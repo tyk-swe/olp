@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -196,11 +197,11 @@ func TestRateHeadersOfARejectionStateWhatTheWindowHolds(t *testing.T) {
 // no allocation, and the headers of one that does add two however many there are.
 func TestResponseHeadersCostNothingWhereNothingIsConfigured(t *testing.T) {
 	sink := make(http.Header, 16)
-	for name, x := range map[string]*execution{
-		"no lease":       {family: openai.FamilyChat},
-		"no attempt yet": {family: openai.FamilyChat, responseMetadata: true},
-		"gemini":         {family: openai.FamilyGemini, attemptCount: 1},
-		"metadata off":   {family: openai.FamilyChat, attemptCount: 2, attemptVendor: "vendor"},
+	for name, x := range map[string]*call{
+		"no lease":       {family: wire.Chat},
+		"no attempt yet": {family: wire.Chat, responseMetadata: true},
+		"gemini":         {family: wire.Gemini, attemptCount: 1},
+		"metadata off":   {family: wire.Chat, attemptCount: 2, attemptVendor: "vendor"},
 	} {
 		if got := testing.AllocsPerRun(100, func() { x.responseHeaders(sink, false) }); got != 0 {
 			t.Errorf("%s: %v allocations, want none", name, got)
@@ -250,19 +251,19 @@ func reservedLease(t *testing.T, requests, tokens int64) *limits.Lease {
 // map holds. A formatting call that allocates for each value would show here.
 func TestSuccessHeadersAllocateTwiceAtMostHoweverManyThereAre(t *testing.T) {
 	both := reservedLease(t, 60, 150_000)
-	route := &runtime.Route{RevisionID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"}
+	route := &routing.Route{RevisionID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"}
 	sink := make(http.Header, 16)
 	for _, tc := range []struct {
 		name     string
-		x        *execution
+		x        *call
 		streamed bool
 		want     int // headers written
 	}{
-		{"openai allowance", &execution{family: openai.FamilyChat, lease: both}, false, 6},
-		{"anthropic allowance", &execution{family: openai.FamilyAnthropic, lease: both}, false, 6},
-		{"metadata of a stream", &execution{family: openai.FamilyChat, responseMetadata: true, attemptCount: 2, attemptVendor: "vendor-b", route: route}, true, 3},
-		{"openai allowance and metadata of a stream", &execution{family: openai.FamilyChat, lease: both, responseMetadata: true, attemptCount: 2, attemptVendor: "vendor-b", route: route}, true, 9},
-		{"anthropic allowance and metadata of a stream", &execution{family: openai.FamilyAnthropic, lease: both, responseMetadata: true, attemptCount: 1, attemptVendor: "vendor-a", route: route}, true, 9},
+		{"openai allowance", &call{family: wire.Chat, lease: both}, false, 6},
+		{"anthropic allowance", &call{family: wire.Anthropic, lease: both}, false, 6},
+		{"metadata of a stream", &call{family: wire.Chat, responseMetadata: true, attemptCount: 2, attemptVendor: "vendor-b", routeLeg: routeLeg{route: route}}, true, 3},
+		{"openai allowance and metadata of a stream", &call{family: wire.Chat, lease: both, responseMetadata: true, attemptCount: 2, attemptVendor: "vendor-b", routeLeg: routeLeg{route: route}}, true, 9},
+		{"anthropic allowance and metadata of a stream", &call{family: wire.Anthropic, lease: both, responseMetadata: true, attemptCount: 1, attemptVendor: "vendor-a", routeLeg: routeLeg{route: route}}, true, 9},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := testing.AllocsPerRun(100, func() {
@@ -305,7 +306,7 @@ func TestVideoCallsStateTheAttemptsTheyMade(t *testing.T) {
 		{"polls of a provider without a vendor name none", polled("", ""), 2, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			x := &execution{facts: tc.facts, attemptCount: 99, attemptVendor: "stale"}
+			x := &call{facts: tc.facts, attemptCount: 99, attemptVendor: "stale"}
 			x.notePolls()
 			if x.attemptCount != tc.count || x.attemptVendor != tc.vendor {
 				t.Fatalf("a list states %d attempts on %q, want %d on %q", x.attemptCount, x.attemptVendor, tc.count, tc.vendor)
@@ -313,7 +314,7 @@ func TestVideoCallsStateTheAttemptsTheyMade(t *testing.T) {
 		})
 	}
 
-	x := &execution{}
+	x := &call{}
 	x.noteJobAttempt(AttemptFact{VendorID: "vendor-a"})
 	if x.attemptCount != 1 || x.attemptVendor != "vendor-a" || len(x.facts) != 1 {
 		t.Fatalf("a call states %d attempts on %q with %d facts, want its one", x.attemptCount, x.attemptVendor, len(x.facts))
@@ -360,7 +361,7 @@ func decimalText(value string) *string { return &value }
 func billedFact(price *usage.RoutingPrice, input, output int64) AttemptFact {
 	return AttemptFact{
 		Class: classSuccess, Price: price, UsageObserved: true, UsageComplete: true,
-		Usage: &openai.Usage{InputTokens: input, OutputTokens: output, TotalTokens: input + output},
+		Usage: &wire.Usage{InputTokens: input, OutputTokens: output, TotalTokens: input + output},
 	}
 }
 
@@ -400,7 +401,7 @@ func TestResponseCostIsStatedExactlyWhenAccountingWouldPriceTheRequest(t *testin
 		{"nothing was billable", []AttemptFact{{Class: classSuccess, Price: price, UsageComplete: true}}, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			x := &execution{family: openai.FamilyChat, facts: tc.facts}
+			x := &call{family: wire.Chat, facts: tc.facts}
 			cost, ok := x.responseCost()
 			if ok != tc.priced || ok && cost.String() != tc.want {
 				t.Fatalf("responseCost = %s, %v; want %s, %v", cost, ok, tc.want, tc.priced)

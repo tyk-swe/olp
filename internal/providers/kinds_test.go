@@ -6,10 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -181,7 +182,7 @@ func TestKindCapabilityOptionsIncludeProfileTuples(t *testing.T) {
 func TestCommitmentValidation(t *testing.T) {
 	cfg := Configuration{Kind: KindOpenAI, AuthMode: "api_key"}
 	cfg.Normalize()
-	cfg.Options.Commitment = &runtime.Commitment{Amount: "300.50", Period: "day"}
+	cfg.Options.Commitment = &routing.Commitment{Amount: "300.50", Period: "day"}
 	if err := cfg.Validate(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestCommitmentValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			invalid := cfg
-			invalid.Options.Commitment = &runtime.Commitment{Amount: tc.amount, Period: tc.period}
+			invalid.Options.Commitment = &routing.Commitment{Amount: tc.amount, Period: tc.period}
 			if problem, ok := errors.AsType[*access.Problem](invalid.Validate(&egress.Policy{})); !ok || problem.Field != tc.field {
 				t.Fatalf("%+v of %q/%q passed validation", problem, tc.amount, tc.period)
 			}

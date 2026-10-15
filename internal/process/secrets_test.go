@@ -2,8 +2,9 @@ package process
 
 import (
 	"context"
-	"github.com/tyk-swe/olp/internal/config"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/config"
 )
 
 func TestWorkerRequiresMasterKeyForRetainedMedia(t *testing.T) {

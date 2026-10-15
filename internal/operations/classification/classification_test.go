@@ -1,11 +1,12 @@
 package classification_test
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/classification"
-	"strings"
-	"testing"
 )
 
 func definition(t *testing.T, id string) operations.Dialect {

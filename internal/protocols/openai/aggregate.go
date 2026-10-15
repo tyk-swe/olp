@@ -7,22 +7,23 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
 const maxAggregateItems = 4096
 
-// ErrAggregateTooLarge marks a stream whose non-streaming result exceeds the
+// wire.ErrAggregateTooLarge marks a stream whose non-streaming result exceeds the
 // bound it is aggregated within.
-var ErrAggregateTooLarge = errors.New("aggregated upstream stream exceeds the response size limit")
 
 // aggregators reduce each family's event stream to its non-streaming result.
-var aggregators = map[Family]func(r io.Reader, maxEventBytes, maxBytes int) (*Completion, error){
-	FamilyResponses: aggregateResponses,
+var aggregators = map[wire.Format]func(r io.Reader, maxEventBytes, maxBytes int) (*wire.Completion, error){
+	wire.Responses: aggregateResponses,
 }
 
 // Aggregates reports whether Aggregate reduces the family's streams.
-func Aggregates(family Family) bool {
+func Aggregates(family wire.Format) bool {
 	_, ok := aggregators[family]
 	return ok
 }
@@ -31,10 +32,10 @@ func Aggregates(family Family) bool {
 // not ask to stream, and returns the family's non-streaming result as the
 // completion's Body. The stream is validated as it is for a streaming caller.
 // OIF keeps no accumulator, so the reducer retains at most maxBytes of the
-// result and fails with ErrAggregateTooLarge beyond it. As with Stream, the
+// result and fails with wire.ErrAggregateTooLarge beyond it. As with Stream, the
 // completion summarizes what the stream reported, also on failure; a stream
 // that fails or ends before its terminal event has no Body.
-func Aggregate(family Family, r io.Reader, maxEventBytes, maxBytes int) (*Completion, error) {
+func Aggregate(family wire.Format, r io.Reader, maxEventBytes, maxBytes int) (*wire.Completion, error) {
 	aggregate, ok := aggregators[family]
 	if !ok {
 		return nil, errors.New("no reducer aggregates this family's streams")
@@ -46,26 +47,26 @@ func Aggregate(family Family, r io.Reader, maxEventBytes, maxBytes int) (*Comple
 // event carries. An upstream may leave that response's output empty and
 // deliver each item only in response.output_item.done, so an empty output
 // becomes the items the stream completed, in output order.
-func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*Completion, error) {
+func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*wire.Completion, error) {
 	var terminal json.RawMessage
 	items := map[int64]json.RawMessage{}
 	retained := 0
-	c, err := StreamMetadataEvents(FamilyResponses, r, maxEventBytes, "", true, func([]byte) error { return nil }, func(event oif.Event) error {
+	c, err := StreamMetadataEvents(wire.Responses, r, maxEventBytes, "", true, func([]byte) error { return nil }, func(event oif.Event) error {
 		kind, _ := event.Source().Root().Lookup("type")
 		switch text, _ := kind.Text(); text {
 		case "response.output_item.done":
 			fields := event.Source().Fields()
 			index, indexed := int64Field(fields, "output_index")
 			if _, err := object(fields["item"]); !indexed || err != nil {
-				return &ProtocolError{Detail: "output item event has no output index or item"}
+				return &wire.ProtocolError{Detail: "output item event has no output index or item"}
 			}
 			if _, done := items[index]; done {
-				return &ProtocolError{Detail: "output item completed twice"}
+				return &wire.ProtocolError{Detail: "output item completed twice"}
 			}
 			// Bound per-entry map and sorting overhead independently of payload
 			// bytes, including streams of tiny objects with sparse indexes.
 			if len(items) >= maxAggregateItems || len(fields["item"]) > maxBytes-retained {
-				return ErrAggregateTooLarge
+				return wire.ErrAggregateTooLarge
 			}
 			retained += len(fields["item"])
 			items[index] = fields["item"]
@@ -79,7 +80,7 @@ func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*Completion, 
 	}
 	response, err := object(terminal)
 	if err != nil {
-		return c, &ProtocolError{Detail: "response is not an object"}
+		return c, &wire.ProtocolError{Detail: "response is not an object"}
 	}
 	c.Body = terminal
 	if output, _ := arrayField(response, "output"); len(output) == 0 && len(items) > 0 {
@@ -94,7 +95,7 @@ func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*Completion, 
 	}
 	if len(c.Body) > maxBytes {
 		c.Body = nil
-		return c, ErrAggregateTooLarge
+		return c, wire.ErrAggregateTooLarge
 	}
 	return c, nil
 }

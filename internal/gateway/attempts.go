@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // attemptAdapter supplies the operation-specific estimate of an attempt and one
@@ -16,8 +16,8 @@ import (
 // draining streams before returning their final fact. The loop owns admission,
 // attempt numbering, settlement, health and retries.
 type attemptAdapter[Result any] struct {
-	estimate func(runtime.Attempt, *runtime.Provider) int64
-	dispatch func(context.Context, runtime.Attempt, *runtime.Provider, runtime.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
+	estimate func(routing.Attempt, *routing.Provider) int64
+	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
 }
 
 // attemptOutcome keeps the successful payload typed without coupling shared
@@ -35,7 +35,7 @@ type attemptOutcome[Result any] struct {
 // When a route's attempts fail for a condition one of its fallbacks names,
 // the loop continues on the fallback route within the same deadline and
 // attempt budget.
-func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapter attemptAdapter[Result]) attemptOutcome[Result] {
+func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) attemptOutcome[Result] {
 	var generation string
 	if x.request.release != nil && x.request.release.Snapshot != nil {
 		generation = x.request.release.Snapshot.Generation.ID
@@ -58,7 +58,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 // runRoute tries the attempts planned for the request's current route. When
 // they all fail before anything is committed, it also returns the fallback
 // conditions the route met.
-func runRoute[Result any](ctx context.Context, s *Server, x *execution, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
+func runRoute[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
 	deadline, _ := ctx.Deadline()
 	snapshot := x.snapshot()
 	unmeterable := false
@@ -89,7 +89,7 @@ route:
 			if x.spent >= x.budget || ctx.Err() != nil {
 				break
 			}
-			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) {
+			if !x.servingAllowed(&provider, attempt.TargetID, attempt.UpstreamModel, slot, false) {
 				continue
 			}
 			estimate := adapter.estimate(attempt, &provider)
@@ -117,12 +117,12 @@ route:
 				}
 				next = gate.quota == quotaConnection
 			case gateAdmitted:
-				if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, true) {
+				if !x.servingAllowed(&provider, attempt.TargetID, attempt.UpstreamModel, slot, true) {
 					s.releaseHold(ctx, gate.hold)
 					continue
 				}
 				x.spent++
-				x.activatePreparation(&provider, attempt.UpstreamModel)
+				x.activatePreparation(&provider, attempt.TargetID, attempt.UpstreamModel)
 				x.grantGeneration = 0
 				fact := s.newFact(x, attempt, slot, x.spent)
 				// Streams can persist accounting before dispatch returns.
@@ -148,7 +148,7 @@ route:
 					if failure.class == classContentFilter && !failure.committed {
 						// A content filter refuses the request on every target
 						// of the route; only a fallback route can serve it.
-						return out, []string{runtime.FallbackContentFilter}
+						return out, []string{routing.FallbackContentFilter}
 					}
 					return out, nil
 				}
@@ -176,7 +176,7 @@ route:
 	}
 	// Every attempt the route could make failed in a way another target, or
 	// another route, might not.
-	met = append(met, runtime.FallbackExhausted)
+	met = append(met, routing.FallbackExhausted)
 	switch {
 	case last != nil:
 		return attemptOutcome[Result]{err: last.toError()}, met
@@ -198,7 +198,7 @@ func meet(met []string, class string) []string {
 // retryWait reports how long to wait before retrying a failed attempt on the
 // same slot, when the route's retry policy allows another try within the
 // request's attempt budget and deadline. An open circuit ends retries.
-func (s *Server) retryWait(x *execution, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
+func (s *Server) retryWait(x *call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
 	rule, ok := x.route.Retry.Retries(failure.class)
 	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.open(providerID) {
 		return 0, false

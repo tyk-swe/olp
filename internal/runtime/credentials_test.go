@@ -8,18 +8,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func credentialManager(t *testing.T, readAt time.Time, revoked ...string) *Manager {
 	t.Helper()
-	ineligible := map[string]Eligibility{}
+	ineligible := map[string]routing.Eligibility{}
 	for _, id := range revoked {
-		ineligible[id] = Revoked
+		ineligible[id] = routing.Revoked
 	}
 	return authorityManager(readAt, ineligible)
 }
 
-func authorityManager(readAt time.Time, ineligible map[string]Eligibility) *Manager {
+func authorityManager(readAt time.Time, ineligible map[string]routing.Eligibility) *Manager {
 	m := NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	m.authority = authorityState{loaded: true, readAt: readAt, ineligible: ineligible}
 	return m
@@ -27,20 +28,20 @@ func authorityManager(readAt time.Time, ineligible map[string]Eligibility) *Mana
 
 func TestCredentialEligibilityNamesWhyAVersionCannotServe(t *testing.T) {
 	live, revoked, lapsed := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	fresh := authorityManager(time.Now(), map[string]Eligibility{revoked: Revoked, lapsed: Lapsed})
-	for id, want := range map[string]Eligibility{live: Eligible, revoked: Revoked, lapsed: Lapsed} {
+	fresh := authorityManager(time.Now(), map[string]routing.Eligibility{revoked: routing.Revoked, lapsed: routing.Lapsed})
+	for id, want := range map[string]routing.Eligibility{live: routing.Eligible, revoked: routing.Revoked, lapsed: routing.Lapsed} {
 		if got := fresh.Eligibility(id); got != want {
 			t.Fatalf("credential eligibility %q, want %q", got, want)
 		}
 	}
-	stale := authorityManager(time.Now().Add(-AuthorityStaleAfter-time.Second), map[string]Eligibility{revoked: Revoked, lapsed: Lapsed})
+	stale := authorityManager(time.Now().Add(-AuthorityStaleAfter-time.Second), map[string]routing.Eligibility{revoked: routing.Revoked, lapsed: routing.Lapsed})
 	for _, id := range []string{live, revoked, lapsed} {
-		if got := stale.Eligibility(id); got != StaleAuthority {
+		if got := stale.Eligibility(id); got != routing.StaleAuthority {
 			t.Fatalf("stale authority vouched for %s: %q", id, got)
 		}
 	}
 	unloaded := NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if got := unloaded.Eligibility(live); got != StaleAuthority {
+	if got := unloaded.Eligibility(live); got != routing.StaleAuthority {
 		t.Fatalf("unloaded authority vouched for a credential: %q", got)
 	}
 }
@@ -70,7 +71,7 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 		}
 	}
 	revoked := credentialManager(t, time.Now(), slot, network)
-	lapsed := authorityManager(time.Now(), map[string]Eligibility{slot: Lapsed, network: Revoked})
+	lapsed := authorityManager(time.Now(), map[string]routing.Eligibility{slot: routing.Lapsed, network: routing.Revoked})
 	stale := credentialManager(t, time.Now().Add(-AuthorityStaleAfter-time.Second))
 	for _, m := range []*Manager{revoked, lapsed, stale} {
 		if secret, _, err := m.Secret(t.Context(), release, slot); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
@@ -87,7 +88,7 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 // new grant enrollment replaces it.
 func TestARefusedCredentialRequestsNoRefreshOfALapsedGrant(t *testing.T) {
 	lapsed, revoked := uuid.NewString(), uuid.NewString()
-	m := authorityManager(time.Now(), map[string]Eligibility{lapsed: Lapsed, revoked: Revoked})
+	m := authorityManager(time.Now(), map[string]routing.Eligibility{lapsed: routing.Lapsed, revoked: routing.Revoked})
 	m.grants = map[string]servedGrant{lapsed: {generation: 3}, revoked: {generation: 1}}
 	m.CredentialRefused(lapsed, 3)
 	m.CredentialRefused(revoked, 1)

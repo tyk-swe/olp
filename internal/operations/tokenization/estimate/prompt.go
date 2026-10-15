@@ -7,7 +7,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Count is how many tokens a counter finds in a prompt, and how it counted
@@ -38,7 +38,7 @@ type Count struct {
 // many bytes there were. That is every count there is to make, and it is what
 // keeps a megabyte request from weighing twice.
 type Prompt struct {
-	request    *openai.Request
+	request    *wire.Request
 	generation bool
 	in         input
 	tally      *tally
@@ -58,8 +58,8 @@ type counted struct {
 
 // Walk reads the prompt of a request. A nil request is a generation with no
 // prompt, as admission sees one that named nothing.
-func Walk(request *openai.Request) *Prompt {
-	p := &Prompt{request: request, generation: request == nil || request.Family.Operation() == openai.OperationGeneration, tally: &tally{}}
+func Walk(request *wire.Request) *Prompt {
+	p := &Prompt{request: request, generation: request == nil || request.Family.Operation() == wire.OperationGeneration, tally: &tally{}}
 	if request != nil {
 		walkInput(&p.in, request.Family, requestFields(request))
 	}
@@ -67,7 +67,7 @@ func Walk(request *openai.Request) *Prompt {
 }
 
 // Request is the request the prompt was walked from.
-func (p *Prompt) Request() *openai.Request { return p.request }
+func (p *Prompt) Request() *wire.Request { return p.request }
 
 // Observe makes fn run each time the prompt is counted for a family, and not
 // when a count is reused. It is how a test, or a metric, sees that a family

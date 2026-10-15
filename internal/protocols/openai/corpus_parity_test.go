@@ -3,6 +3,8 @@ package openai
 import (
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
@@ -20,7 +22,7 @@ func TestCorpusEnvelopesAreValidatedAsTheyWereValidated(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		for _, family := range []Family{FamilyChat, FamilyResponses, FamilyInputTokens, FamilyEmbeddings, FamilyModeration} {
+		for _, family := range []wire.Format{wire.Chat, wire.Responses, wire.InputTokens, wire.Embeddings, wire.Moderation} {
 			if sameValidation(t, family, doc) {
 				accepted++
 			} else {

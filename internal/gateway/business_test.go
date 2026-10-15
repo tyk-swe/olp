@@ -151,7 +151,7 @@ func TestBusinessMetricsCallerPaidBudgetExemptCosts(t *testing.T) {
 	env.Attempts[0].BudgetExempt = true
 	business := telemetry.NewBusinessMetrics(5000, nil)
 	h.gateway.Business = business
-	h.gateway.recordBusiness(env, &execution{request: request{startedAt: env.StartedAt}})
+	h.gateway.recordBusiness(env, &call{request: request{startedAt: env.StartedAt}})
 	out := businessExposition(business)
 	if !strings.Contains(out, `olp_cost_total{route="team-chat",currency="usd"} 8e-06`) {
 		t.Fatalf("budget-exempt priced usage emitted no cost:\n%s", out)

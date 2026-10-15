@@ -8,11 +8,13 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -28,8 +30,8 @@ const (
 // opted into probing. Each is probed once per interval across the fleet, on
 // the first route that serves it.
 type probeTarget struct {
-	route     runtime.Route
-	target    runtime.Target
+	route     routing.Route
+	target    routing.Target
 	provider  string
 	operation string
 	interval  time.Duration
@@ -40,12 +42,12 @@ func (t probeTarget) key() string { return t.provider + "/" + t.target.ProviderM
 // probeRequests are the certification requests a probe sends, by operation:
 // the smallest each operation answers, addressed to the probed route.
 var probeRequests = map[string]struct {
-	family openai.Family
+	family wire.Format
 	body   string
 }{
-	operationGeneration: {openai.FamilyChat, `{"model":%q,"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}`},
-	"embeddings":        {openai.FamilyEmbeddings, `{"model":%q,"input":"embedding probe"}`},
-	"rerank":            {openai.FamilyRerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
+	operationGeneration: {wire.Chat, `{"model":%q,"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}`},
+	"embeddings":        {wire.Embeddings, `{"model":%q,"input":"embedding probe"}`},
+	"rerank":            {wire.Rerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
 }
 
 // RunHealthProbes probes every target whose connection enables probing, each
@@ -105,7 +107,7 @@ func (s *Server) probeDue(ctx context.Context) (int, error) {
 // probeTargets lists the probe-enabled provider models in route order. A
 // probe speaks the canonical OpenAI shape, so strict routes, which carry a
 // native dialect verbatim, are never probed through.
-func probeTargets(snapshot *runtime.Snapshot) []probeTarget {
+func probeTargets(snapshot *routing.Snapshot) []probeTarget {
 	var targets []probeTarget
 	seen := map[string]bool{}
 	for _, slug := range slices.Sorted(maps.Keys(snapshot.Routes)) {
@@ -150,23 +152,23 @@ func (s *Server) probe(ctx context.Context, release *runtime.Release, target pro
 	// one attempt, no route behavior beyond its spend cap, and a short
 	// deadline.
 	route := target.route
-	route.Targets = []runtime.Target{target.target}
+	route.Targets = []routing.Target{target.target}
 	route.MaxAttempts = 1
 	route.OverallTimeout = min(route.OverallTimeout, probeDeadline.Milliseconds())
-	route.Behavior = runtime.Behavior{Budget: route.Budget}
+	route.Behavior = routing.Behavior{Budget: route.Budget}
 	snapshot := *release.Snapshot
-	snapshot.Routes = map[string]runtime.Route{route.Slug: route}
+	snapshot.Routes = map[string]routing.Route{route.Slug: route}
 	narrowed := *release
 	narrowed.Snapshot = &snapshot
-	x := &execution{
-		request:  request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: &narrowed},
-		family:   shape.family,
-		parsed:   parsed,
-		actor:    "system",
-		mode:     "unary",
-		route:    &route,
+	x := &call{
+		request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: &narrowed},
+		family:  shape.family,
+
+		actor: "system",
+		mode:  "unary",
+
 		origin:   usage.OriginProbe,
-		priority: runtime.PriorityLow,
+		priority: routing.PriorityLow, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed},
 	}
 	x.bind(canonicalPlanner, nil, true)
 	defer s.settleAdmission(ctx, x)

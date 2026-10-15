@@ -5,19 +5,19 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func requestWithFormat(t *testing.T, format string, stream bool) *openai.Request {
+func requestWithFormat(t *testing.T, format string, stream bool) *wire.Request {
 	t.Helper()
-	fields, _ := object([]byte(generationFixtures[openai.FamilyChat]))
+	fields, _ := object([]byte(generationFixtures[wire.Chat]))
 	if format != "" {
 		fields["response_format"] = json.RawMessage(format)
 	}
 	if stream {
 		fields["stream"] = json.RawMessage("true")
 	}
-	r, err := Parse(openai.FamilyChat, raw(fields), "")
+	r, err := Parse(wire.Chat, raw(fields), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +86,9 @@ func TestAnthropicStructuredOutputTranslation(t *testing.T) {
 			t.Errorf("accepted %s", format)
 		}
 	}
-	fields, _ := object([]byte(generationFixtures[openai.FamilyChat]))
+	fields, _ := object([]byte(generationFixtures[wire.Chat]))
 	fields["seed"] = json.RawMessage("7")
-	r, err := Parse(openai.FamilyChat, raw(fields), "")
+	r, err := Parse(wire.Chat, raw(fields), "")
 	if err != nil {
 		t.Fatal(err)
 	}

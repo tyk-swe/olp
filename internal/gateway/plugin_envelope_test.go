@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -38,7 +40,7 @@ func (h *harness) servePlugin(profile abi.Profile) {
 func (h *harness) pinPlugin(plugin *connectors.PluginProfile, credential []byte) {
 	h.t.Helper()
 	profile := plugin.Profile()
-	h.reissue(func(provider *runtime.Provider) {
+	h.reissue(func(provider *routing.Provider) {
 		provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, profile.Authentication[0], plugin
 		provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, profile.Revision, plugin.Address(nil)
 	}, credential)
@@ -46,7 +48,7 @@ func (h *harness) pinPlugin(plugin *connectors.PluginProfile, credential []byte)
 
 // reissue publishes a release in which the harness's first provider is
 // edited, with credential as its secret unless that is nil.
-func (h *harness) reissue(edit func(*runtime.Provider), credential []byte) {
+func (h *harness) reissue(edit func(*routing.Provider), credential []byte) {
 	h.t.Helper()
 	secrets := map[string][]byte{}
 	for id, provider := range h.rt.release.Snapshot.Providers {

@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -22,13 +23,13 @@ func TestRoutingUsesCurrentMeasurements(t *testing.T) {
 					route.Targets[i].Priority = 0
 				}
 				snapshot.Routes[routeSlug] = route
-				weighted, err := runtime.Select(snapshot, routeSlug, "generation", "openai", "unary", []byte(h.keyID))
-				if err != nil || len(weighted) != 2 {
+				weighted, err := routing.Select(snapshot, routeSlug, "generation", "openai", "unary", []byte(h.keyID), routing.Options{})
+				if err != nil || len(weighted.Attempts) != 2 {
 					t.Fatalf("weighted candidates=%v error=%v", weighted, err)
 				}
 				// Give only the second weighted candidate measurements, so the
 				// strategy must change the selection when those inputs are fresh.
-				measured := weighted[1]
+				measured := weighted.Attempts[1]
 				price := "1"
 				if state != "missing" {
 					inputs := &usage.RoutingInputs{
@@ -46,7 +47,7 @@ func TestRoutingUsesCurrentMeasurements(t *testing.T) {
 					}
 					h.rt.inputs = inputs
 				}
-				want := weighted[0].ProviderID
+				want := weighted.Attempts[0].ProviderID
 				if state == "fresh" {
 					want = measured.ProviderID
 				}
@@ -65,5 +66,31 @@ func TestRoutingUsesCurrentMeasurements(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSimulationAndExecutionAgreeForDuplicateProviderModelTargets(t *testing.T) {
+	h := newHarness(t, Config{})
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	first := route.Targets[0]
+	first.Priority = 1
+	second := first
+	second.ID = uuid.NewString()
+	second.RoutingID = uuid.NewString()
+	second.Priority = 0
+	route.Targets = []routing.Target{first, second}
+	snapshot.Routes[routeSlug] = route
+	plan, err := routing.Select(snapshot, routeSlug, "generation", "openai", "unary", []byte(h.keyID), routing.Options{KeyID: h.keyID, CheckSlots: true, CredentialEligibility: h.rt.Eligibility})
+	if err != nil || len(plan.Attempts) == 0 {
+		t.Fatal("simulation failed", err)
+	}
+	response, body := h.chat(fullKey, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("execution failed: %d %v", response.StatusCode, body)
+	}
+	facts := h.sink.last(t).Attempts
+	if len(facts) != 1 || facts[0].TargetID != plan.Attempts[0].TargetID || facts[0].TargetID != second.ID {
+		t.Fatalf("execution %+v disagrees with simulation %+v", facts, plan.Attempts)
 	}
 }

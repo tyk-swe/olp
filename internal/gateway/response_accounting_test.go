@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -19,9 +21,10 @@ func TestPendingGenerationSeparatesKnownNativeEvidenceFromUnfinishedHTTP(t *test
 		fact.UsageObserved, fact.UsageComplete = false, false
 		fact.Interaction = &usage.InteractionEvidence{Fidelity: "strict", PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 		original := *fact
-		x := &execution{family: openai.FamilyResponses, keyID: env.KeyID, route: &runtime.Route{Slug: env.Route}, facts: env.Attempts,
+		x := &call{family: wire.Responses, keyID: env.KeyID, facts: env.Attempts,
 			request: request{id: env.RequestID, durableID: env.AccountingID, startedAt: env.StartedAt,
-				release: &runtime.Release{Snapshot: &runtime.Snapshot{Generation: runtime.Generation{ID: env.RuntimeGenerationID}}}}}
+				release: &runtime.Release{Snapshot: &routing.Snapshot{Generation: routing.Generation{ID: env.RuntimeGenerationID}}}}, routeLeg: routeLeg{route: &routing.Route{Slug: env.Route}},
+		}
 		if pinned {
 			x.exchange = &pinnedExchange{state: attemptState{accepted: true, settled: true}}
 			x.exchange.state.dispatched.Store(true)
@@ -47,7 +50,7 @@ func TestPendingGenerationSeparatesKnownNativeEvidenceFromUnfinishedHTTP(t *test
 		if !reflect.DeepEqual(*fact, original) {
 			t.Fatal("pending template mutated the live native fact")
 		}
-		if event.EventID != x.generationHTTP.event.EventID || event.RequestID != env.AccountingID || final.ID != x.generationHTTP.event.Attempts[len(event.Attempts)-1].ID {
+		if event.EventID != x.generation.generationHTTP.event.EventID || event.RequestID != env.AccountingID || final.ID != x.generation.generationHTTP.event.Attempts[len(event.Attempts)-1].ID {
 			t.Fatal("pending identity was not retained for original HTTP completion")
 		}
 		raw, _ := json.Marshal(metadata)

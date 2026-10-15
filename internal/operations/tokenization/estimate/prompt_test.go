@@ -9,11 +9,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
-func mustParse(t testing.TB, family openai.Family, body string) *openai.Request {
+func mustParse(t testing.TB, family wire.Format, body string) *wire.Request {
 	t.Helper()
 	request, err := openai.Parse(family, []byte(body))
 	if err != nil {
@@ -24,13 +26,17 @@ func mustParse(t testing.TB, family openai.Family, body string) *openai.Request 
 
 // native builds a request of a dialect this package does not parse, the way
 // the dialect's codec hands one to admission: its fields, unvalidated.
-func native(t testing.TB, family openai.Family, body string) *openai.Request {
+func native(t testing.TB, family wire.Format, body string) *wire.Request {
 	t.Helper()
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(body), &fields); err != nil {
 		t.Fatal(err)
 	}
-	return openai.NewEnvelope(family, "route", false, fields)
+	request, err := wire.FromFields(family, "route", false, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
 }
 
 // TestWalkerReproducesTheCookbookConversations walks each conversation the
@@ -51,7 +57,7 @@ func TestWalkerReproducesTheCookbookConversations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			e := Walk(mustParse(t, openai.FamilyChat, string(body))).Estimate(ForModel(f.Model), nil)
+			e := Walk(mustParse(t, wire.Chat, string(body))).Estimate(ForModel(f.Model), nil)
 			if e.Input != f.Tokens || e.Provenance != ProvenanceTokenizer {
 				t.Fatalf("input %d (%s), the cookbook formula counts %d", e.Input, e.Provenance, f.Tokens)
 			}
@@ -65,7 +71,7 @@ func TestWalkerReproducesTheCookbookConversations(t *testing.T) {
 func TestPromptEstimates(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		family     openai.Family
+		family     wire.Format
 		body       string
 		model      string
 		defaults   string
@@ -74,30 +80,30 @@ func TestPromptEstimates(t *testing.T) {
 		provenance Provenance
 	}{
 		{
-			name: "one message", family: openai.FamilyChat, model: "gpt-4o",
+			name: "one message", family: wire.Chat, model: "gpt-4o",
 			body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`,
 			// "hello" one token and "user" one, three for the message, three
 			// priming the reply.
 			input: 1 + 1 + 3 + 3, total: 8 + 10, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "the same request on a heuristic family", family: openai.FamilyChat, model: "claude-sonnet-4-5",
+			name: "the same request on a heuristic family", family: wire.Chat, model: "claude-sonnet-4-5",
 			body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`,
 			// Five characters are two tokens, and nothing frames them.
 			input: 2, total: 12, provenance: ProvenanceHeuristic,
 		},
 		{
-			name: "a script the heuristic overcharges", family: openai.FamilyChat, model: "gpt-4o",
+			name: "a script the heuristic overcharges", family: wire.Chat, model: "gpt-4o",
 			body:  `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"日本語で"}]}`,
 			input: 3 + 1 + 3 + 3, total: 10 + 1, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "the older encoding counts the same text differently", family: openai.FamilyChat, model: "gpt-4",
+			name: "the older encoding counts the same text differently", family: wire.Chat, model: "gpt-4",
 			body:  `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"日本語で"}]}`,
 			input: 5 + 1 + 3 + 3, total: 12 + 1, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "a tool catalogue with its schema", family: openai.FamilyChat, model: "gpt-4o",
+			name: "a tool catalogue with its schema", family: wire.Chat, model: "gpt-4o",
 			body: `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"What is 2+2?"}],` +
 				`"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]}`,
 			// The question is seven, the name two, the description three and
@@ -108,63 +114,63 @@ func TestPromptEstimates(t *testing.T) {
 			input: 7 + 2 + 3 + 14 + 1 + 3 + 3, total: 33 + 1, provenance: ProvenanceCalibrated,
 		},
 		{
-			name: "an image costs its flat charge and makes the count calibrated", family: openai.FamilyChat, model: "gpt-4o",
+			name: "an image costs its flat charge and makes the count calibrated", family: wire.Chat, model: "gpt-4o",
 			body:  `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`,
 			input: 1 + ImageTokens + 1 + 3 + 3, total: 8 + ImageTokens + 1, provenance: ProvenanceCalibrated,
 		},
 		{
-			name: "an image on a heuristic family stays a heuristic", family: openai.FamilyChat, model: "claude-sonnet-4-5",
+			name: "an image on a heuristic family stays a heuristic", family: wire.Chat, model: "claude-sonnet-4-5",
 			body:  `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"hello"},{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`,
 			input: 2 + MediaTokens, total: 2 + MediaTokens + 1, provenance: ProvenanceHeuristic,
 		},
 		{
-			name: "responses input is one user message", family: openai.FamilyResponses, model: "gpt-4.1",
+			name: "responses input is one user message", family: wire.Responses, model: "gpt-4.1",
 			body:  `{"model":"m","max_output_tokens":10,"input":"What is 2+2?"}`,
 			input: 7 + 1 + 3 + 3, total: 14 + 10, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "responses instructions are a system message", family: openai.FamilyResponses, model: "gpt-4.1",
+			name: "responses instructions are a system message", family: wire.Responses, model: "gpt-4.1",
 			body:  `{"model":"m","max_output_tokens":10,"input":"What is 2+2?","instructions":"Be concise and kind."}`,
 			input: 7 + 1 + 3 + 5 + 1 + 3 + 3, total: 23 + 10, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "instructions a provider supplies", family: openai.FamilyResponses, model: "gpt-4.1",
+			name: "instructions a provider supplies", family: wire.Responses, model: "gpt-4.1",
 			body: `{"model":"m","input":"What is 2+2?"}`, defaults: `{"instructions":"Be concise and kind.","max_output_tokens":10}`,
 			// The reply is primed once however many inputs make a message.
 			input: 7 + 1 + 3 + 5 + 1 + 3 + 3, total: 23 + 10, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "an Anthropic request sent to an OpenAI model", family: openai.FamilyAnthropic, model: "gpt-4o",
+			name: "an Anthropic request sent to an OpenAI model", family: wire.Anthropic, model: "gpt-4o",
 			body: `{"model":"m","max_tokens":10,"system":"Be brief.","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
 			// "Be brief." three and "hi" one; "system" and "user" one each, two
 			// messages of three, and the reply.
 			input: 3 + 1 + 1 + 1 + 6 + 3, total: 15 + 10, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "an Anthropic request sent to Claude", family: openai.FamilyAnthropic, model: "claude-sonnet-4-5",
+			name: "an Anthropic request sent to Claude", family: wire.Anthropic, model: "claude-sonnet-4-5",
 			body:  `{"model":"m","max_tokens":10,"system":"Be brief.","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
 			input: 3 + 1, total: 4 + 10, provenance: ProvenanceHeuristic,
 		},
 		{
-			name: "embedding text", family: openai.FamilyEmbeddings, model: "text-embedding-3-small",
+			name: "embedding text", family: wire.Embeddings, model: "text-embedding-3-small",
 			body:  `{"model":"m","input":["hello","日本語で"]}`,
 			input: 1 + 5, total: 6, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "embedding token ids are one token each", family: openai.FamilyEmbeddings, model: "text-embedding-3-small",
+			name: "embedding token ids are one token each", family: wire.Embeddings, model: "text-embedding-3-small",
 			body:  `{"model":"m","input":[[1,2,3],[4]]}`,
 			input: 4, total: 4, provenance: ProvenanceTokenizer,
 		},
 		{
-			name: "an empty embedding reserves one", family: openai.FamilyEmbeddings, model: "text-embedding-3-small",
+			name: "an empty embedding reserves one", family: wire.Embeddings, model: "text-embedding-3-small",
 			body:  `{"model":"m","input":""}`,
 			input: 1, total: 1, provenance: ProvenanceTokenizer,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var request *openai.Request
+			var request *wire.Request
 			switch tc.family {
-			case openai.FamilyAnthropic:
+			case wire.Anthropic:
 				request = native(t, tc.family, tc.body)
 			default:
 				request = mustParse(t, tc.family, tc.body)
@@ -193,61 +199,61 @@ func TestOnlyAnExactReadingOfTheRequestIsATokenizerCount(t *testing.T) {
 	const image = `{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}`
 	for _, tc := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		body   string
 		want   Provenance
 	}{
-		{"chat text", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi","name":"bot"}]}`, ProvenanceTokenizer},
-		{"responses text", openai.FamilyResponses, `{"model":"m","input":"hello","instructions":"Be brief."}`, ProvenanceTokenizer},
-		{"anthropic text", openai.FamilyAnthropic, `{"system":"Be brief.","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`, ProvenanceTokenizer},
-		{"gemini text", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, ProvenanceTokenizer},
+		{"chat text", wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi","name":"bot"}]}`, ProvenanceTokenizer},
+		{"responses text", wire.Responses, `{"model":"m","input":"hello","instructions":"Be brief."}`, ProvenanceTokenizer},
+		{"anthropic text", wire.Anthropic, `{"system":"Be brief.","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`, ProvenanceTokenizer},
+		{"gemini text", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, ProvenanceTokenizer},
 
-		{"chat image", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":[` + image + `]}]}`, ProvenanceCalibrated},
-		{"chat audio", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`, ProvenanceCalibrated},
-		{"chat file", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":[{"type":"file","file":{"file_id":"f"}}]}]}`, ProvenanceCalibrated},
-		{"responses image", openai.FamilyResponses, `{"model":"m","input":[{"role":"user","content":[{"type":"input_image","image_url":"x"}]}]}`, ProvenanceCalibrated},
-		{"anthropic image", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
-		{"gemini inline data", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
-		{"gemini file data", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"fileData":{"fileUri":"gs://b/o"}}]}]}`, ProvenanceCalibrated},
+		{"chat image", wire.Chat, `{"model":"m","messages":[{"role":"user","content":[` + image + `]}]}`, ProvenanceCalibrated},
+		{"chat audio", wire.Chat, `{"model":"m","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`, ProvenanceCalibrated},
+		{"chat file", wire.Chat, `{"model":"m","messages":[{"role":"user","content":[{"type":"file","file":{"file_id":"f"}}]}]}`, ProvenanceCalibrated},
+		{"responses image", wire.Responses, `{"model":"m","input":[{"role":"user","content":[{"type":"input_image","image_url":"x"}]}]}`, ProvenanceCalibrated},
+		{"anthropic image", wire.Anthropic, `{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
+		{"gemini inline data", wire.Gemini, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
+		{"gemini file data", wire.Gemini, `{"contents":[{"role":"user","parts":[{"fileData":{"fileUri":"gs://b/o"}}]}]}`, ProvenanceCalibrated},
 
-		{"chat tool catalogue", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}`, ProvenanceCalibrated},
-		{"responses tool catalogue", openai.FamilyResponses, `{"model":"m","input":"hi","tools":[{"type":"function","name":"f","parameters":{"type":"object"}}]}`, ProvenanceCalibrated},
-		{"anthropic tool catalogue", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":{"type":"object"}}]}`, ProvenanceCalibrated},
-		{"chat tool call", openai.FamilyChat, `{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}]}`, ProvenanceCalibrated},
-		{"chat tool result", openai.FamilyChat, `{"model":"m","messages":[{"role":"tool","tool_call_id":"c","content":"22C"}]}`, ProvenanceCalibrated},
-		{"responses tool call", openai.FamilyResponses, `{"model":"m","input":[{"type":"function_call","name":"f","call_id":"c","arguments":"{}"}]}`, ProvenanceCalibrated},
-		{"anthropic tool result", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"22C"}]}]}`, ProvenanceCalibrated},
-		{"anthropic tool use", openai.FamilyAnthropic, `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f","input":{"city":"Paris"}}]}]}`, ProvenanceCalibrated},
-		{"gemini function call", openai.FamilyGemini, `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"f","args":{"city":"Paris"}}}]}]}`, ProvenanceCalibrated},
-		{"gemini function response", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"functionResponse":{"name":"f","response":{"output":"22C"}}}]}]}`, ProvenanceCalibrated},
+		{"chat tool catalogue", wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}`, ProvenanceCalibrated},
+		{"responses tool catalogue", wire.Responses, `{"model":"m","input":"hi","tools":[{"type":"function","name":"f","parameters":{"type":"object"}}]}`, ProvenanceCalibrated},
+		{"anthropic tool catalogue", wire.Anthropic, `{"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":{"type":"object"}}]}`, ProvenanceCalibrated},
+		{"chat tool call", wire.Chat, `{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}]}`, ProvenanceCalibrated},
+		{"chat tool result", wire.Chat, `{"model":"m","messages":[{"role":"tool","tool_call_id":"c","content":"22C"}]}`, ProvenanceCalibrated},
+		{"responses tool call", wire.Responses, `{"model":"m","input":[{"type":"function_call","name":"f","call_id":"c","arguments":"{}"}]}`, ProvenanceCalibrated},
+		{"anthropic tool result", wire.Anthropic, `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"22C"}]}]}`, ProvenanceCalibrated},
+		{"anthropic tool use", wire.Anthropic, `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f","input":{"city":"Paris"}}]}]}`, ProvenanceCalibrated},
+		{"gemini function call", wire.Gemini, `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"f","args":{"city":"Paris"}}}]}]}`, ProvenanceCalibrated},
+		{"gemini function response", wire.Gemini, `{"contents":[{"role":"user","parts":[{"functionResponse":{"name":"f","response":{"output":"22C"}}}]}]}`, ProvenanceCalibrated},
 
 		// What a model reads that is neither plain text nor a part with a flat
 		// charge: a schema its reply must follow, its own reasoning, a document.
-		{"chat structured output", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"o","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
-		{"chat json mode", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`, ProvenanceTokenizer},
-		{"responses structured output", openai.FamilyResponses, `{"model":"m","input":"hi","text":{"format":{"type":"json_schema","name":"o","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
-		{"responses plain text format", openai.FamilyResponses, `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`, ProvenanceTokenizer},
-		{"responses reasoning item", openai.FamilyResponses, `{"model":"m","input":[{"type":"reasoning","id":"r","summary":[{"type":"summary_text","text":"thought"}],"encrypted_content":"AAAA"}]}`, ProvenanceCalibrated},
-		{"responses reasoning item without a summary", openai.FamilyResponses, `{"model":"m","input":[{"type":"reasoning","id":"r","summary":[],"encrypted_content":"AAAA"}]}`, ProvenanceCalibrated},
-		{"anthropic structured output", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
-		{"anthropic output format", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"output_format":{"type":"json_schema","schema":{"type":"object"}}}`, ProvenanceCalibrated},
-		{"anthropic effort", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"output_config":{"effort":"high"}}`, ProvenanceTokenizer},
-		{"anthropic thinking", openai.FamilyAnthropic, `{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"hmm","signature":"s"}]}]}`, ProvenanceCalibrated},
-		{"anthropic redacted thinking", openai.FamilyAnthropic, `{"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"AAAA"}]}]}`, ProvenanceCalibrated},
-		{"anthropic pdf document", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
-		{"anthropic text document", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"the text"}}]}]}`, ProvenanceCalibrated},
-		{"anthropic document of text blocks", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content","content":[{"type":"text","text":"the text"}]}}]}]}`, ProvenanceCalibrated},
-		{"gemini response schema", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT"}}}`, ProvenanceCalibrated},
-		{"gemini response json schema", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseJsonSchema":{"type":"object"}}}`, ProvenanceCalibrated},
-		{"gemini json mode", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","maxOutputTokens":9}}`, ProvenanceTokenizer},
-		{"gemini count response schema", openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseSchema":{"type":"OBJECT"}}}}`, ProvenanceCalibrated},
-		{"gemini count tools", openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"f"}]}]}}`, ProvenanceCalibrated},
-		{"bedrock tool catalogue", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"text":"hi"}]}],"toolConfig":{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":{"type":"object"}}}}]}}`, ProvenanceCalibrated},
-		{"bedrock structured output", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"text":"hi"}]}],"outputConfig":{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":"{\"type\":\"object\"}"}}}}}`, ProvenanceCalibrated},
+		{"chat structured output", wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"o","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
+		{"chat json mode", wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`, ProvenanceTokenizer},
+		{"responses structured output", wire.Responses, `{"model":"m","input":"hi","text":{"format":{"type":"json_schema","name":"o","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
+		{"responses plain text format", wire.Responses, `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`, ProvenanceTokenizer},
+		{"responses reasoning item", wire.Responses, `{"model":"m","input":[{"type":"reasoning","id":"r","summary":[{"type":"summary_text","text":"thought"}],"encrypted_content":"AAAA"}]}`, ProvenanceCalibrated},
+		{"responses reasoning item without a summary", wire.Responses, `{"model":"m","input":[{"type":"reasoning","id":"r","summary":[],"encrypted_content":"AAAA"}]}`, ProvenanceCalibrated},
+		{"anthropic structured output", wire.Anthropic, `{"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
+		{"anthropic output format", wire.Anthropic, `{"messages":[{"role":"user","content":"hi"}],"output_format":{"type":"json_schema","schema":{"type":"object"}}}`, ProvenanceCalibrated},
+		{"anthropic effort", wire.Anthropic, `{"messages":[{"role":"user","content":"hi"}],"output_config":{"effort":"high"}}`, ProvenanceTokenizer},
+		{"anthropic thinking", wire.Anthropic, `{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"hmm","signature":"s"}]}]}`, ProvenanceCalibrated},
+		{"anthropic redacted thinking", wire.Anthropic, `{"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"AAAA"}]}]}`, ProvenanceCalibrated},
+		{"anthropic pdf document", wire.Anthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
+		{"anthropic text document", wire.Anthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"the text"}}]}]}`, ProvenanceCalibrated},
+		{"anthropic document of text blocks", wire.Anthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content","content":[{"type":"text","text":"the text"}]}}]}]}`, ProvenanceCalibrated},
+		{"gemini response schema", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT"}}}`, ProvenanceCalibrated},
+		{"gemini response json schema", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseJsonSchema":{"type":"object"}}}`, ProvenanceCalibrated},
+		{"gemini json mode", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","maxOutputTokens":9}}`, ProvenanceTokenizer},
+		{"gemini count response schema", wire.GeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseSchema":{"type":"OBJECT"}}}}`, ProvenanceCalibrated},
+		{"gemini count tools", wire.GeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"f"}]}]}}`, ProvenanceCalibrated},
+		{"bedrock tool catalogue", wire.Bedrock, `{"messages":[{"role":"user","content":[{"text":"hi"}]}],"toolConfig":{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":{"type":"object"}}}}]}}`, ProvenanceCalibrated},
+		{"bedrock structured output", wire.Bedrock, `{"messages":[{"role":"user","content":[{"text":"hi"}]}],"outputConfig":{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":"{\"type\":\"object\"}"}}}}}`, ProvenanceCalibrated},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var request *openai.Request
-			if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+			var request *wire.Request
+			if tc.family == wire.Chat || tc.family == wire.Responses {
 				request = mustParse(t, tc.family, tc.body)
 			} else {
 				request = native(t, tc.family, tc.body)
@@ -273,14 +279,14 @@ func TestDefaultsThatAreApproximateWeakenTheCount(t *testing.T) {
 	c := ForModel("gpt-4o")
 	for _, tc := range []struct {
 		name     string
-		request  *openai.Request
+		request  *wire.Request
 		defaults string
 		want     Provenance
 	}{
-		{"instructions", mustParse(t, openai.FamilyResponses, `{"model":"m","input":"hello"}`), `{"instructions":"Be brief."}`, ProvenanceTokenizer},
-		{"a system prompt", native(t, openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hello"}]}`), `{"system":"Be brief."}`, ProvenanceTokenizer},
-		{"a system prompt with an image", native(t, openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hello"}]}`), `{"system":[{"type":"image","source":{"type":"url","url":"x"}}]}`, ProvenanceCalibrated},
-		{"tools", mustParse(t, openai.FamilyResponses, `{"model":"m","input":"hello"}`), `{"tools":[{"type":"function","name":"f","parameters":{"type":"object"}}]}`, ProvenanceCalibrated},
+		{"instructions", mustParse(t, wire.Responses, `{"model":"m","input":"hello"}`), `{"instructions":"Be brief."}`, ProvenanceTokenizer},
+		{"a system prompt", native(t, wire.Anthropic, `{"messages":[{"role":"user","content":"hello"}]}`), `{"system":"Be brief."}`, ProvenanceTokenizer},
+		{"a system prompt with an image", native(t, wire.Anthropic, `{"messages":[{"role":"user","content":"hello"}]}`), `{"system":[{"type":"image","source":{"type":"url","url":"x"}}]}`, ProvenanceCalibrated},
+		{"tools", mustParse(t, wire.Responses, `{"model":"m","input":"hello"}`), `{"tools":[{"type":"function","name":"f","parameters":{"type":"object"}}]}`, ProvenanceCalibrated},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var defaults map[string]json.RawMessage
@@ -321,7 +327,7 @@ func TestWeakerIsTheLessTrustworthyProvenance(t *testing.T) {
 func TestEachFamilyIsCountedOnce(t *testing.T) {
 	var mu sync.Mutex
 	counted := map[Family]int{}
-	prompt := Walk(mustParse(t, openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hello"}]}`)).
+	prompt := Walk(mustParse(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hello"}]}`)).
 		Observe(func(f Family) { mu.Lock(); counted[f]++; mu.Unlock() })
 	models := []string{"gpt-4o", "gpt-4o-mini", "gpt-4.1", "o3", "gpt-4", "gpt-3.5-turbo", "claude-sonnet-4-5", "us.anthropic.claude-haiku", "gemini-2.5-pro", "mistral-large", "my-deployment", "gpt-4o"}
 	var wg sync.WaitGroup
@@ -347,7 +353,7 @@ func TestEachFamilyIsCountedOnce(t *testing.T) {
 
 func TestDefaultsAreNotCountedAgainstThePrompt(t *testing.T) {
 	counted := 0
-	prompt := Walk(mustParse(t, openai.FamilyResponses, `{"model":"m","input":"hello"}`)).Observe(func(Family) { counted++ })
+	prompt := Walk(mustParse(t, wire.Responses, `{"model":"m","input":"hello"}`)).Observe(func(Family) { counted++ })
 	c := ForModel("gpt-4o")
 	plain := prompt.Estimate(c, nil)
 	withDefaults := prompt.Estimate(c, map[string]json.RawMessage{"instructions": json.RawMessage(`"Be brief."`)})
@@ -359,7 +365,7 @@ func TestDefaultsAreNotCountedAgainstThePrompt(t *testing.T) {
 	}
 	// The caller's own instructions, even a null one, win over the default.
 	for _, body := range []string{`{"model":"m","input":"hello","instructions":null}`, `{"model":"m","input":"hello","instructions":"x"}`} {
-		p := Walk(mustParse(t, openai.FamilyResponses, body))
+		p := Walk(mustParse(t, wire.Responses, body))
 		before := p.Estimate(c, nil)
 		after := p.Estimate(c, map[string]json.RawMessage{"instructions": json.RawMessage(`"Be brief and nothing else."`)})
 		if before.Input != after.Input {
@@ -372,19 +378,19 @@ func TestDefaultsAreNotCountedAgainstThePrompt(t *testing.T) {
 // which is usually what the caller sent in another dialect.
 func TestFollowSharesTheCountOfTheSameText(t *testing.T) {
 	counted := 0
-	source := Walk(mustParse(t, openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hello there"}]}`)).Observe(func(Family) { counted++ })
+	source := Walk(mustParse(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hello there"}]}`)).Observe(func(Family) { counted++ })
 	c := ForModel("gpt-4o")
 	want := source.Estimate(c, nil).Input
 
 	// The responses spelling of the same conversation, and the same text in
 	// another shape.
-	same := Walk(mustParse(t, openai.FamilyResponses, `{"model":"m","input":"hello there"}`))
+	same := Walk(mustParse(t, wire.Responses, `{"model":"m","input":"hello there"}`))
 	same.Follow(source)
 	if got := same.Estimate(c, nil).Input; got != want || counted != 1 {
 		t.Fatalf("an equal prompt counted %d after %d counts, want %d after one", got, counted, want)
 	}
 
-	different := Walk(mustParse(t, openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hello there!"}]}`))
+	different := Walk(mustParse(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hello there!"}]}`))
 	different.Follow(source)
 	if got := different.Estimate(c, nil).Input; got == want {
 		t.Fatalf("a different prompt took the count of another: %d", got)
@@ -395,7 +401,7 @@ func TestFollowSharesTheCountOfTheSameText(t *testing.T) {
 		`{"model":"m","messages":[{"role":"user","content":"hello there"},{"role":"user","content":""}]}`,
 		`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"hello there"},{"type":"image_url","image_url":{"url":"x"}}]}]}`,
 	} {
-		p := Walk(mustParse(t, openai.FamilyChat, other))
+		p := Walk(mustParse(t, wire.Chat, other))
 		p.Follow(source)
 		if p.tally == source.tally {
 			t.Errorf("%s shares the count of a prompt that reads differently", other)
@@ -411,15 +417,15 @@ func TestFollowSharesTheCountOfTheSameText(t *testing.T) {
 func TestFollowIgnoresTheOrderOfText(t *testing.T) {
 	c := ForModel("gpt-4o")
 	chat := `{"model":"m","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hello there"}]}`
-	want := Walk(mustParse(t, openai.FamilyChat, chat)).Estimate(c, nil)
-	for name, source := range map[string]*openai.Request{
-		"anthropic": native(t, openai.FamilyAnthropic, `{"system":"Be brief.","messages":[{"role":"user","content":"hello there"}]}`),
-		"responses": mustParse(t, openai.FamilyResponses, `{"model":"m","input":"hello there","instructions":"Be brief."}`),
+	want := Walk(mustParse(t, wire.Chat, chat)).Estimate(c, nil)
+	for name, source := range map[string]*wire.Request{
+		"anthropic": native(t, wire.Anthropic, `{"system":"Be brief.","messages":[{"role":"user","content":"hello there"}]}`),
+		"responses": mustParse(t, wire.Responses, `{"model":"m","input":"hello there","instructions":"Be brief."}`),
 	} {
 		counted := 0
 		from := Walk(source).Observe(func(Family) { counted++ })
 		from.Estimate(c, nil)
-		effective := Walk(mustParse(t, openai.FamilyChat, chat))
+		effective := Walk(mustParse(t, wire.Chat, chat))
 		effective.Follow(from)
 		got := effective.Estimate(c, nil)
 		if counted != 1 || effective.tally != from.tally {
@@ -431,13 +437,13 @@ func TestFollowIgnoresTheOrderOfText(t *testing.T) {
 	}
 
 	// Other text, or the same text under other roles, is another prompt.
-	source := Walk(native(t, openai.FamilyAnthropic, `{"system":"Be brief.","messages":[{"role":"user","content":"hello there"}]}`))
+	source := Walk(native(t, wire.Anthropic, `{"system":"Be brief.","messages":[{"role":"user","content":"hello there"}]}`))
 	for _, other := range []string{
 		`{"model":"m","messages":[{"role":"system","content":"Be brief!"},{"role":"user","content":"hello there"}]}`,
 		`{"model":"m","messages":[{"role":"user","content":"Be brief."},{"role":"user","content":"hello there"}]}`,
 		`{"model":"m","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hello there"},{"role":"user","content":"hello there"}]}`,
 	} {
-		p := Walk(mustParse(t, openai.FamilyChat, other))
+		p := Walk(mustParse(t, wire.Chat, other))
 		p.Follow(source)
 		if p.tally == source.tally {
 			t.Errorf("%s shares the count of a prompt that reads differently", other)
@@ -462,7 +468,7 @@ func TestFollowIgnoresTheOrderOfText(t *testing.T) {
 				messages = append(messages, map[string]any{"role": "user", "content": text})
 			}
 			body, _ := json.Marshal(map[string]any{"model": "m", "messages": messages})
-			return Walk(mustParse(t, openai.FamilyChat, string(body)))
+			return Walk(mustParse(t, wire.Chat, string(body)))
 		}
 		first, again := walked(tc.first), walked(tc.again)
 		again.Follow(first)
@@ -486,7 +492,7 @@ func TestFollowCountsRolesAgainstTheBound(t *testing.T) {
 	system := map[string]any{"role": "system", "content": y}
 	walked := func(messages ...map[string]any) *Prompt {
 		body, _ := json.Marshal(map[string]any{"model": "m", "messages": messages})
-		return Walk(mustParse(t, openai.FamilyChat, string(body)))
+		return Walk(mustParse(t, wire.Chat, string(body)))
 	}
 	first, second := walked(user, system), walked(system, user)
 	if first.in.bytes+roleBytes(first.in.roles) <= ExactBytes || first.in.bytes > ExactBytes {
@@ -504,7 +510,7 @@ func TestFollowCountsRolesAgainstTheBound(t *testing.T) {
 
 // walkKeeping walks a request into an input that keeps at most retain bytes of
 // its text.
-func walkKeeping(request *openai.Request, retain int) *input {
+func walkKeeping(request *wire.Request, retain int) *input {
 	in := &input{retain: retain}
 	walkInput(in, request.Family, requestFields(request))
 	return in
@@ -547,7 +553,7 @@ func TestAPromptKeepsOnlyWhatACounterReads(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := mustParse(t, openai.FamilyChat, string(body))
+			request := mustParse(t, wire.Chat, string(body))
 			kept, whole := walkKeeping(request, 0), walkKeeping(request, 1<<40)
 
 			var held int
@@ -597,9 +603,9 @@ func TestAPromptDoesNotHoldTheTextOfItsRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	const requests = 4
-	var parsed [requests]*openai.Request
+	var parsed [requests]*wire.Request
 	for i := range parsed {
-		parsed[i] = mustParse(t, openai.FamilyChat, string(body))
+		parsed[i] = mustParse(t, wire.Chat, string(body))
 	}
 	heap := func() uint64 {
 		var stats runtime.MemStats
@@ -627,7 +633,7 @@ func TestAPromptDoesNotHoldTheTextOfItsRequest(t *testing.T) {
 func TestALongPromptIsCalibrated(t *testing.T) {
 	text := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 4*ExactBytes/45)
 	body, _ := json.Marshal(map[string]any{"model": "m", "messages": []any{map[string]any{"role": "user", "content": text}}})
-	prompt := Walk(mustParse(t, openai.FamilyChat, string(body)))
+	prompt := Walk(mustParse(t, wire.Chat, string(body)))
 	exact := ForModel("gpt-4o")
 	e := prompt.Estimate(exact, nil)
 	if e.Provenance != ProvenanceCalibrated {
@@ -651,20 +657,20 @@ func TestALongPromptIsCalibrated(t *testing.T) {
 func TestWalkerReadsEveryDialectPrompt(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		body   string
 		want   int64 // heuristic tokens
 	}{
-		{"gemini contents and system instruction", openai.FamilyGemini,
+		{"gemini contents and system instruction", wire.Gemini,
 			`{"contents":[{"role":"user","parts":[{"text":"abcd"},{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}],"systemInstruction":{"parts":[{"text":"abcdefgh"}]}}`,
 			1 + ImageTokens + 2},
-		{"gemini count wraps a request", openai.FamilyGeminiCount,
+		{"gemini count wraps a request", wire.GeminiCount,
 			`{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}}`, 1},
-		{"anthropic tools are one schema", openai.FamilyAnthropic,
+		{"anthropic tools are one schema", wire.Anthropic,
 			`{"messages":[],"tools":[{"name":"a","input_schema":{"type":"object"}}]}`,
 			// The array compacts to 47 characters.
 			12},
-		{"bedrock converse", openai.FamilyBedrock,
+		{"bedrock converse", wire.Bedrock,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"system":[{"text":"abcd"}]}`, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -686,60 +692,60 @@ func TestWalkerReadsTheStructuredOutputsReasoningAndDocumentsOfEveryDialect(t *t
 	schemaTokens := HeuristicTokens(schema)
 	for _, tc := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		body   string
 		want   int64 // heuristic tokens
 	}{
-		{"chat response format", openai.FamilyChat,
+		{"chat response format", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":"abcd"}],"response_format":{"type":"json_schema","json_schema":{"name":"o","schema":` + schema + `}}}`,
 			1 + schemaTokens},
-		{"chat json mode", openai.FamilyChat,
+		{"chat json mode", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":"abcd"}],"response_format":{"type":"json_object"}}`, 1},
-		{"responses text format", openai.FamilyResponses,
+		{"responses text format", wire.Responses,
 			`{"model":"m","input":"abcd","text":{"format":{"type":"json_schema","name":"o","schema":` + schema + `}}}`,
 			1 + schemaTokens},
-		{"responses reasoning summary", openai.FamilyResponses,
+		{"responses reasoning summary", wire.Responses,
 			`{"model":"m","input":[{"type":"reasoning","id":"r","summary":[{"type":"summary_text","text":"abcdefgh"},{"type":"summary_text","text":"abcd"}],"encrypted_content":"` + strings.Repeat("A", 4000) + `"}]}`,
 			2 + 1},
-		{"responses reasoning text", openai.FamilyResponses,
+		{"responses reasoning text", wire.Responses,
 			`{"model":"m","input":[{"type":"reasoning","id":"r","summary":[],"content":[{"type":"reasoning_text","text":"abcdefgh"}]}]}`, 2},
-		{"anthropic output format", openai.FamilyAnthropic,
+		{"anthropic output format", wire.Anthropic,
 			`{"messages":[{"role":"user","content":"abcd"}],"output_config":{"effort":"high","format":{"type":"json_schema","schema":` + schema + `}}}`,
 			1 + schemaTokens},
-		{"anthropic legacy output format", openai.FamilyAnthropic,
+		{"anthropic legacy output format", wire.Anthropic,
 			`{"messages":[{"role":"user","content":"abcd"}],"output_format":{"type":"json_schema","schema":` + schema + `}}`,
 			1 + schemaTokens},
-		{"anthropic thinking", openai.FamilyAnthropic,
+		{"anthropic thinking", wire.Anthropic,
 			`{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"abcdefgh","signature":"` + strings.Repeat("s", 400) + `"},{"type":"redacted_thinking","data":"` + strings.Repeat("A", 400) + `"}]}]}`, 2},
-		{"anthropic pdf document", openai.FamilyAnthropic,
+		{"anthropic pdf document", wire.Anthropic,
 			`{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + strings.Repeat("A", 20_000) + `"}}]}]}`, MediaTokens},
-		{"anthropic document by url", openai.FamilyAnthropic,
+		{"anthropic document by url", wire.Anthropic,
 			`{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://example.com/a.pdf"}}]}]}`, MediaTokens},
-		{"anthropic text document", openai.FamilyAnthropic,
+		{"anthropic text document", wire.Anthropic,
 			`{"messages":[{"role":"user","content":[{"type":"document","title":"t","source":{"type":"text","media_type":"text/plain","data":"abcdefgh"}}]}]}`, 2},
-		{"anthropic document of content blocks", openai.FamilyAnthropic,
+		{"anthropic document of content blocks", wire.Anthropic,
 			`{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content","content":[{"type":"text","text":"abcd"},{"type":"image","source":{"type":"base64","data":"AAAA"}}]}}]}]}`,
 			1 + ImageTokens},
-		{"gemini response schema", openai.FamilyGemini,
+		{"gemini response schema", wire.Gemini,
 			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9,"responseSchema":` + schema + `}}`, 1 + schemaTokens},
-		{"gemini response json schema", openai.FamilyGemini,
+		{"gemini response json schema", wire.Gemini,
 			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"responseJsonSchema":` + schema + `}}`, 1 + schemaTokens},
-		{"gemini count of a request with a schema and tools", openai.FamilyGeminiCount,
+		{"gemini count of a request with a schema and tools", wire.GeminiCount,
 			`{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"responseSchema":` + schema + `},"tools":[{"functionDeclarations":[{"name":"f","parameters":` + schema + `}]}]}}`,
 			1 + schemaTokens + HeuristicTokens(`[{"functionDeclarations":[{"name":"f","parameters":`+schema+`}]}]`)},
-		{"bedrock tool catalogue", openai.FamilyBedrock,
+		{"bedrock tool catalogue", wire.Bedrock,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"toolConfig":{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":` + schema + `}}}]}}`,
 			1 + HeuristicTokens(`{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":`+schema+`}}}]}`)},
-		{"bedrock structured output", openai.FamilyBedrock,
+		{"bedrock structured output", wire.Bedrock,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"outputConfig":{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":` + strconv.Quote(schema) + `}}}}}`,
 			1 + schemaTokens},
 		// Gemini's toolConfig only chooses among the tools the request holds.
-		{"gemini tool config", openai.FamilyGemini,
+		{"gemini tool config", wire.Gemini,
 			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["get_weather"]}}}`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var request *openai.Request
-			if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+			var request *wire.Request
+			if tc.family == wire.Chat || tc.family == wire.Responses {
 				request = mustParse(t, tc.family, tc.body)
 			} else {
 				request = native(t, tc.family, tc.body)
@@ -781,44 +787,44 @@ func TestDefaultedStructuredOutputsAndCataloguesAreCounted(t *testing.T) {
 	const schema = `{"type":"object","properties":{"city":{"type":"string"}}}`
 	for _, tc := range []struct {
 		name      string
-		family    openai.Family
+		family    wire.Format
 		body, own string // the request, and the same request with a member of its own
 		defaults  map[string]json.RawMessage
 	}{
-		{"chat", openai.FamilyChat,
+		{"chat", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":"abcd"}]}`,
 			`{"model":"m","messages":[{"role":"user","content":"abcd"}],"response_format":{"type":"text"}}`,
 			map[string]json.RawMessage{"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"o","schema":` + schema + `}}`)}},
-		{"responses", openai.FamilyResponses,
+		{"responses", wire.Responses,
 			`{"model":"m","input":"abcd"}`,
 			`{"model":"m","input":"abcd","text":{"format":{"type":"text"}}}`,
 			map[string]json.RawMessage{"text": json.RawMessage(`{"format":{"type":"json_schema","name":"o","schema":` + schema + `}}`)}},
-		{"anthropic output config", openai.FamilyAnthropic,
+		{"anthropic output config", wire.Anthropic,
 			`{"messages":[{"role":"user","content":"abcd"}]}`,
 			`{"messages":[{"role":"user","content":"abcd"}],"output_config":{"effort":"high"}}`,
 			map[string]json.RawMessage{"output_config": json.RawMessage(`{"format":{"type":"json_schema","schema":` + schema + `}}`)}},
-		{"anthropic output format", openai.FamilyAnthropic,
+		{"anthropic output format", wire.Anthropic,
 			`{"messages":[{"role":"user","content":"abcd"}]}`,
 			`{"messages":[{"role":"user","content":"abcd"}],"output_format":{"type":"text"}}`,
 			map[string]json.RawMessage{"output_format": json.RawMessage(`{"type":"json_schema","schema":` + schema + `}`)}},
 		// The encoder merges a default generation config into the caller's, so a
 		// caller's own response schema is what shields the provider's.
-		{"gemini", openai.FamilyGemini,
+		{"gemini", wire.Gemini,
 			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
 			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9,"responseSchema":{"type":"OBJECT"}}}`,
 			map[string]json.RawMessage{"generationConfig": json.RawMessage(`{"responseSchema":` + schema + `}`)}},
-		{"bedrock tool catalogue", openai.FamilyBedrock,
+		{"bedrock tool catalogue", wire.Bedrock,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}]}`,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"toolConfig":{}}`,
 			map[string]json.RawMessage{"toolConfig": json.RawMessage(`{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":` + schema + `}}}]}`)}},
-		{"bedrock structured output", openai.FamilyBedrock,
+		{"bedrock structured output", wire.Bedrock,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}]}`,
 			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"outputConfig":{}}`,
 			map[string]json.RawMessage{"outputConfig": json.RawMessage(`{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":` + strconv.Quote(schema) + `}}}}`)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			walk := func(body string) *Prompt {
-				if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+				if tc.family == wire.Chat || tc.family == wire.Responses {
 					return Walk(mustParse(t, tc.family, body))
 				}
 				return Walk(native(t, tc.family, body))
@@ -867,10 +873,10 @@ func TestDefaultedGenerationConfigIsMergedIntoTheCallers(t *testing.T) {
 			if tc.config != "" {
 				body += `,"generationConfig":` + tc.config
 			}
-			request := Walk(native(t, openai.FamilyGemini, body+`}`))
+			request := Walk(native(t, wire.Gemini, body+`}`))
 			defaults := map[string]json.RawMessage{"generationConfig": json.RawMessage(tc.defaults)}
 			got := request.Estimate(ForModel("gpt-4o"), defaults)
-			want := Walk(native(t, openai.FamilyGemini, sent)).Estimate(ForModel("gpt-4o"), nil)
+			want := Walk(native(t, wire.Gemini, sent)).Estimate(ForModel("gpt-4o"), nil)
 			if got.Input != want.Input || got.Provenance != want.Provenance {
 				t.Fatalf("the estimate is %d tokens, %s; the request the provider is sent is %d, %s", got.Input, got.Provenance, want.Input, want.Provenance)
 			}
@@ -883,26 +889,26 @@ func TestDefaultedGenerationConfigIsMergedIntoTheCallers(t *testing.T) {
 func TestDefaultsThatHoldNoPromptTextAreNotWalked(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		family   openai.Family
+		family   wire.Format
 		body     string
 		defaults string
 	}{
-		{"gemini bounds", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9}}`,
+		{"gemini bounds", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9}}`,
 			`{"generationConfig":{"maxOutputTokens":512,"temperature":0.2,"responseMimeType":"application/json"}}`},
-		{"gemini sampling of a request with no config", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
+		{"gemini sampling of a request with no config", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
 			`{"generationConfig":{"temperature":0.2}}`},
-		{"gemini function calling mode", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
+		{"gemini function calling mode", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
 			`{"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},"generationConfig":{"temperature":0.2}}`},
-		{"anthropic effort", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"abcd"}]}`,
+		{"anthropic effort", wire.Anthropic, `{"messages":[{"role":"user","content":"abcd"}]}`,
 			`{"output_config":{"effort":"high"},"max_tokens":512}`},
-		{"chat json mode", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"abcd"}]}`,
+		{"chat json mode", wire.Chat, `{"model":"m","messages":[{"role":"user","content":"abcd"}]}`,
 			`{"response_format":{"type":"json_object"}}`},
-		{"responses plain text", openai.FamilyResponses, `{"model":"m","input":"abcd"}`,
+		{"responses plain text", wire.Responses, `{"model":"m","input":"abcd"}`,
 			`{"text":{"verbosity":"low"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var request *openai.Request
-			if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+			var request *wire.Request
+			if tc.family == wire.Chat || tc.family == wire.Responses {
 				request = mustParse(t, tc.family, tc.body)
 			} else {
 				request = native(t, tc.family, tc.body)
@@ -933,7 +939,7 @@ func TestAHeuristicTailKeepsTheFramingOfTheExactPart(t *testing.T) {
 		map[string]any{"role": "system", "content": "Be brief."},
 		map[string]any{"role": "user", "content": text},
 	}})
-	e := Walk(mustParse(t, openai.FamilyChat, string(body))).Estimate(ForModel("gpt-4o"), nil)
+	e := Walk(mustParse(t, wire.Chat, string(body))).Estimate(ForModel("gpt-4o"), nil)
 	// "Be brief." is three tokens. The run is too long to count, and what is
 	// counted before it is too short to say what it costs, so it and the two
 	// roles after it, forty thousand and ten bytes, are four bytes to a token.
@@ -949,14 +955,14 @@ func TestMeterDegradationLeavesNoFraming(t *testing.T) {
 	// gateway never framed one.
 	text := strings.Repeat("a", 2*ExactBytes)
 	body, _ := json.Marshal(map[string]any{"model": "m", "messages": []any{map[string]any{"role": "user", "content": text}}})
-	e := Walk(mustParse(t, openai.FamilyChat, string(body))).Estimate(ForModel("gpt-4o"), nil)
+	e := Walk(mustParse(t, wire.Chat, string(body))).Estimate(ForModel("gpt-4o"), nil)
 	if e.Provenance != ProvenanceHeuristic || e.Input != HeuristicTokens(text) {
 		t.Fatalf("input %d (%s), want the heuristic %d", e.Input, e.Provenance, HeuristicTokens(text))
 	}
 }
 
 func TestEstimateTokensSaturate(t *testing.T) {
-	e := Walk(mustParse(t, openai.FamilyChat, `{"model":"m","max_completion_tokens":9007199254740991,"n":1024,"messages":[{"role":"user","content":"hi"}]}`)).Estimate(Counter{}, nil)
+	e := Walk(mustParse(t, wire.Chat, `{"model":"m","max_completion_tokens":9007199254740991,"n":1024,"messages":[{"role":"user","content":"hi"}]}`)).Estimate(Counter{}, nil)
 	if e.Tokens() != MaxTokens {
 		t.Fatalf("an absurd request reserves %d, want %d", e.Tokens(), int64(MaxTokens))
 	}
@@ -992,17 +998,17 @@ func TestPromptFieldsNamesEveryFieldTheWalkerReads(t *testing.T) {
 func TestReplyIsTheReservationBeyondTheInput(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		body   string
 		want   int64
 	}{
-		{"unbounded output is the default", openai.FamilyChat,
+		{"unbounded output is the default", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":"hello"}]}`, DefaultOutputTokens},
-		{"max_tokens bounds one reply", openai.FamilyChat,
+		{"max_tokens bounds one reply", wire.Chat,
 			`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`, 10},
-		{"every candidate may be as long", openai.FamilyChat,
+		{"every candidate may be as long", wire.Chat,
 			`{"model":"m","max_completion_tokens":7,"n":3,"messages":[{"role":"user","content":"hi"}]}`, 21},
-		{"an embedding has no reply", openai.FamilyEmbeddings, `{"model":"m","input":"hello"}`, 0},
+		{"an embedding has no reply", wire.Embeddings, `{"model":"m","input":"hello"}`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := Walk(mustParse(t, tc.family, tc.body)).Estimate(Counter{}, nil)
@@ -1018,7 +1024,7 @@ func TestReplyIsTheReservationBeyondTheInput(t *testing.T) {
 		t.Fatalf("a request that named nothing replies %d, want the default", got)
 	}
 	// A reply bound beyond what the limiter stores saturates instead of wrapping.
-	huge := mustParse(t, openai.FamilyChat, `{"model":"m","max_tokens":9007199254740991,"n":8,"messages":[{"role":"user","content":"hi"}]}`)
+	huge := mustParse(t, wire.Chat, `{"model":"m","max_tokens":9007199254740991,"n":8,"messages":[{"role":"user","content":"hi"}]}`)
 	if got := Walk(huge).Estimate(Counter{}, nil).Reply(); got != MaxTokens {
 		t.Fatalf("Reply = %d, want it saturated at %d", got, MaxTokens)
 	}

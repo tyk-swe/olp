@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -45,7 +46,7 @@ type Release struct {
 	ID          string
 	Sequence    int64
 	Digest      string
-	Snapshot    *Snapshot
+	Snapshot    *routing.Snapshot
 	InstalledAt time.Time
 	credentials map[string][]byte
 	references  map[string]secretstore.Reference
@@ -63,19 +64,12 @@ type releaseCandidate struct {
 // caller retains its mutable inputs; serving consumers borrow the resulting
 // release and must not mutate it. Database installation already decodes into
 // exclusively owned storage and does not pay for this construction copy.
-func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[string][]byte) (*Release, error) {
+func NewRelease(id string, sequence int64, snapshot *routing.Snapshot, credentials map[string][]byte) (*Release, error) {
 	if snapshot == nil {
 		return nil, errors.New("snapshot is required")
 	}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, err
-	}
-	frozen := &Snapshot{}
-	if err := json.Unmarshal(raw, frozen); err != nil {
-		return nil, err
-	}
-	if err := frozen.Validate(); err != nil {
+	frozen := snapshot.Clone()
+	if err := frozen.Compile(); err != nil {
 		return nil, err
 	}
 	digest, err := frozen.Digest()
@@ -135,7 +129,7 @@ type authorityState struct {
 	keys                      map[string]*keyRecord
 	// ineligible holds the credential versions and network credentials that
 	// may not serve, with why.
-	ineligible map[string]Eligibility
+	ineligible map[string]routing.Eligibility
 }
 
 // Manager installs releases and refreshes key authority for one gateway.
@@ -214,7 +208,7 @@ func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, 
 }
 
 func emptyRelease() *Release {
-	return &Release{Snapshot: &Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}, InstalledAt: time.Now()}
+	return &Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}, InstalledAt: time.Now()}
 }
 
 // Start performs one synchronous refresh and then polls until ctx ends or
@@ -549,17 +543,17 @@ func (m *Manager) refreshRelease(ctx context.Context) error {
 }
 
 func (m *Manager) install(ctx context.Context, id string, sequence int64, digest string, raw []byte) (*releaseCandidate, error) {
-	snapshot := &Snapshot{}
+	snapshot := &routing.Snapshot{}
 	if err := json.Unmarshal(raw, snapshot); err != nil {
 		return nil, err
 	}
 	if snapshot.Providers == nil {
-		snapshot.Providers = map[string]Provider{}
+		snapshot.Providers = map[string]routing.Provider{}
 	}
 	if snapshot.Routes == nil {
-		snapshot.Routes = map[string]Route{}
+		snapshot.Routes = map[string]routing.Route{}
 	}
-	if err := snapshot.Validate(); err != nil {
+	if err := snapshot.Compile(); err != nil {
 		return nil, err
 	}
 	computed, err := snapshot.Digest()
@@ -721,12 +715,17 @@ func (m *Manager) Authenticate(secret string) (*access.Authority, error) {
 	if !strings.HasPrefix(secret, "olp_") {
 		return m.authenticateWorkload(secret)
 	}
-	lookup, rest, found := strings.Cut(secret[len("olp_"):], "_")
-	if !found || strings.Contains(rest, "_") {
+	presented := secret[len("olp_"):]
+	separator := strings.IndexByte(presented, '_')
+	if separator < 0 {
 		return nil, ErrInvalidKey
 	}
-	record, ok := keys[lookup]
-	if !ok || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
+	record, ok := keys[presented[:separator]]
+	if !ok {
+		return nil, ErrInvalidKey
+	}
+	// Only a known lookup needs its secret suffix inspected and authenticated.
+	if strings.IndexByte(presented[separator+1:], '_') >= 0 || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return nil, ErrInvalidKey
 	}
 	return &record.authority, nil

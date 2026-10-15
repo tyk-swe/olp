@@ -19,11 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
 	"github.com/aws/aws-sdk-go-v2/service/sso"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func localPolicy() *egress.Policy {
@@ -32,11 +33,11 @@ func localPolicy() *egress.Policy {
 func TestNativeCloudURLAndAuthentication(t *testing.T) {
 	for _, test := range []struct {
 		config      Config
-		family      openai.Family
+		family      wire.Format
 		model, want string
 	}{
-		{Config{Kind: "azure_openai", Endpoint: "https://resource.example", Deployment: "prod", APIVersion: "2025-01-01-preview"}, openai.FamilyResponses, "prod", "https://resource.example/openai/deployments/prod/responses?api-version=2025-01-01-preview"},
-		{Config{Kind: "gemini", Endpoint: "https://generativelanguage.googleapis.com/v1beta"}, openai.FamilyGemini, "gemini-pro", "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"},
+		{Config{Kind: "azure_openai", Endpoint: "https://resource.example", Deployment: "prod", APIVersion: "2025-01-01-preview"}, wire.Responses, "prod", "https://resource.example/openai/deployments/prod/responses?api-version=2025-01-01-preview"},
+		{Config{Kind: "gemini", Endpoint: "https://generativelanguage.googleapis.com/v1beta"}, wire.Gemini, "gemini-pro", "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"},
 		{Config{Kind: "bedrock", Endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com"}, "bedrock", "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.model", "https://bedrock-runtime.us-east-1.amazonaws.com/model/arn:aws:bedrock:us-east-1:123456789012:inference-profile%2Fus.model/converse"},
 	} {
 		got, e := test.config.URL(test.family, test.model, false)

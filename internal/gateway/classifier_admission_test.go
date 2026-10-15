@@ -6,17 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestClassifierDoesNotDispatchForAnExhaustedCaller(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
 	})
 	server := admitThrough(t, h)
 	key := h.rt.keys[fullKey]
@@ -31,8 +32,8 @@ func TestClassifierDoesNotDispatchForAnExhaustedCaller(t *testing.T) {
 
 func TestClassifierSettlesItsOwnCallerReservation(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
 	})
 	server := admitThrough(t, h)
 	key := h.rt.keys[fullKey]
@@ -56,16 +57,16 @@ func TestClassifierSettlesItsOwnCallerReservation(t *testing.T) {
 
 func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
 	})
-	parsed, err := protocols.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hi"}]}`), routeSlug)
+	parsed, err := protocols.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hi"}]}`), routeSlug)
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := &execution{
+	parent := &call{
 		request: request{id: uuid.NewString(), minted: true, release: h.rt.Release(), startedAt: time.Now()},
-		parsed:  parsed, family: openai.FamilyChat, mode: "unary", authority: h.rt.keys[fullKey],
+		family:  wire.Chat, mode: "unary", authority: h.rt.keys[fullKey], generation: generationCall{parsed: parsed},
 	}
 	pool := observability.NewPool(1)
 	pool.Queue(1, time.Second)
@@ -75,7 +76,7 @@ func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
 	defer queued.Release()
 	ctx, cancel := context.WithTimeout(observability.WithPermit(t.Context(), queued), 20*time.Millisecond)
 	defer cancel()
-	result := h.gateway.callClassifier(ctx, parent, &runtime.ClassifierPredicate{Route: classifierSlug, TimeoutMS: 1000})
+	result := h.gateway.callClassifier(ctx, parent, &routing.ClassifierPredicate{Route: classifierSlug, TimeoutMS: 1000})
 	if result.failure == "" || h.mock.count("b") != 0 {
 		t.Fatalf("queued classifier dispatched: result=%+v calls=%d", result, h.mock.count("b"))
 	}
@@ -83,8 +84,8 @@ func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
 
 func TestClassifierSharesTheNamedRoutesOverallDeadline(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
 		route := s.Routes[routeSlug]
 		route.OverallTimeout = 50
 		s.Routes[routeSlug] = route
@@ -118,17 +119,17 @@ func TestNativeClassifierPredicateReturnsLabelsAndFallsThroughOnFailure(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, Config{})
-			h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-				triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+			h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+				triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
 				classifier := b
 				classifier.ID, classifier.Name = uuid.NewString(), "c"
 				classifier.Endpoint = h.upstream.URL + "/c/v1"
 				classifier.ProfileID, classifier.ProfileRevision = "tei-classification", "1"
-				classifier.Capabilities = []runtime.Capability{{Model: modelB, Operation: "classification", Surface: "native", Mode: "unary"}}
+				classifier.Capabilities = []routing.Capability{{Model: modelB, Operation: "classification", Surface: "native", Mode: "unary"}}
 				s.Providers[classifier.ID] = classifier
 				route := s.Routes[classifierSlug]
 				route.Operations = []string{"classification"}
-				route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+				route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 				route.Targets[0].ProviderID = classifier.ID
 				s.Routes[classifierSlug] = route
 			})

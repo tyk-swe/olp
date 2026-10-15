@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -75,21 +77,21 @@ func TestChatStreamUsageOptionPreservesInternalAccounting(t *testing.T) {
 }
 
 func TestFailedStreamsRetainObservedUsage(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		for _, usage := range []struct {
 			name string
-			want *openai.Usage
+			want *wire.Usage
 		}{
 			{"unreported", nil},
-			{"zero", &openai.Usage{}},
-			{"reported", &openai.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
+			{"zero", &wire.Usage{}},
+			{"reported", &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
 		} {
 			t.Run(string(family)+"/"+usage.name, func(t *testing.T) {
 				h := newHarness(t, Config{})
 				usageJSON := "null"
 				if usage.want != nil {
 					names := []string{"prompt_tokens", "completion_tokens"}
-					if family == openai.FamilyResponses {
+					if family == wire.Responses {
 						names = []string{"input_tokens", "output_tokens"}
 					}
 					usageJSON = fmt.Sprintf("{%q:%d,%q:%d,\"total_tokens\":%d}", names[0], usage.want.InputTokens, names[1], usage.want.OutputTokens, usage.want.TotalTokens)
@@ -97,16 +99,16 @@ func TestFailedStreamsRetainObservedUsage(t *testing.T) {
 				body := `{"model":"team-chat","messages":[{"role":"user","content":"hi"}],"stream":true}`
 				// Usage-only chat frames are hidden unless requested by the
 				// client, but must still survive EOF without [DONE].
-				wire := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"stop\"}]}\n\n"
-				wire += "data: {\"choices\":[],\"usage\":" + usageJSON + "}\n\n"
-				if family == openai.FamilyResponses {
+				encodedWire := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"stop\"}]}\n\n"
+				encodedWire += "data: {\"choices\":[],\"usage\":" + usageJSON + "}\n\n"
+				if family == wire.Responses {
 					body = `{"model":"team-chat","input":"hi","stream":true}`
-					wire = "data: {\"type\":\"response.created\"}\n\n"
-					wire += "data: {\"type\":\"response.failed\",\"response\":{\"object\":\"response\",\"status\":\"failed\",\"output\":[],\"usage\":" + usageJSON + ",\"error\":{\"message\":\"failed\"}}}\n\n"
+					encodedWire = "data: {\"type\":\"response.created\"}\n\n"
+					encodedWire += "data: {\"type\":\"response.failed\",\"response\":{\"object\":\"response\",\"status\":\"failed\",\"output\":[],\"usage\":" + usageJSON + ",\"error\":{\"message\":\"failed\"}}}\n\n"
 				}
 				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "text/event-stream")
-					io.WriteString(w, wire)
+					io.WriteString(w, encodedWire)
 				})
 				r := httptest.NewRequest(http.MethodPost, "/v1"+endpointPath(family), strings.NewReader(body)).WithContext(t.Context())
 				r.Header.Set("Authorization", "Bearer "+fullKey)
@@ -129,18 +131,18 @@ func TestFailedStreamsRetainObservedUsage(t *testing.T) {
 }
 
 func TestStreamClientWriteFailureRetainsObservedUsage(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		t.Run(string(family), func(t *testing.T) {
 			h := newHarness(t, Config{})
 			body := `{"model":"team-chat","messages":[{"role":"user","content":"hi"}],"stream":true}`
-			wire := "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"
-			if family == openai.FamilyResponses {
+			encodedWire := "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"
+			if family == wire.Responses {
 				body = `{"model":"team-chat","input":"hi","stream":true}`
-				wire = "data: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n"
+				encodedWire = "data: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n"
 			}
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
-				io.WriteString(w, wire)
+				io.WriteString(w, encodedWire)
 			})
 			r := httptest.NewRequest(http.MethodPost, "/v1"+endpointPath(family), strings.NewReader(body)).WithContext(t.Context())
 			r.Header.Set("Authorization", "Bearer "+fullKey)
@@ -149,7 +151,7 @@ func TestStreamClientWriteFailureRetainsObservedUsage(t *testing.T) {
 			h.gateway.inference(family)(w, r)
 			env := h.sink.last(t)
 			wantClass := classCancelled
-			if family == openai.FamilyResponses {
+			if family == wire.Responses {
 				wantClass = classSuccess
 			}
 			if env.Outcome != "cancelled" || env.Status != 0 || len(env.Attempts) != 1 || env.Attempts[0].Class != wantClass || h.mock.count("b") != 0 {
@@ -159,7 +161,7 @@ func TestStreamClientWriteFailureRetainsObservedUsage(t *testing.T) {
 				t.Fatalf("client failure discarded usage: %+v", env)
 			}
 			wantSuccesses := int64(0)
-			if family == openai.FamilyResponses {
+			if family == wire.Responses {
 				wantSuccesses = 1
 			}
 			stats := h.gateway.Health().ProviderHealth(time.Minute)[env.Attempts[0].ProviderID]
@@ -180,7 +182,7 @@ func TestResponsesClientWriteFailureBeforeTerminalRetainsPartialEvidence(t *test
 	r.Header.Set("Authorization", "Bearer "+fullKey)
 	r.Header.Set("Content-Type", "application/json")
 	w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), writeErr: io.ErrClosedPipe, beforeDelivery: func() {}}
-	h.gateway.inference(openai.FamilyResponses)(w, r)
+	h.gateway.inference(wire.Responses)(w, r)
 	env := h.sink.last(t)
 	if env.Outcome != "cancelled" || len(env.Attempts) != 1 || env.Attempts[0].Class != classCancelled || h.mock.count("b") != 0 {
 		t.Fatalf("partial native work became a completed provider outcome: %+v", env)
@@ -208,12 +210,12 @@ func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
 				if phase == "failed" {
 					nativeFailure = `,"error":{"type":"server_error","code":"server_error","message":"native generation failed"}`
 				}
-				wire := fmt.Sprintf("data: {\"type\":\"response.%s\",\"response\":{\"id\":\"native-response\",\"object\":\"response\",\"status\":%q,\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}%s}}\n\n", kind, status, nativeFailure)
+				encodedWire := fmt.Sprintf("data: {\"type\":\"response.%s\",\"response\":{\"id\":\"native-response\",\"object\":\"response\",\"status\":%q,\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}%s}}\n\n", kind, status, nativeFailure)
 				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "text/event-stream")
-					io.WriteString(w, wire)
+					io.WriteString(w, encodedWire)
 				})
-				parsed, err := openai.Parse(openai.FamilyResponses, fmt.Appendf(nil, `{"model":"team-chat","input":"hi","stream":true,"store":%t}`, retained))
+				parsed, err := openai.Parse(wire.Responses, fmt.Appendf(nil, `{"model":"team-chat","input":"hi","stream":true,"store":%t}`, retained))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -221,15 +223,15 @@ func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
 				route := release.Snapshot.Routes[routeSlug]
 				target := route.Targets[0]
 				provider := release.Snapshot.Providers[target.ProviderID]
-				x := &execution{
-					request:       request{release: release, startedAt: time.Now()},
-					family:        openai.FamilyResponses,
-					parsed:        parsed,
-					route:         &route,
-					providerState: true,
-					emit:          func([]byte) error { return errClientWrite },
+				x := &call{
+					request: request{release: release, startedAt: time.Now()},
+					family:  wire.Responses,
+
+					providerState: true, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed,
+
+						emit: func([]byte) error { return errClientWrite }},
 				}
-				attempt := runtime.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel, Timeout: 2 * time.Second}
+				attempt := routing.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel, Timeout: 2 * time.Second}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				fact, _, failure := h.gateway.attempt(ctx, x, attempt, &provider, provider.Slots[0], AttemptFact{Ordinal: 1, StartedAt: time.Now()})

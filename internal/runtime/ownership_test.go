@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 func TestReleaseFreezesCallerOwnedSnapshotAndCredentials(t *testing.T) {
-	provider := Provider{ID: uuid.NewString(), Name: "original", Kind: "openai_compatible", Enabled: true, RevisionID: uuid.NewString(), Capabilities: []Capability{}, Limits: &Limits{MaxConcurrency: quotaLimit(2)}}
-	snapshot := quotaSnapshot(provider)
+	provider := routing.Provider{ID: uuid.NewString(), Name: "original", Kind: "openai_compatible", Enabled: true, RevisionID: uuid.NewString(), Capabilities: []routing.Capability{}, Limits: &routing.Limits{MaxConcurrency: new(int64(2))}}
+	snapshot := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1}, Providers: map[string]routing.Provider{provider.ID: provider}, Routes: map[string]routing.Route{}}
 	credential := []byte("original")
 	credentials := map[string][]byte{"credential": credential}
 	release, err := NewRelease("release", 1, snapshot, credentials)
@@ -113,7 +114,7 @@ func TestExternalResolutionCannotOutliveObservedRevocation(t *testing.T) {
 	}()
 	<-started
 	m.mu.Lock()
-	m.authority.ineligible["credential"] = Revoked
+	m.authority.ineligible["credential"] = routing.Revoked
 	m.mu.Unlock()
 	close(resume)
 	if err := <-result; !errors.Is(err, ErrCredentialUnavailable) || !returned.Load() {

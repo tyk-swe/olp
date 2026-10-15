@@ -1,9 +1,10 @@
 package tokenization
 
 import (
+	"slices"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
-	"slices"
 )
 
 func countDefaults(id string) map[string]operations.Field {

@@ -18,6 +18,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/priority"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 
@@ -29,8 +33,6 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -76,7 +78,7 @@ type Config struct {
 // *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
 	// CheckRouteFidelity confirms a strict admission against current publication.
-	CheckRouteFidelity(context.Context, runtime.Route) error
+	CheckRouteFidelity(context.Context, routing.Route) error
 	Release() *runtime.Release
 	Authenticate(secret string) (*access.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
@@ -175,7 +177,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 }
 
 // Health exposes windowed attempt statistics for the management API.
-func (s *Server) Health() providers.HealthSource { return s.health }
+func (s *Server) Health() observability.HealthSource { return s.health }
 
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
@@ -193,8 +195,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
-	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))
-	mux.HandleFunc("POST /v1/responses", s.inference(openai.FamilyResponses))
+	mux.HandleFunc("POST /v1/chat/completions", s.inference(wire.Chat))
+	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("GET /v1/models/{model}", s.model)
 	mux.HandleFunc("OPTIONS /v1/", s.preflight)
@@ -345,7 +347,7 @@ func (s *Server) admitLater(ctx context.Context) bool {
 // awaitAdmission waits for the slot a queued request reserved, in its
 // priority class and never past ctx's deadline, then answers the same 503 a
 // full pool does. A request admitted outright returns at once.
-func (s *Server) awaitAdmission(ctx context.Context, x *execution) *Error {
+func (s *Server) awaitAdmission(ctx context.Context, x *call) *Error {
 	permit := observability.PermitFromContext(ctx)
 	if !permit.Queued() {
 		return nil
@@ -428,7 +430,7 @@ const routingHeader = "X-OLP-Routing"
 // admission class: the key's own priority unless the header asks for another
 // within the key's ceiling. Asking above it is refused like any other budget
 // increase.
-func routingControls(r *http.Request, policy access.KeyPolicy) (*runtime.Preferences, string, *Error) {
+func routingControls(r *http.Request, policy access.KeyPolicy) (*routing.Preferences, string, *Error) {
 	preferences, e := routingPreferences(r)
 	if e != nil {
 		return nil, "", e
@@ -436,15 +438,15 @@ func routingControls(r *http.Request, policy access.KeyPolicy) (*runtime.Prefere
 	if preferences == nil || preferences.Priority == nil {
 		return preferences, policy.DefaultPriority(), nil
 	}
-	priority, ceiling := *preferences.Priority, policy.PriorityCeiling()
-	if access.PriorityRank(priority) < access.PriorityRank(ceiling) {
+	requestedPriority, ceiling := *preferences.Priority, policy.PriorityCeiling()
+	if priority.Rank(requestedPriority) < priority.Rank(ceiling) {
 		param := routingHeader
 		return nil, "", invalidRequest("priority_increase_forbidden", "This API key may request priority "+ceiling+" at most.", &param)
 	}
-	return preferences, priority, nil
+	return preferences, requestedPriority, nil
 }
 
-func routingPreferences(r *http.Request) (*runtime.Preferences, *Error) {
+func routingPreferences(r *http.Request) (*routing.Preferences, *Error) {
 	values := r.Header.Values("X-OLP-Routing")
 	if len(values) == 0 {
 		return nil, nil
@@ -453,7 +455,7 @@ func routingPreferences(r *http.Request) (*runtime.Preferences, *Error) {
 	if len(values) != 1 {
 		return nil, invalidRequest("invalid_request", "Provide exactly one X-OLP-Routing header.", &param)
 	}
-	p, err := runtime.ParsePreferences([]byte(values[0]))
+	p, err := routing.ParsePreferences([]byte(values[0]))
 	if err != nil {
 		return nil, invalidRequest("invalid_request", err.Error(), &param)
 	}
@@ -479,7 +481,7 @@ func requestError(err error) *Error {
 		}
 		return invalidRequest(code, message, param)
 	}
-	if re, ok := errors.AsType[*openai.RequestError](err); ok {
+	if re, ok := errors.AsType[*wire.RequestError](err); ok {
 		var param *string
 		if re.Param != "" {
 			param = &re.Param
@@ -492,7 +494,7 @@ func requestError(err error) *Error {
 // noteCostExceeded remembers that a leg this request planned excluded a
 // non-shadow target for its maximum cost; when nothing serves, the refusal is
 // 400 cost_limit_exceeded rather than route-unavailable.
-func (x *execution) noteCostExceeded(plan runtime.Plan) {
+func (x *call) noteCostExceeded(plan routing.Plan) {
 	for index := range plan.Decisions {
 		if plan.Decisions[index].Reason != nil && *plan.Decisions[index].Reason == "cost_limit_exceeded" && !plan.Decisions[index].Shadow {
 			x.costExcluded = true
@@ -508,11 +510,11 @@ func costLimitExceeded() *Error {
 }
 
 func selectionError(err error, model string) *Error {
-	if se, ok := errors.AsType[*runtime.SelectionError](err); ok {
+	if se, ok := errors.AsType[*routing.SelectionError](err); ok {
 		switch se.Code {
-		case runtime.RouteNotFound:
+		case routing.RouteNotFound:
 			return modelNotFound(model)
-		case runtime.OperationNotSupported:
+		case routing.OperationNotSupported:
 			return invalidRequest("invalid_request", "The model `"+model+"` does not allow this operation.", nil)
 		}
 	}
@@ -521,12 +523,12 @@ func selectionError(err error, model string) *Error {
 
 const requestBodyTimeout = 15 * time.Second
 
-func (s *Server) inference(family openai.Family) http.HandlerFunc {
+func (s *Server) inference(family wire.Format) http.HandlerFunc {
 	return s.inferenceOperation(family, "")
 }
-func (s *Server) inferenceOperation(family openai.Family, dialect string) http.HandlerFunc {
+func (s *Server) inferenceOperation(family wire.Format, dialect string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 		if dialect == "" && requestSurface(r) == "gemini" {
 			// Gemini embeddings match OpenAI embedding capabilities but
 			// speak Gemini on the wire.
@@ -603,9 +605,9 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			out, status = s.serveUnary(w, r, x, body)
 			return
 		}
-		var parsed *openai.Request
+		var parsed *wire.Request
 		var err error
-		if family == openai.FamilyBedrock {
+		if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
 		} else {
 			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
@@ -622,13 +624,13 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		x.parsed = parsed
+		x.generation.parsed = parsed
 		if e := s.prepareContinuation(r.Context(), x); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
-		if x.continuation != nil && x.continuation.replay != nil {
+		if x.generation.continuation != nil && x.generation.continuation.replay != nil {
 			var deliveryErr error
 			status, deliveryErr = s.replayContinuation(w, x)
 			out = continuationDeliveryOutcome(deliveryErr)
@@ -636,7 +638,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			x.mirrors = false
 			return
 		}
-		if family == openai.FamilyResponses {
+		if family == wire.Responses {
 			if e := s.responsesStateGate(r.Context(), x, authority, parsed); e != nil {
 				x.failure, status = e, e.Status
 				writeError(w, e)
@@ -681,7 +683,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		}
 		if parsed.Stream {
 			sw := &streamWriter{w: w, family: family, x: x}
-			x.emit = func(frame []byte) error {
+			x.generation.emit = func(frame []byte) error {
 				err := sw.emit(frame)
 				if err == nil {
 					x.delivered(s.now())
@@ -707,7 +709,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if family == openai.FamilyResponses && x.providerState {
+		if family == wire.Responses && x.providerState {
 			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.completion.Body)
 			if me != nil {
 				out.err = me
@@ -753,14 +755,14 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 // prepare resolves the route, lets authorize refuse the caller's use of it in
 // the caller's own terms, and ranks the eligible attempts against the pinned
 // snapshot.
-func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runtime.Route) *Error) *Error {
+func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.Route) *Error) *Error {
 	x.mode = "unary"
-	if x.parsed.Stream {
+	if x.generation.parsed.Stream {
 		x.mode = "streaming"
 	}
-	route, ok := x.snapshot().Routes[x.parsed.Route]
+	route, ok := x.snapshot().Routes[x.generation.parsed.Route]
 	if !ok {
-		return modelNotFound(x.parsed.Route)
+		return modelNotFound(x.generation.parsed.Route)
 	}
 	x.route = &route
 	if e := authorize(&route); e != nil {
@@ -773,14 +775,14 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	}
 	// A pinned resource, a continuation and provider state belong to the
 	// route that holds them, so those requests never leave it.
-	x.bind(canonicalPlanner, authorize, x.pin != nil || x.continuation != nil || x.providerState)
+	x.bind(canonicalPlanner, authorize, x.pin != nil || x.generation.continuation != nil || x.providerState)
 	return s.planNamed(ctx, x)
 }
 
 // planCanonical plans x.route for a canonical request and applies the route's
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
-func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
+func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
@@ -809,22 +811,22 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 	// A target's context window is weighed against the request as the model that
 	// would serve it counts it, so the demand follows the target.
 	options.Parameters = source.parameters
-	options.Demand = func(_ runtime.Provider, t runtime.Target) *runtime.TokenDemand {
+	options.Demand = func(_ routing.Provider, t routing.Target) *routing.TokenDemand {
 		return x.sourceDemand(t.ProviderModel)
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
+	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
 		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
 			return source.parameters, x.sourceDemand(t.ProviderModel)
 		}
-		prepared, err := x.preparedProvider(&p, t.ProviderModel)
+		prepared, err := x.preparedProvider(&p, t.ID, t.ProviderModel)
 		if err != nil {
 			return nil, nil
 		}
 		return prepared.parameters, prepared.demand
 	}
-	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+	options.Accept = func(p routing.Provider, t routing.Target) error {
 		cfg := p.Connector()
-		if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != runtime.Eligible {
+		if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != routing.Eligible {
 			return errors.New("provider network credential unavailable")
 		}
 		if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
@@ -834,8 +836,8 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 			semantic = errors.New("provider-state capability unavailable")
 			return semantic
 		}
-		if !x.strict() && protocols.StructuredOutputRequested(x.parsed) {
-			var metadata runtime.ModelMetadata
+		if !x.strict() && protocols.StructuredOutputRequested(x.generation.parsed) {
+			var metadata routing.ModelMetadata
 			_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
 			if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
 				semantic = errors.New("model does not declare structured-output support")
@@ -845,12 +847,12 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 		var e error
 		if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
 			var prepared preparedProvider
-			prepared, e = x.preparedProvider(&p, t.ProviderModel)
+			prepared, e = x.preparedProvider(&p, t.ID, t.ProviderModel)
 			if e != nil {
 				policyDecisions = prepared.policyDecisions
 			}
 		} else {
-			e = x.encodes(&p, cfg, t.ProviderModel)
+			e = x.encodes(&p, cfg, t.ID, t.ProviderModel)
 		}
 		if e != nil {
 			semantic = e
@@ -867,10 +869,10 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 		}
 	}
 	options.Preferences = x.legPreferences()
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
+	plan, err := routing.Select(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
 	if err != nil {
-		var se *runtime.SelectionError
-		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
+		var se *routing.SelectionError
+		if errors.As(err, &se) && se.Code != routing.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
 			return selectionError(err, route.Slug)
 		}
 		return requestError(err)
@@ -897,7 +899,7 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 		if x.costExcluded {
 			return costLimitExceeded()
 		}
-		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	if x.pin != nil {
 		x.budget, x.allowance = 1, 1
@@ -906,13 +908,13 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 }
 
 // modelObject renders a route as an OpenAI model object.
-func modelObject(snapshot *runtime.Snapshot, route *runtime.Route) map[string]any {
+func modelObject(snapshot *routing.Snapshot, route *routing.Route) map[string]any {
 	return map[string]any{
 		"id":           route.Slug,
 		"object":       "model",
 		"created":      route.PublishedAt.Unix(),
 		"owned_by":     "openllmproxy",
-		"capabilities": runtime.EffectiveCapabilities(snapshot, *route),
+		"capabilities": routing.EffectiveCapabilities(snapshot, *route),
 	}
 }
 
@@ -978,7 +980,7 @@ func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
 // bindAuthority attaches the authenticated caller's authority to x and pins
 // its consumer rate card when the routing inputs are fresh. Stale inputs leave
 // the request unpinned so accounting resolves the card at fact time.
-func (s *Server) bindAuthority(x *execution, authority access.Authority) {
+func (s *Server) bindAuthority(x *call, authority access.Authority) {
 	x.authority = authority
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.endUserDigest = authority.EndUserDigest
@@ -1012,10 +1014,10 @@ func writeJSON(w http.ResponseWriter, body any) {
 // work forever.
 type streamWriter struct {
 	w      http.ResponseWriter
-	family openai.Family
+	family wire.Format
 	// x is the request being streamed, whose response headers are added as the
 	// stream is committed. A writer that only reports an error has none.
-	x         *execution
+	x         *call
 	committed bool
 }
 
@@ -1031,7 +1033,7 @@ func (sw *streamWriter) emit(frame []byte) error {
 	if !sw.committed {
 		h := sw.w.Header()
 		h.Set("Content-Type", "text/event-stream; charset=utf-8")
-		if sw.family == openai.FamilyBedrock {
+		if sw.family == wire.Bedrock {
 			h.Set("Content-Type", "application/vnd.amazon.eventstream")
 		}
 		h.Set("X-Accel-Buffering", "no")
@@ -1068,7 +1070,7 @@ func (sw *streamWriter) finish(out *outcome) int {
 	// The response is committed: signal the failure in-band the way the
 	// official SDKs detect it, then end the stream without a completion
 	// marker so the client cannot mistake it for success.
-	if sw.family == openai.FamilyBedrock {
+	if sw.family == wire.Bedrock {
 		headers := eventstream.Headers{}
 		headers.Set(":message-type", eventstream.StringValue("exception"))
 		headers.Set(":exception-type", eventstream.StringValue("modelStreamErrorException"))
@@ -1079,7 +1081,7 @@ func (sw *streamWriter) finish(out *outcome) int {
 		return http.StatusOK
 	}
 	frame := "data: " + string(out.err.surfaceBody(sw.family.Surface())) + "\n\n"
-	if sw.family == openai.FamilyResponses || sw.family.Surface() == "anthropic" {
+	if sw.family == wire.Responses || sw.family.Surface() == "anthropic" {
 		frame = "event: error\n" + frame
 	}
 	sw.emit([]byte(frame))

@@ -6,20 +6,21 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/generation"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 var contracts = buildContracts()
 
 func buildContracts() *oif.Registry {
-	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyBedrock, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, "bedrock_count", openai.FamilyEmbeddings, openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch, openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings, openai.FamilyRerank, openai.FamilyBedrockRerank, openai.FamilyModeration, openai.FamilyMistralFIM, openai.FamilyCohereChat}
+	families := []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, "bedrock_count", wire.Embeddings, wire.GeminiEmbeddings, wire.GeminiEmbeddingsBatch, wire.VertexEmbeddings, wire.BedrockEmbeddings, wire.Rerank, wire.BedrockRerank, wire.Moderation, wire.MistralFIM, wire.CohereChat}
 	operations := []oif.Operation{}
 	bindings := []oif.Binding{}
 	seen := map[oif.Identity]bool{}
 	for _, family := range families {
-		d := openai.Descriptor(family, false)
+		d := wire.Descriptor(family, false)
 		if !seen[d.Operation] {
 			operations = append(operations, oif.Operation{Identity: d.Operation})
 			seen[d.Operation] = true
@@ -27,20 +28,20 @@ func buildContracts() *oif.Registry {
 		binding := oif.Binding{Dialect: d.Dialect, Operation: d.Operation}
 		// Bedrock bodies name no model: Converse addresses it in the URL, and
 		// Rerank by the ARN its configuration carries.
-		if family.Surface() != "gemini" && family != openai.FamilyBedrock && family != "bedrock_count" && family != openai.FamilyBedrockRerank {
+		if family.Surface() != "gemini" && family != wire.Bedrock && family != "bedrock_count" && family != wire.BedrockRerank {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/model", Origin: oif.IdentityBinding, Kind: oif.String})
 		}
-		if family == openai.FamilyGeminiCount {
+		if family == wire.GeminiCount {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/generateContentRequest/model", Origin: oif.IdentityBinding, Kind: oif.String})
 		}
-		if family == openai.FamilyChat {
+		if family == wire.Chat {
 			binding.IdentityRules = append(binding.IdentityRules,
 				oif.IdentityRule{Pointer: "/stream_options", Origin: oif.TransportOption, Kind: oif.Object, Validate: func(before, after oif.Value) bool {
 					return (before.Kind() == oif.Absent || before.Kind() == oif.Null) && len(after.Members()) == 1 && field(after, "include_usage").Raw() == "true"
 				}},
 				oif.IdentityRule{Pointer: "/stream_options/include_usage", Origin: oif.TransportOption, Kind: oif.Boolean, Validate: func(_, after oif.Value) bool { return after.Raw() == "true" }})
 		}
-		if family == openai.FamilyResponses {
+		if family == wire.Responses {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/previous_response_id", Origin: oif.ResourceBinding, Kind: oif.String})
 		}
 		if d.Operation == generation.Contract() {
@@ -61,55 +62,55 @@ func buildContracts() *oif.Registry {
 // PrepareTarget is the translation path for transformed routes. The
 // destination source and transformed provenance make its changes explicit;
 // strict planners use PrepareIdentity or an independently qualified lowering.
-func PrepareTarget(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object) (oif.Prepared, openai.Family, error) {
-	destination := openai.Descriptor(wire, r.Stream)
+func PrepareTarget(r *wire.Request, encodedWire wire.Format, kind, vendor, model string, defaults Object) (oif.Prepared, wire.Format, error) {
+	destination := wire.Descriptor(encodedWire, r.Stream)
 	if destination.Operation != r.OIF().Descriptor().Operation {
-		return oif.Prepared{}, wire, unsupported("operation")
+		return oif.Prepared{}, encodedWire, unsupported("operation")
 	}
 	if _, err := contracts.Binding(destination.Dialect, destination.Operation); err != nil {
-		return oif.Prepared{}, wire, unsupported("operation")
+		return oif.Prepared{}, encodedWire, unsupported("operation")
 	}
 	var applied []oif.Provenance
-	body, wire, err := encodeTransformed(r, wire, kind, vendor, model, defaults, &applied)
+	body, encodedWire, err := encodeTransformed(r, encodedWire, kind, vendor, model, defaults, &applied)
 	if err != nil {
-		return oif.Prepared{}, wire, err
+		return oif.Prepared{}, encodedWire, err
 	}
 	// An operation codec may select a documented collection form such as
 	// Gemini batch embeddings. The result descriptor must name that actual wire.
-	destination = openai.Descriptor(wire, r.Stream)
+	destination = wire.Descriptor(encodedWire, r.Stream)
 	if _, err := contracts.Binding(destination.Dialect, destination.Operation); err != nil {
-		return oif.Prepared{}, wire, unsupported("operation")
+		return oif.Prepared{}, encodedWire, unsupported("operation")
 	}
 	doc, err := oif.ParseJSON(body, r.OIF().Document().Limits())
 	if err != nil {
-		return oif.Prepared{}, wire, err
+		return oif.Prepared{}, encodedWire, err
 	}
 	p, err := oif.PrepareDestination(r.OIF(), destination, doc, oif.TransformedMapping, "transformed route codec")
 	slices.SortFunc(applied, func(a, b oif.Provenance) int { return strings.Compare(a.Pointer, b.Pointer) })
 	p = p.WithProvenance(applied...)
-	return p, wire, err
+	return p, encodedWire, err
 }
 
 // PrepareIdentity binds only the configured model and necessary transport
 // accounting option. It does not rename token controls, normalize input forms,
 // drop native fields, or assume a different dialect executes foreign state.
-func PrepareIdentity(r *openai.Request, model string) (oif.Prepared, error) {
+func PrepareIdentity(r *wire.Request, model string) (oif.Prepared, error) {
 	d := r.OIF().Descriptor()
 	if _, err := contracts.Binding(d.Dialect, d.Operation); err != nil {
 		return oif.Prepared{}, err
 	}
 	changes := []oif.Change{}
-	if r.Family.Surface() != "gemini" && r.Family != openai.FamilyBedrock && r.Family != "bedrock_count" {
+	if r.Family.Surface() != "gemini" && r.Family != wire.Bedrock && r.Family != "bedrock_count" {
 		encoded, _ := json.Marshal(model)
 		changes = append(changes, oif.Change{Pointer: "/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "published route model binding"})
 	}
-	if r.Family == openai.FamilyGeminiCount {
+	if r.Family == wire.GeminiCount {
 		if nested, _ := r.OIF().Document().Lookup("/generateContentRequest"); nested.Kind() == oif.Object {
 			encoded, _ := json.Marshal("models/" + strings.TrimPrefix(model, "models/"))
 			changes = append(changes, oif.Change{Pointer: "/generateContentRequest/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "published route model binding"})
 		}
 	}
-	if r.Stream && r.Family == openai.FamilyChat {
+	if r.Stream && r.Family == wire.Chat {
 		path, value := "/stream_options", `{"include_usage":true}`
 		if options, _ := r.OIF().Document().Lookup("/stream_options"); options.Kind() == oif.Object {
 			path, value = "/stream_options/include_usage", "true"
@@ -119,7 +120,7 @@ func PrepareIdentity(r *openai.Request, model string) (oif.Prepared, error) {
 	return contracts.PrepareIdentity(r.OIF(), d, changes)
 }
 
-func GenerationRequest(r *openai.Request) (generation.Request, error) {
+func GenerationRequest(r *wire.Request) (generation.Request, error) {
 	d := r.OIF().Descriptor()
 	binding, err := contracts.Binding(d.Dialect, d.Operation)
 	if err != nil || binding.Request == nil {

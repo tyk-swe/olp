@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -15,7 +17,7 @@ import (
 // normalizedFidelity stores every draft with an explicit mode. Omission, null
 // and an empty object declare a strict route; nothing is inherited on edit.
 func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
-	f, err := runtime.DecodeFidelity(raw)
+	f, err := routing.DecodeFidelity(raw)
 	if err != nil {
 		return nil, access.Invalid("fidelity", err.Error())
 	}
@@ -25,7 +27,7 @@ func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 // ValidateFidelityPolicy is shared by draft validation, activation and
 // configuration promotion so a direct draft SQL write cannot evade the rule.
 func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
-	f, err := runtime.DecodeFidelity(fidelity)
+	f, err := routing.DecodeFidelity(fidelity)
 	if err != nil {
 		return access.Invalid("fidelity", err.Error())
 	}
@@ -36,7 +38,7 @@ func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
 			return access.Invalid("content_policy", err.Error())
 		}
 	}
-	if err = runtime.ValidateRouteFidelity(f, policy); errors.Is(err, runtime.ErrFidelityPolicyConflict) {
+	if err = routing.ValidateRouteFidelity(f, policy); errors.Is(err, routing.ErrFidelityPolicyConflict) {
 		return access.Fail(422, "fidelity_policy_conflict", err.Error())
 	}
 	return err
@@ -45,11 +47,11 @@ func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
 // compileDraftExecution checks the same configured links used by release
 // installation. It is read-only and never performs provider inference or probes.
 func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
-	fidelity, err := runtime.DecodeFidelity(d.Fidelity)
+	fidelity, err := routing.DecodeFidelity(d.Fidelity)
 	if err != nil || !fidelity.Strict() {
 		return err
 	}
-	snapshot, err := runtime.Compile(ctx, tx)
+	snapshot, err := runtime.ReadSnapshot(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -60,8 +62,8 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 			return err
 		}
 	}
-	if err = snapshot.CompileRouteExecution(route); err != nil {
-		if refusal := runtime.StrictRefusal(err); refusal != nil {
+	if err = snapshot.ValidateRouteContracts(route); err != nil {
+		if refusal := access.ContractProblem(err); refusal != nil {
 			return refusal
 		}
 		return err

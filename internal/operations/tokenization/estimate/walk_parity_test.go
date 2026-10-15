@@ -8,20 +8,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // walkerFamilies is every request family the gateway can hand to admission.
 // The walker must charge each as the old walker did, including the ones whose
 // prompt it does not read.
-var walkerFamilies = []openai.Family{
-	openai.FamilyChat, openai.FamilyResponses, openai.FamilyInputTokens,
-	openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank,
-	openai.FamilyAnthropic, openai.FamilyAnthropicCount,
-	openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount,
-	openai.FamilyGeminiInteractions, openai.FamilyGeminiEmbeddings,
-	openai.FamilyBedrock, openai.FamilyBedrockEmbeddings, openai.FamilyBedrockInvoke,
-	openai.FamilyVertexEmbeddings, openai.FamilyImageGeneration, openai.FamilySpeech,
+var walkerFamilies = []wire.Format{
+	wire.Chat, wire.Responses, wire.InputTokens,
+	wire.Embeddings, wire.Moderation, wire.Rerank,
+	wire.Anthropic, wire.AnthropicCount,
+	wire.Gemini, wire.GeminiStream, wire.GeminiCount,
+	wire.GeminiInteractions, wire.GeminiEmbeddings,
+	wire.Bedrock, wire.BedrockEmbeddings, wire.BedrockInvoke,
+	wire.VertexEmbeddings, wire.ImageGeneration, wire.Speech,
 }
 
 // requestGen builds requests from a seeded source. Most of what it makes is a
@@ -234,7 +236,7 @@ func (g requestGen) dialect(depth int) any {
 	return g.wild(2)
 }
 
-func (g requestGen) fields(family openai.Family) map[string]json.RawMessage {
+func (g requestGen) fields(family wire.Format) map[string]json.RawMessage {
 	raw := map[string]any{"model": "m"}
 	put := func(name string, v any) { raw[name] = v }
 	switch g.intn(4) {
@@ -357,7 +359,10 @@ func TestWalkerMatchesTheLegacyHeuristic(t *testing.T) {
 			checked := 0
 			for i := range cases {
 				fields := g.fields(family)
-				parsed := openai.NewEnvelope(family, "route", false, fields)
+				parsed, err := wire.FromFields(family, "route", false, fields)
+				if err != nil {
+					t.Fatal(err)
+				}
 				prompt := Walk(parsed)
 				// One walk answers every provider's defaults.
 				for j := range 3 {
@@ -432,7 +437,7 @@ func TestWalkerKeepsTheFlatCharges(t *testing.T) {
 }
 
 func ExampleWalk() {
-	request, _ := openai.Parse(openai.FamilyChat, []byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
+	request, _ := openai.Parse(wire.Chat, []byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
 	prompt := Walk(request)
 	for _, model := range []string{"gpt-4o", "claude-sonnet-4-5"} {
 		e := prompt.Estimate(ForModel(model), nil)

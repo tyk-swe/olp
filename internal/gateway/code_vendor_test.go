@@ -11,11 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // newCodeVendorHarness serves the "coding" route through a coding-plan
@@ -23,8 +24,8 @@ import (
 func newCodeVendorHarness(t *testing.T, profile string) (*harness, *codeTestLedger, *httptest.Server) {
 	t.Helper()
 	h, ledger, server := newCodeForwardHarness(t)
-	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, Endpoint: h.upstream.URL + "/a"}}
-	if err := h.rt.release.Snapshot.Validate(); err != nil {
+	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, Endpoint: h.upstream.URL + "/a"}}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
 	return h, ledger, server
@@ -197,15 +198,15 @@ func TestCodeAdaptersRefuseOtherPathsBeforeDispatch(t *testing.T) {
 
 func TestCodeMixedRoutesDispatchEachPathToAnAccountOfItsAdapter(t *testing.T) {
 	h, ledger, server := newCodeForwardHarness(t)
-	connection := func(profile string) runtime.Configuration {
-		return runtime.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, Endpoint: h.upstream.URL + "/a"}
+	connection := func(profile string) routing.Configuration {
+		return routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, Endpoint: h.upstream.URL + "/a"}
 	}
-	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{
+	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{
 		"revision:p-codex": connection(codexauth.ProfileID),
 		"revision:p-glm":   connection(codeplans.ZAIProfile),
 		"revision:p-go":    connection(codeplans.OpenCodeGoProfile),
 	}
-	if err := h.rt.release.Snapshot.Validate(); err != nil {
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
 	type upstream struct {
@@ -282,7 +283,7 @@ func TestCodeMessagesRefusalsUseTheAnthropicEnvelope(t *testing.T) {
 
 type codeHeaderAuthorizer http.Header
 
-func (a codeHeaderAuthorizer) AuthorizeCode(context.Context, runtime.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error) {
+func (a codeHeaderAuthorizer) AuthorizeCode(context.Context, routing.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error) {
 	return codemode.Authorization{Principal: "principal", Headers: http.Header(a)}, nil
 }
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestJSONLogPreservesEveryAttempt(t *testing.T) {
@@ -74,22 +74,22 @@ func TestJSONLogPreservesActorIdentity(t *testing.T) {
 
 func TestJSONLogPreservesRevisionAndUsageMetadata(t *testing.T) {
 	var buffer bytes.Buffer
-	usage := &openai.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
+	usage := &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	env := Envelope{RequestID: "request", ClientIP: "203.0.113.1", RouteRevisionID: "route-revision", StartedAt: at, Usage: usage,
 		Attempts: []AttemptFact{{ProviderRevisionID: "provider-revision", CredentialID: "credential-version-id", UpstreamModel: "upstream-model", StartedAt: at, Usage: usage}}}
 	LogSink{Log: slog.New(slog.NewJSONHandler(&buffer, nil))}.Terminal(env)
 	var got struct {
-		ClientIP        string        `json:"client_ip"`
-		RouteRevisionID string        `json:"route_revision_id"`
-		StartedAt       time.Time     `json:"started_at"`
-		Usage           *openai.Usage `json:"usage"`
+		ClientIP        string      `json:"client_ip"`
+		RouteRevisionID string      `json:"route_revision_id"`
+		StartedAt       time.Time   `json:"started_at"`
+		Usage           *wire.Usage `json:"usage"`
 		Attempts        []struct {
-			ProviderRevisionID string        `json:"provider_revision_id"`
-			CredentialID       string        `json:"credential_id"`
-			UpstreamModel      string        `json:"upstream_model"`
-			StartedAt          time.Time     `json:"started_at"`
-			Usage              *openai.Usage `json:"usage"`
+			ProviderRevisionID string      `json:"provider_revision_id"`
+			CredentialID       string      `json:"credential_id"`
+			UpstreamModel      string      `json:"upstream_model"`
+			StartedAt          time.Time   `json:"started_at"`
+			Usage              *wire.Usage `json:"usage"`
 		} `json:"attempts"`
 	}
 	if err := json.Unmarshal(buffer.Bytes(), &got); err != nil {

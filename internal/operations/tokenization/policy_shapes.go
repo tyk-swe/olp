@@ -1,10 +1,11 @@
 package tokenization
 
 import (
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operations"
 	"slices"
 	"strconv"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations"
 )
 
 // Policy coverage is narrower than native identity. Unknown native nodes stay

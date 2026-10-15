@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // Delivery is already projected client data. The gateway commits it with the
@@ -362,7 +363,7 @@ func (p *Plan) declaresTool(name string) bool {
 // Complete runs only after the existing native stream grammar has accepted a
 // terminal result. It builds a bounded delivery; the caller still must commit
 // it and its dependency state before emitting the queued frames or handle.
-func (p *ToolProjection) Complete(completion *openai.Completion, handle string) (*Continuation, Delivery, error) {
+func (p *ToolProjection) Complete(completion *wire.Completion, handle string) (*Continuation, Delivery, error) {
 	if !p.terminal || completion == nil || completion.Usage == nil || len(p.nativeUsage) == 0 || handle == "" {
 		return nil, Delivery{}, guardFailure("/result", "complete_recoverable_result")
 	}
@@ -401,7 +402,7 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 
 // ProjectUnary uses the same native block/correspondence projection as streaming,
 // after the normal native result codec has established its grammar and usage.
-func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit int) (*Continuation, Delivery, error) {
+func (p *Plan) ProjectUnary(completion *wire.Completion, handle string, limit int) (*Continuation, Delivery, error) {
 	projection, err := p.NewToolProjection(limit)
 	if err != nil {
 		return nil, Delivery{}, err
@@ -420,7 +421,7 @@ func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit 
 		if e != nil {
 			return e
 		}
-		event, e := oif.NewEvent(openai.Descriptor(openai.FamilyAnthropic, true), doc, name, seq)
+		event, e := oif.NewEvent(wire.Descriptor(wire.Anthropic, true), doc, name, seq)
 		seq++
 		if e != nil {
 			return e

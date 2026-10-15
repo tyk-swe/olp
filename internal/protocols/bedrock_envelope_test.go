@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestConverseRejectsNonObjectBeforeIndexing(t *testing.T) {
@@ -15,7 +15,7 @@ func TestConverseRejectsNonObjectBeforeIndexing(t *testing.T) {
 		allocations := testing.AllocsPerRun(2, func() {
 			_, failure = ParseBedrockRequest(body, "route", stream)
 		})
-		var invalid *openai.RequestError
+		var invalid *wire.RequestError
 		if !errors.As(failure, &invalid) || invalid.Code != "invalid_json" || allocations > 8 {
 			t.Fatalf("Converse allocated a non-object source index: stream=%v allocations=%v error=%v", stream, allocations, failure)
 		}

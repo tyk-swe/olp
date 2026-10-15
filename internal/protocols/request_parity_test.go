@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Parse reads the conversation of an Anthropic or Gemini request from the
@@ -15,9 +15,9 @@ import (
 // level. They are held to the same answer for any body: the same error to the
 // code, message and parameter, or the same request.
 
-var nativeFamilies = []openai.Family{
-	openai.FamilyAnthropic, openai.FamilyAnthropicCount,
-	openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount,
+var nativeFamilies = []wire.Format{
+	wire.Anthropic, wire.AnthropicCount,
+	wire.Gemini, wire.GeminiStream, wire.GeminiCount,
 }
 
 type nativeGen struct{ r *rand.Rand }
@@ -127,7 +127,7 @@ func (g nativeGen) badConfig() any {
 
 // tameBody is a request a client could send, which has at most one thing wrong
 // with it, in the place the validation reads from the document.
-func (g nativeGen) tameBody(family openai.Family) []byte {
+func (g nativeGen) tameBody(family wire.Format) []byte {
 	raw := map[string]any{}
 	messages := make([]any, 1+g.intn(3))
 	var mutate func(any)
@@ -140,7 +140,7 @@ func (g nativeGen) tameBody(family openai.Family) []byte {
 		raw["messages"] = messages
 		mutate = func(v any) { messages[g.intn(len(messages))] = v }
 	} else {
-		if family == openai.FamilyGeminiCount && g.intn(2) == 0 {
+		if family == wire.GeminiCount && g.intn(2) == 0 {
 			content, wrapped = map[string]any{}, true
 			raw["generateContentRequest"] = content
 		}
@@ -178,7 +178,7 @@ func (g nativeGen) tameBody(family openai.Family) []byte {
 	return data
 }
 
-func (g nativeGen) body(family openai.Family) []byte {
+func (g nativeGen) body(family wire.Format) []byte {
 	raw := map[string]any{}
 	if family.Surface() == "anthropic" {
 		for name, v := range g.controls(false) {
@@ -229,8 +229,8 @@ func (g nativeGen) body(family openai.Family) []byte {
 // range is refused for either, whichever the validation reaches first, which
 // map order decides, so the controls are not told apart by their parameter.
 func sameParseError(a, b error) bool {
-	x, ok := a.(*openai.RequestError)
-	y, other := b.(*openai.RequestError)
+	x, ok := a.(*wire.RequestError)
+	y, other := b.(*wire.RequestError)
 	if ok && other && x.Code == y.Code && x.Message == y.Message {
 		switch x.Message {
 		case "expected a positive integer within the protocol range", "numeric parameter is outside the protocol range":
@@ -240,7 +240,7 @@ func sameParseError(a, b error) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func sameParse(t testing.TB, family openai.Family, data []byte) (accepted bool) {
+func sameParse(t testing.TB, family wire.Format, data []byte) (accepted bool) {
 	t.Helper()
 	for _, model := range []string{"route", "Not A Slug"} {
 		got, gotErr := Parse(family, data, model)
@@ -300,15 +300,15 @@ func TestCountTokensControlsAreTheWrappedRequests(t *testing.T) {
 		{"unwrapped control out of range", `{` + contents + `,"generationConfig":{"candidateCount":0}}`, "generationConfig.candidateCount"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sameParse(t, openai.FamilyGeminiCount, []byte(tc.body))
-			_, err := Parse(openai.FamilyGeminiCount, []byte(tc.body), "route")
+			sameParse(t, wire.GeminiCount, []byte(tc.body))
+			_, err := Parse(wire.GeminiCount, []byte(tc.body), "route")
 			if tc.param == "" {
 				if err != nil {
 					t.Fatalf("the request was refused: %v", err)
 				}
 				return
 			}
-			var refused *openai.RequestError
+			var refused *wire.RequestError
 			if !errors.As(err, &refused) || refused.Param != tc.param {
 				t.Fatalf("got %v, want a request error for %q", err, tc.param)
 			}

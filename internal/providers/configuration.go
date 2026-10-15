@@ -10,6 +10,8 @@ import (
 	"net/textproto"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -18,7 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -28,7 +29,7 @@ type Limits struct {
 	RequestsPerMinute *int64 `json:"requests_per_minute"`
 	TokensPerMinute   *int64 `json:"tokens_per_minute"`
 	// Supply carries the quota's spend caps and per-priority shares.
-	runtime.Supply
+	routing.Supply
 }
 
 // Options carries connector options and per-model metadata.
@@ -46,13 +47,13 @@ type Options struct {
 	// Commitment is the provisioned capacity the connection pays for: priced
 	// attempts on it bill nothing extra and share the amount across each UTC
 	// calendar period by list-cost weight.
-	Commitment *runtime.Commitment `json:"commitment,omitempty"`
+	Commitment *routing.Commitment `json:"commitment,omitempty"`
 	// PluginOptions holds a plugin provider's values for the options its
 	// plugin profile declares, by option name.
 	PluginOptions map[string]string `json:"plugin_options,omitempty"`
 	// HealthProbe opts the connection into active health probing, which
 	// sends billable synthetic requests.
-	HealthProbe *runtime.HealthProbe `json:"health_probe,omitempty"`
+	HealthProbe *routing.HealthProbe `json:"health_probe,omitempty"`
 }
 
 // Configuration is the stored connection configuration; it is the contract's
@@ -264,7 +265,7 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
 		}
 		c.Options.Commitment.Amount = amount
-		if !runtime.CommitmentPeriods[c.Options.Commitment.Period] {
+		if !routing.CommitmentPeriods[c.Options.Commitment.Period] {
 			return access.Invalid("configuration.options.commitment.period",
 				`A commitment period is "hour", "day" or "month".`)
 		}

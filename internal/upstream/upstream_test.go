@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestAcceptanceFollowsExplicitEvidence(t *testing.T) {
@@ -25,7 +25,7 @@ func TestAcceptanceFollowsExplicitEvidence(t *testing.T) {
 		{"rate limit", Evidence{Reached: true, Status: 429}, Terminal},
 		{"server failure leaves work possible", Evidence{Reached: true, Status: 503}, Unknown},
 		{"a status implies the request arrived", Evidence{Status: 401}, Terminal},
-		{"in-band error keeps the response accepted", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "overloaded_error"}}, Accepted},
+		{"in-band error keeps the response accepted", Evidence{Reached: true, Accepted: true, Error: &wire.UpstreamError{Type: "overloaded_error"}}, Accepted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.evidence.Acceptance(); got != tc.want {
@@ -41,12 +41,12 @@ func TestAcceptanceFollowsExplicitEvidence(t *testing.T) {
 }
 
 func TestClassifyStatusRejections(t *testing.T) {
-	contextCode := &openai.UpstreamError{Type: "invalid_request_error", Code: "context_length_exceeded"}
+	contextCode := &wire.UpstreamError{Type: "invalid_request_error", Code: "context_length_exceeded"}
 	for _, tc := range []struct {
 		name       string
 		classifier Classifier
 		status     int
-		stated     *openai.UpstreamError
+		stated     *wire.UpstreamError
 		want       Class
 	}{
 		{"unauthorized", Classifier{}, 401, nil, Credential},
@@ -54,7 +54,7 @@ func TestClassifyStatusRejections(t *testing.T) {
 		{"rate limited", Classifier{}, 429, nil, RateLimit},
 		{"server failure", Classifier{}, 500, nil, ServerError},
 		{"gateway failure", Classifier{}, 504, nil, ServerError},
-		{"bad request", Classifier{}, 400, &openai.UpstreamError{Type: "invalid_request_error"}, ClientError},
+		{"bad request", Classifier{}, 400, &wire.UpstreamError{Type: "invalid_request_error"}, ClientError},
 		{"not found", Classifier{}, 404, nil, ClientError},
 		{"unexpected success status", Classifier{}, 201, nil, ClientError},
 		{"context rejection that can fail over", Classifier{ContextWindow: true}, 400, contextCode, ContextWindow},
@@ -83,15 +83,15 @@ func TestContextRejectionMatchesTypedCodesExactly(t *testing.T) {
 		"context_length":              false,
 		"":                            false,
 	} {
-		got := windowed.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Code: code}}).Class == ContextWindow
+		got := windowed.Classify(Evidence{Status: 400, Error: &wire.UpstreamError{Code: code}}).Class == ContextWindow
 		if got != want {
 			t.Errorf("code %q: context window %v, want %v", code, got, want)
 		}
 	}
-	if windowed.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Type: "context_window_exceeded"}}).Class != ContextWindow {
+	if windowed.Classify(Evidence{Status: 400, Error: &wire.UpstreamError{Type: "context_window_exceeded"}}).Class != ContextWindow {
 		t.Error("typed error type must classify")
 	}
-	if windowed.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Message: "context_length_exceeded"}}).Class != ClientError {
+	if windowed.Classify(Evidence{Status: 400, Error: &wire.UpstreamError{Message: "context_length_exceeded"}}).Class != ClientError {
 		t.Error("message prose must never classify")
 	}
 	if windowed.Classify(Evidence{Status: 400}).Class != ClientError {
@@ -111,21 +111,21 @@ func TestContentFilterRefusalsMatchTypedCodesExactly(t *testing.T) {
 		"filter":                       false,
 		"":                             false,
 	} {
-		got := classifier.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Code: code}}).Class == ContentFilter
+		got := classifier.Classify(Evidence{Status: 400, Error: &wire.UpstreamError{Code: code}}).Class == ContentFilter
 		if got != want {
 			t.Errorf("code %q: content filter %v, want %v", code, got, want)
 		}
 	}
-	if classifier.Classify(Evidence{Reached: true, Error: &openai.UpstreamError{Type: "content_filter"}}).Class != ContentFilter {
+	if classifier.Classify(Evidence{Reached: true, Error: &wire.UpstreamError{Type: "content_filter"}}).Class != ContentFilter {
 		t.Error("an in-band typed refusal must classify")
 	}
-	if classifier.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Message: "content_filter"}}).Class != ClientError {
+	if classifier.Classify(Evidence{Status: 400, Error: &wire.UpstreamError{Message: "content_filter"}}).Class != ClientError {
 		t.Error("message prose must never classify")
 	}
-	if classifier.Classify(Evidence{Status: 429, Error: &openai.UpstreamError{Code: "content_filter"}}).Class != RateLimit {
+	if classifier.Classify(Evidence{Status: 429, Error: &wire.UpstreamError{Code: "content_filter"}}).Class != RateLimit {
 		t.Error("the status decides before the error body")
 	}
-	if (Classifier{AtMostOnce: true}).Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Code: "content_filter"}}).Class != ContentFilter {
+	if (Classifier{AtMostOnce: true}).Classify(Evidence{Status: 400, Error: &wire.UpstreamError{Code: "content_filter"}}).Class != ContentFilter {
 		t.Error("a stated refusal performed no work, so at-most-once calls keep its class")
 	}
 }
@@ -134,22 +134,22 @@ func TestClassifyInBandErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		classifier Classifier
-		stated     openai.UpstreamError
+		stated     wire.UpstreamError
 		committed  bool
 		want       Class
 	}{
-		{"context rejection", Classifier{ContextWindow: true}, openai.UpstreamError{Code: "context_window_exceeded"}, false, ContextWindow},
-		{"context rejection without a window", Classifier{}, openai.UpstreamError{Code: "context_window_exceeded"}, false, ClientError},
-		{"authentication type", Classifier{}, openai.UpstreamError{Type: "authentication_error"}, false, Credential},
-		{"permission status code", Classifier{}, openai.UpstreamError{Code: "403"}, false, Credential},
-		{"rate limit type", Classifier{}, openai.UpstreamError{Type: "rate_limit_error"}, false, RateLimit},
-		{"exhausted resource", Classifier{}, openai.UpstreamError{Code: "RESOURCE_EXHAUSTED"}, false, RateLimit},
-		{"throttling", Classifier{}, openai.UpstreamError{Type: "ThrottlingException"}, false, RateLimit},
-		{"deadline", Classifier{}, openai.UpstreamError{Code: "DEADLINE_EXCEEDED"}, false, Timeout},
-		{"invalid request", Classifier{}, openai.UpstreamError{Type: "invalid_request_error"}, true, ClientError},
-		{"validation", Classifier{}, openai.UpstreamError{Type: "ValidationException"}, false, ClientError},
-		{"unknown failure before commit", Classifier{}, openai.UpstreamError{Type: "overloaded_error"}, false, ServerError},
-		{"unknown failure after commit", Classifier{}, openai.UpstreamError{Type: "overloaded_error"}, true, Protocol},
+		{"context rejection", Classifier{ContextWindow: true}, wire.UpstreamError{Code: "context_window_exceeded"}, false, ContextWindow},
+		{"context rejection without a window", Classifier{}, wire.UpstreamError{Code: "context_window_exceeded"}, false, ClientError},
+		{"authentication type", Classifier{}, wire.UpstreamError{Type: "authentication_error"}, false, Credential},
+		{"permission status code", Classifier{}, wire.UpstreamError{Code: "403"}, false, Credential},
+		{"rate limit type", Classifier{}, wire.UpstreamError{Type: "rate_limit_error"}, false, RateLimit},
+		{"exhausted resource", Classifier{}, wire.UpstreamError{Code: "RESOURCE_EXHAUSTED"}, false, RateLimit},
+		{"throttling", Classifier{}, wire.UpstreamError{Type: "ThrottlingException"}, false, RateLimit},
+		{"deadline", Classifier{}, wire.UpstreamError{Code: "DEADLINE_EXCEEDED"}, false, Timeout},
+		{"invalid request", Classifier{}, wire.UpstreamError{Type: "invalid_request_error"}, true, ClientError},
+		{"validation", Classifier{}, wire.UpstreamError{Type: "ValidationException"}, false, ClientError},
+		{"unknown failure before commit", Classifier{}, wire.UpstreamError{Type: "overloaded_error"}, false, ServerError},
+		{"unknown failure after commit", Classifier{}, wire.UpstreamError{Type: "overloaded_error"}, true, Protocol},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stated := tc.stated
@@ -172,8 +172,8 @@ func TestDeclaredClassificationPrecedesTheBuiltInRules(t *testing.T) {
 		{Code: "context_length_exceeded", Class: ClientError},
 		{Status: 409, Code: "busy", Class: ServerError},
 	}}
-	stated := func(errorType, code string) *openai.UpstreamError {
-		return &openai.UpstreamError{Type: errorType, Code: code, Message: "declared"}
+	stated := func(errorType, code string) *wire.UpstreamError {
+		return &wire.UpstreamError{Type: errorType, Code: code, Message: "declared"}
 	}
 	for _, tc := range []struct {
 		name     string
@@ -224,7 +224,7 @@ func TestDeclaredClassificationPrecedesTheBuiltInRules(t *testing.T) {
 }
 
 func TestClassifyInterruptionsAndTransportFailures(t *testing.T) {
-	malformed := &openai.ProtocolError{Detail: "malformed event"}
+	malformed := &wire.ProtocolError{Detail: "malformed event"}
 	for _, tc := range []struct {
 		name     string
 		evidence Evidence
@@ -238,7 +238,7 @@ func TestClassifyInterruptionsAndTransportFailures(t *testing.T) {
 		{"connection refused", Evidence{Err: errors.New("connection refused")}, Connect},
 		{"connection lost after commit", Evidence{Reached: true, Accepted: true, Committed: true, Err: errors.New("unexpected EOF")}, Protocol},
 		{"malformed stream", Evidence{Reached: true, Accepted: true, Err: fmt.Errorf("decode: %w", malformed)}, Protocol},
-		{"oversized event", Evidence{Reached: true, Accepted: true, Err: openai.ErrEventTooLarge}, Protocol},
+		{"oversized event", Evidence{Reached: true, Accepted: true, Err: wire.ErrEventTooLarge}, Protocol},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := (Classifier{}).Classify(tc.evidence).Class; got != tc.want {
@@ -259,15 +259,15 @@ func TestAtMostOnceCallsNeverFailOverUnresolvedWork(t *testing.T) {
 		{"sent connect failure", Evidence{Reached: true, Err: errors.New("reset")}, Outcome{Class: Ambiguous, Acceptance: Unknown}},
 		{"timeout after acceptance", Evidence{Reached: true, Accepted: true, Interrupted: context.DeadlineExceeded}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
 		{"server failure", Evidence{Reached: true, Status: 502}, Outcome{Class: Ambiguous, Acceptance: Unknown}},
-		{"in-band server failure", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "overloaded_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
+		{"in-band server failure", Evidence{Reached: true, Accepted: true, Error: &wire.UpstreamError{Type: "overloaded_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
 		{"stated rate limit", Evidence{Reached: true, Status: 429}, Outcome{Class: RateLimit, Acceptance: Terminal}},
 		{"stated credential rejection", Evidence{Reached: true, Status: 401}, Outcome{Class: Credential, Acceptance: Terminal, CredentialRefused: true}},
-		{"in-band credential rejection", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "authentication_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}},
-		{"credential rejection after commit", Evidence{Reached: true, Accepted: true, Committed: true, Error: &openai.UpstreamError{Code: "invalid_api_key"}}, Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}},
-		{"context rejection", Evidence{Reached: true, Status: 400, Error: &openai.UpstreamError{Code: "prompt_too_long"}}, Outcome{Class: ContextWindow, Acceptance: Terminal}},
-		{"in-band rate limit", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "rate_limit_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
+		{"in-band credential rejection", Evidence{Reached: true, Accepted: true, Error: &wire.UpstreamError{Type: "authentication_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}},
+		{"credential rejection after commit", Evidence{Reached: true, Accepted: true, Committed: true, Error: &wire.UpstreamError{Code: "invalid_api_key"}}, Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}},
+		{"context rejection", Evidence{Reached: true, Status: 400, Error: &wire.UpstreamError{Code: "prompt_too_long"}}, Outcome{Class: ContextWindow, Acceptance: Terminal}},
+		{"in-band rate limit", Evidence{Reached: true, Accepted: true, Error: &wire.UpstreamError{Type: "rate_limit_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
 		{"caller cancellation", Evidence{Reached: true, Interrupted: context.Canceled}, Outcome{Class: Cancelled, Acceptance: Unknown}},
-		{"malformed accepted result", Evidence{Reached: true, Accepted: true, Err: &openai.ProtocolError{}}, Outcome{Class: Protocol, Acceptance: Accepted}},
+		{"malformed accepted result", Evidence{Reached: true, Accepted: true, Err: &wire.ProtocolError{}}, Outcome{Class: Protocol, Acceptance: Accepted}},
 		{"failure after the result settled", Evidence{Reached: true, Accepted: true, Settled: true, Err: errors.New("commit")}, Outcome{Class: Connect, Acceptance: Terminal}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

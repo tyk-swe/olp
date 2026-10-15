@@ -10,16 +10,18 @@ import (
 	"net/http/httptrace"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true}}
 	attemptCtx, trace := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finish := func() {
@@ -52,7 +54,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 		finish()
 		return fact, operationplan.Result{}, f
 	}
-	plan, err := x.unaryPlan(provider, a.UpstreamModel)
+	plan, err := x.unaryPlan(provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -152,11 +154,11 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 // accountingUsage converts operation usage into the usage an accounting fact
 // records. It carries only observed usage; operation requests, results, vectors
 // and token counts never enter generation.
-func accountingUsage(value *operations.Usage) *openai.Usage {
+func accountingUsage(value *operations.Usage) *wire.Usage {
 	if value == nil {
 		return nil
 	}
-	out := &openai.Usage{CachedInputTokens: value.CachedInputTokens}
+	out := &wire.Usage{CachedInputTokens: value.CachedInputTokens}
 	if value.InputTokens != nil {
 		out.InputTokens = *value.InputTokens
 	}

@@ -2,11 +2,12 @@ package tokenization_test
 
 import (
 	"encoding/base64"
+	"strings"
+	"testing"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/tokenization"
-	"strings"
-	"testing"
 )
 
 func definition(t *testing.T, id string) operations.Dialect {

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/google/uuid"
 )
 
 type grantGenerationRuntime struct {
@@ -26,7 +26,7 @@ func TestIntegrationGrantCooldownsFollowGenerationsAcrossGateways(t *testing.T) 
 	limiter := mediaLimiter(t)
 	log := slog.New(slog.DiscardHandler)
 	provider, credential := uuid.NewString(), uuid.NewString()
-	slot := &runtime.Slot{ID: uuid.NewString(), CredentialID: &credential}
+	slot := &routing.Slot{ID: uuid.NewString(), CredentialID: &credential}
 	makeGateway := func(generation int64) *Server {
 		return &Server{
 			Runtime: &grantGenerationRuntime{fakeRuntime: &fakeRuntime{}, generation: generation},

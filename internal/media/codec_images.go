@@ -125,20 +125,20 @@ func encodeStabilityEdit(r *Request, model string) (*UpstreamCall, *Error) {
 // decodeStabilityImage reads Stability's one image, which its content filter
 // may withhold.
 func decodeStabilityImage(body []byte, stage func(string, int) (*Artifact, *Error)) (*ImageResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Image        string `json:"image"`
 		FinishReason string `json:"finish_reason"`
 	}
-	if json.Unmarshal(body, &wire) != nil {
+	if json.Unmarshal(body, &encodedWire) != nil {
 		return nil, protocolError("The provider image response is not valid JSON.")
 	}
 	switch {
-	case wire.FinishReason == "CONTENT_FILTERED":
+	case encodedWire.FinishReason == "CONTENT_FILTERED":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
-	case wire.FinishReason != "SUCCESS" || wire.Image == "":
+	case encodedWire.FinishReason != "SUCCESS" || encodedWire.Image == "":
 		return nil, protocolError("The provider image response carries no image.")
 	}
-	staged, failure := stage(wire.Image, 0)
+	staged, failure := stage(encodedWire.Image, 0)
 	if failure != nil {
 		return nil, failure
 	}
@@ -216,24 +216,24 @@ func encodeBFLImage(r *Request, model string) (*UpstreamCall, *Error) {
 // nextBFLStep follows a submission to its polling URL, polls until the work
 // is ready, and then fetches the image.
 func nextBFLStep(body []byte) (*Step, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		PollingURL string `json:"polling_url"`
 		Status     string `json:"status"`
 		Result     struct {
 			Sample string `json:"sample"`
 		} `json:"result"`
 	}
-	if json.Unmarshal(body, &wire) != nil {
+	if json.Unmarshal(body, &encodedWire) != nil {
 		return nil, protocolError("The provider's image work answered with invalid JSON.")
 	}
 	switch {
-	case wire.PollingURL != "" && wire.Status == "":
-		return &Step{URL: wire.PollingURL, Wait: bflPoll, Credentials: true}, nil
-	case wire.Status == "Pending" || wire.Status == "Reasoning" || wire.Status == "Generating":
+	case encodedWire.PollingURL != "" && encodedWire.Status == "":
+		return &Step{URL: encodedWire.PollingURL, Wait: bflPoll, Credentials: true}, nil
+	case encodedWire.Status == "Pending" || encodedWire.Status == "Reasoning" || encodedWire.Status == "Generating":
 		return nil, nil
-	case wire.Status == "Ready" && wire.Result.Sample != "":
-		return &Step{URL: wire.Result.Sample, Asset: "image/"}, nil
-	case wire.Status == "Request Moderated" || wire.Status == "Content Moderated":
+	case encodedWire.Status == "Ready" && encodedWire.Result.Sample != "":
+		return &Step{URL: encodedWire.Result.Sample, Asset: "image/"}, nil
+	case encodedWire.Status == "Request Moderated" || encodedWire.Status == "Content Moderated":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
 	}
 	return nil, protocolError("The provider's image work failed.")

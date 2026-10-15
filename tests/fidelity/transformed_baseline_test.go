@@ -5,8 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/tests/fidelity"
 	fixtures "github.com/tyk-swe/olp/tests/fixtures/fidelity"
 )
@@ -41,7 +42,7 @@ func TestTransformedCounterexamplesAndPositiveNativeControls(t *testing.T) {
 	if err = json.Unmarshal(data, &corpus); err != nil {
 		t.Fatal(err)
 	}
-	family := map[string]openai.Family{"openai_chat": openai.FamilyChat, "anthropic_messages": openai.FamilyAnthropic, "gemini_generate_content": openai.FamilyGemini}
+	family := map[string]wire.Format{"openai_chat": wire.Chat, "anthropic_messages": wire.Anthropic, "gemini_generate_content": wire.Gemini}
 	losses := 0
 	for _, scenario := range corpus.Scenarios {
 		t.Run(scenario.ID, func(t *testing.T) {
@@ -56,9 +57,9 @@ func TestTransformedCounterexamplesAndPositiveNativeControls(t *testing.T) {
 			if err = fidelity.Compare(scenario.Native, native); err != nil {
 				t.Fatalf("native positive control: %v", err)
 			}
-			transformed, wire, err := protocols.Encode(request, scenario.TargetKind, scenario.TargetVendor, "fixture-model", nil)
+			transformed, encodedWire, err := protocols.Encode(request, scenario.TargetKind, scenario.TargetVendor, "fixture-model", nil)
 			if scenario.TransformedError != "" {
-				var refusal *openai.RequestError
+				var refusal *wire.RequestError
 				if !errors.As(err, &refusal) || refusal.Param != scenario.TransformedError {
 					t.Fatalf("expected precise rejection at %s: %v", scenario.TransformedError, err)
 				}
@@ -67,8 +68,8 @@ func TestTransformedCounterexamplesAndPositiveNativeControls(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if wire != family[scenario.TargetFamily] {
-				t.Fatal("wrong target dialect", wire)
+			if encodedWire != family[scenario.TargetFamily] {
+				t.Fatal("wrong target dialect", encodedWire)
 			}
 			if err = fidelity.Compare(scenario.TransformedTarget, transformed); err != nil {
 				t.Fatalf("transformed characterization changed: %v", err)

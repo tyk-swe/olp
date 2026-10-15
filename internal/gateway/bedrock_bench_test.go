@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 )
 
 // BenchmarkBedrockNativeRelay includes CRC framing, bounded native observation,
@@ -43,7 +43,7 @@ func BenchmarkBedrockNativeRelay(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		w.reset()
-		x := &execution{family: openai.FamilyBedrockInvoke, dispatched: true, request: request{startedAt: time.Now()}, facts: []AttemptFact{{Class: classSuccess}}}
+		x := &call{family: wire.BedrockInvoke, dispatched: true, request: request{startedAt: time.Now()}, facts: []AttemptFact{{Class: classSuccess}}}
 		s.relayBedrockStream(context.Background(), w, x, p, &http.Response{Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(input.Bytes()))})
 	}
 }

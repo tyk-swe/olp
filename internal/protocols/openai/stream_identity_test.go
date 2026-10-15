@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -22,9 +24,9 @@ func TestResponsesStreamIdentityPrecedesUsageAndNativeObservation(t *testing.T) 
 				}
 				created := `{"type":"response.created","response":{"id":"original-response","status":"in_progress","output":[],"usage":` + usage + `}}`
 				terminal := `{"type":"response.completed","response":{` + terminalID + `"status":"completed","output":[],"usage":{"input_tokens":90,"output_tokens":80,"total_tokens":170}}}`
-				wire := "event: response.created\ndata: " + created + "\n\nevent: response.completed\ndata: " + terminal + "\n\n"
+				encodedWire := "event: response.created\ndata: " + created + "\n\nevent: response.completed\ndata: " + terminal + "\n\n"
 				var emitted, observed int
-				completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(wire), 4096, "route", true,
+				completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(encodedWire), 4096, "route", true,
 					func([]byte) error { emitted++; return nil }, func(oif.Event) error { observed++; return nil })
 				if err == nil || emitted != 1 || observed != 1 {
 					t.Fatalf("unbound terminal reached delivery or native observation: emitted=%d observed=%d err=%v", emitted, observed, err)
@@ -52,9 +54,9 @@ func TestResponsesLocalProjectionRetainsNativeTerminalOutcome(t *testing.T) {
 				nativeError = `,"error":{"type":"server_error","message":"native generation failed"}`
 			}
 			body := `{"type":"response.` + status + `","response":{"id":"original-response","model":"native","status":"` + status + `","output":[],"usage":{"input_tokens":17,"output_tokens":9,"total_tokens":26}}` + nativeError + `}`
-			wire := "event: response." + status + "\ndata: " + body + "\n\n"
+			encodedWire := "event: response." + status + "\ndata: " + body + "\n\n"
 			var emitted int
-			completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(wire), 4096, strings.Repeat("r", 8192), true,
+			completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(encodedWire), 4096, strings.Repeat("r", 8192), true,
 				func([]byte) error { emitted++; return nil }, nil)
 			terminal, failed := completion.NativeResponseOutcome()
 			if err == nil || !IsResponseProjectionError(err) || !terminal || (failed != nil) != (status == "failed") || emitted != 0 {

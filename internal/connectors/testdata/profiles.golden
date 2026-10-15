@@ -7,7 +7,7 @@
       "image_edit": "direct-openai/image_edit",
       "image_generation": "direct-openai/image_generation",
       "image_variation": "direct-openai/image_variation",
-      "moderation": "direct-openai/moderation",
+      "moderation": "openai-moderation",
       "realtime": "openai-realtime",
       "speech": "direct-openai/speech",
       "token_count": "openai-input-tokens",
@@ -507,7 +507,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "direct-openai/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -946,7 +946,7 @@
       "image_edit": "direct-openai/image_edit",
       "image_generation": "direct-openai/image_generation",
       "image_variation": "direct-openai/image_variation",
-      "moderation": "direct-openai/moderation",
+      "moderation": "openai-moderation",
       "realtime": "openai-realtime",
       "speech": "direct-openai/speech",
       "token_count": "openai-input-tokens",
@@ -1374,7 +1374,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "direct-openai/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -1812,7 +1812,7 @@
       "image_edit": "direct-compatible/image_edit",
       "image_generation": "direct-compatible/image_generation",
       "image_variation": "direct-compatible/image_variation",
-      "moderation": "direct-compatible/moderation",
+      "moderation": "openai-moderation",
       "rerank": "rerank",
       "speech": "direct-compatible/speech",
       "token_count": "openai-input-tokens",
@@ -2291,7 +2291,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "direct-compatible/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -2739,7 +2739,7 @@
       "image_edit": "direct-compatible/image_edit",
       "image_generation": "direct-compatible/image_generation",
       "image_variation": "direct-compatible/image_variation",
-      "moderation": "direct-compatible/moderation",
+      "moderation": "openai-moderation",
       "rerank": "rerank",
       "speech": "direct-compatible/speech",
       "token_count": "openai-input-tokens",
@@ -3146,7 +3146,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "direct-compatible/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -4016,7 +4016,7 @@
       "image_edit": "azure-deployment/image_edit",
       "image_generation": "azure-deployment/image_generation",
       "image_variation": "azure-deployment/image_variation",
-      "moderation": "azure-deployment/moderation",
+      "moderation": "openai-moderation",
       "realtime": "azure-deployment/realtime",
       "speech": "azure-deployment/speech",
       "token_count": "openai-input-tokens",
@@ -4516,7 +4516,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "azure-deployment/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -4957,7 +4957,7 @@
       "image_edit": "azure-responses-legacy/image_edit",
       "image_generation": "azure-responses-legacy/image_generation",
       "image_variation": "azure-responses-legacy/image_variation",
-      "moderation": "azure-responses-legacy/moderation",
+      "moderation": "openai-moderation",
       "realtime": "azure-responses-legacy/realtime",
       "speech": "azure-responses-legacy/speech",
       "token_count": "openai-input-tokens",
@@ -5385,7 +5385,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "azure-responses-legacy/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -5826,7 +5826,7 @@
       "image_edit": "azure-v1/image_edit",
       "image_generation": "azure-v1/image_generation",
       "image_variation": "azure-v1/image_variation",
-      "moderation": "azure-v1/moderation",
+      "moderation": "openai-moderation",
       "realtime": "openai-realtime",
       "speech": "azure-v1/speech",
       "token_count": "openai-input-tokens",
@@ -6326,7 +6326,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "azure-v1/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -6765,7 +6765,7 @@
       "image_edit": "azure-v1/image_edit",
       "image_generation": "azure-v1/image_generation",
       "image_variation": "azure-v1/image_variation",
-      "moderation": "azure-v1/moderation",
+      "moderation": "openai-moderation",
       "realtime": "openai-realtime",
       "speech": "azure-v1/speech",
       "token_count": "openai-input-tokens",
@@ -7193,7 +7193,7 @@
         "additionalProperties": false,
         "properties": {
           "dialect": {
-            "const": "azure-v1/moderation"
+            "const": "openai-moderation"
           },
           "native_options": {
             "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
@@ -8597,7 +8597,8 @@
   },
   {
     "operation_dialects": {
-      "generation": "mistral-fim"
+      "generation": "mistral-fim",
+      "moderation": "openai-moderation"
     },
     "default_schemas": {
       "generation": {

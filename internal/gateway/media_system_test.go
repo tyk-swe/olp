@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -152,7 +154,7 @@ type mediaFixture struct {
 	slotID       string
 	credentialID *string
 	generationID string
-	snapshot     *runtime.Snapshot
+	snapshot     *routing.Snapshot
 	spool        *media.Spool
 	spoolDir     string
 	service      *media.Service
@@ -167,13 +169,13 @@ type mediaFixture struct {
 
 const mediaVideoModel = "upstream-video-model"
 
-func videoCapabilities() []runtime.Capability {
-	out := []runtime.Capability{
+func videoCapabilities() []routing.Capability {
+	out := []routing.Capability{
 		{Model: mediaVideoModel, Operation: media.OpVideoCreate, Surface: "openai", Mode: "async"},
 		{Model: mediaVideoModel, Operation: media.OpVideoList, Surface: "openai", Mode: "unary"},
 	}
 	for _, op := range []string{media.OpVideoGet, media.OpVideoContent, media.OpVideoDelete} {
-		out = append(out, runtime.Capability{Model: mediaVideoModel, Operation: op, Surface: "openai", Mode: "unary"})
+		out = append(out, routing.Capability{Model: mediaVideoModel, Operation: op, Surface: "openai", Mode: "unary"})
 	}
 	return out
 }
@@ -293,11 +295,11 @@ func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, 
 
 	f.generationID = uuid.NewString()
 	routeID := uuid.NewString()
-	provider := runtime.Provider{
+	provider := routing.Provider{
 		ID: f.providerID, Name: "media-provider", Kind: "openai", Enabled: true, VendorID: vendor,
 		RevisionID: f.revisionID, Endpoint: endpoint, AuthMode: authMode,
 		Capabilities: videoCapabilities(),
-		Slots: []runtime.Slot{{
+		Slots: []routing.Slot{{
 			ID: f.slotID, Name: "Default", Enabled: true, Weight: 1,
 			CredentialID: f.credentialID,
 		}},
@@ -311,15 +313,15 @@ func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, 
 		provider.ActiveCredential = f.credentialID
 		provider.DefaultSlotID = f.slotID
 	}
-	f.snapshot = &runtime.Snapshot{
-		Generation: runtime.Generation{ID: f.generationID, Ordinal: 1, ActivatedAt: time.Now()},
-		Providers:  map[string]runtime.Provider{f.providerID: provider},
-		Routes: map[string]runtime.Route{"video-default": {
+	f.snapshot = &routing.Snapshot{
+		Generation: routing.Generation{ID: f.generationID, Ordinal: 1, ActivatedAt: time.Now()},
+		Providers:  map[string]routing.Provider{f.providerID: provider},
+		Routes: map[string]routing.Route{"video-default": {
 			ID: routeID, Slug: "video-default", RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
 			Operations:     []string{media.OpVideoCreate, media.OpVideoList, media.OpVideoGet, media.OpVideoContent, media.OpVideoDelete},
 			OverallTimeout: 8000, MaxAttempts: 1, RoutingID: routeID,
-			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
-			Targets: []runtime.Target{{
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Targets: []routing.Target{{
 				ID: uuid.NewString(), ProviderID: f.providerID, ProviderModel: mediaVideoModel,
 				Priority: 0, Weight: 1, Timeout: 6000, RoutingID: uuid.NewString(),
 			}},
@@ -404,7 +406,7 @@ func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, 
 func (f *mediaFixture) republish(t *testing.T) {
 	t.Helper()
 	old := f.rt.Release()
-	f.snapshot.Generation = runtime.Generation{
+	f.snapshot.Generation = routing.Generation{
 		ID: uuid.NewString(), Ordinal: old.Sequence + 1, ActivatedAt: time.Now(),
 	}
 	credentials := map[string][]byte{}

@@ -3,8 +3,9 @@ package access
 import (
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/workload"
 )

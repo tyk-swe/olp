@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -274,7 +276,7 @@ type slotInput struct {
 	MaxConcurrency      *int64   `json:"max_concurrency"`
 	RequestsPerMinute   *int64   `json:"requests_per_minute"`
 	TokensPerMinute     *int64   `json:"tokens_per_minute"`
-	runtime.Supply
+	routing.Supply
 }
 
 func (in *slotInput) limits() Limits {
@@ -315,7 +317,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 		if err = q.QueryRow(ctx, "SELECT slots FROM olp.provider_revisions WHERE id=$1 AND provider_id=$2", *current.ActiveRevisionID, current.ID).Scan(&encoded); err != nil {
 			return access.Reply{}, err
 		}
-		var published []runtime.RevisionSlot
+		var published []routing.RevisionSlot
 		if err = json.Unmarshal(encoded, &published); err != nil {
 			return access.Reply{}, err
 		}

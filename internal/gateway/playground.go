@@ -7,13 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
+	"slices"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
-	"slices"
 )
 
 // playgroundTimeout bounds one console playground call end to end.
@@ -57,7 +60,7 @@ type playgroundRequest struct {
 	MaxOutputTokens *int64               `json:"max_output_tokens"`
 	Tools           []playgroundTool     `json:"tools"`
 	ResponseFormat  *playgroundFormat    `json:"response_format"`
-	Routing         *runtime.Preferences `json:"routing"`
+	Routing         *routing.Preferences `json:"routing"`
 }
 
 // chatBody translates the playground request into a native chat request.
@@ -183,7 +186,7 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	return nil
 }
 
-func (in *playgroundRequest) parse(operation, mode string) (*openai.Request, openai.Family, error) {
+func (in *playgroundRequest) parse(operation, mode string) (*wire.Request, wire.Format, error) {
 	if in.Request != nil {
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(in.Request, &fields); err != nil || fields == nil {
@@ -207,50 +210,51 @@ func (in *playgroundRequest) parse(operation, mode string) (*openai.Request, ope
 	if err != nil {
 		return nil, "", access.Invalid("input", "the request could not be encoded")
 	}
-	parsed, err := openai.Parse(openai.FamilyChat, body)
+	parsed, err := openai.Parse(wire.Chat, body)
 	if err != nil {
 		return nil, "", access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
-	family := openai.FamilyChat
+	family := wire.Chat
 	if in.Surface != nil && (*in.Surface == "anthropic" || *in.Surface == "gemini") {
 		kind := *in.Surface
 		if in.MaxOutputTokens == nil {
 			fields := parsed.Document()
 			fields["max_completion_tokens"] = json.RawMessage("4096")
 			body, _ = json.Marshal(fields)
-			parsed, _ = openai.Parse(openai.FamilyChat, body)
+			parsed, _ = openai.Parse(wire.Chat, body)
 		}
-		encoded, wire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
+		encoded, encodedWire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
 		if e != nil {
 			return nil, "", access.Invalid("input", e.Error())
 		}
-		parsed, e = protocols.Parse(wire, encoded, in.Model)
+		parsed, e = protocols.Parse(encodedWire, encoded, in.Model)
 		if e != nil {
 			return nil, "", access.Invalid("input", e.Error())
 		}
-		family = wire
+		family = encodedWire
 	}
 	return parsed, family, nil
 }
 
-func (p *Playground) execution(r *http.Request, principal access.Principal, parsed *openai.Request, family openai.Family, preferences *runtime.Preferences) *execution {
+func (p *Playground) call(r *http.Request, principal access.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
 	s := p.Gateway
-	return &execution{
+	return &call{
 		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		family:      family,
 		preferences: preferences,
-		parsed:      parsed,
-		actor:       "playground",
-		origin:      usage.OriginPlayground,
-		userID:      principal.ID,
-		affinity:    []byte(principal.ID),
+
+		actor:  "playground",
+		origin: usage.OriginPlayground,
+		userID: principal.ID, routeLeg: routeLeg{affinity: []byte(principal.ID)}, generation:
+
+		// authorize admits routes in the member's projects. A route outside them is
+		// answered as missing, exactly like a route that does not exist.
+		generationCall{parsed: parsed},
 	}
 }
 
-// authorize admits routes in the member's projects. A route outside them is
-// answered as missing, exactly like a route that does not exist.
-func (p *Playground) authorize(principal access.Principal) func(*runtime.Route) *Error {
-	return func(route *runtime.Route) *Error {
+func (p *Playground) authorize(principal access.Principal) func(*routing.Route) *Error {
+	return func(route *routing.Route) *Error {
 		if principal.Project(route.ProjectID, access.View) != nil {
 			return modelNotFound(route.Slug)
 		}
@@ -271,7 +275,7 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		return access.Reply{}, err
 	}
 	s := p.Gateway
-	x := p.execution(r, principal, parsed, family, in.Routing)
+	x := p.call(r, principal, parsed, family, in.Routing)
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
@@ -309,17 +313,17 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	return access.OK(p.response(x, out, in)), nil
 }
 
-func routingEvidence(x *execution) []map[string]any {
-	routing := []map[string]any{}
+func routingEvidence(x *call) []map[string]any {
+	evidenceRows := []map[string]any{}
 	for _, fact := range x.facts {
-		var evidence runtime.Decision
+		var evidence routing.Decision
 		for _, decision := range x.decisions {
 			if decision.TargetID == fact.TargetID && decision.CredentialSlotID != nil && *decision.CredentialSlotID == fact.SlotID {
 				evidence = decision
 				break
 			}
 		}
-		routing = append(routing, map[string]any{
+		evidenceRows = append(evidenceRows, map[string]any{
 			"target_id":      fact.TargetID,
 			"provider_id":    fact.ProviderID,
 			"upstream_model": fact.UpstreamModel,
@@ -332,10 +336,10 @@ func routingEvidence(x *execution) []map[string]any {
 			"reason":             fact.Class,
 		})
 	}
-	return routing
+	return evidenceRows
 }
 
-func (p *Playground) response(x *execution, out *outcome, in playgroundRequest) map[string]any {
+func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[string]any {
 	c := out.completion
 	routing := routingEvidence(x)
 	if in.operation() != "generation" {
@@ -391,7 +395,7 @@ func (p *Playground) response(x *execution, out *outcome, in playgroundRequest) 
 	return res
 }
 
-func attemptPriority(x *execution, targetID string) int {
+func attemptPriority(x *call, targetID string) int {
 	for _, a := range x.attempts {
 		if a.TargetID == targetID {
 			return a.Priority
@@ -413,7 +417,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 		return err
 	}
 	s := p.Gateway
-	x := p.execution(r, principal, parsed, family, in.Routing)
+	x := p.call(r, principal, parsed, family, in.Routing)
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
@@ -433,7 +437,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 		return access.Fail(e.Status, e.Code, e.Message)
 	}
 	sw := &playgroundStreamWriter{w: w, maxTotal: s.cfg.MaxResponseBytes}
-	x.emit = sw.emit
+	x.generation.emit = sw.emit
 	out := s.execute(r.Context(), x)
 	status := http.StatusOK
 	if out.err != nil && out.err.Status > 0 {
@@ -490,7 +494,7 @@ func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool)
 	return nil
 }
 
-func (sw *playgroundStreamWriter) finish(x *execution, out *outcome) {
+func (sw *playgroundStreamWriter) finish(x *call, out *outcome) {
 	if out.err != nil {
 		data, _ := json.Marshal(map[string]any{"code": out.err.Code, "message": out.err.Message, "status": out.err.Status})
 		_ = sw.write("error", data, false)

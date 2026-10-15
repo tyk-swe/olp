@@ -4,16 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-// ErrEventTooLarge marks a streamed event over the configured cap.
-var ErrEventTooLarge = errors.New("upstream event exceeds the configured size limit")
+// wire.ErrEventTooLarge marks a streamed event over the configured cap.
 
 var errStreamComplete = errors.New("terminal stream event delivered")
 
@@ -32,39 +33,38 @@ func IsResponseProjectionError(err error) bool {
 	return found
 }
 
-// Emit receives one encoded client frame. The first call marks the point of
+// wire.Emit receives one encoded client frame. The first call marks the point of
 // no return: callers commit the response to the client there.
-type Emit func(frame []byte) error
 
 // Stream decodes an upstream event stream for the family, validates each event,
 // rewrites model names, forwards frames, and reports the completion summary.
 // includeUsage controls client-visible chat usage; accounting always retains it.
 // On failure, the partial summary preserves usage observed before the error.
-func Stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit) (*Completion, error) {
+func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
 	return stream(family, r, maxEventBytes, route, includeUsage, true, emit, nil)
 }
 
 // StreamMetadata forwards the same validated frames as Stream, but retains only
 // completion metadata. The gateway must not accumulate output or tool arguments
 // for the lifetime of a stream; the unary response cap does not bound streams.
-func StreamMetadata(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit) (*Completion, error) {
+func StreamMetadata(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
 	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, nil)
 }
 
-func StreamMetadataEvents(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
+func StreamMetadataEvents(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
 	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, observe)
 }
 
-func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
+func stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
 	var s streamer
 	var encoded []byte
 	retain := func(frame []byte) error { encoded = frame; return nil }
 	switch family {
-	case FamilyChat, FamilyMistralFIM:
+	case wire.Chat, wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
 		s = &chatStream{route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
-	case FamilyResponses:
+	case wire.Responses:
 		s = &responsesStream{route: route, collect: collect, emit: retain}
 	default:
 		return nil, errors.New("unknown request family")
@@ -105,10 +105,10 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 	completion, finishErr := s.finish()
 	if err != nil && !errors.Is(err, errStreamComplete) {
 		if errors.Is(err, sse.ErrEventTooLarge) {
-			return completion, ErrEventTooLarge
+			return completion, wire.ErrEventTooLarge
 		}
 		if framing, ok := errors.AsType[*sse.DecodeError](err); ok {
-			return completion, &ProtocolError{Detail: framing.Detail}
+			return completion, &wire.ProtocolError{Detail: framing.Detail}
 		}
 		return completion, err
 	}
@@ -117,7 +117,7 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 
 type streamer interface {
 	frame(sse.Frame, oif.Event) error
-	finish() (*Completion, error)
+	finish() (*wire.Completion, error)
 }
 
 type chatStream struct {
@@ -125,24 +125,24 @@ type chatStream struct {
 	collect      bool
 	maxChoices   int
 	route        string
-	emit         Emit
+	emit         wire.Emit
 	done         bool
 	finished     map[int64]bool
 	text         strings.Builder
 	refusal      strings.Builder
-	calls        map[int64]*ToolCall
+	calls        map[int64]*wire.ToolCall
 	callOrder    []int64
-	c            Completion
+	c            wire.Completion
 }
 
 func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	if f.Data == "[DONE]" {
 		if !s.finished[0] {
-			return &ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
+			return &wire.ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
 		}
 		for index, finished := range s.finished {
 			if !finished {
-				return &ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
+				return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
 			}
 		}
 		s.done = true
@@ -153,7 +153,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	}
 	fields := event.Source().Fields()
 	if fields == nil {
-		return &ProtocolError{Detail: "chunk is not a JSON object"}
+		return &wire.ProtocolError{Detail: "chunk is not a JSON object"}
 	}
 	if raw, present := fields["error"]; present && !isNull(raw) {
 		if upstream := errorObject(raw); upstream != nil {
@@ -161,7 +161,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 		}
 	}
 	if kind, ok := stringField(fields, "object"); ok && kind != "chat.completion.chunk" {
-		return &ProtocolError{Detail: "unexpected object " + kind}
+		return &wire.ProtocolError{Detail: "unexpected object " + kind}
 	}
 	if s.c.UpstreamID == "" {
 		s.c.UpstreamID, _ = stringField(fields, "id")
@@ -171,7 +171,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	}
 	choices, ok := arrayField(fields, "choices")
 	if !ok {
-		return &ProtocolError{Detail: "chunk has no choices array"}
+		return &wire.ProtocolError{Detail: "chunk has no choices array"}
 	}
 	for _, raw := range choices {
 		if err := s.choice(raw); err != nil {
@@ -205,27 +205,27 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 func (s *chatStream) choice(raw json.RawMessage) error {
 	choice, err := object(raw)
 	if err != nil {
-		return &ProtocolError{Detail: "choice is not an object"}
+		return &wire.ProtocolError{Detail: "choice is not an object"}
 	}
 	index, ok := int64Field(choice, "index")
 	if _, present := choice["index"]; present && !ok {
-		return &ProtocolError{Detail: "choice index is not a non-negative integer"}
+		return &wire.ProtocolError{Detail: "choice index is not a non-negative integer"}
 	}
 	if _, seen := s.finished[index]; !seen && len(s.finished) >= s.maxChoices {
-		return &ProtocolError{Detail: "stream exceeds the choice tracking limit"}
+		return &wire.ProtocolError{Detail: "stream exceeds the choice tracking limit"}
 	}
 	finish, hasFinish := stringField(choice, "finish_reason")
 	delta := map[string]json.RawMessage{}
 	if raw, present := choice["delta"]; present && !isNull(raw) {
 		if delta, err = object(raw); err != nil {
-			return &ProtocolError{Detail: "delta is not an object"}
+			return &wire.ProtocolError{Detail: "delta is not an object"}
 		}
 	}
 	content, hasContent := stringField(delta, "content")
 	refusal, hasRefusal := stringField(delta, "refusal")
 	calls, hasCalls := arrayField(delta, "tool_calls")
 	if s.finished[index] && (hasFinish || hasContent || hasRefusal || hasCalls) {
-		return &ProtocolError{Detail: fmt.Sprintf("choice %d received data after its finish", index)}
+		return &wire.ProtocolError{Detail: fmt.Sprintf("choice %d received data after its finish", index)}
 	}
 	if index == 0 {
 		if s.collect {
@@ -235,18 +235,18 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 		for _, raw := range calls {
 			call, err := object(raw)
 			if err != nil {
-				return &ProtocolError{Detail: "tool call delta is not an object"}
+				return &wire.ProtocolError{Detail: "tool call delta is not an object"}
 			}
 			if !s.collect {
 				continue
 			}
 			position, _ := int64Field(call, "index")
 			if s.calls == nil {
-				s.calls = map[int64]*ToolCall{}
+				s.calls = map[int64]*wire.ToolCall{}
 			}
 			current := s.calls[position]
 			if current == nil {
-				current = &ToolCall{}
+				current = &wire.ToolCall{}
 				s.calls[position] = current
 				s.callOrder = append(s.callOrder, position)
 			}
@@ -270,14 +270,14 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 	return nil
 }
 
-func (s *chatStream) finish() (*Completion, error) {
+func (s *chatStream) finish() (*wire.Completion, error) {
 	s.c.OutputText = s.text.String()
 	s.c.Refusal = s.refusal.String()
 	for _, position := range s.callOrder {
 		s.c.ToolCalls = append(s.c.ToolCalls, *s.calls[position])
 	}
 	if !s.done {
-		return &s.c, &ProtocolError{Detail: "stream ended before [DONE]", Truncated: true}
+		return &s.c, &wire.ProtocolError{Detail: "stream ended before [DONE]", Truncated: true}
 	}
 	return &s.c, nil
 }
@@ -285,10 +285,10 @@ func (s *chatStream) finish() (*Completion, error) {
 type responsesStream struct {
 	collect     bool
 	route       string
-	emit        Emit
+	emit        wire.Emit
 	done        bool
 	terminalErr error
-	c           *Completion
+	c           *wire.Completion
 	upstreamID  string
 }
 
@@ -296,19 +296,19 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 	source := event.Source()
 	fields := source.Fields()
 	if fields == nil {
-		return &ProtocolError{Detail: "event is not a JSON object"}
+		return &wire.ProtocolError{Detail: "event is not a JSON object"}
 	}
 	kind, ok := stringField(fields, "type")
 	if !ok || kind == "" || strings.ContainsAny(kind, "\r\n\x00") {
-		return &ProtocolError{Detail: "event has an invalid type"}
+		return &wire.ProtocolError{Detail: "event has an invalid type"}
 	}
 	if f.Event != nil && *f.Event != kind {
-		return &ProtocolError{Detail: "event name disagrees with type"}
+		return &wire.ProtocolError{Detail: "event name disagrees with type"}
 	}
 	if kind == "error" {
 		upstream := errorObject(fields["error"])
 		if upstream == nil {
-			upstream = &UpstreamError{Message: "upstream reported an error"}
+			upstream = &wire.UpstreamError{Message: "upstream reported an error"}
 		}
 		s.terminalErr, s.done = upstream, true
 	}
@@ -321,7 +321,7 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 		id, present := event.Source().Lookup("/response/id")
 		upstreamID, valid := id.Text()
 		if s.upstreamID != "" && (!present || !valid || upstreamID != s.upstreamID) {
-			return &ProtocolError{Detail: "response identity changed during the stream"}
+			return &wire.ProtocolError{Detail: "response identity changed during the stream"}
 		}
 		if present && valid && upstreamID != "" {
 			s.upstreamID = upstreamID
@@ -339,15 +339,15 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 			if terminalErr != nil && kind != "response.failed" {
 				return terminalErr
 			}
-			if _, invalid := errors.AsType[*ProtocolError](terminalErr); invalid {
+			if _, invalid := errors.AsType[*wire.ProtocolError](terminalErr); invalid {
 				return terminalErr
 			}
 			if kind == "response.failed" && terminalErr == nil {
-				terminalErr = &UpstreamError{Message: "upstream reported a failed response"}
+				terminalErr = &wire.UpstreamError{Message: "upstream reported a failed response"}
 			}
 			completion.UsageComplete = observed.usage.Complete
-			completion.responseTerminal = true
-			completion.responseFailure, _ = errors.AsType[*UpstreamError](terminalErr)
+			completion.Terminal = true
+			completion.Failure, _ = errors.AsType[*wire.UpstreamError](terminalErr)
 			if completion.Usage == nil && s.c != nil {
 				completion.Usage = s.c.Usage
 			}
@@ -357,7 +357,7 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 		default:
 			if observed.usage.Usage != nil {
 				if s.c == nil {
-					s.c = &Completion{}
+					s.c = &wire.Completion{}
 				}
 				if !s.c.UsageComplete {
 					s.c.Usage = observed.usage.Usage
@@ -402,12 +402,12 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 	return nil
 }
 
-func (s *responsesStream) finish() (*Completion, error) {
+func (s *responsesStream) finish() (*wire.Completion, error) {
 	if s.done && s.terminalErr != nil {
 		return s.c, s.terminalErr
 	}
 	if !s.done || s.c == nil {
-		return s.c, &ProtocolError{Detail: "stream ended before the terminal response event", Truncated: true}
+		return s.c, &wire.ProtocolError{Detail: "stream ended before the terminal response event", Truncated: true}
 	}
 	return s.c, s.terminalErr
 }

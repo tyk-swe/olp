@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -76,24 +78,24 @@ func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
 	return &a, nil
 }
 
-func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
+func (f *fakeRuntime) Eligibility(id string) routing.Eligibility {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch {
 	case f.stale:
-		return runtime.StaleAuthority
+		return routing.StaleAuthority
 	case f.revoked[id]:
-		return runtime.Revoked
+		return routing.Revoked
 	case f.lapsed[id]:
-		return runtime.Lapsed
+		return routing.Lapsed
 	}
-	return runtime.Eligible
+	return routing.Eligible
 }
 
 // Secret serves eligible credentials the pinned release installed. The fake's
 // secret authority, for callers that pin no release, is its current release.
 func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
-	if f.Eligibility(id) != runtime.Eligible {
+	if f.Eligibility(id) != routing.Eligible {
 		return nil, 0, runtime.ErrCredentialUnavailable
 	}
 	if release == nil {
@@ -235,25 +237,25 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 	credA, credB := uuid.NewString(), uuid.NewString()
 	version := 1
 	slotA := uuid.NewString()
-	provider := func(name, secretID, model, slot string) runtime.Provider {
+	provider := func(name, secretID, model, slot string) routing.Provider {
 		id := uuid.NewString()
-		return runtime.Provider{
+		return routing.Provider{
 			ID: id, Name: name, Kind: "openai_compatible", Enabled: true, ActiveCredential: &secretID, RevisionID: uuid.NewString(),
-			Capabilities: []runtime.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: model, Operation: "generation", Surface: "openai", Mode: "streaming"}},
+			Capabilities: []routing.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: model, Operation: "generation", Surface: "openai", Mode: "streaming"}},
 			Endpoint:     upstream.URL + "/" + name + "/v1", AuthMode: "api_key",
-			Slots: []runtime.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &secretID, CredentialVersion: &version}},
+			Slots: []routing.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &secretID, CredentialVersion: &version}},
 		}
 	}
 	a := provider("a", credA, modelA, slotA)
 	b := provider("b", credB, modelB, uuid.NewString())
 	routeID := uuid.NewString()
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
-		Providers:  map[string]runtime.Provider{a.ID: a, b.ID: b},
-		Routes: map[string]runtime.Route{routeSlug: {
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
+		Providers:  map[string]routing.Provider{a.ID: a, b.ID: b},
+		Routes: map[string]routing.Route{routeSlug: {
 			ID: routeID, Slug: routeSlug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 3, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
-			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
-			Targets: []runtime.Target{
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Targets: []routing.Target{
 				{ID: uuid.NewString(), ProviderID: a.ID, ProviderModel: modelA, Priority: 0, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()},
 				{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Priority: 1, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()},
 			},
@@ -794,7 +796,7 @@ func TestModelListExposesEffectiveCapabilities(t *testing.T) {
 	h := newHarness(t, Config{})
 	snap := h.rt.release.Snapshot
 	for id, p := range snap.Providers {
-		metadata, err := json.Marshal(runtime.ModelMetadata{
+		metadata, err := json.Marshal(routing.ModelMetadata{
 			InputModalities:     []string{"text"},
 			OutputModalities:    []string{"text"},
 			ContextLength:       ptrInt64(8000),
@@ -1035,4 +1037,4 @@ func TestClientWriteFailureIsCancellation(t *testing.T) {
 }
 
 // This fixture has no asynchronous publication or external database.
-func (*fakeRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }
+func (*fakeRuntime) CheckRouteFidelity(context.Context, routing.Route) error { return nil }

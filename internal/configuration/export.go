@@ -6,10 +6,11 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -98,7 +99,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			if err = json.Unmarshal(configuration, &entry.Configuration); err != nil {
 				return nil, err
 			}
-			var revisionModels []runtime.RevisionModel
+			var revisionModels []routing.RevisionModel
 			if err = json.Unmarshal(models, &revisionModels); err != nil {
 				return nil, err
 			}
@@ -109,7 +110,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 				}
 				entry.Models = append(entry.Models, model)
 			}
-			var revisionSlots []runtime.RevisionSlot
+			var revisionSlots []routing.RevisionSlot
 			if err = json.Unmarshal(slots, &revisionSlots); err != nil {
 				return nil, err
 			}
@@ -187,7 +188,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		if err = json.Unmarshal(operations, &route.Operations); err != nil {
 			return nil, err
 		}
-		var published []runtime.PublishedTarget
+		var published []routing.PublishedTarget
 		if err = json.Unmarshal(targets, &published); err != nil {
 			return nil, err
 		}
@@ -195,7 +196,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			route.Targets = append(route.Targets, targetEntry(t))
 		}
 		if policy != nil {
-			var p runtime.Policy
+			var p routing.Policy
 			if err = json.Unmarshal(policy, &p); err != nil {
 				return nil, err
 			}
@@ -463,7 +464,7 @@ func exportTemplates(ctx context.Context, q access.Queryer) ([]TemplateEntry, er
 			return nil, err
 		}
 		if len(policy) > 0 {
-			t.RoutingPolicy = &runtime.Policy{}
+			t.RoutingPolicy = &routing.Policy{}
 			if err = json.Unmarshal(policy, t.RoutingPolicy); err != nil {
 				return nil, err
 			}

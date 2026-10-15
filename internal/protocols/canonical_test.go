@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestGeminiCountKeepsNestedGenerationAndExtensions(t *testing.T) {
@@ -29,7 +29,7 @@ func TestGeminiCountKeepsNestedGenerationAndExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	generation, err := decodeCanonical(openai.FamilyGeminiCount, fields)
+	generation, err := decodeCanonical(wire.GeminiCount, fields)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,17 +71,17 @@ func TestSpelledOutDefaultsAreNotSourceExtensions(t *testing.T) {
 	}
 	for _, test := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		body   string
 		want   []string
 	}{
-		{"responses defaults", openai.FamilyResponses, responses(`[]`, `false`), nil},
-		{"chat default strict", openai.FamilyChat, chat(`false`), nil},
-		{"responses strict tool", openai.FamilyResponses, responses(`[]`, `true`), []string{"/tools/0/strict"}},
-		{"chat strict tool", openai.FamilyChat, chat(`true`), []string{"/tools/0/function/strict"}},
-		{"responses include request", openai.FamilyResponses, responses(`["reasoning.encrypted_content"]`, `false`), []string{"/include"}},
-		{"responses defaults spelled with spaces", openai.FamilyResponses, responses(`[ ]`, ` false `), nil},
-		{"responses incomplete tool output", openai.FamilyResponses, strings.Replace(responses(`[]`, `false`), `"output":"sunny","status":"completed"`, `"output":"sunny","status":"incomplete"`, 1), []string{"/input/2/status"}},
+		{"responses defaults", wire.Responses, responses(`[]`, `false`), nil},
+		{"chat default strict", wire.Chat, chat(`false`), nil},
+		{"responses strict tool", wire.Responses, responses(`[]`, `true`), []string{"/tools/0/strict"}},
+		{"chat strict tool", wire.Chat, chat(`true`), []string{"/tools/0/function/strict"}},
+		{"responses include request", wire.Responses, responses(`["reasoning.encrypted_content"]`, `false`), []string{"/include"}},
+		{"responses defaults spelled with spaces", wire.Responses, responses(`[ ]`, ` false `), nil},
+		{"responses incomplete tool output", wire.Responses, strings.Replace(responses(`[]`, `false`), `"output":"sunny","status":"completed"`, `"output":"sunny","status":"incomplete"`, 1), []string{"/input/2/status"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fields, err := object([]byte(test.body))
@@ -98,7 +98,7 @@ func TestSpelledOutDefaultsAreNotSourceExtensions(t *testing.T) {
 			if len(generation.Tools) != 1 || generation.Tools[0].Name != "get_weather" {
 				t.Fatalf("the tool was lost: %+v", generation.Tools)
 			}
-			if test.family == openai.FamilyResponses && len(generation.Messages) != 3 {
+			if test.family == wire.Responses && len(generation.Messages) != 3 {
 				t.Fatalf("the tool round trip was lost: %+v", generation.Messages)
 			}
 		})
@@ -113,7 +113,7 @@ func TestAgentsSDKResponsesRequestTranslatesToAnthropicAndGemini(t *testing.T) {
 		"tools":[{"type":"function","name":"get_weather","description":"Weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}},"strict":false}]}`
 	for _, kind := range []string{"anthropic", "gemini"} {
 		t.Run(kind, func(t *testing.T) {
-			r, err := Parse(openai.FamilyResponses, []byte(body), "")
+			r, err := Parse(wire.Responses, []byte(body), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,7 +145,7 @@ func TestJSONSchemaFieldsAndStreamingHintsTranslate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		generation, err := decodeCanonical(openai.FamilyGemini, fields)
+		generation, err := decodeCanonical(wire.Gemini, fields)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +174,7 @@ func TestJSONSchemaFieldsAndStreamingHintsTranslate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := decodeCanonical(openai.FamilyGemini, fields); err == nil {
+			if _, err := decodeCanonical(wire.Gemini, fields); err == nil {
 				t.Fatalf("accepted a schema given both ways: %s", body)
 			}
 		}
@@ -184,7 +184,7 @@ func TestJSONSchemaFieldsAndStreamingHintsTranslate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		generation, err := decodeCanonical(openai.FamilyAnthropic, fields)
+		generation, err := decodeCanonical(wire.Anthropic, fields)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +193,7 @@ func TestJSONSchemaFieldsAndStreamingHintsTranslate(t *testing.T) {
 		}
 	})
 	t.Run("both reach an OpenAI provider with the schema intact", func(t *testing.T) {
-		for family, body := range map[openai.Family]string{openai.FamilyGemini: gemini, openai.FamilyAnthropic: anthropic} {
+		for family, body := range map[wire.Format]string{wire.Gemini: gemini, wire.Anthropic: anthropic} {
 			r, err := Parse(family, []byte(body), "route")
 			if err != nil {
 				t.Fatal(err)
@@ -235,7 +235,7 @@ func TestEmptySafetySettingsAndToolMessageNamesTranslate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			generation, err := decodeCanonical(openai.FamilyGemini, fields)
+			generation, err := decodeCanonical(wire.Gemini, fields)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +252,7 @@ func TestEmptySafetySettingsAndToolMessageNamesTranslate(t *testing.T) {
 	}
 	for _, kind := range []string{"anthropic", "gemini"} {
 		t.Run("a named tool message reaches "+kind, func(t *testing.T) {
-			r, err := Parse(openai.FamilyChat, []byte(chat("tool")), "")
+			r, err := Parse(wire.Chat, []byte(chat("tool")), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -267,7 +267,7 @@ func TestEmptySafetySettingsAndToolMessageNamesTranslate(t *testing.T) {
 	}
 	t.Run("a named user message is still refused", func(t *testing.T) {
 		body := `{"model":"route","max_tokens":32,"messages":[{"role":"user","name":"alice","content":"hi"}]}`
-		r, err := Parse(openai.FamilyChat, []byte(body), "")
+		r, err := Parse(wire.Chat, []byte(body), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -312,7 +312,7 @@ func TestGeminiSchemaTypesBecomeJSONSchemaTypes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		generation, err := decodeCanonical(openai.FamilyGemini, fields)
+		generation, err := decodeCanonical(wire.Gemini, fields)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -375,7 +375,7 @@ func TestGeminiSchemaTypesBecomeJSONSchemaTypes(t *testing.T) {
 func TestGeminiStructuredOutputKeepsThePropertyOrderOfTheClient(t *testing.T) {
 	const request = `{"contents":[{"role":"user","parts":[{"text":"x"}]}],"generationConfig":{"responseMimeType":"application/json",` +
 		`"responseSchema":{"type":"OBJECT","properties":{"title":{"type":"STRING"},"priority":{"type":"STRING"},"score":{"type":"INTEGER"}},"required":["title","priority","score"]}}}`
-	r, err := Parse(openai.FamilyGemini, []byte(request), "route")
+	r, err := Parse(wire.Gemini, []byte(request), "route")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestGeminiSchemasGoInTheFieldThatTakesThem(t *testing.T) {
 			chat := `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"x"}],` +
 				`"response_format":{"type":"json_schema","json_schema":{"name":"out","schema":` + tc.schema + `}},` +
 				`"tools":[{"type":"function","function":{"name":"f","description":"d","parameters":` + tc.schema + `}}]}`
-			r, err := Parse(openai.FamilyChat, []byte(chat), "route")
+			r, err := Parse(wire.Chat, []byte(chat), "route")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -498,7 +498,7 @@ func TestGeminiSchemasKeepTheirFieldsOnAGeminiRoute(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			request := `{"contents":[{"role":"user","parts":[{"text":"x"}]}],"generationConfig":{"responseMimeType":"application/json",` + tc.format + `},` +
 				`"tools":[{"functionDeclarations":[{"name":"f",` + tc.tool + `}]}]}`
-			r, err := Parse(openai.FamilyGemini, []byte(request), "route")
+			r, err := Parse(wire.Gemini, []byte(request), "route")
 			if err != nil {
 				t.Fatal(err)
 			}

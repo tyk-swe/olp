@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -22,7 +24,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type codeTestLedger struct {
@@ -139,7 +140,7 @@ func (l *codeTestLedger) wait(t *testing.T) codemode.Usage {
 
 type codeTestAuthorizer struct{ principal string }
 
-func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ runtime.Configuration, _ codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
+func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configuration, _ codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	if dispatch.Adapter != codemode.AdapterCodex {
 		if header := codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol); header == "X-Api-Key" {
 			return codemode.Authorization{Principal: a.principal, Headers: http.Header{header: {"upstream-only"}}}, nil
@@ -159,8 +160,8 @@ func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.S
 	authority.ProjectID = &route.ProjectID
 	h.rt.keys[fullKey] = authority
 	h.rt.release.Snapshot.CodeRoutes = map[string]codemode.Route{"coding": route}
-	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, Endpoint: h.upstream.URL + "/a"}}
-	if err := h.rt.release.Snapshot.Validate(); err != nil {
+	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, Endpoint: h.upstream.URL + "/a"}}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
 	h.gateway.CodeLedger = ledger

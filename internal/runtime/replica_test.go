@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestReplicaLagConsumesTheAuthorityAgeBudget(t *testing.T) {
@@ -19,7 +21,7 @@ func TestReplicaLagConsumesTheAuthorityAgeBudget(t *testing.T) {
 	}
 	manager := authorityManager(confirmed, nil)
 	manager.authority.readAt = confirmed.Add(-AuthorityStaleAfter - time.Second)
-	if manager.Eligibility("credential") != StaleAuthority {
+	if manager.Eligibility("credential") != routing.StaleAuthority {
 		t.Fatal("lagged authority vouched for credentials")
 	}
 	if _, err = progress.observe(at.Add(AuthorityStaleAfter+time.Second), 300, 100); !errors.Is(err, ErrStaleAuthority) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestGeminiUsageWithoutCandidatesTokenCount(t *testing.T) {
@@ -32,7 +32,7 @@ func TestGeminiStreamKeepsUsageWhenFinalChunkOmitsOutputCount(t *testing.T) {
 	stream := "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hi\"}]},\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":1,\"totalTokenCount\":11}}\n\n" +
 		"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"MAX_TOKENS\",\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":10,\"thoughtsTokenCount\":100,\"totalTokenCount\":110}}\n\n"
 	var out bytes.Buffer
-	c, err := Stream(openai.FamilyGemini, openai.FamilyChat, strings.NewReader(stream), 8192, "route", true, func(b []byte) error { out.Write(b); return nil })
+	c, err := Stream(wire.Gemini, wire.Chat, strings.NewReader(stream), 8192, "route", true, func(b []byte) error { out.Write(b); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

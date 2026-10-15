@@ -6,40 +6,17 @@ import (
 	"math"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
-
-// Usage is the token accounting observed on one generation.
-type Usage struct {
-	InputTokens       int64  `json:"input_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
-	TotalTokens       int64  `json:"total_tokens"`
-	CachedInputTokens *int64 `json:"cached_input_tokens,omitempty"`
-
-	CacheWriteInputTokens   *int64 `json:"cache_write_input_tokens,omitempty"`
-	CacheWrite5MInputTokens *int64 `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWrite1HInputTokens *int64 `json:"cache_write_1h_input_tokens,omitempty"`
-	AudioInputTokens        *int64 `json:"audio_input_tokens,omitempty"`
-	CachedAudioInputTokens  *int64 `json:"cached_audio_input_tokens,omitempty"`
-	AudioOutputTokens       *int64 `json:"audio_output_tokens,omitempty"`
-	ImageInputTokens        *int64 `json:"image_input_tokens,omitempty"`
-	CachedImageInputTokens  *int64 `json:"cached_image_input_tokens,omitempty"`
-	ImageOutputTokens       *int64 `json:"image_output_tokens,omitempty"`
-	// ToolCalls counts metered server-side tool invocations by tool name.
-	ToolCalls       map[string]int64 `json:"tool_calls,omitempty"`
-	ReasoningTokens *int64           `json:"reasoning_tokens,omitempty"`
-	// MediaUnits is the provider-metered media quantity — images returned or
-	// seconds processed — carried as decimal text so it survives the usage
-	// event wire shape unchanged.
-	MediaUnits *string `json:"media_units,omitempty"`
-}
 
 // ResponseUsageObservation describes one native Responses accounting snapshot.
 // Complete requires valid usage on an explicitly terminal response; a missing
 // usage object remains unknown, including when the response itself is terminal.
 type ResponseUsageObservation struct {
 	Status   string
-	Usage    *Usage
+	Usage    *wire.Usage
 	Complete bool
 }
 
@@ -47,7 +24,7 @@ type ResponseUsageObservation struct {
 // or rewriting native bytes. The operation owning an event or result decides
 // whether this snapshot can replace previously observed accounting evidence.
 func ObserveResponseUsage(body []byte) (ResponseUsageObservation, error) {
-	source, err := liftResult(FamilyResponses, body)
+	source, err := liftResult(wire.Responses, body)
 	if err != nil {
 		return ResponseUsageObservation{}, err
 	}
@@ -59,7 +36,7 @@ func ObserveResponseUsage(body []byte) (ResponseUsageObservation, error) {
 // exact counter semantics as ObserveResponseUsage.
 func ObserveResponseDocumentUsage(source oif.Document) (ResponseUsageObservation, error) {
 	if source.Root().Kind() != oif.Object {
-		return ResponseUsageObservation{}, &ProtocolError{Detail: "response is not a JSON object"}
+		return ResponseUsageObservation{}, &wire.ProtocolError{Detail: "response is not a JSON object"}
 	}
 	// Accounting owns these fields alone. Do not copy generated output or
 	// opaque provider extensions merely to observe a small usage snapshot.
@@ -83,7 +60,7 @@ func observeResponseUsage(fields map[string]json.RawMessage) (ResponseUsageObser
 	if raw, present := fields["status"]; present && !isNull(raw) {
 		var ok bool
 		if observation.Status, ok = stringField(fields, "status"); !ok || observation.Status == "" {
-			return ResponseUsageObservation{}, &ProtocolError{Detail: "response status is not a nonempty string"}
+			return ResponseUsageObservation{}, &wire.ProtocolError{Detail: "response status is not a nonempty string"}
 		}
 	}
 	var err error
@@ -129,12 +106,12 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 		return observed, nil
 	}
 	if event.Name() != "" && event.Name() != kind {
-		return observed, &ProtocolError{Detail: "event name disagrees with type"}
+		return observed, &wire.ProtocolError{Detail: "event name disagrees with type"}
 	}
 	if raw, present := fields["response"]; !present || isNull(raw) {
 		switch kind {
 		case "response.completed", "response.incomplete", "response.failed":
-			return observed, &ProtocolError{Detail: "terminal event has no response object"}
+			return observed, &wire.ProtocolError{Detail: "terminal event has no response object"}
 		case "response.created":
 			observed.usage.Status = "in_progress"
 		case "response.queued", "response.in_progress":
@@ -144,12 +121,12 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 	}
 	var err error
 	if observed.response, err = object(fields["response"]); err != nil {
-		return observed, &ProtocolError{Detail: "lifecycle event has no response object"}
+		return observed, &wire.ProtocolError{Detail: "lifecycle event has no response object"}
 	}
 	switch kind {
 	case "response.completed", "response.incomplete", "response.failed":
 		if raw, present := observed.response["status"]; present && isNull(raw) {
-			return observed, &ProtocolError{Detail: "terminal response has an invalid status"}
+			return observed, &wire.ProtocolError{Detail: "terminal response has an invalid status"}
 		}
 	}
 	if observed.usage, err = observeResponseUsage(observed.response); err != nil {
@@ -159,7 +136,7 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 	switch status {
 	case "", "queued", "in_progress", "completed", "incomplete", "failed", "cancelled":
 	default:
-		return observed, &ProtocolError{Detail: "lifecycle event has an invalid response status"}
+		return observed, &wire.ProtocolError{Detail: "lifecycle event has an invalid response status"}
 	}
 	switch kind {
 	case "response.created":
@@ -176,7 +153,7 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 	default:
 		expected := strings.TrimPrefix(kind, "response.")
 		if status != "" && status != expected {
-			return observed, &ProtocolError{Detail: "lifecycle event disagrees with response status"}
+			return observed, &wire.ProtocolError{Detail: "lifecycle event disagrees with response status"}
 		}
 		observed.usage.Status = expected
 		observed.usage.Complete = observed.usage.Usage != nil
@@ -184,75 +161,11 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 	return observed, nil
 }
 
-// ToolCall is a function call requested by the model.
-type ToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-// Completion summarises an observed generation, which may be partial on stream
-// failure. Body is the rewritten unary document and is nil for streams.
-type Completion struct {
-	// Native retains the immutable upstream result before projection. Streams
-	// use incremental OIF events instead of accumulating a result document.
-	Native        oif.Result `json:"-"`
-	Body          []byte
-	UpstreamID    string
-	ProviderModel string
-	FinishReason  string
-	OutputText    string
-	Refusal       string
-	ToolCalls     []ToolCall
-	Usage         *Usage
-	// UsageComplete reports authoritative terminal generation counters. A partial
-	// stream may retain Usage without proving that no further work was billed.
-	UsageComplete    bool `json:"-"`
-	responseTerminal bool
-	responseFailure  *UpstreamError
-}
-
-// NativeResponseOutcome reports a validated terminal Responses event,
-// independently of usage disclosure and local projection or delivery.
-func (c *Completion) NativeResponseOutcome() (terminal bool, failure *UpstreamError) {
-	if c == nil {
-		return false, nil
-	}
-	return c.responseTerminal, c.responseFailure
-}
-
-// ProtocolError reports an upstream document or stream that violates the
-// OpenAI protocol. Truncated marks streams that ended before their terminal event.
-type ProtocolError struct {
-	Detail    string
-	Truncated bool
-}
-
-func (e *ProtocolError) Error() string { return "upstream protocol violation: " + e.Detail }
-
-// UpstreamError is an error object the upstream returned in place of a result.
-type UpstreamError struct {
-	Type    string
-	Code    string
-	Message string
-}
-
-func (e *UpstreamError) Error() string { return "upstream error: " + e.Message }
-
-// Redact passes every provider-supplied field through redact, because a
-// provider may echo request credentials in any of them. A nil error stays nil.
-func (e *UpstreamError) Redact(redact func(string) string) *UpstreamError {
-	if e != nil {
-		e.Type, e.Code, e.Message = redact(e.Type), redact(e.Code), redact(e.Message)
-	}
-	return e
-}
-
 // ParseErrorBody extracts an OpenAI error envelope, tolerating other shapes.
 // Google APIs, including Vertex's OpenAI-compatible endpoint, may wrap the
 // envelope in a one-element array, and IBM's list errors, of which the first
 // states the failure.
-func ParseErrorBody(body []byte) *UpstreamError {
+func ParseErrorBody(body []byte) *wire.UpstreamError {
 	type envelope struct {
 		Error  json.RawMessage `json:"error"`
 		Errors json.RawMessage `json:"errors"`
@@ -281,10 +194,10 @@ func ParseErrorBody(body []byte) *UpstreamError {
 	return errorObject(single.Error)
 }
 
-func errorObject(raw json.RawMessage) *UpstreamError {
+func errorObject(raw json.RawMessage) *wire.UpstreamError {
 	var message string
 	if json.Unmarshal(raw, &message) == nil {
-		return &UpstreamError{Message: message}
+		return &wire.UpstreamError{Message: message}
 	}
 	var detail struct {
 		Type    string          `json:"type"`
@@ -309,18 +222,18 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 	if detail.Type == "" {
 		detail.Type = detail.Name
 	}
-	return &UpstreamError{Type: detail.Type, Code: code, Message: detail.Message}
+	return &wire.UpstreamError{Type: detail.Type, Code: code, Message: detail.Message}
 }
 
 // DecodeChat validates a unary chat completion and rewrites its model to the route.
-func DecodeChat(body []byte, route string) (*Completion, error) {
-	source, err := liftResult(FamilyChat, body)
+func DecodeChat(body []byte, route string) (*wire.Completion, error) {
+	source, err := liftResult(wire.Chat, body)
 	if err != nil {
 		return nil, err
 	}
 	fields := source.Source().Fields()
 	if fields == nil {
-		return nil, &ProtocolError{Detail: "chat completion is not a JSON object"}
+		return nil, &wire.ProtocolError{Detail: "chat completion is not a JSON object"}
 	}
 	if raw, present := fields["error"]; present && !isNull(raw) {
 		if upstream := errorObject(raw); upstream != nil {
@@ -328,41 +241,41 @@ func DecodeChat(body []byte, route string) (*Completion, error) {
 		}
 	}
 	if kind, ok := stringField(fields, "object"); ok && kind != "chat.completion" {
-		return nil, &ProtocolError{Detail: "unexpected object " + kind}
+		return nil, &wire.ProtocolError{Detail: "unexpected object " + kind}
 	}
 	choices, ok := arrayField(fields, "choices")
 	if !ok || len(choices) == 0 {
-		return nil, &ProtocolError{Detail: "chat completion has no choices"}
+		return nil, &wire.ProtocolError{Detail: "chat completion has no choices"}
 	}
-	c := &Completion{Native: source}
+	c := &wire.Completion{Native: source}
 	c.UpstreamID, _ = stringField(fields, "id")
 	c.ProviderModel, _ = stringField(fields, "model")
 	seen := make(map[int64]bool, len(choices))
 	for i, raw := range choices {
 		choice, err := object(raw)
 		if err != nil {
-			return nil, &ProtocolError{Detail: "choice is not an object"}
+			return nil, &wire.ProtocolError{Detail: "choice is not an object"}
 		}
 		index, ok := int64Field(choice, "index")
 		if !ok || seen[index] {
-			return nil, &ProtocolError{Detail: "choice index must be a unique non-negative integer"}
+			return nil, &wire.ProtocolError{Detail: "choice index must be a unique non-negative integer"}
 		}
 		seen[index] = true
 		finish, ok := stringField(choice, "finish_reason")
 		if !ok || finish == "" {
-			return nil, &ProtocolError{Detail: "choice has no terminal finish reason"}
+			return nil, &wire.ProtocolError{Detail: "choice has no terminal finish reason"}
 		}
 		message, err := object(choice["message"])
 		if err != nil {
-			return nil, &ProtocolError{Detail: "choice message is not an object"}
+			return nil, &wire.ProtocolError{Detail: "choice message is not an object"}
 		}
 		if role, _ := stringField(message, "role"); role != "assistant" {
-			return nil, &ProtocolError{Detail: "choice message role is not assistant"}
+			return nil, &wire.ProtocolError{Detail: "choice message role is not assistant"}
 		}
 		for _, field := range []string{"content", "refusal"} {
 			if value, present := message[field]; present && !isNull(value) {
 				if _, ok := stringField(message, field); !ok {
-					return nil, &ProtocolError{Detail: "message " + field + " is not a string or null"}
+					return nil, &wire.ProtocolError{Detail: "message " + field + " is not a string or null"}
 				}
 			}
 		}
@@ -374,12 +287,12 @@ func DecodeChat(body []byte, route string) (*Completion, error) {
 		if value, present := message["tool_calls"]; present && !isNull(value) {
 			calls, ok := arrayField(message, "tool_calls")
 			if !ok {
-				return nil, &ProtocolError{Detail: "message tool_calls is not an array"}
+				return nil, &wire.ProtocolError{Detail: "message tool_calls is not an array"}
 			}
 			for _, raw := range calls {
 				call, err := object(raw)
 				if err != nil {
-					return nil, &ProtocolError{Detail: "tool call is not an object"}
+					return nil, &wire.ProtocolError{Detail: "tool call is not an object"}
 				}
 				if i == 0 {
 					c.ToolCalls = append(c.ToolCalls, chatToolCall(call))
@@ -399,8 +312,8 @@ func DecodeChat(body []byte, route string) (*Completion, error) {
 	return c, nil
 }
 
-func chatToolCall(call map[string]json.RawMessage) ToolCall {
-	var tc ToolCall
+func chatToolCall(call map[string]json.RawMessage) wire.ToolCall {
+	var tc wire.ToolCall
 	tc.ID, _ = stringField(call, "id")
 	if raw, present := call["function"]; present {
 		if function, err := object(raw); err == nil {
@@ -411,22 +324,22 @@ func chatToolCall(call map[string]json.RawMessage) ToolCall {
 	return tc
 }
 
-func chatUsage(fields map[string]json.RawMessage) (*Usage, error) {
+func chatUsage(fields map[string]json.RawMessage) (*wire.Usage, error) {
 	raw, present := fields["usage"]
 	if !present || isNull(raw) {
 		return nil, nil
 	}
 	usage, err := object(raw)
 	if err != nil {
-		return nil, &ProtocolError{Detail: "usage is not an object"}
+		return nil, &wire.ProtocolError{Detail: "usage is not an object"}
 	}
-	u := &Usage{}
+	u := &wire.Usage{}
 	var ok bool
 	if u.InputTokens, ok = int64Field(usage, "prompt_tokens"); !ok {
-		return nil, &ProtocolError{Detail: "usage.prompt_tokens is not a non-negative integer"}
+		return nil, &wire.ProtocolError{Detail: "usage.prompt_tokens is not a non-negative integer"}
 	}
 	if u.OutputTokens, ok = int64Field(usage, "completion_tokens"); !ok {
-		return nil, &ProtocolError{Detail: "usage.completion_tokens is not a non-negative integer"}
+		return nil, &wire.ProtocolError{Detail: "usage.completion_tokens is not a non-negative integer"}
 	}
 	if u.TotalTokens, ok = int64Field(usage, "total_tokens"); !ok {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
@@ -454,24 +367,24 @@ func nestedCount(fields map[string]json.RawMessage, parent, name string) *int64 
 }
 
 // DecodeResponse validates a unary Responses API document and rewrites its model.
-func DecodeResponse(body []byte, route string) (*Completion, error) {
+func DecodeResponse(body []byte, route string) (*wire.Completion, error) {
 	return decodeResponse(body, route, false)
 }
 
 // DecodeBackgroundResponse also accepts the queued and in-progress objects
 // returned by a provider after accepting an explicitly background request.
-func DecodeBackgroundResponse(body []byte, route string) (*Completion, error) {
+func DecodeBackgroundResponse(body []byte, route string) (*wire.Completion, error) {
 	return decodeResponse(body, route, true)
 }
 
-func decodeResponse(body []byte, route string, background bool) (*Completion, error) {
-	source, err := liftResult(FamilyResponses, body)
+func decodeResponse(body []byte, route string, background bool) (*wire.Completion, error) {
+	source, err := liftResult(wire.Responses, body)
 	if err != nil {
 		return nil, err
 	}
 	fields := source.Source().Fields()
 	if fields == nil {
-		return nil, &ProtocolError{Detail: "response is not a JSON object"}
+		return nil, &wire.ProtocolError{Detail: "response is not a JSON object"}
 	}
 	status, _ := stringField(fields, "status")
 	pending := background && (status == "queued" || status == "in_progress")
@@ -480,7 +393,7 @@ func decodeResponse(body []byte, route string, background bool) (*Completion, er
 			return nil, err
 		}
 	} else if raw, present := fields["error"]; present && !isNull(raw) {
-		return nil, &ProtocolError{Detail: "pending response contains an error"}
+		return nil, &wire.ProtocolError{Detail: "pending response contains an error"}
 	}
 	c, err := responseSummary(fields)
 	if err != nil {
@@ -508,7 +421,7 @@ func terminalResponseError(fields map[string]json.RawMessage) error {
 		if upstream := errorObject(raw); upstream != nil {
 			return upstream
 		}
-		return &ProtocolError{Detail: "response has an invalid error object"}
+		return &wire.ProtocolError{Detail: "response has an invalid error object"}
 	}
 	if _, present := fields["status"]; !present {
 		return nil
@@ -518,13 +431,13 @@ func terminalResponseError(fields map[string]json.RawMessage) error {
 	case "completed", "incomplete":
 		return nil
 	case "failed":
-		return &UpstreamError{Message: "upstream reported a failed response"}
+		return &wire.UpstreamError{Message: "upstream reported a failed response"}
 	default:
-		return &ProtocolError{Detail: "response is not terminal"}
+		return &wire.ProtocolError{Detail: "response is not terminal"}
 	}
 }
 
-func responseSummary(fields map[string]json.RawMessage) (*Completion, error) {
+func responseSummary(fields map[string]json.RawMessage) (*wire.Completion, error) {
 	usage, err := responseUsage(fields)
 	if err != nil {
 		return nil, err
@@ -532,22 +445,22 @@ func responseSummary(fields map[string]json.RawMessage) (*Completion, error) {
 	return responseSummaryWithUsage(fields, usage)
 }
 
-func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *Usage) (*Completion, error) {
+func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *wire.Usage) (*wire.Completion, error) {
 	if kind, ok := stringField(fields, "object"); ok && kind != "response" {
-		return nil, &ProtocolError{Detail: "unexpected object " + kind}
+		return nil, &wire.ProtocolError{Detail: "unexpected object " + kind}
 	}
 	output, ok := arrayField(fields, "output")
 	if !ok {
-		return nil, &ProtocolError{Detail: "response has no output array"}
+		return nil, &wire.ProtocolError{Detail: "response has no output array"}
 	}
-	c := &Completion{Usage: usage}
+	c := &wire.Completion{Usage: usage}
 	c.UpstreamID, _ = stringField(fields, "id")
 	c.ProviderModel, _ = stringField(fields, "model")
 	var text strings.Builder
 	for _, raw := range output {
 		item, err := object(raw)
 		if err != nil {
-			return nil, &ProtocolError{Detail: "output item is not an object"}
+			return nil, &wire.ProtocolError{Detail: "output item is not an object"}
 		}
 		kind, _ := stringField(item, "type")
 		switch kind {
@@ -567,7 +480,7 @@ func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *Usage) (
 				}
 			}
 		case "function_call":
-			var tc ToolCall
+			var tc wire.ToolCall
 			tc.ID, _ = stringField(item, "call_id")
 			tc.Name, _ = stringField(item, "name")
 			tc.Arguments, _ = stringField(item, "arguments")
@@ -670,30 +583,30 @@ func responseToolCalls(raw json.RawMessage) map[string]int64 {
 	return calls
 }
 
-func responseUsage(fields map[string]json.RawMessage) (*Usage, error) {
+func responseUsage(fields map[string]json.RawMessage) (*wire.Usage, error) {
 	raw, present := fields["usage"]
 	if !present || isNull(raw) {
 		return nil, nil
 	}
 	usage, err := object(raw)
 	if err != nil {
-		return nil, &ProtocolError{Detail: "usage is not an object"}
+		return nil, &wire.ProtocolError{Detail: "usage is not an object"}
 	}
-	u := &Usage{}
+	u := &wire.Usage{}
 	var ok bool
 	if u.InputTokens, ok = int64Field(usage, "input_tokens"); !ok {
-		return nil, &ProtocolError{Detail: "usage.input_tokens is not a non-negative integer"}
+		return nil, &wire.ProtocolError{Detail: "usage.input_tokens is not a non-negative integer"}
 	}
 	if u.OutputTokens, ok = int64Field(usage, "output_tokens"); !ok {
-		return nil, &ProtocolError{Detail: "usage.output_tokens is not a non-negative integer"}
+		return nil, &wire.ProtocolError{Detail: "usage.output_tokens is not a non-negative integer"}
 	}
 	if raw, present := usage["total_tokens"]; present && !isNull(raw) {
 		if u.TotalTokens, ok = int64Field(usage, "total_tokens"); !ok {
-			return nil, &ProtocolError{Detail: "usage.total_tokens is not a non-negative integer"}
+			return nil, &wire.ProtocolError{Detail: "usage.total_tokens is not a non-negative integer"}
 		}
 	} else {
 		if u.InputTokens > math.MaxInt64-u.OutputTokens {
-			return nil, &ProtocolError{Detail: "usage token total is out of range"}
+			return nil, &wire.ProtocolError{Detail: "usage token total is out of range"}
 		}
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
@@ -701,13 +614,13 @@ func responseUsage(fields map[string]json.RawMessage) (*Usage, error) {
 		return nil, err
 	}
 	if u.CachedInputTokens != nil && *u.CachedInputTokens > u.InputTokens {
-		return nil, &ProtocolError{Detail: "usage cached input exceeds input tokens"}
+		return nil, &wire.ProtocolError{Detail: "usage cached input exceeds input tokens"}
 	}
 	if u.ReasoningTokens, err = responseDetailCount(usage, "output_tokens_details", "reasoning_tokens"); err != nil {
 		return nil, err
 	}
 	if u.ReasoningTokens != nil && *u.ReasoningTokens > u.OutputTokens {
-		return nil, &ProtocolError{Detail: "usage reasoning tokens exceed output tokens"}
+		return nil, &wire.ProtocolError{Detail: "usage reasoning tokens exceed output tokens"}
 	}
 	return u, nil
 }
@@ -719,14 +632,14 @@ func responseDetailCount(usage map[string]json.RawMessage, parent, name string) 
 	}
 	details, err := object(raw)
 	if err != nil {
-		return nil, &ProtocolError{Detail: "usage." + parent + " is not an object"}
+		return nil, &wire.ProtocolError{Detail: "usage." + parent + " is not an object"}
 	}
 	if raw, present := details[name]; !present || isNull(raw) {
 		return nil, nil
 	}
 	n, ok := int64Field(details, name)
 	if !ok {
-		return nil, &ProtocolError{Detail: "usage." + parent + "." + name + " is not a non-negative integer"}
+		return nil, &wire.ProtocolError{Detail: "usage." + parent + "." + name + " is not a non-negative integer"}
 	}
 	return &n, nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -65,7 +66,7 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 // grantProviders names exactly the grant membership of a serving snapshot.
 // Both installation and rotation polling use this set; historical credentials
 // outside it retain the database fallback in Secret.
-func grantProviders(snapshot *Snapshot) map[string]string {
+func grantProviders(snapshot *routing.Snapshot) map[string]string {
 	providers := map[string]string{}
 	for _, provider := range snapshot.Providers {
 		if provider.AuthMode != connectors.AuthGrant {
@@ -217,7 +218,7 @@ func ReadGrantGenerations(ctx context.Context, q access.Queryer, credentials []s
 // generations against the database too. Stale generations and versions that
 // may no longer serve, such as one whose grant lapsed, are not refreshed.
 func (m *Manager) CredentialRefused(credentialID string, generation int64) {
-	if m.Eligibility(credentialID) != Eligible {
+	if m.Eligibility(credentialID) != routing.Eligible {
 		return
 	}
 	m.mu.Lock()

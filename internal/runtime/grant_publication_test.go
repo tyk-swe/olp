@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func grantCandidate(sequence, generation int64, credentialID string) *releaseCandidate {
 	return &releaseCandidate{
 		baseSequence: sequence - 1,
-		release: &Release{Sequence: sequence, Snapshot: &Snapshot{Providers: map[string]Provider{
-			"provider": {ID: "provider", AuthMode: connectors.AuthGrant, Slots: []Slot{{CredentialID: &credentialID}}},
+		release: &Release{Sequence: sequence, Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{
+			"provider": {ID: "provider", AuthMode: connectors.AuthGrant, Slots: []routing.Slot{{CredentialID: &credentialID}}},
 		}}},
 		grants: map[string]servedGrant{credentialID: {generation: generation, secret: []byte(strconv.FormatInt(generation, 10))}},
 	}

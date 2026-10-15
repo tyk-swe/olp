@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestCodeRouteCanonicalizesIDs(t *testing.T) {
@@ -45,7 +46,7 @@ func TestCodeRouteCanonicalizesIDs(t *testing.T) {
 			if err := f.h.Pool.QueryRow(t.Context(), `SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1`).Scan(&document); err != nil {
 				t.Fatal(err)
 			}
-			var snapshot runtime.Snapshot
+			var snapshot routing.Snapshot
 			if err := json.Unmarshal(document, &snapshot); err != nil {
 				t.Fatal(err)
 			}

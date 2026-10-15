@@ -9,7 +9,7 @@ import (
 )
 
 func TestResponseStreamBindingKeepsOneIdentityPerAttempt(t *testing.T) {
-	x := &execution{responseBinding: &responseStreamBinding{attemptOrdinal: 1, upstreamID: "native-first", localID: "local-first"}}
+	x := &call{generation: generationCall{responseBinding: &responseStreamBinding{attemptOrdinal: 1, upstreamID: "native-first", localID: "local-first"}}}
 	first, err := x.responseStreamIdentity(1, "native-first")
 	if err != nil {
 		t.Fatal(err)

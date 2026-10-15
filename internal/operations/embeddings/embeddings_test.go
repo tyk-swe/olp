@@ -1,10 +1,11 @@
 package embeddings_test
 
 import (
+	"testing"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
-	"testing"
 )
 
 func codec(t *testing.T, id string) operations.Dialect {

@@ -24,11 +24,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
@@ -194,7 +195,7 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	if err := json.Unmarshal(encoded, &account); err != nil {
 		t.Fatal(err)
 	}
-	var cfg runtime.Configuration
+	var cfg routing.Configuration
 	encoded, _ = json.Marshal(configuration)
 	if err := json.Unmarshal(encoded, &cfg); err != nil {
 		t.Fatal(err)

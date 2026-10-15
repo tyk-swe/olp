@@ -9,19 +9,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func TestMountedProfileCannotChangePublishedSemanticsOrCredentialIdentity(t *testing.T) {
 	id, slotID, credentialID, networkID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	provider := Provider{ID: id, Enabled: true, Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1", Endpoint: "https://api.openai.com/v1", DefaultSlotID: slotID, Slots: []Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}, SemanticHeaders: map[string]string{"OpenAI-Beta": "fixture"}, Network: &egress.ConnectionOptions{CredentialID: networkID}}
-	cfg := Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, Endpoint: provider.Endpoint}
+	provider := routing.Provider{ID: id, Enabled: true, Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1", Endpoint: "https://api.openai.com/v1", DefaultSlotID: slotID, Slots: []routing.Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}, SemanticHeaders: map[string]string{"OpenAI-Beta": "fixture"}, Network: &egress.ConnectionOptions{CredentialID: networkID}}
+	cfg := routing.Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, Endpoint: provider.Endpoint}
 	cfg.Options.SemanticHeaders = map[string]string{"OpenAI-Beta": "fixture"}
 	cfg.Options.Network = &egress.ConnectionOptions{CredentialID: networkID}
 	cfg.Options.CredentialHeaders = []string{}
 	cfg.Options.ParameterDefaults = map[string]json.RawMessage{}
 	mounted := MountedProvider{Configuration: cfg, Credential: []byte("api-secret"), NetworkCredential: []byte("network-secret")}
-	snapshot := Snapshot{Providers: map[string]Provider{id: provider}}
+	snapshot := routing.Snapshot{Providers: map[string]routing.Provider{id: provider}}
 	secrets, err := installMounted(&snapshot, map[string]MountedProvider{id: mounted})
 	if err != nil {
 		t.Fatal(err)
@@ -57,9 +58,9 @@ func TestMountedPluginProviderMountsItsStaticCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, slotID, credentialID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	provider := Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, Plugin: plugin, ProfileID: "acme-chat", ProfileRevision: digest, Endpoint: plugin.Address(nil), DefaultSlotID: slotID, Slots: []Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
-	cfg := Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: digest, Endpoint: provider.Endpoint}
-	snapshot := Snapshot{Providers: map[string]Provider{id: provider}}
+	provider := routing.Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, Plugin: plugin, ProfileID: "acme-chat", ProfileRevision: digest, Endpoint: plugin.Address(nil), DefaultSlotID: slotID, Slots: []routing.Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
+	cfg := routing.Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: digest, Endpoint: provider.Endpoint}
+	snapshot := routing.Snapshot{Providers: map[string]routing.Provider{id: provider}}
 	secrets, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: cfg, Credential: []byte("static-secret")}})
 	if err != nil {
 		t.Fatal(err)
@@ -92,9 +93,9 @@ func TestMountedGatewayRefusesProvidersWithGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, slotID, credentialID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	provider := Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, Plugin: plugin, ProfileID: "acme-account", ProfileRevision: digest, Endpoint: plugin.Address(nil), DefaultSlotID: slotID, Slots: []Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
-	cfg := Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: digest, Endpoint: provider.Endpoint}
-	snapshot := Snapshot{Providers: map[string]Provider{id: provider}}
+	provider := routing.Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, Plugin: plugin, ProfileID: "acme-account", ProfileRevision: digest, Endpoint: plugin.Address(nil), DefaultSlotID: slotID, Slots: []routing.Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
+	cfg := routing.Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: digest, Endpoint: provider.Endpoint}
+	snapshot := routing.Snapshot{Providers: map[string]routing.Provider{id: provider}}
 	if _, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: cfg, Credential: []byte(`{"access_token":"at"}`)}}); err == nil || !strings.Contains(err.Error(), "grants") {
 		t.Fatalf("a mounted gateway installed a provider with grants: %v", err)
 	}

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 const jsonSchemaField = `,"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}`
@@ -17,7 +17,7 @@ func declareParams(h *harness, model string, params []string) {
 		if len(p.Capabilities) == 0 || p.Capabilities[0].Model != model {
 			continue
 		}
-		metadata, err := json.Marshal(runtime.ModelMetadata{SupportedParameters: &params})
+		metadata, err := json.Marshal(routing.ModelMetadata{SupportedParameters: &params})
 		if err != nil {
 			h.t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestRequiredParametersAreChecked(t *testing.T) {
 	} {
 		h := newHarness(t, Config{})
 		route := h.rt.release.Snapshot.Routes[routeSlug]
-		route.Policy = &runtime.Policy{Constraints: runtime.Preferences{RequireParameters: &require}}
+		route.Policy = &routing.Policy{Constraints: routing.Preferences{RequireParameters: &require}}
 		h.rt.release.Snapshot.Routes[routeSlug] = route
 		declareParams(h, modelA, []string{"temperature"})
 		declareParams(h, modelB, []string{"top_p"})

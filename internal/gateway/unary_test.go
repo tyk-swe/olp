@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type unaryResponseWriter struct {
@@ -61,7 +61,7 @@ func TestInferenceErrorDeliveryHasWriteDeadline(t *testing.T) {
 					t.Fatalf("error delivery has no bounded write deadline: %v", w.deadline)
 				}
 			}
-			h.gateway.inference(openai.FamilyChat)(w, r)
+			h.gateway.inference(wire.Chat)(w, r)
 			if !wrote || w.Code != tc.status || h.gateway.admission.Admitted() != 0 {
 				t.Fatalf("error delivery: wrote=%t status=%d admission=%d", wrote, w.Code, h.gateway.admission.Admitted())
 			}
@@ -70,7 +70,7 @@ func TestInferenceErrorDeliveryHasWriteDeadline(t *testing.T) {
 }
 
 func TestUnaryDeliveryDeterminesTerminalOutcome(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		for _, tc := range []struct {
 			name               string
 			writeErr, flushErr error
@@ -82,7 +82,7 @@ func TestUnaryDeliveryDeterminesTerminalOutcome(t *testing.T) {
 			t.Run(string(family)+"/"+tc.name, func(t *testing.T) {
 				h := newHarness(t, Config{})
 				body := `{"model":"team-chat","messages":[{"role":"user","content":"hi"}]}`
-				if family == openai.FamilyResponses {
+				if family == wire.Responses {
 					body = `{"model":"team-chat","input":"hi"}`
 					h.mock.set("a", status(http.StatusOK, `{"id":"resp_1","object":"response","model":"model-a","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
 				}

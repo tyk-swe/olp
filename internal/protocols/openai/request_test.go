@@ -4,24 +4,26 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestExplicitTokenLimitSuppressesDefaultsUnderEitherAlias(t *testing.T) {
 	for _, explicit := range []string{"max_tokens", "max_completion_tokens"} {
 		for _, value := range []string{"32", "null"} {
 			t.Run(explicit+"/"+value, func(t *testing.T) {
-				r, err := Parse(FamilyChat, []byte(`{"model":"r","messages":[{"role":"user","content":"hi"}],"`+explicit+`":`+value+`}`))
+				r, err := Parse(wire.Chat, []byte(`{"model":"r","messages":[{"role":"user","content":"hi"}],"`+explicit+`":`+value+`}`))
 				if err != nil {
 					t.Fatal(err)
 				}
-				encoded, err := r.Encode("upstream", map[string]json.RawMessage{
+				encoded, err := Encode(r, "upstream", map[string]json.RawMessage{
 					"max_tokens": json.RawMessage("64"), "max_completion_tokens": json.RawMessage("128"), "temperature": json.RawMessage("0.5"),
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				// The composed document must still satisfy the mutual exclusion rule.
-				out, err := Parse(FamilyChat, encoded)
+				out, err := Parse(wire.Chat, encoded)
 				if err != nil {
 					t.Fatalf("defaults invalidated the request: %s: %v", encoded, err)
 				}
@@ -32,15 +34,15 @@ func TestExplicitTokenLimitSuppressesDefaultsUnderEitherAlias(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"max_tokens", "max_completion_tokens"} {
-		r, err := Parse(FamilyChat, []byte(`{"model":"r","messages":[{"role":"user","content":"hi"}]}`))
+		r, err := Parse(wire.Chat, []byte(`{"model":"r","messages":[{"role":"user","content":"hi"}]}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		encoded, err := r.Encode("upstream", map[string]json.RawMessage{name: json.RawMessage("64")})
+		encoded, err := Encode(r, "upstream", map[string]json.RawMessage{name: json.RawMessage("64")})
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, err := Parse(FamilyChat, encoded)
+		out, err := Parse(wire.Chat, encoded)
 		if err != nil || string(out.Field(name)) != "64" {
 			t.Fatalf("absent token limit did not use default: %s: %v", encoded, err)
 		}
@@ -48,11 +50,11 @@ func TestExplicitTokenLimitSuppressesDefaultsUnderEitherAlias(t *testing.T) {
 }
 
 func TestTopLogprobsAcceptsZeroAndPreservesValue(t *testing.T) {
-	for _, family := range []Family{FamilyChat, FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		for _, value := range []string{"0", "1", "20", "null", "-1", "21", "0.5", `"0"`, "true", "{}", "[]"} {
 			t.Run(string(family)+"/"+value, func(t *testing.T) {
 				input := `"messages":[{"role":"user","content":"hi"}],"logprobs":true`
-				if family == FamilyResponses {
+				if family == wire.Responses {
 					input = `"input":"hi"`
 				}
 				body := []byte(`{"model":"r",` + input + `,"top_logprobs":` + value + `}`)
@@ -62,7 +64,7 @@ func TestTopLogprobsAcceptsZeroAndPreservesValue(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					encoded, err := request.Encode("upstream", nil)
+					encoded, err := Encode(request, "upstream", nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -74,7 +76,7 @@ func TestTopLogprobsAcceptsZeroAndPreservesValue(t *testing.T) {
 						t.Fatalf("top_logprobs changed in upstream request: %s", encoded)
 					}
 				default:
-					var invalid *RequestError
+					var invalid *wire.RequestError
 					if !errors.As(err, &invalid) || invalid.Code != "invalid_value" || invalid.Param != "top_logprobs" {
 						t.Fatalf("invalid top_logprobs: %v", err)
 					}
@@ -87,8 +89,8 @@ func TestTopLogprobsAcceptsZeroAndPreservesValue(t *testing.T) {
 func TestChatStreamUsageOptionMustBeBoolean(t *testing.T) {
 	for _, value := range []string{`"false"`, "0", "1", "[]", "{}"} {
 		t.Run(value, func(t *testing.T) {
-			_, err := Parse(FamilyChat, []byte(`{"model":"r","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":`+value+`}}`))
-			var invalid *RequestError
+			_, err := Parse(wire.Chat, []byte(`{"model":"r","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":`+value+`}}`))
+			var invalid *wire.RequestError
 			if !errors.As(err, &invalid) || invalid.Param != "stream_options.include_usage" {
 				t.Fatalf("invalid usage option was accepted: %v", err)
 			}

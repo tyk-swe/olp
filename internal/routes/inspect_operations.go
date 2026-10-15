@@ -3,6 +3,9 @@ package routes
 import (
 	"encoding/json"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
@@ -10,11 +13,9 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*openai.Request, *oif.Request, *media.Request, error) {
+func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
 	if !strict || operation == "generation" {
 		request, err := inspectorRequest(raw, operation, surface, mode, dialect, slug, strict)
 		return request, nil, nil, err
@@ -63,11 +64,11 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	return nil, &request, nil, nil
 }
-func inspectionUnaryAccept(route runtime.Route, source oif.Request, context interaction.Context, client string, demand *runtime.TokenDemand, budget *inspectionBudget) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionUnaryAccept(route routing.Route, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	plans := map[string]*operationplan.Plan{}
-	accept := func(provider runtime.Provider, target runtime.Target) error {
-		result := &interactionInspection{Status: "incompatible", Fidelity: runtime.FidelityStrict, Evidence: []string{}}
+	accept := func(provider routing.Provider, target routing.Target) error {
+		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
 		template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, Policy: route.ContentPolicy})
 		if err != nil {
@@ -106,21 +107,21 @@ func inspectionUnaryAccept(route runtime.Route, source oif.Request, context inte
 		plans[target.ID] = plan
 		return nil
 	}
-	effective := func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
+	effective := func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
 		plan := plans[target.ID]
 		if plan == nil {
 			return nil, demand
 		}
-		return runtime.Listed(plan.Parameters()), demand
+		return routing.Listed(plan.Parameters()), demand
 	}
 	return accept, effective, details
 }
 
-func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *runtime.TokenDemand, budget *inspectionBudget) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionMediaAccept(route routing.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	parameters := map[string][]string{}
-	accept := func(provider runtime.Provider, target runtime.Target) error {
-		result := &interactionInspection{Status: "incompatible", Fidelity: runtime.FidelityStrict, Evidence: []string{}}
+	accept := func(provider routing.Provider, target routing.Target) error {
+		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
 		if client != "" || len(context.Headers) != 0 || len(context.Query) != 0 {
 			return safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/semantic_context", Requirement: "media_context", Message: "This media profile has no qualified caller semantic context."})
@@ -170,8 +171,8 @@ func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect s
 		result.Status = "admitted"
 		return nil
 	}
-	effective := func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
-		return runtime.Listed(parameters[target.ID]), demand
+	effective := func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
+		return routing.Listed(parameters[target.ID]), demand
 	}
 	return accept, effective, details
 }

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -16,7 +18,7 @@ import (
 
 type Invocation struct {
 	Prepared oif.Prepared
-	Wire     openai.Family
+	Wire     wire.Format
 	Defaults []connectors.DefaultProvenance
 }
 
@@ -26,8 +28,8 @@ type Invocation struct {
 // native default, plugin profile rewrite, forced upstream streaming and
 // hosting wrapper in the prepared document. A plugin profile's envelope stays
 // outside it: see connectors.Config.WrapRequest.
-func Prepare(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) (Invocation, error) {
-	wire := protocols.WireFamily(config.Kind, config.VendorID, request.Family)
+func Prepare(request *wire.Request, config connectors.Config, model string, parameterDefaults protocols.Object) (Invocation, error) {
+	encodedWire := protocols.WireFamily(config.Kind, config.VendorID, request.Family)
 	defaults := parameterDefaults
 	var origins []connectors.DefaultProvenance
 	if config.ProfileID != "" {
@@ -35,7 +37,7 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 			return Invocation{}, profileError(err)
 		}
 		var err error
-		wire, err = config.TargetFamily(request.Family)
+		encodedWire, err = config.TargetFamily(request.Family)
 		if err != nil {
 			return Invocation{}, profileError(err)
 		}
@@ -44,27 +46,27 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 			return Invocation{}, profileError(err)
 		}
 	}
-	if config.ProfileID != "" && request.Family.Operation() == "embeddings" && wire != request.Family && len(defaults) > 0 {
+	if config.ProfileID != "" && request.Family.Operation() == "embeddings" && encodedWire != request.Family && len(defaults) > 0 {
 		for name, raw := range request.Document() {
 			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-				return Invocation{}, &openai.RequestError{Code: "unsupported_parameter", Param: name, Message: "The selected embedding profile cannot qualify explicit null with native defaults."}
+				return Invocation{}, &wire.RequestError{Code: "unsupported_parameter", Param: name, Message: "The selected embedding profile cannot qualify explicit null with native defaults."}
 			}
 		}
 	}
 	target := config.Model(model)
-	if wire == openai.FamilyBedrockRerank {
+	if encodedWire == wire.BedrockRerank {
 		// Bedrock Rerank names its model by ARN in the request body.
 		target = config.BedrockModelARN(target)
 	}
-	prepared, wire, err := protocols.PrepareTarget(request, wire, config.Kind, config.VendorID, target, defaults)
+	prepared, encodedWire, err := protocols.PrepareTarget(request, encodedWire, config.Kind, config.VendorID, target, defaults)
 	if err != nil {
 		return Invocation{}, err
 	}
 	if config.ProfileID == "" {
-		return Invocation{Prepared: prepared, Wire: wire}, nil
+		return Invocation{Prepared: prepared, Wire: encodedWire}, nil
 	}
 	if request.Family.Operation() == "embeddings" {
-		prepared, err = protocols.ApplyEmbeddingDefaults(prepared, wire, defaults)
+		prepared, err = protocols.ApplyEmbeddingDefaults(prepared, encodedWire, defaults)
 		if err != nil {
 			return Invocation{}, err
 		}
@@ -89,14 +91,14 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 	if err != nil {
 		return Invocation{}, profileError(err)
 	}
-	if err = checkStateRewrites(beforeRewrites, prepared.Document(), wire); err != nil {
+	if err = checkStateRewrites(beforeRewrites, prepared.Document(), encodedWire); err != nil {
 		return Invocation{}, profileError(err)
 	}
 	if prepared, err = config.StreamRequest(prepared); err != nil {
 		return Invocation{}, profileError(err)
 	}
 	body := prepared.Document().Bytes()
-	wrapped, err := config.WrapBody(body, wire)
+	wrapped, err := config.WrapBody(body, encodedWire)
 	if err != nil {
 		return Invocation{}, profileError(err)
 	}
@@ -111,16 +113,16 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 		}
 		prepared = hosted.WithProvenance(prepared.Provenance()...)
 	}
-	return Invocation{Prepared: prepared, Wire: wire, Defaults: applied}, nil
+	return Invocation{Prepared: prepared, Wire: encodedWire, Defaults: applied}, nil
 }
 
 // Hosting rewrites cannot introduce provider retention or replace a reference
 // authorized on ingress. Check the effective dialect body before any envelope
 // wraps it, including Responses' implicit retention when store is omitted.
-func checkStateRewrites(before, after oif.Document, wire openai.Family) error {
+func checkStateRewrites(before, after oif.Document, encodedWire wire.Format) error {
 	fields := []string{"store"}
-	switch wire {
-	case openai.FamilyResponses:
+	switch encodedWire {
+	case wire.Responses:
 		from, _ := before.Root().Lookup("input")
 		to, _ := after.Root().Lookup("input")
 		if from.Raw() != to.Raw() {
@@ -129,7 +131,7 @@ func checkStateRewrites(before, after oif.Document, wire openai.Family) error {
 			}
 		}
 		fields = append(fields, "background", "previous_response_id", "conversation")
-	case openai.FamilyChat:
+	case wire.Chat:
 	default:
 		return nil
 	}
@@ -142,7 +144,7 @@ func checkStateRewrites(before, after oif.Document, wire openai.Family) error {
 		absent := to.Kind() == oif.Absent || to.Kind() == oif.Null
 		switch field {
 		case "store":
-			if to.Raw() == "false" || absent && (wire == openai.FamilyChat || from.Raw() == "true") {
+			if to.Raw() == "false" || absent && (encodedWire == wire.Chat || from.Raw() == "true") {
 				continue
 			}
 		case "background":
@@ -160,14 +162,6 @@ func checkStateRewrites(before, after oif.Document, wire openai.Family) error {
 	return nil
 }
 
-func Encode(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) ([]byte, openai.Family, error) {
-	invocation, err := Prepare(request, config, model, parameterDefaults)
-	if err != nil {
-		return nil, "", err
-	}
-	return invocation.Prepared.Document().Bytes(), invocation.Wire, nil
-}
-
 func profileError(err error) error {
-	return &openai.RequestError{Code: "unsupported_parameter", Param: "provider_profile", Message: err.Error()}
+	return &wire.RequestError{Code: "unsupported_parameter", Param: "provider_profile", Message: err.Error()}
 }

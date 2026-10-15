@@ -14,22 +14,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, resourceCall bool) (*execution, access.Authority, bool) {
+func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, resourceCall bool) (*call, access.Authority, bool) {
 	actor := "api_key"
 	if resourceCall {
 		actor = "api_key_resource"
 	}
-	x := &execution{request: s.begin(w, r), family: openai.FamilyGeminiInteractions, actor: actor, mode: "unary"}
+	x := &call{request: s.begin(w, r), family: wire.GeminiInteractions, actor: actor, mode: "unary"}
 	if !s.admit(r.Context()) {
 		x.failure = overloaded
 		s.finish(x, nil, overloaded.Status)
@@ -172,7 +174,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			fail(serverError(http.StatusConflict, "provider_resource_unavailable", "The previous Interaction cannot be read."))
 			return
 		}
-		var retainedRoute *runtime.Route
+		var retainedRoute *routing.Route
 		p, retainedRoute, e = s.resolveResource(ctx, x, authority, parent, "generation", retainedNewWork)
 		if e != nil || retainedRoute == nil || retainedRoute.Slug != route.Slug || p.provider.ProfileID != "gemini-interactions" || !p.provider.Supports(p.model, "generation", "gemini", x.mode) {
 			fail(pinUnavailable())
@@ -188,9 +190,9 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		p.hold = gate.hold
-		x.attempts, x.budget = []runtime.Attempt{p.attempt}, 1
+		x.attempts, x.budget = []routing.Attempt{p.attempt}, 1
 	} else {
-		p, e = s.selectPinSurface(ctx, x, &route, "generation", "gemini", x.mode, func(provider *runtime.Provider, model string) bool {
+		p, e = s.selectPinSurface(ctx, x, &route, "generation", "gemini", x.mode, func(provider *routing.Provider, model string) bool {
 			return provider.ProfileID == "gemini-interactions" && provider.Connector().Supports("generation", "gemini", x.mode) && provider.Supports(model, "generation", "gemini", x.mode)
 		})
 		if e != nil {
@@ -347,7 +349,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func (s *Server) storeGeminiInteraction(ctx context.Context, x *execution, p *pin, owner, upstreamID, state string, parent *resources.Resource, deferUsage bool) (*resources.Resource, error) {
+func (s *Server) storeGeminiInteraction(ctx context.Context, x *call, p *pin, owner, upstreamID, state string, parent *resources.Resource, deferUsage bool) (*resources.Resource, error) {
 	version := resources.InteractionContract
 	expiry := s.now().Add(resources.ContinuationLifetime - time.Minute)
 	model, _ := json.Marshal(p.model)
@@ -499,7 +501,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	x.estimate = resourceEstimate
-	var retained *runtime.Route
+	var retained *routing.Route
 	var e *Error
 	use := retainedHousekeeping
 	if r.Method == http.MethodGet {
@@ -688,7 +690,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	status, out = response.StatusCode, &outcome{committed: true}
 }
 
-func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWriter, x *execution, p *pin, response *http.Response, authority access.Authority, store bool, parent, existing *resources.Resource, expectedID string, resumed bool) (bool, error) {
+func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWriter, x *call, p *pin, response *http.Response, authority access.Authority, store bool, parent, existing *resources.Resource, expectedID string, resumed bool) (bool, error) {
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return false, errors.New("provider did not return Interaction SSE")
@@ -861,7 +863,7 @@ func geminiGenerationFailure() *Error {
 	return failure
 }
 
-func (s *Server) recordGeminiInteractionUsage(x *execution, object oif.Value) {
+func (s *Server) recordGeminiInteractionUsage(x *call, object oif.Value) {
 	if len(x.facts) == 0 || x.actor == "api_key_resource" {
 		return
 	}
@@ -878,7 +880,7 @@ func (s *Server) recordGeminiInteractionUsage(x *execution, object oif.Value) {
 	fact.UsageComplete, fact.BillingUncertain = complete, !complete
 }
 
-func geminiInteractionUsage(object oif.Value) *openai.Usage {
+func geminiInteractionUsage(object oif.Value) *wire.Usage {
 	usageValue, ok := object.Lookup("usage")
 	if !ok || usageValue.Kind() != oif.Object {
 		return nil

@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -222,14 +223,14 @@ func (c Config) ServingPrincipal(model string) string {
 	}
 	return c.Bindings[model].PrincipalID
 }
-func (c Config) URL(wire openai.Family, model string, stream bool) (string, error) {
+func (c Config) URL(encodedWire wire.Format, model string, stream bool) (string, error) {
 	if c.ProfileID != "" {
 		if err := c.ValidateProfile(); err != nil {
 			return "", err
 		}
-		expected, err := c.TargetFamily(wire)
-		batch := wire == openai.FamilyGeminiEmbeddingsBatch && expected == openai.FamilyGeminiEmbeddings
-		if err != nil || wire != expected && !batch {
+		expected, err := c.TargetFamily(encodedWire)
+		batch := encodedWire == wire.GeminiEmbeddingsBatch && expected == wire.GeminiEmbeddings
+		if err != nil || encodedWire != expected && !batch {
 			return "", errors.New("wire dialect does not match the selected provider profile")
 		}
 	}
@@ -240,30 +241,30 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	}
 	switch c.Kind {
 	case KindSageMaker:
-		return sagemakerURL(base, wire, model)
+		return sagemakerURL(base, encodedWire, model)
 	case KindWatsonx:
-		return c.watsonxURL(base, wire, stream)
+		return c.watsonxURL(base, encodedWire, stream)
 	}
 	path := "/chat/completions"
-	switch wire {
-	case openai.FamilyResponses:
+	switch encodedWire {
+	case wire.Responses:
 		path = "/responses"
-	case openai.FamilyInputTokens:
+	case wire.InputTokens:
 		path = "/responses/input_tokens"
-	case openai.FamilyEmbeddings:
+	case wire.Embeddings:
 		path = "/embeddings"
-	case openai.FamilyModeration:
+	case wire.Moderation:
 		path = "/moderations"
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		path = "/messages"
-	case openai.FamilyAnthropicCount:
+	case wire.AnthropicCount:
 		path = "/messages/count_tokens"
-	case openai.FamilyGemini, openai.FamilyGeminiCount:
+	case wire.Gemini, wire.GeminiCount:
 		operation := "generateContent"
 		if stream {
 			operation = "streamGenerateContent"
 		}
-		if wire == openai.FamilyGeminiCount {
+		if encodedWire == wire.GeminiCount {
 			operation = "countTokens"
 		}
 		path = "/models/" + url.PathEscape(model) + ":" + operation
@@ -278,48 +279,48 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		path = "/model/" + url.PathEscape(model) + "/" + operation
 	case "bedrock_count":
 		path = "/model/" + url.PathEscape(model) + "/count-tokens"
-	case openai.FamilyGeminiEmbeddings:
+	case wire.GeminiEmbeddings:
 		path = "/models/" + url.PathEscape(model) + ":embedContent"
-	case openai.FamilyGeminiEmbeddingsBatch:
+	case wire.GeminiEmbeddingsBatch:
 		path = "/models/" + url.PathEscape(model) + ":batchEmbedContents"
-	case openai.FamilyVertexEmbeddings:
+	case wire.VertexEmbeddings:
 		path = "/models/" + url.PathEscape(model) + ":predict"
-	case openai.FamilyBedrockInvoke:
+	case wire.BedrockInvoke:
 		operation := "invoke"
 		if stream {
 			operation = "invoke-with-response-stream"
 		}
 		path = "/model/" + url.PathEscape(model) + "/" + operation
-	case openai.FamilyBedrockEmbeddings:
+	case wire.BedrockEmbeddings:
 		path = "/model/" + url.PathEscape(model) + "/invoke"
-	case openai.FamilyBedrockRerank:
+	case wire.BedrockRerank:
 		return c.bedrockAgentRuntime(base)
-	case openai.FamilyMistralFIM:
+	case wire.MistralFIM:
 		path = "/fim/completions"
-	case openai.FamilyCohereChat:
+	case wire.CohereChat:
 		path = "/chat"
-	case openai.FamilyRerank:
+	case wire.Rerank:
 		if endpoint, ok := c.operationEndpoint("rerank", base); ok {
 			return endpoint, nil
 		}
 		path = "/rerank"
 	}
 	hosting, traits := c.Hosting(), c.traits()
-	if hosting == "vertex-anthropic" && wire == openai.FamilyAnthropic {
+	if hosting == "vertex-anthropic" && encodedWire == wire.Anthropic {
 		action := "rawPredict"
 		if stream {
 			action = "streamRawPredict"
 		}
 		return base + "/models/" + url.PathEscape(model) + ":" + action, nil
 	}
-	if hosting == "bedrock-anthropic-invoke" && wire == openai.FamilyAnthropic {
+	if hosting == "bedrock-anthropic-invoke" && encodedWire == wire.Anthropic {
 		action := "invoke"
 		if stream {
 			action = "invoke-with-response-stream"
 		}
 		return base + "/model/" + url.PathEscape(model) + "/" + action, nil
 	}
-	if hosting == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
+	if hosting == "azure-responses-legacy" && (encodedWire == wire.Responses || encodedWire == wire.InputTokens) {
 		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
 	if traits.deployment {

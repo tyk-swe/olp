@@ -5,9 +5,10 @@ package usage
 import (
 	"testing"
 
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"time"
 )
 
 // seedCommittedProvider stores a provider whose revision carries a

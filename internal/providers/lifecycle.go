@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -519,8 +521,8 @@ func onePrincipal(slots []slotRow, cfg *Configuration) error {
 	return access.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals or serving environments: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account and environment: re-enroll these slots alike, and pool other accounts through other providers.")
 }
 
-func (row *slotRow) published(authMode string) runtime.RevisionSlot {
-	slot := runtime.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency, Supply: row.Limits.Supply}
+func (row *slotRow) published(authMode string) routing.RevisionSlot {
+	slot := routing.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency, Supply: row.Limits.Supply}
 	var principal string
 	if connectors.SecretRequired(authMode) {
 		slot.Enabled = slot.Enabled && !row.CredentialRevoked
@@ -528,7 +530,7 @@ func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 		slot.CredentialVersion = row.CredentialVersion
 		principal = row.observedPrincipal()
 	}
-	return runtime.RevisionSlot{Slot: slot, Default: row.Default, ObservedPrincipal: principal}
+	return routing.RevisionSlot{Slot: slot, Default: row.Default, ObservedPrincipal: principal}
 }
 
 func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -554,17 +556,17 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		if len(models) == 0 {
 			return access.Reply{}, access.Fail(422, "no_enabled_models", "Enable and certify at least one model before activating.")
 		}
-		published := make([]runtime.RevisionModel, 0, len(models))
+		published := make([]routing.RevisionModel, 0, len(models))
 		for _, m := range models {
 			if len(m.Capabilities) == 0 {
 				return access.Reply{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" declares no capabilities.")
 			}
-			rm := runtime.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName}
+			rm := routing.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName}
 			for _, c := range m.Capabilities {
 				if c.Source != "certified" {
 					return access.Reply{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
 				}
-				rm.Capabilities = append(rm.Capabilities, runtime.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
+				rm.Capabilities = append(rm.Capabilities, routing.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
 			}
 			published = append(published, rm)
 		}
@@ -576,7 +578,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 			return access.Reply{}, err
 		}
 		var credentialVersion *int
-		revisionSlots := make([]runtime.RevisionSlot, 0, len(slots))
+		revisionSlots := make([]routing.RevisionSlot, 0, len(slots))
 		for i := range slots {
 			slot := slots[i].published(current.Configuration.AuthMode)
 			if err := slots[i].credentialFits(&current.Configuration); err != nil {
@@ -642,8 +644,8 @@ type revisionRow struct {
 	Revision          int
 	Name              string
 	Configuration     Configuration
-	Models            []runtime.RevisionModel
-	Slots             []runtime.RevisionSlot
+	Models            []routing.RevisionModel
+	Slots             []routing.RevisionSlot
 	CredentialVersion *int
 	SourceETag        string
 	ActivatedBy       string
@@ -790,7 +792,7 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 	return access.ListReply(items, page), nil
 }
 
-func capabilityKey(model string, c runtime.RevisionCapability) string {
+func capabilityKey(model string, c routing.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
@@ -811,11 +813,11 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	a, b := from.Configuration, to.Configuration
-	fromModels := map[string]runtime.RevisionModel{}
+	fromModels := map[string]routing.RevisionModel{}
 	for _, m := range from.Models {
 		fromModels[m.UpstreamModel] = m
 	}
-	toModels := map[string]runtime.RevisionModel{}
+	toModels := map[string]routing.RevisionModel{}
 	for _, m := range to.Models {
 		toModels[m.UpstreamModel] = m
 	}
@@ -864,7 +866,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		"plugin_changed":                 a.pluginDigest() != b.pluginDigest(),
 		"plugin_options_changed":         !sameJSON(a.Options.PluginOptions, b.Options.PluginOptions),
 		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
-		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings) || runtime.ObservedPrincipal(from.Slots) != runtime.ObservedPrincipal(to.Slots),
+		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings) || routing.ObservedPrincipal(from.Slots) != routing.ObservedPrincipal(to.Slots),
 		"name_changed":                   from.Name != to.Name,
 		"endpoint_changed":               deref(a.Endpoint) != deref(b.Endpoint),
 		"cloud_context_changed":          deref(a.CloudRegion) != deref(b.CloudRegion) || deref(a.CloudProject) != deref(b.CloudProject),
@@ -934,7 +936,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 		if err != nil {
 			return "", err
 		}
-		published := make([]runtime.RevisionSlot, 0, len(slots))
+		published := make([]routing.RevisionSlot, 0, len(slots))
 		for i := range slots {
 			published = append(published, slots[i].published(v.Configuration.AuthMode))
 		}

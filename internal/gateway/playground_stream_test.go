@@ -20,7 +20,7 @@ func TestPlaygroundStreamDeliversTerminalErrorAfterByteLimit(t *testing.T) {
 	if !errors.Is(err, errResponseTooLarge) {
 		t.Fatalf("emit error = %v, want errResponseTooLarge", err)
 	}
-	sw.finish(&execution{}, &outcome{err: &Error{
+	sw.finish(&call{}, &outcome{err: &Error{
 		Status:  http.StatusBadGateway,
 		Code:    "upstream_response_too_large",
 		Message: "The upstream response exceeded the byte limit.",

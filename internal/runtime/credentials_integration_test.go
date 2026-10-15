@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -119,7 +120,7 @@ func TestIntegrationHistoricalSecretReleasesPoolBeforeRemoteResolution(t *testin
 	if err := <-result; !errors.Is(err, ErrCredentialUnavailable) {
 		t.Fatal("remote completion ignored observed revocation", err)
 	}
-	if m.Eligibility(credential) != Revoked {
+	if m.Eligibility(credential) != routing.Revoked {
 		t.Fatal("historical revocation was not retained")
 	}
 	if err := m.StopContext(t.Context()); err != nil {

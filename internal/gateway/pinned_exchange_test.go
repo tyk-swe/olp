@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -18,18 +19,18 @@ type pinnedTransportFunc func(*http.Request) (*http.Response, error)
 
 func (f pinnedTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func pinnedExchangeFixture(t *testing.T) (*harness, *execution, *pin) {
+func pinnedExchangeFixture(t *testing.T) (*harness, *call, *pin) {
 	t.Helper()
 	h := newHarness(t, Config{})
-	var provider runtime.Provider
+	var provider routing.Provider
 	for _, candidate := range h.rt.release.Snapshot.Providers {
 		if candidate.Name == "a" {
 			provider = candidate
 		}
 	}
 	route := h.rt.release.Snapshot.Routes[routeSlug]
-	x := &execution{request: request{release: h.rt.release, startedAt: time.Now()}, route: &route, family: openai.FamilyGeminiInteractions, mode: "unary", estimate: 100}
-	p := &pin{provider: provider, slot: provider.Slots[0], model: modelA, attempt: runtime.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: modelA}}
+	x := &call{request: request{release: h.rt.release, startedAt: time.Now()}, family: wire.GeminiInteractions, mode: "unary", estimate: 100, routeLeg: routeLeg{route: &route}}
+	p := &pin{provider: provider, slot: provider.Slots[0], model: modelA, attempt: routing.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: modelA}}
 	return h, x, p
 }
 
@@ -91,7 +92,7 @@ func TestPinnedObservedUsageSurvivesMappingAndDeliveryFailure(t *testing.T) {
 			x.exchange.state.dispatched.Store(true)
 			x.exchange.state.accepted, x.dispatched = true, true
 			x.facts[0].Interaction = &usage.InteractionEvidence{UpstreamState: usage.UpstreamAccepted}
-			x.facts[0].Usage = &openai.Usage{InputTokens: 9, OutputTokens: 5}
+			x.facts[0].Usage = &wire.Usage{InputTokens: 9, OutputTokens: 5}
 			x.completePinned()
 			if delivery {
 				h.gateway.writeStateJSON(&failedMediaWriter{header: make(http.Header)}, x, []byte(`{"id":"owned"}`))
@@ -137,7 +138,7 @@ func TestPinnedBufferedFlushFailurePreservesUpstreamCompletion(t *testing.T) {
 	e := h.gateway.beginPinned(t.Context(), x, p, http.MethodPost)
 	e.state.dispatched.Store(true)
 	e.state.accepted, x.dispatched = true, true
-	x.facts[0].Usage = &openai.Usage{InputTokens: 9, OutputTokens: 5}
+	x.facts[0].Usage = &wire.Usage{InputTokens: 9, OutputTokens: 5}
 	x.completePinned()
 	h.gateway.writeStateJSON(&pinnedFlushFailure{header: make(http.Header)}, x, []byte(`{"id":"owned"}`))
 	fact := x.facts[0]

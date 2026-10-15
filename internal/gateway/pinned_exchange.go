@@ -7,7 +7,8 @@ import (
 	"net/http/httptrace"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -20,7 +21,7 @@ type pinnedExchange struct {
 	billable bool
 }
 
-func (s *Server) beginPinned(ctx context.Context, x *execution, p *pin, method string) *pinnedExchange {
+func (s *Server) beginPinned(ctx context.Context, x *call, p *pin, method string) *pinnedExchange {
 	x.finalizePinned(nil, s.now())
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = x.mode
@@ -29,14 +30,14 @@ func (s *Server) beginPinned(ctx context.Context, x *execution, p *pin, method s
 	}
 	exchange := &pinnedExchange{
 		state: attemptState{parent: ctx, classifier: upstream.Classifier{AtMostOnce: method == http.MethodPost, Declared: p.provider.Connector().Classification()}},
-		index: len(x.facts), billable: (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyBedrock || x.family == openai.FamilyBedrockInvoke) && x.actor != "api_key_resource",
+		index: len(x.facts), billable: (x.family == wire.GeminiInteractions || x.family == wire.Bedrock || x.family == wire.BedrockInvoke) && x.actor != "api_key_resource",
 	}
 	x.facts = append(x.facts, fact)
 	x.exchange = exchange
 	return exchange
 }
 
-func (e *pinnedExchange) fail(s *Server, x *execution, class string, failure *attemptFailure) *attemptFailure {
+func (e *pinnedExchange) fail(s *Server, x *call, class string, failure *attemptFailure) *attemptFailure {
 	if failure == nil {
 		failure = &attemptFailure{}
 	}
@@ -57,7 +58,7 @@ func (e *pinnedExchange) fail(s *Server, x *execution, class string, failure *at
 	return failure
 }
 
-func (s *Server) doPinnedRequest(ctx context.Context, x *execution, p *pin, exchange *pinnedExchange, req *http.Request, decodeError func([]byte) *openai.UpstreamError) (*http.Response, *attemptFailure) {
+func (s *Server) doPinnedRequest(ctx context.Context, x *call, p *pin, exchange *pinnedExchange, req *http.Request, decodeError func([]byte) *wire.UpstreamError) (*http.Response, *attemptFailure) {
 	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
 	if err != nil {
 		return nil, exchange.fail(s, x, classCredential, nil)
@@ -98,14 +99,14 @@ func (s *Server) doPinnedRequest(ctx context.Context, x *execution, p *pin, exch
 
 // completePinned records validated upstream completion before any local
 // persistence or delivery that can fail without changing the provider's result.
-func (x *execution) completePinned() {
+func (x *call) completePinned() {
 	if e := x.exchange; e != nil {
 		e.state.settled = true
 		x.facts[e.index].Class = classSuccess
 	}
 }
 
-func (x *execution) finalizePinned(out *outcome, at time.Time) {
+func (x *call) finalizePinned(out *outcome, at time.Time) {
 	e := x.exchange
 	if e == nil {
 		return

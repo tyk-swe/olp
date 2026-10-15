@@ -1,9 +1,10 @@
 package config_test
 
 import (
-	"github.com/tyk-swe/olp/internal/config"
 	"io"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/config"
 )
 
 func TestReleaseConfigurationEnforcesAdvertisedBounds(t *testing.T) {

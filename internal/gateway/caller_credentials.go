@@ -5,8 +5,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // Use net/http canonical spelling to avoid allocating during absent-header lookups.
@@ -54,7 +55,7 @@ func readCallerCredential(headers http.Header) *callerCredential {
 	return c
 }
 
-func (x *execution) callerSecret(provider, model string) ([]byte, error) {
+func (x *call) callerSecret(provider, model string) ([]byte, error) {
 	secret, err := x.bindCallerSecret(provider, model)
 	if err != nil {
 		return nil, err
@@ -67,7 +68,7 @@ func (x *execution) callerSecret(provider, model string) ([]byte, error) {
 
 // bindCallerSecret binds the caller credential to a target without recording
 // it, for calls that redact with their own collection.
-func (x *execution) bindCallerSecret(provider, model string) ([]byte, error) {
+func (x *call) bindCallerSecret(provider, model string) ([]byte, error) {
 	c := x.request.callerCredential
 	if c == nil || c.invalid || x.origin != "" || !c.bind(provider+"\x00"+model) {
 		return nil, connectors.ErrCredentialRejected
@@ -75,7 +76,7 @@ func (x *execution) bindCallerSecret(provider, model string) ([]byte, error) {
 	return c.secret, nil
 }
 
-func (x *execution) checkCallerTarget(provider *runtime.Provider, model string) *Error {
+func (x *call) checkCallerTarget(provider *routing.Provider, model string) *Error {
 	if x.callerCostExempt() && provider.CredentialSource != "caller" {
 		return invalidRequest("caller_cost_policy_mismatch", "This retained target is incompatible with the caller-paid route policy.", nil)
 	}
@@ -93,7 +94,7 @@ func (x *execution) checkCallerTarget(provider *runtime.Provider, model string) 
 }
 
 // The named ingress policy governs all attempts in a request.
-func (x *execution) callerCostExempt() bool {
+func (x *call) callerCostExempt() bool {
 	if x == nil || x.origin != "" || x.named() == nil {
 		return false
 	}

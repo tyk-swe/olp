@@ -5,34 +5,35 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // explainSnapshot publishes one route per name, each serving one model with
 // the given context window.
-func explainSnapshot(windows map[string]int) *runtime.Snapshot {
+func explainSnapshot(windows map[string]int) *routing.Snapshot {
 	credential := uuid.NewString()
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}, Routes: map[string]runtime.Route{}}
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
 	for slug, window := range windows {
 		provider, model := uuid.NewString(), slug+"-model"
-		snapshot.Providers[provider] = runtime.Provider{
+		snapshot.Providers[provider] = routing.Provider{
 			ID: provider, Kind: "openai", Enabled: true, AuthMode: "api_key",
-			Capabilities: []runtime.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}},
+			Capabilities: []routing.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}},
 			Models:       map[string]json.RawMessage{model: json.RawMessage(`{"context_length":` + itoa(window) + `}`)},
-			Slots:        []runtime.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}},
+			Slots:        []routing.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}},
 		}
-		target := runtime.PublishedTarget{ID: uuid.NewString(), ProviderID: provider, ProviderModelID: uuid.NewString(), ProviderModel: model, Weight: 1}
-		snapshot.Routes[slug] = simulationRoute(uuid.NewString(), slug, runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, []string{"generation"}, 3000, 2, []runtime.PublishedTarget{target})
+		target := routing.PublishedTarget{ID: uuid.NewString(), ProviderID: provider, ProviderModelID: uuid.NewString(), ProviderModel: model, Weight: 1}
+		snapshot.Routes[slug] = simulationRoute(uuid.NewString(), slug, routing.RouteFidelity{Mode: routing.FidelityTransformed}, []string{"generation"}, 3000, 2, []routing.PublishedTarget{target})
 	}
 	return snapshot
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
-func explainRequest(t *testing.T, snapshot *runtime.Snapshot, slug string, input simulationInput) explanation {
+func explainRequest(t *testing.T, snapshot *routing.Snapshot, slug string, input simulationInput) explanation {
 	t.Helper()
 	input.Operation, input.Surface, input.Mode = "generation", "openai", "unary"
 	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
@@ -57,10 +58,10 @@ func legRoutes(e explanation) []string {
 func TestSimulationFollowsPlanTimeFallbacksAndNamesTheStandbys(t *testing.T) {
 	snapshot := explainSnapshot(map[string]int{"assistant": 200, "assistant-long": 100000, "assistant-backup": 200})
 	primary := snapshot.Routes["assistant"]
-	primary.Fallbacks = []runtime.Fallback{
-		{Route: "assistant-long", On: []string{runtime.FallbackContextWindow}},
-		{Route: "assistant-backup", On: []string{runtime.FallbackExhausted}},
-		{Route: "assistant-retired", On: []string{runtime.FallbackExhausted}},
+	primary.Fallbacks = []routing.Fallback{
+		{Route: "assistant-long", On: []string{routing.FallbackContextWindow}},
+		{Route: "assistant-backup", On: []string{routing.FallbackExhausted}},
+		{Route: "assistant-retired", On: []string{routing.FallbackExhausted}},
 	}
 	snapshot.Routes["assistant"] = primary
 
@@ -91,7 +92,7 @@ func TestSimulationFollowsPlanTimeFallbacksAndNamesTheStandbys(t *testing.T) {
 	if got := outcomes(long); !slices.Equal(got, []string{"assistant-long:planned", "assistant-backup:standby", "assistant-retired:fallback_route_unavailable"}) {
 		t.Fatalf("fallbacks = %v", got)
 	}
-	if step := long.Fallbacks[0]; step.From != "assistant" || !slices.Equal(step.Conditions, []string{runtime.FallbackContextWindow}) {
+	if step := long.Fallbacks[0]; step.From != "assistant" || !slices.Equal(step.Conditions, []string{routing.FallbackContextWindow}) {
 		t.Fatalf("planned step = %+v", step)
 	}
 }
@@ -99,11 +100,11 @@ func TestSimulationFollowsPlanTimeFallbacksAndNamesTheStandbys(t *testing.T) {
 func TestSimulationExplainsSelectorDelegationAndSessionAffinity(t *testing.T) {
 	snapshot := explainSnapshot(map[string]int{"assistant": 200000, "assistant-tools": 200000})
 	primary := snapshot.Routes["assistant"]
-	primary.Selectors = []runtime.Selector{
-		{ID: "triage", When: runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: "classifier", Labels: []string{"complex"}}}, Route: "assistant-tools"},
-		{ID: "tools", When: runtime.Predicate{Tools: new(true)}, Route: "assistant-tools"},
+	primary.Selectors = []routing.Selector{
+		{ID: "triage", When: routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: "classifier", Labels: []string{"complex"}}}, Route: "assistant-tools"},
+		{ID: "tools", When: routing.Predicate{Tools: new(true)}, Route: "assistant-tools"},
 	}
-	primary.Affinity = &runtime.Affinity{Source: runtime.AffinityCacheKey}
+	primary.Affinity = &routing.Affinity{Source: routing.AffinityCacheKey}
 	snapshot.Routes["assistant"] = primary
 	tools := `{"model":"assistant","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],"prompt_cache_key":"session-7"}`
 
@@ -115,7 +116,7 @@ func TestSimulationExplainsSelectorDelegationAndSessionAffinity(t *testing.T) {
 	if got := legRoutes(explained); !slices.Equal(got, []string{"assistant", "assistant-tools"}) || *explained.Legs[1].Via != "selector" {
 		t.Fatalf("legs = %v, want the delegated route", got)
 	}
-	if named.Affinity == nil || named.Affinity.Source != runtime.AffinityCacheKey || !named.Affinity.Session {
+	if named.Affinity == nil || named.Affinity.Source != routing.AffinityCacheKey || !named.Affinity.Session {
 		t.Fatalf("affinity = %+v, want the cache key to seed the session", named.Affinity)
 	}
 

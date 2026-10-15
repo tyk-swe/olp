@@ -11,14 +11,15 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func callerHarness(t *testing.T) *harness {
 	t.Helper()
 	h := strictHarness(t, nil)
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		for id, p := range s.Providers {
 			p.CredentialSource = "caller"
 			s.Providers[id] = p
@@ -97,14 +98,14 @@ func TestCallerCostExemptionRequiresCallerTargetsAndMatchingRouteTransitions(t *
 	route := snapshot.Routes[routeSlug]
 	route.CallerCostExempt = true
 	snapshot.Routes[routeSlug] = route
-	if err := snapshot.Validate(); err != nil {
+	if err := snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
 	providerID := route.Targets[0].ProviderID
 	provider := snapshot.Providers[providerID]
 	provider.CredentialSource = "operator"
 	snapshot.Providers[providerID] = provider
-	if err := snapshot.Validate(); err == nil {
+	if err := snapshot.Compile(); err == nil {
 		t.Fatal("operator target became exempt")
 	}
 	provider.CredentialSource = "caller"
@@ -113,9 +114,9 @@ func TestCallerCostExemptionRequiresCallerTargetsAndMatchingRouteTransitions(t *
 	backup.Slug = "backup"
 	backup.CallerCostExempt = false
 	snapshot.Routes[backup.Slug] = backup
-	route.Fallbacks = []runtime.Fallback{{Route: backup.Slug, On: []string{runtime.FallbackExhausted}}}
+	route.Fallbacks = []routing.Fallback{{Route: backup.Slug, On: []string{routing.FallbackExhausted}}}
 	snapshot.Routes[routeSlug] = route
-	if err := snapshot.Validate(); err == nil {
+	if err := snapshot.Compile(); err == nil {
 		t.Fatal("route transition bypassed cost admission")
 	}
 	route.Fallbacks = nil
@@ -123,9 +124,9 @@ func TestCallerCostExemptionRequiresCallerTargetsAndMatchingRouteTransitions(t *
 	snapshot.Routes[routeSlug] = route
 	classified := backup
 	classified.Slug = "classified"
-	classified.Selectors = []runtime.Selector{{When: runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: routeSlug, Labels: []string{"code"}, TimeoutMS: 1000}}, Route: backup.Slug}}
+	classified.Selectors = []routing.Selector{{When: routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: routeSlug, Labels: []string{"code"}, TimeoutMS: 1000}}, Route: backup.Slug}}
 	snapshot.Routes[classified.Slug] = classified
-	if err := snapshot.Validate(); err == nil || !strings.Contains(err.Error(), "requires caller credentials") {
+	if err := snapshot.Compile(); err == nil || !strings.Contains(err.Error(), "requires caller credentials") {
 		t.Fatalf("classifier route requires a caller credential it never receives: %v", err)
 	}
 }

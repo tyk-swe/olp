@@ -9,20 +9,20 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // anthropicStrictHarness serves provider "a" as a native Anthropic upstream
 // behind a strict route, as Claude Code reaches it.
 func anthropicStrictHarness(t *testing.T) *harness {
 	t.Helper()
-	return strictHarness(t, func(snapshot *runtime.Snapshot) {
+	return strictHarness(t, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
 			if provider.Name != "a" {
 				continue
 			}
 			provider.Kind, provider.VendorID, provider.ProfileID = "anthropic", "anthropic", "anthropic-messages"
-			provider.Capabilities = []runtime.Capability{
+			provider.Capabilities = []routing.Capability{
 				{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "unary"},
 				{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "streaming"},
 				{Model: modelA, Operation: "token_count", Surface: "anthropic", Mode: "unary"},

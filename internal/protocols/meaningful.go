@@ -2,12 +2,13 @@ package protocols
 
 import (
 	"bytes"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // MeaningfulFrame distinguishes model output from protocol setup, heartbeats,
 // and usage-only events. Performance measurements use delivered output only.
-func MeaningfulFrame(family openai.Family, frame []byte) bool {
+func MeaningfulFrame(family wire.Format, frame []byte) bool {
 	for line := range bytes.SplitSeq(frame, []byte("\n")) {
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
@@ -35,7 +36,7 @@ func MeaningfulFrame(family openai.Family, frame []byte) bool {
 				}
 			}
 		default:
-			if family == openai.FamilyResponses {
+			if family == wire.Responses {
 				if str(f["delta"]) != "" {
 					return true
 				}

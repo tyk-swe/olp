@@ -3,18 +3,19 @@ package gateway
 import (
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func policyUnavailable(code, message string) *Error {
 	return &Error{Status: http.StatusUnprocessableEntity, Type: "invalid_request_error", Code: code, Message: message}
 }
 
-func compiledPolicy(route *runtime.Route) (*contentpolicy.Compiled, *Error) {
+func compiledPolicy(route *routing.Route) (*contentpolicy.Compiled, *Error) {
 	if route == nil || route.ContentPolicy == nil {
 		return nil, nil
 	}
@@ -28,14 +29,14 @@ func compiledPolicy(route *runtime.Route) (*contentpolicy.Compiled, *Error) {
 	return c, nil
 }
 
-func policySurfaceGate(route *runtime.Route) *Error {
+func policySurfaceGate(route *routing.Route) *Error {
 	if route != nil && route.ContentPolicy != nil && len(route.ContentPolicy.Rules) > 0 {
 		return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has a content policy this surface cannot enforce; use a canonical request surface.")
 	}
 	return nil
 }
 
-func recordDecision(x *execution, d contentpolicy.Decision) {
+func recordDecision(x *call, d contentpolicy.Decision) {
 	for _, existing := range x.policyDecisions {
 		if existing == d {
 			return
@@ -44,20 +45,20 @@ func recordDecision(x *execution, d contentpolicy.Decision) {
 	x.policyDecisions = append(x.policyDecisions, d)
 }
 
-func (s *Server) enforceContentPolicy(x *execution) *Error {
+func (s *Server) enforceContentPolicy(x *call) *Error {
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return e
 	}
 	if compiled.HasOutput() {
-		if x.parsed.Stream {
+		if x.generation.parsed.Stream {
 			return policyUnavailable("content_policy_streaming_requires_unary", "The model `"+x.route.Slug+"` enforces an output content policy, which requires a buffered unary response; send the request without streaming.")
 		}
 		if x.providerState {
 			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
 		}
 	}
-	if x.strict() || len(x.preparedProviders) > 0 {
+	if x.strict() || x.hasPreparedProviders() {
 		// The compiled interaction inspected the effective destination after
 		// defaults while filtering candidates. Inspecting the caller projection
 		// again would not establish coverage of that actual invocation.
@@ -66,7 +67,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 	for i := range compiled.Input {
 		rule := &compiled.Input[i]
 		matched, blocked := false, false
-		transformed, err := protocols.InspectInputText(x.parsed, func(text string) (string, bool) {
+		transformed, err := protocols.InspectInputText(x.generation.parsed, func(text string) (string, bool) {
 			if !rule.Re.MatchString(text) {
 				return text, false
 			}
@@ -85,7 +86,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
 			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 		case matched:
-			x.parsed = transformed
+			x.generation.parsed = transformed
 			x.requestPreparation = requestPreparation{}
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 		}
@@ -93,7 +94,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 	return nil
 }
 
-func applySlotRules(x *execution, rules []contentpolicy.CompiledRule, phase string, value *string) bool {
+func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, value *string) bool {
 	if value == nil {
 		return false
 	}
@@ -112,7 +113,7 @@ func applySlotRules(x *execution, rules []contentpolicy.CompiledRule, phase stri
 	return false
 }
 
-func (s *Server) enforceMediaInput(x *execution, request *media.Request) *Error {
+func (s *Server) enforceMediaInput(x *call, request *media.Request) *Error {
 	if x.strict() {
 		// Every strict target was checked against its actual effective native
 		// call during selection. Mutating this detached typed adapter would not
@@ -131,7 +132,7 @@ func (s *Server) enforceMediaInput(x *execution, request *media.Request) *Error 
 	return nil
 }
 
-func (s *Server) enforceCompletionOutput(x *execution, completion *openai.Completion) *Error {
+func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *Error {
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return e
@@ -144,7 +145,7 @@ func (s *Server) enforceCompletionOutput(x *execution, completion *openai.Comple
 	return nil
 }
 
-func (s *Server) enforceContentOutput(x *execution, body []byte) ([]byte, *Error) {
+func (s *Server) enforceContentOutput(x *call, body []byte) ([]byte, *Error) {
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return body, e

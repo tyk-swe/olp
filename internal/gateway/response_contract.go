@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 )
@@ -16,10 +15,10 @@ import (
 const responseContractVersion = "native-responses-v2"
 
 type storedResponseContract struct {
-	Version            string              `json:"version"`
-	Receipt            interaction.Receipt `json:"receipt"`
-	Binding            string              `json:"binding"`
-	PreviousUpstreamID string              `json:"previous_upstream_id,omitempty"`
+	Version            string      `json:"version"`
+	Receipt            oif.Receipt `json:"receipt"`
+	Binding            string      `json:"binding"`
+	PreviousUpstreamID string      `json:"previous_upstream_id,omitempty"`
 }
 
 type responseProjection struct {
@@ -117,14 +116,14 @@ func responseParentProjection(res *resources.Resource, contract *storedResponseC
 	return contract.PreviousUpstreamID, resources.LocalID(resources.KindStrictResponse, *res.ParentID), nil
 }
 
-func responseResourceKind(x *execution) string {
+func responseResourceKind(x *call) string {
 	if x.strict() {
 		return resources.KindStrictResponse
 	}
 	return resources.KindResponse
 }
 
-func responseNativeIdentity(x *execution, fact *AttemptFact, upstream string) resources.NativeIdentity {
+func responseNativeIdentity(x *call, fact *AttemptFact, upstream string) resources.NativeIdentity {
 	var credential *string
 	if fact.CredentialID != "" {
 		credential = &fact.CredentialID
@@ -149,12 +148,12 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	}
 	return r, &contract, nil
 }
-func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
+func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
 	provider, ok := x.snapshot().Providers[fact.ProviderID]
 	if !ok {
 		return nil, resources.ErrContract
 	}
-	prepared, err := x.preparedProvider(&provider, fact.UpstreamModel)
+	prepared, err := x.preparedProvider(&provider, fact.TargetID, fact.UpstreamModel)
 	if err != nil || prepared.plan == nil || prepared.plan.Obligations().Continuation != "native_response_resource" {
 		return nil, resources.ErrContract
 	}
@@ -177,7 +176,7 @@ func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *Atte
 	// Retrieval projects only the response and prior-response identities. Keep
 	// that binding, not the caller's input or native end-user identifiers.
 	previousID := ""
-	if previous, present := x.parsed.OIF().Document().Lookup("/previous_response_id"); present && previous.Kind() != oif.Null {
+	if previous, present := x.generation.parsed.OIF().Document().Lookup("/previous_response_id"); present && previous.Kind() != oif.Null {
 		var valid bool
 		previousID, valid = previous.Text()
 		if !valid || previousID == "" {

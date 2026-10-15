@@ -5,39 +5,41 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/oif"
 	"math"
 	"strconv"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // Decode validates a bounded upstream result. Native extensions survive model
 // rewriting; translated results contain only the shared, represented fields.
-func Decode(wire, target openai.Family, body []byte, route, encoding string) (*openai.Completion, error) {
-	return decode(wire, target, body, route, encoding, nil)
+func Decode(encodedWire, target wire.Format, body []byte, route, encoding string) (*wire.Completion, error) {
+	return decode(encodedWire, target, body, route, encoding, nil)
 }
 
-func DecodeRequest(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
-	return decode(wire, target, body, route, encoding, request)
+func DecodeRequest(encodedWire, target wire.Format, body []byte, route, encoding string, request *wire.Request) (*wire.Completion, error) {
+	return decode(encodedWire, target, body, route, encoding, request)
 }
 
-func decode(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
-	if wire == openai.FamilyChat || wire == openai.FamilyResponses {
-		return decodeTransformed(wire, target, body, route, encoding, request)
+func decode(encodedWire, target wire.Format, body []byte, route, encoding string, request *wire.Request) (*wire.Completion, error) {
+	if encodedWire == wire.Chat || encodedWire == wire.Responses {
+		return decodeTransformed(encodedWire, target, body, route, encoding, request)
 	}
 	doc, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil {
 		return nil, protocolError(err.Error())
 	}
-	result, err := contracts.Result(openai.Descriptor(wire, false), doc, oif.Complete)
+	result, err := contracts.Result(wire.Descriptor(encodedWire, false), doc, oif.Complete)
 	if err != nil {
 		return nil, protocolError("unregistered result contract")
 	}
-	c, err := decodeTransformed(wire, target, result.Source().Bytes(), route, encoding, request)
+	c, err := decodeTransformed(encodedWire, target, result.Source().Bytes(), route, encoding, request)
 	if c != nil {
 		c.Native = result
-		if wire == openai.FamilyBedrock && target == wire {
+		if encodedWire == wire.Bedrock && target == encodedWire {
 			// Converse's model belongs to the URL; native output needs no
 			// model rewrite. Keep every validated source member verbatim.
 			c.Body = result.Source().Bytes()
@@ -49,15 +51,15 @@ func decode(wire, target openai.Family, body []byte, route, encoding string, req
 // decodeTransformed is the family result codec. It translates a completion
 // when the target dialect differs; strict callers pass wire == target, so it
 // only applies the native grammar.
-func decodeTransformed(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
-	var c *openai.Completion
+func decodeTransformed(encodedWire, target wire.Format, body []byte, route, encoding string, request *wire.Request) (*wire.Completion, error) {
+	var c *wire.Completion
 	var err error
-	switch wire {
-	case openai.FamilyChat:
+	switch encodedWire {
+	case wire.Chat:
 		c, err = openai.DecodeChat(body, route)
-	case openai.FamilyResponses:
+	case wire.Responses:
 		var background bool
-		if request != nil && target == openai.FamilyResponses {
+		if request != nil && target == wire.Responses {
 			_ = json.Unmarshal(request.Field("background"), &background)
 		}
 		if background {
@@ -65,25 +67,25 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 		} else {
 			c, err = openai.DecodeResponse(body, route)
 		}
-	case openai.FamilyMistralFIM:
+	case wire.MistralFIM:
 		// A fill-in-the-middle result is a chat completion.
 		c, err = openai.DecodeChat(body, route)
-	case openai.FamilyCohereChat:
+	case wire.CohereChat:
 		c, err = decodeCohereChat(body)
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		c, err = decodeAnthropic(body, route)
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		c, err = decodeGemini(body, route, false)
-	case openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, "bedrock_count":
+	case wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, "bedrock_count":
 		f, e := object(body)
 		if e != nil {
 			return nil, protocolError("invalid count result")
 		}
 		key := "input_tokens"
-		if wire == openai.FamilyGeminiCount {
+		if encodedWire == wire.GeminiCount {
 			key = "totalTokens"
 		}
-		if wire == "bedrock_count" {
+		if encodedWire == "bedrock_count" {
 			key = "inputTokens"
 		}
 		n, ok := count(f[key])
@@ -91,31 +93,31 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 			return nil, protocolError("missing token count")
 		}
 		out := Object{"input_tokens": raw(n), "object": raw("response.input_tokens")}
-		if target == openai.FamilyAnthropicCount {
+		if target == wire.AnthropicCount {
 			out = Object{"input_tokens": raw(n)}
 		}
-		if target == openai.FamilyGeminiCount {
+		if target == wire.GeminiCount {
 			out = Object{"totalTokens": raw(n)}
 		}
-		if wire == target {
+		if encodedWire == target {
 			out = f
 		}
-		c = &openai.Completion{Body: raw(out), FinishReason: "stop", Usage: &openai.Usage{InputTokens: n, TotalTokens: n}}
-	case openai.FamilyEmbeddings:
+		c = &wire.Completion{Body: raw(out), FinishReason: "stop", Usage: &wire.Usage{InputTokens: n, TotalTokens: n}}
+	case wire.Embeddings:
 		c, err = decodeEmbeddings(body, route, encoding)
-	case openai.FamilyGeminiEmbeddings:
+	case wire.GeminiEmbeddings:
 		c, err = decodeGeminiEmbedding(body, route, encoding)
-	case openai.FamilyGeminiEmbeddingsBatch:
+	case wire.GeminiEmbeddingsBatch:
 		c, err = decodeGeminiEmbeddingBatch(body, route, encoding)
-	case openai.FamilyVertexEmbeddings:
+	case wire.VertexEmbeddings:
 		c, err = decodeVertexEmbeddings(body, route, encoding)
-	case openai.FamilyBedrockEmbeddings:
+	case wire.BedrockEmbeddings:
 		c, err = decodeBedrockEmbedding(body, route, encoding)
-	case openai.FamilyRerank:
+	case wire.Rerank:
 		c, err = decodeRerank(body, route, request)
-	case openai.FamilyBedrockRerank:
+	case wire.BedrockRerank:
 		c, err = decodeBedrockRerank(body, route, request)
-	case openai.FamilyModeration:
+	case wire.Moderation:
 		f, e := object(body)
 		if e != nil {
 			return nil, protocolError("invalid moderation result")
@@ -156,7 +158,7 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 		if _, ok := f["model"]; ok {
 			f["model"] = raw(route)
 		}
-		c = &openai.Completion{Body: raw(f), FinishReason: "stop"}
+		c = &wire.Completion{Body: raw(f), FinishReason: "stop"}
 	case "bedrock":
 		c, err = decodeBedrock(body, route)
 	default:
@@ -165,7 +167,7 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 	if err != nil {
 		return c, err
 	}
-	if wire != target && target.Operation() == "generation" {
+	if encodedWire != target && target.Operation() == "generation" {
 		for _, call := range c.ToolCalls {
 			if call.ID == "" || call.Name == "" {
 				return c, protocolError("incomplete translated tool identity")
@@ -174,8 +176,8 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 				return c, protocolError("translated tool arguments must be a JSON object")
 			}
 		}
-		if supportsCandidates(wire) {
-			translated, e := translateCandidates(wire, target, body, route)
+		if supportsCandidates(encodedWire) {
+			translated, e := translateCandidates(encodedWire, target, body, route)
 			if e != nil {
 				return c, e
 			}
@@ -195,7 +197,7 @@ func count(v json.RawMessage) (int64, bool) {
 	n, e := strconv.ParseInt(string(v), 10, 64)
 	return n, e == nil && n >= 0
 }
-func nativeUsage(f Object, family string) (*openai.Usage, error) {
+func nativeUsage(f Object, family string) (*wire.Usage, error) {
 	if f == nil {
 		return nil, nil
 	}
@@ -223,7 +225,7 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 	if i > math.MaxInt64-o {
 		return nil, protocolError("usage count overflow")
 	}
-	u := &openai.Usage{InputTokens: i, OutputTokens: o, TotalTokens: i + o}
+	u := &wire.Usage{InputTokens: i, OutputTokens: o, TotalTokens: i + o}
 	if n, ok := count(f[cached]); ok {
 		u.CachedInputTokens = &n
 		if family == "anthropic" {
@@ -340,7 +342,7 @@ func geminiDetailCounts(detail []geminiTokenDetail) (audio, image int64) {
 // geminiUsageDetails reads the modality detail arrays on a usageMetadata or
 // equivalent usage object: prompt shares by modality, cache shares by modality,
 // and output shares by modality. Live calls its output detail response.
-func geminiUsageDetails(u *openai.Usage, f Object) error {
+func geminiUsageDetails(u *wire.Usage, f Object) error {
 	details := []struct {
 		name         string
 		audio, image **int64
@@ -377,7 +379,7 @@ func geminiUsageDetails(u *openai.Usage, f Object) error {
 // geminiGrounding counts the search queries grounded candidates made. Both
 // keys are emitted together so a price can bill per query or per grounded
 // prompt and set the other fee to zero.
-func geminiGrounding(u *openai.Usage, f Object) error {
+func geminiGrounding(u *wire.Usage, f Object) error {
 	if u == nil || !present(f["candidates"]) || !bytes.Contains(f["candidates"], []byte("webSearchQueries")) {
 		return nil
 	}
@@ -404,7 +406,7 @@ func geminiGrounding(u *openai.Usage, f Object) error {
 	}
 	return nil
 }
-func decodeAnthropic(body []byte, route string) (*openai.Completion, error) {
+func decodeAnthropic(body []byte, route string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("message is not an object")
@@ -422,7 +424,7 @@ func decodeAnthropic(body []byte, route string) (*openai.Completion, error) {
 	if reason == "" {
 		return nil, protocolError("message has no stop reason")
 	}
-	c := &openai.Completion{UpstreamID: str(f["id"]), ProviderModel: str(f["model"]), FinishReason: anthropicFinish(reason)}
+	c := &wire.Completion{UpstreamID: str(f["id"]), ProviderModel: str(f["model"]), FinishReason: anthropicFinish(reason)}
 	if err := anthropicContent(c, f["content"]); err != nil {
 		return nil, err
 	}
@@ -448,7 +450,7 @@ func optionalObject(v json.RawMessage) (Object, error) {
 	}
 	return f, nil
 }
-func anthropicContent(c *openai.Completion, v json.RawMessage) error {
+func anthropicContent(c *wire.Completion, v json.RawMessage) error {
 	parts := arr(v)
 	if parts == nil {
 		return protocolError("message content is not an array")
@@ -472,7 +474,7 @@ func anthropicContent(c *openai.Completion, v json.RawMessage) error {
 			if _, e := object(p["input"]); e != nil {
 				return protocolError("invalid tool input")
 			}
-			c.ToolCalls = append(c.ToolCalls, openai.ToolCall{ID: str(p["id"]), Name: str(p["name"]), Arguments: string(p["input"])})
+			c.ToolCalls = append(c.ToolCalls, wire.ToolCall{ID: str(p["id"]), Name: str(p["name"]), Arguments: string(p["input"])})
 		}
 	}
 	return nil
@@ -489,7 +491,7 @@ func anthropicFinish(reason string) string {
 		return "stop"
 	}
 }
-func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, error) {
+func decodeGemini(body []byte, route string, partial bool) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("generation is not an object")
@@ -504,7 +506,7 @@ func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, 
 	if len(candidates) == 0 && !present(f["promptFeedback"]) && !partial {
 		return nil, protocolError("generation has no candidates")
 	}
-	c := &openai.Completion{UpstreamID: str(f["responseId"]), ProviderModel: str(f["modelVersion"])}
+	c := &wire.Completion{UpstreamID: str(f["responseId"]), ProviderModel: str(f["modelVersion"])}
 	seen := map[int64]bool{}
 	for i, v := range candidates {
 		candidate, e := object(v)
@@ -528,7 +530,7 @@ func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, 
 		}
 		first := c
 		if i > 0 {
-			first = &openai.Completion{}
+			first = &wire.Completion{}
 		}
 		c := first
 		content, e := optionalObject(candidate["content"])
@@ -566,7 +568,7 @@ func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, 
 				if _, e := object(call["args"]); e != nil {
 					return nil, protocolError("invalid function arguments")
 				}
-				c.ToolCalls = append(c.ToolCalls, openai.ToolCall{ID: id, Name: str(call["name"]), Arguments: string(call["args"])})
+				c.ToolCalls = append(c.ToolCalls, wire.ToolCall{ID: id, Name: str(call["name"]), Arguments: string(call["args"])})
 			}
 		}
 		if reason != "" {
@@ -602,13 +604,13 @@ func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, 
 	c.Body = raw(f)
 	return c, nil
 }
-func renderCompletion(c *openai.Completion, family openai.Family, route string) []byte {
+func renderCompletion(c *wire.Completion, family wire.Format, route string) []byte {
 	id := c.UpstreamID
 	if id == "" {
 		id = "olp_completion"
 	}
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		msg := map[string]any{"role": "assistant", "content": c.OutputText}
 		if c.Refusal != "" {
 			msg["refusal"] = c.Refusal
@@ -625,7 +627,7 @@ func renderCompletion(c *openai.Completion, family openai.Family, route string) 
 			f["usage"] = chatUsage(c.Usage)
 		}
 		return raw(f)
-	case openai.FamilyResponses:
+	case wire.Responses:
 		output := []any{}
 		content := []any{}
 		if c.OutputText != "" {
@@ -653,7 +655,7 @@ func renderCompletion(c *openai.Completion, family openai.Family, route string) 
 			f["usage"] = responseUsage(c.Usage)
 		}
 		return raw(f)
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		content := []any{}
 		if text := c.OutputText + c.Refusal; text != "" {
 			content = append(content, map[string]any{"type": "text", "text": text})
@@ -697,7 +699,7 @@ func renderCompletion(c *openai.Completion, family openai.Family, route string) 
 		return raw(f)
 	}
 }
-func chatUsage(u *openai.Usage) Object {
+func chatUsage(u *wire.Usage) Object {
 	f := Object{"prompt_tokens": raw(u.InputTokens), "completion_tokens": raw(u.OutputTokens), "total_tokens": raw(u.TotalTokens)}
 	if u.CachedInputTokens != nil {
 		f["prompt_tokens_details"] = raw(map[string]any{"cached_tokens": *u.CachedInputTokens})
@@ -707,7 +709,7 @@ func chatUsage(u *openai.Usage) Object {
 	}
 	return f
 }
-func responseUsage(u *openai.Usage) Object {
+func responseUsage(u *wire.Usage) Object {
 	f := Object{"input_tokens": raw(u.InputTokens), "output_tokens": raw(u.OutputTokens), "total_tokens": raw(u.TotalTokens)}
 	if u.CachedInputTokens != nil {
 		f["input_tokens_details"] = raw(map[string]any{"cached_tokens": *u.CachedInputTokens})
@@ -717,7 +719,7 @@ func responseUsage(u *openai.Usage) Object {
 	}
 	return f
 }
-func geminiUsage(u *openai.Usage) Object {
+func geminiUsage(u *wire.Usage) Object {
 	f := Object{"promptTokenCount": raw(u.InputTokens), "candidatesTokenCount": raw(u.OutputTokens), "totalTokenCount": raw(u.TotalTokens)}
 	if u.CachedInputTokens != nil {
 		f["cachedContentTokenCount"] = raw(*u.CachedInputTokens)
@@ -783,7 +785,7 @@ func embeddingItems(data []json.RawMessage, encoding string) ([]json.RawMessage,
 	return data, nil
 }
 
-func nativeEmbeddingsCompletion(values [][]float64, route, encoding string, usage *openai.Usage) (*openai.Completion, error) {
+func nativeEmbeddingsCompletion(values [][]float64, route, encoding string, usage *wire.Usage) (*wire.Completion, error) {
 	data := make([]json.RawMessage, len(values))
 	for i, vector := range values {
 		data[i] = raw(Object{"index": raw(i), "embedding": raw(vector)})
@@ -796,7 +798,7 @@ func nativeEmbeddingsCompletion(values [][]float64, route, encoding string, usag
 	if usage != nil {
 		f["usage"] = raw(Object{"prompt_tokens": raw(usage.InputTokens), "total_tokens": raw(usage.TotalTokens)})
 	}
-	c := &openai.Completion{Body: raw(f), FinishReason: "stop", Usage: usage}
+	c := &wire.Completion{Body: raw(f), FinishReason: "stop", Usage: usage}
 	return c, nil
 }
 
@@ -808,7 +810,7 @@ func floatVector(raw json.RawMessage) ([]float64, error) {
 	return values, nil
 }
 
-func decodeGeminiEmbedding(body []byte, route, encoding string) (*openai.Completion, error) {
+func decodeGeminiEmbedding(body []byte, route, encoding string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -837,7 +839,7 @@ func decodeGeminiEmbedding(body []byte, route, encoding string) (*openai.Complet
 // geminiEmbeddingUsage is the usage a Gemini embedding response reports in its
 // usageMetadata: the tokens of the prompt. A response that reports none has no
 // usage.
-func geminiEmbeddingUsage(f Object) (*openai.Usage, error) {
+func geminiEmbeddingUsage(f Object) (*wire.Usage, error) {
 	metadata, e := optionalObject(f["usageMetadata"])
 	if e != nil {
 		return nil, e
@@ -849,10 +851,10 @@ func geminiEmbeddingUsage(f Object) (*openai.Usage, error) {
 	if !ok {
 		return nil, protocolError("invalid embeddings usage")
 	}
-	return &openai.Usage{InputTokens: n, TotalTokens: n}, nil
+	return &wire.Usage{InputTokens: n, TotalTokens: n}, nil
 }
 
-func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*openai.Completion, error) {
+func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -886,7 +888,7 @@ func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*openai.Co
 	return nativeEmbeddingsCompletion(values, route, encoding, usage)
 }
 
-func decodeVertexEmbeddings(body []byte, route, encoding string) (*openai.Completion, error) {
+func decodeVertexEmbeddings(body []byte, route, encoding string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -903,7 +905,7 @@ func decodeVertexEmbeddings(body []byte, route, encoding string) (*openai.Comple
 	}
 	values := make([][]float64, len(predictions))
 	var tokens int64
-	var usage *openai.Usage
+	var usage *wire.Usage
 	for i, v := range predictions {
 		prediction, e := object(v)
 		if e != nil {
@@ -926,13 +928,13 @@ func decodeVertexEmbeddings(body []byte, route, encoding string) (*openai.Comple
 				return nil, protocolError("invalid embeddings usage")
 			}
 			tokens += n
-			usage = &openai.Usage{InputTokens: tokens, TotalTokens: tokens}
+			usage = &wire.Usage{InputTokens: tokens, TotalTokens: tokens}
 		}
 	}
 	return nativeEmbeddingsCompletion(values, route, encoding, usage)
 }
 
-func decodeBedrockEmbedding(body []byte, route, encoding string) (*openai.Completion, error) {
+func decodeBedrockEmbedding(body []byte, route, encoding string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -951,11 +953,11 @@ func decodeBedrockEmbedding(body []byte, route, encoding string) (*openai.Comple
 	if !ok {
 		return nil, protocolError("invalid embeddings usage")
 	}
-	usage := &openai.Usage{InputTokens: n, TotalTokens: n}
+	usage := &wire.Usage{InputTokens: n, TotalTokens: n}
 	return nativeEmbeddingsCompletion([][]float64{values}, route, encoding, usage)
 }
 
-func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, error) {
+func decodeEmbeddings(body []byte, route, encoding string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -971,7 +973,7 @@ func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, 
 	f["data"] = raw(data)
 	f["model"] = raw(route)
 	f["object"] = raw("list")
-	c := &openai.Completion{Body: raw(f), FinishReason: "stop"}
+	c := &wire.Completion{Body: raw(f), FinishReason: "stop"}
 	usage, e := optionalObject(f["usage"])
 	if e != nil {
 		return nil, e
@@ -984,7 +986,7 @@ func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, 
 		if !ok {
 			return nil, protocolError("invalid embeddings usage")
 		}
-		c.Usage = &openai.Usage{InputTokens: n, TotalTokens: n}
+		c.Usage = &wire.Usage{InputTokens: n, TotalTokens: n}
 	}
 	return c, nil
 }

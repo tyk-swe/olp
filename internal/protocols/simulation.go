@@ -2,42 +2,43 @@ package protocols
 
 import (
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // SimulationRequest accepts the management API's shared operation document or
 // a native request. It uses the serving codecs for semantic feasibility, so a
 // dry run cannot approve parameters that execution would refuse.
-func SimulationRequest(data []byte, operation, surface, mode, route string) (*openai.Request, error) {
+func SimulationRequest(data []byte, operation, surface, mode, route string) (*wire.Request, error) {
 	f, err := object(data)
 	if err != nil {
 		return nil, err
 	}
 	canonical := present(f["route"]) || present(f["parameters"])
-	family := openai.FamilyChat
+	family := wire.Chat
 	switch operation {
 	case "token_count":
-		family = openai.FamilyInputTokens
+		family = wire.InputTokens
 	case "embeddings":
-		family = openai.FamilyEmbeddings
+		family = wire.Embeddings
 	case "moderation":
-		family = openai.FamilyModeration
+		family = wire.Moderation
 	case "rerank":
-		family = openai.FamilyRerank
+		family = wire.Rerank
 	}
 	if !canonical {
 		if surface == "anthropic" {
-			family = openai.FamilyAnthropic
+			family = wire.Anthropic
 			if operation == "token_count" {
-				family = openai.FamilyAnthropicCount
+				family = wire.AnthropicCount
 			}
 		}
 		if surface == "gemini" {
-			family = openai.FamilyGemini
+			family = wire.Gemini
 			if operation == "token_count" {
-				family = openai.FamilyGeminiCount
+				family = wire.GeminiCount
 			} else if mode == "streaming" {
-				family = openai.FamilyGeminiStream
+				family = wire.GeminiStream
 			}
 		}
 		return Parse(family, data, route)
@@ -93,14 +94,14 @@ func SimulationRequest(data []byte, operation, surface, mode, route string) (*op
 			f["max_completion_tokens"] = raw(4096)
 		}
 		if operation == "token_count" {
-			g, err := decodeCanonical(openai.FamilyChat, f)
+			g, err := decodeCanonical(wire.Chat, f)
 			if err != nil {
 				return nil, err
 			}
 			if len(g.Extensions) > 0 {
 				return nil, unsupported(g.Extensions[0])
 			}
-			f, err = encodeCanonical(g, openai.FamilyInputTokens, route, operation)
+			f, err = encodeCanonical(g, wire.InputTokens, route, operation)
 			if err != nil {
 				return nil, err
 			}

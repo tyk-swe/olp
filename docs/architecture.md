@@ -10,7 +10,8 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Provider configuration, models, credentials, certification, revisions | `internal/providers/` and `console/src/lib/features/providers/` |
 | Provider plugin install, approval, confined runtime, hosted plugin code and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
 | Grants beneath credential versions, grant enrollment sessions and grant refresh | `internal/grants/`, with its API in `internal/providers/grants.go` |
-| Route drafts, target selection, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
+| Route drafts, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
+| Snapshot schema, routing policies, selection, compiled target contracts and revision/pin validation | `internal/routing/` |
 | Users, sessions, OIDC, projects, API keys, budgets, tokens, audit | `internal/access/` and `console/src/lib/features/access/` |
 | Installation settings and notification destinations/rules | `internal/access/` and console access/settings features |
 | Configuration export, plan, and apply | `internal/configuration/` |
@@ -28,8 +29,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Strict media, batch, realtime and Gemini lifecycle contracts | `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Transformed provider preparation and wire defaults | `internal/providerinvoke/` |
 | Provider profiles, addressing, and upstream hosting, authentication and signing | `internal/connectors/` |
+| Shared wire formats, request/result envelopes, usage and errors | `internal/protocols/wire/` |
 | OpenAI, Anthropic, Gemini, Bedrock codecs and cross-dialect translation | `internal/protocols/` |
-| Immutable runtime publication, activation, authority refresh, credential source, strict contract compilation | `internal/runtime/` |
+| Database publication, release installation, authority refresh and credential source | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Admission token estimates: tokenizers, the request walker, per-family counters | `internal/operations/tokenization/estimate/` |
 | Cost reservation at admission; rate-limit and gateway metadata response headers | `internal/gateway/cost_reservation.go`, `response_headers.go` |
@@ -49,7 +51,10 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 
 ## Contracts and feature ownership
 
-Feature packages own SQL, transactions, validation and audit provenance.
+Feature packages own SQL, transactions, validation and audit provenance. Prefer
+concrete types and explicit dependencies; introduce interfaces at actual
+substitution boundaries. Package context supplies names instead of redundant
+provider- or protocol-specific aliases.
 `openapi/management.json` is the management source; `openapi/document.go` embeds
 it. `make api` generates Go/TypeScript types, console authorization requirements
 and safe SDK/CLI/MCP consumer metadata. Unsupported serializer shapes fail
@@ -74,31 +79,54 @@ refresh progresses independently with monotonic freshness and generation fences.
 Historical remote-secret lookup occurs outside short authorized database
 transactions, followed by revocation revalidation.
 
-`runtime/revision.go` owns pure revision decoding. `runtime/release_pin.go` verifies
+Routing has no runtime-manager or database dependency. `Snapshot.Validate` checks
+configuration without replacing compiled contracts; `Snapshot.Compile` publishes
+a complete set of derived contracts only after every target succeeds. Runtime
+owns installation and live credentials. Management boundaries translate routing
+validation failures to HTTP problems.
+
+`Snapshot.Clone`, `connectors.Config.Clone` and `contentpolicy.Policy.Clone` give
+new owners independent mutable configuration. Immutable plugin profiles may be
+shared. Connector configuration constructs serving identities for every operation;
+provider management reads health statistics from observability, which the gateway
+can report without depending on provider management.
+
+`routing/revision.go` owns pure revision decoding. `routing/release_pin.go` verifies
 exact historical provider/route/target/slot/credential identity for retained/media
 work. Ambiguous migration backfills remain null and refuse, never substitute current
 configuration. Runtime credential source owns current and historical resolution;
 grant eligibility remains live.
 
 OIF sources retain immutable JSON spans, presence and numeric provenance without
-provider/storage dependencies. Reject decoded duplicate keys, invalid UTF-8 and
-surrogates; accessors copy or expose explicit immutable views. Protocol owners
+provider/storage dependencies. `wire` owns neutral envelopes and format names;
+codecs own parsing, validation and encoding. Request transformations return a new
+request or an immediate error and preserve the original source. Reject decoded
+duplicate keys, invalid UTF-8 and surrogates; accessors copy or expose explicit
+immutable views. Protocol owners
 validate bounded native events and terminal proof. Local projection cannot invent
 provider completion.
 
 ## Ordinary execution
 
-`PlanRequest` owns selection policy, constraints, stable ordering and slot budget.
-Route inspection uses the same planner without dispatch. Gateway attempt state
+`routing.Select(..., routing.Options)` owns selection policy, constraints, stable
+ordering and slot budget. Execution and simulation consume its `routing.Plan`;
+request preparation is supplied explicitly by each operation. Gateway attempt state
 separates request transmission, upstream acceptance, validated native completion,
 durable mapping and client visibility; typed upstream evidence applies uniformly
 to native and plugin traffic.
 
 Strict contracts are per-target and operation-owned; transformed preparation owns
-declared defaults/translation. One immutable source owner replaces caches on route
-transitions. Retain at most four heavyweight dispatch plans and release unused
-ones before long streaming. Rebuild evicted targets deterministically from pinned
-source/release; never weaken strict obligations.
+declared defaults/translation. A gateway `call` owns authority, deadlines, financial
+state and the shared attempt loop. Its `routeLeg` owns selection and preparation;
+`generationCall` and `unaryCall` own their respective source and operation state.
+Media and code-mode lifetimes remain with their existing owners.
+
+Each preparation record belongs to one immutable source and route leg, keyed by
+target ID, provider ID, provider revision and model. Template lookup uses the exact
+target ID even when several targets share a provider/model pair. Estimates and
+dispatch read the same prepared document. Retain at most four heavyweight plans,
+release unused plans before streaming, and deterministically rebuild evicted plans
+from the pinned source and release. A route transition replaces the entire leg.
 
 Observe native usage before projection/persistence/delivery. Validated terminal
 consumption survives failed writes/flushes; partial/missing usage stays uncertain,

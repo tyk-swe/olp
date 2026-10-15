@@ -10,6 +10,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -37,22 +40,22 @@ func routeEstimateTargets(h *harness, targets ...estimateTarget) {
 	route := snapshot.Routes[routeSlug]
 	route.Targets = nil
 	route.MaxAttempts = 12
-	snapshot.Providers = map[string]runtime.Provider{}
+	snapshot.Providers = map[string]routing.Provider{}
 	for i, target := range targets {
 		provider := template
 		provider.ID, provider.RevisionID, provider.Name = uuid.NewString(), uuid.NewString(), target.name
 		provider.Kind = "openai"
 		provider.Endpoint = h.upstream.URL + "/" + target.name + "/v1"
-		provider.Capabilities = []runtime.Capability{
+		provider.Capabilities = []routing.Capability{
 			{Model: target.model, Operation: "generation", Surface: "anthropic", Mode: "unary"},
 			{Model: target.model, Operation: "generation", Surface: "openai", Mode: "unary"},
 		}
 		provider.Slots = nil
 		for range target.slots {
-			provider.Slots = append(provider.Slots, runtime.Slot{ID: uuid.NewString(), Name: "slot", Enabled: true, Weight: 1, CredentialID: &h.credA, CredentialVersion: &version})
+			provider.Slots = append(provider.Slots, routing.Slot{ID: uuid.NewString(), Name: "slot", Enabled: true, Weight: 1, CredentialID: &h.credA, CredentialVersion: &version})
 		}
 		snapshot.Providers[provider.ID] = provider
-		route.Targets = append(route.Targets, runtime.Target{ID: uuid.NewString(), ProviderID: provider.ID, ProviderModel: target.model, Priority: i, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()})
+		route.Targets = append(route.Targets, routing.Target{ID: uuid.NewString(), ProviderID: provider.ID, ProviderModel: target.model, Priority: i, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()})
 	}
 	snapshot.Routes[routeSlug] = route
 }
@@ -185,7 +188,7 @@ func TestReservationFollowsTheTargetsFamily(t *testing.T) {
 		estimateTarget{"a", "gpt-4o", 1},
 		estimateTarget{"b", "claude-sonnet-4-5", 1},
 	)
-	var shared runtime.Provider
+	var shared routing.Provider
 	for _, provider := range h.rt.release.Snapshot.Providers {
 		if provider.Name == "a" {
 			shared = provider
@@ -193,22 +196,21 @@ func TestReservationFollowsTheTargetsFamily(t *testing.T) {
 	}
 	route := h.rt.release.Snapshot.Routes[routeSlug]
 	// One provider serving both.
-	shared.Capabilities = append(shared.Capabilities, runtime.Capability{Model: "claude-sonnet-4-5", Operation: "generation", Surface: "openai", Mode: "unary"})
+	shared.Capabilities = append(shared.Capabilities, routing.Capability{Model: "claude-sonnet-4-5", Operation: "generation", Surface: "openai", Mode: "unary"})
 	h.rt.release.Snapshot.Providers[shared.ID] = shared
 	route.Targets[1].ProviderID = shared.ID
 	h.rt.release.Snapshot.Routes[routeSlug] = route
 
 	// Twenty characters are five tokens to the heuristic, and more to o200k_base
 	// once the message is framed: the two families disagree.
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":1,"messages":[{"role":"user","content":"`+strings.Repeat("日本語で", 5)+`"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","max_tokens":1,"messages":[{"role":"user","content":"`+strings.Repeat("日本語で", 5)+`"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{
-		parsed:   parsed,
-		request:  request{release: h.rt.release},
-		route:    &route,
-		attempts: []runtime.Attempt{{ProviderID: shared.ID, UpstreamModel: "gpt-4o"}, {ProviderID: shared.ID, UpstreamModel: "claude-sonnet-4-5"}},
+	x := &call{
+
+		request: request{release: h.rt.release}, routeLeg: routeLeg{route: &route,
+			attempts: []routing.Attempt{{ProviderID: shared.ID, UpstreamModel: "gpt-4o"}, {ProviderID: shared.ID, UpstreamModel: "claude-sonnet-4-5"}}}, generation: generationCall{parsed: parsed},
 	}
 	o200k := estimate.Walk(parsed).Estimate(estimate.ForModel("gpt-4o"), nil).Tokens()
 	heuristic := estimate.Walk(parsed).Estimate(estimate.ForModel("claude-sonnet-4-5"), nil).Tokens()
@@ -238,22 +240,21 @@ func TestPreparedTargetsCountTheSameTextOnce(t *testing.T) {
 	second := first
 	second.ID, second.RevisionID = "other-provider", "other-revision"
 	second.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`)}}}
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hello"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
 	counted := map[estimate.Family]int{}
-	x := &execution{
-		parsed: parsed,
+	x := &call{
+
 		request: request{
-			release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{first.ID: first, second.ID: second}}},
+			release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{first.ID: first, second.ID: second}}},
 			counted: func(f estimate.Family) { mu.Lock(); counted[f]++; mu.Unlock() },
-		},
-		attempts: []runtime.Attempt{
+		}, routeLeg: routeLeg{attempts: []routing.Attempt{
 			{ProviderID: first.ID, UpstreamModel: "gpt-4o"}, {ProviderID: second.ID, UpstreamModel: "gpt-4o-mini"},
 			{ProviderID: first.ID, UpstreamModel: "gpt-4o"}, {ProviderID: second.ID, UpstreamModel: "gpt-4o"},
-		},
+		}}, generation: generationCall{parsed: parsed},
 	}
 	for range 3 {
 		for _, a := range x.attempts {
@@ -261,7 +262,7 @@ func TestPreparedTargetsCountTheSameTextOnce(t *testing.T) {
 			if x.attemptReservation(a, &provider) == 0 {
 				t.Fatal("no reservation")
 			}
-			prepared, err := x.preparedProvider(&provider, a.UpstreamModel)
+			prepared, err := x.preparedProvider(&provider, a.TargetID, a.UpstreamModel)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -284,23 +285,23 @@ func TestPreparedTargetsCountTheSameTextOnce(t *testing.T) {
 // TestRedactionCountsTheRedactedRequest keeps a count from outliving the
 // request it was made for: the walk follows the request the gateway holds.
 func TestRedactionCountsTheRedactedRequest(t *testing.T) {
-	long, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":1,"messages":[{"role":"user","content":"`+strings.Repeat("a long message ", 20)+`"}]}`))
+	long, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","max_tokens":1,"messages":[{"role":"user","content":"`+strings.Repeat("a long message ", 20)+`"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	short, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":1,"messages":[{"role":"user","content":"[REDACTED]"}]}`))
+	short, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","max_tokens":1,"messages":[{"role":"user","content":"[REDACTED]"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{parsed: long}
+	x := &call{generation: generationCall{parsed: long}}
 	before := x.sourceDemand("gpt-4o").EstimatedInputTokens
-	x.parsed, x.sourceSummary = short, nil
+	x.generation.parsed, x.sourceSummary = short, nil
 	after := x.sourceDemand("gpt-4o").EstimatedInputTokens
 	if after >= before {
 		t.Fatalf("a redacted request estimates %d tokens against %d before redaction", after, before)
 	}
 	// Replacing the request without clearing the summary still follows it.
-	x.parsed = long
+	x.generation.parsed = long
 	if again := x.sourceDemand("gpt-4o").EstimatedInputTokens; again != before {
 		t.Fatalf("the request estimates %d tokens, want %d", again, before)
 	}
@@ -310,17 +311,17 @@ func TestRedactionCountsTheRedactedRequest(t *testing.T) {
 // request to the larger of the two requests it may be sent, with the less
 // trustworthy provenance of the two counts.
 func TestPreparedEstimateTakesTheLargerRequest(t *testing.T) {
-	source, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
+	source, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// What a provider is sent can carry more than the caller wrote: here an
 	// image, which no tokenizer counts.
-	rewritten, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"gpt-4o","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"x"}}]}]}`))
+	rewritten, err := openai.Parse(wire.Chat, []byte(`{"model":"gpt-4o","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"x"}}]}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{parsed: source}
+	x := &call{generation: generationCall{parsed: source}}
 	admitted, demand := x.preparedEstimate("gpt-4o", x.summarize(rewritten))
 	// The source is eight tokens and ten for the reply; the rewritten request
 	// adds an image.
@@ -332,7 +333,7 @@ func TestPreparedEstimateTakesTheLargerRequest(t *testing.T) {
 	}
 	// The other way round, the caller's request is the larger and the tokenizer
 	// alone counted it, so its provenance stands.
-	x = &execution{parsed: rewritten}
+	x = &call{generation: generationCall{parsed: rewritten}}
 	admitted, _ = x.preparedEstimate("gpt-4o", x.summarize(source))
 	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, reply: 10, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
 		t.Fatalf("admitted %+v, want %+v", admitted, want)
@@ -351,16 +352,16 @@ func TestBedrockToolCatalogueIsCountedOnce(t *testing.T) {
 		chat  = `{"model":"team-chat","max_tokens":10,"messages":[{"role":"user","content":"hello"}]`
 		tools = `,"tools":[{"type":"function","function":{"name":"get_weather","description":"Weather in a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}`
 	)
-	bedrock := runtime.Provider{ID: "bedrock", RevisionID: "bedrock-revision", Kind: "bedrock", AuthMode: "static", ProfileID: "bedrock-converse", ProfileRevision: connectors.ProfileRevision}
-	compatible := runtime.Provider{ID: "compatible", RevisionID: "compatible-revision", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: "1"}
-	prepare := func(provider runtime.Provider, body string) (preparedProvider, *openai.Request) {
+	bedrock := routing.Provider{ID: "bedrock", RevisionID: "bedrock-revision", Kind: "bedrock", AuthMode: "static", ProfileID: "bedrock-converse", ProfileRevision: connectors.ProfileRevision}
+	compatible := routing.Provider{ID: "compatible", RevisionID: "compatible-revision", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: "1"}
+	prepare := func(provider routing.Provider, body string) (preparedProvider, *wire.Request) {
 		t.Helper()
-		parsed, err := openai.Parse(openai.FamilyChat, []byte(body))
+		parsed, err := openai.Parse(wire.Chat, []byte(body))
 		if err != nil {
 			t.Fatal(err)
 		}
-		x := &execution{parsed: parsed, request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: provider}}}}}
-		prepared, err := x.preparedProvider(&provider, model)
+		x := &call{request: request{release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}}}, generation: generationCall{parsed: parsed}}
+		prepared, err := x.preparedProvider(&provider, "", model)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -370,7 +371,7 @@ func TestBedrockToolCatalogueIsCountedOnce(t *testing.T) {
 	plainBedrock, _ := prepare(bedrock, chat+`}`)
 	withBedrock, source := prepare(bedrock, chat+tools)
 	withCompatible, _ := prepare(compatible, chat+tools)
-	if withBedrock.invocation.Wire != openai.FamilyBedrock || !strings.Contains(string(withBedrock.invocation.Prepared.Document().Bytes()), `"toolConfig"`) {
+	if withBedrock.invocation.Wire != wire.Bedrock || !strings.Contains(string(withBedrock.invocation.Prepared.Document().Bytes()), `"toolConfig"`) {
 		t.Fatalf("the provider was not sent a Bedrock request with a tool catalogue: %s", withBedrock.invocation.Prepared.Document().Bytes())
 	}
 
@@ -382,7 +383,11 @@ func TestBedrockToolCatalogueIsCountedOnce(t *testing.T) {
 	if err := json.Unmarshal(withBedrock.invocation.Prepared.Document().Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	sentInput := estimate.Walk(openai.NewEnvelope(openai.FamilyBedrock, "team-chat", false, fields)).Estimate(counter, nil).Input
+	native, err := wire.FromFields(wire.Bedrock, "team-chat", false, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentInput := estimate.Walk(native).Estimate(counter, nil).Input
 	catalogue, _ := counter.Count(estimate.SchemaText(fields["toolConfig"]))
 	if catalogue < 10 {
 		t.Fatalf("the catalogue is %d tokens: the case no longer has a catalogue worth counting", catalogue)
@@ -411,9 +416,9 @@ func TestBedrockToolCatalogueIsCountedOnce(t *testing.T) {
 	if withBedrock.admitted.provenance != estimate.ProvenanceHeuristic {
 		t.Errorf("provenance %s, want heuristic for a Claude model", withBedrock.admitted.provenance)
 	}
-	var x execution
-	x.parsed = source
-	if admitted, _ := x.preparedEstimate("gpt-4o", x.summarize(openai.NewEnvelope(openai.FamilyBedrock, "team-chat", false, fields))); admitted.provenance != estimate.ProvenanceCalibrated {
+	var x call
+	x.generation.parsed = source
+	if admitted, _ := x.preparedEstimate("gpt-4o", x.summarize(native)); admitted.provenance != estimate.ProvenanceCalibrated {
 		t.Errorf("provenance %s, want calibrated for a tokenizer family", admitted.provenance)
 	}
 }
@@ -490,12 +495,12 @@ func TestAttemptsRecordTheSchemaOfAStructuredOutputInTheirEstimate(t *testing.T)
 // TestAttemptsRecordTheEstimateTheirRequestWasAdmittedUnder covers the requests
 // the gateway reads only the size of, and the ones it reads nothing of.
 func TestAttemptsRecordTheEstimateTheirRequestWasAdmittedUnder(t *testing.T) {
-	attempt := runtime.Attempt{UpstreamModel: "gpt-4o"}
+	attempt := routing.Attempt{UpstreamModel: "gpt-4o"}
 
 	// A body-sized request records the size-based input, whatever the model.
 	sized := int64(42)
 	var fact AttemptFact
-	(&execution{sizedInput: &sized}).recordEstimate(&fact, attempt)
+	(&call{sizedInput: &sized}).recordEstimate(&fact, attempt)
 	if fact.EstimatedInputTokens != 42 || fact.EstimateProvenance != "heuristic" || fact.ModelFamily != "openai-o200k" {
 		t.Errorf("a body-sized request recorded %+v", fact)
 	}
@@ -503,19 +508,19 @@ func TestAttemptsRecordTheEstimateTheirRequestWasAdmittedUnder(t *testing.T) {
 	// A lifecycle call, a realtime session or a job poll carries no prompt: no
 	// estimate is invented for it, and its family is recorded all the same.
 	fact = AttemptFact{}
-	(&execution{}).recordEstimate(&fact, attempt)
+	(&call{}).recordEstimate(&fact, attempt)
 	if fact.EstimateProvenance != "" || fact.EstimatedInputTokens != 0 || fact.ModelFamily != "openai-o200k" {
 		t.Errorf("a request without a prompt recorded %+v", fact)
 	}
 
 	// A walked request records the input alone, not the reply the reservation
 	// holds as well.
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := newHarness(t, Config{})
-	x := &execution{parsed: parsed, request: request{release: h.rt.release}}
+	x := &call{request: request{release: h.rt.release}, generation: generationCall{parsed: parsed}}
 	fact = AttemptFact{}
 	x.recordEstimate(&fact, attempt)
 	if fact.EstimatedInputTokens != 8 || fact.EstimateProvenance != "tokenizer" {
@@ -528,21 +533,23 @@ func TestAttemptsRecordTheEstimateTheirRequestWasAdmittedUnder(t *testing.T) {
 // reply bound the caller left out reserves that bound, not the generic one. The
 // provider is named by an attempt, as it is in every real release.
 func TestAttemptReservationCarriesTheProvidersDefaults(t *testing.T) {
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := runtime.Provider{ID: "bounded", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`100`)}}
-	other := runtime.Provider{ID: "unbounded"}
-	x := &execution{
-		parsed:  parsed,
-		request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: provider, other.ID: other}}}},
-		attempts: []runtime.Attempt{
+	provider := routing.Provider{ID: "bounded", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`100`)}}
+	other := routing.Provider{ID: "unbounded"}
+	x := &call{
+
+		request: request{release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider, other.ID: other}}}}, routeLeg: routeLeg{attempts: []routing.Attempt{
 			{ProviderID: provider.ID, UpstreamModel: "claude-sonnet-4-5"},
 			{ProviderID: other.ID, UpstreamModel: "claude-sonnet-4-5"},
-		},
+		}}, generation:
+
+		// Five characters are two tokens to the heuristic.
+		generationCall{parsed: parsed},
 	}
-	// Five characters are two tokens to the heuristic.
+
 	if got := x.attemptReservation(x.attempts[0], &provider); got != 2+100 {
 		t.Errorf("the bounded provider's attempt reserves %d, want 102", got)
 	}
@@ -562,18 +569,18 @@ func TestAttemptReservationCarriesTheProvidersDefaults(t *testing.T) {
 // measure because they do not vary from run to run: four times the attempts
 // may cost about four times as much, and the square would cost sixteen.
 func TestRequestEstimatePricesEachAttemptOnce(t *testing.T) {
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := runtime.Provider{ID: "shared", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`100`)}}
+	provider := routing.Provider{ID: "shared", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`100`)}}
 	allocations := func(attempts int) float64 {
-		x := &execution{
-			parsed:  parsed,
-			request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: provider}}}},
+		x := &call{
+
+			request: request{release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}}}, generation: generationCall{parsed: parsed},
 		}
 		for i := range attempts {
-			x.attempts = append(x.attempts, runtime.Attempt{ProviderID: provider.ID, UpstreamModel: fmt.Sprintf("model-%d", i)})
+			x.attempts = append(x.attempts, routing.Attempt{ProviderID: provider.ID, UpstreamModel: fmt.Sprintf("model-%d", i)})
 		}
 		// The first run walks the prompt, and AllocsPerRun discards it.
 		return testing.AllocsPerRun(10, func() { requestEstimate(x) })
@@ -668,7 +675,7 @@ func TestRequestsReadBySizeRecordTheirSizeAsTheEstimate(t *testing.T) {
 		h := newHarness(t, Config{})
 		for id, p := range h.rt.release.Snapshot.Providers {
 			p.Kind = "bedrock"
-			p.Capabilities = append(p.Capabilities, runtime.Capability{Model: p.Capabilities[0].Model, Operation: "bedrock_invoke", Surface: "bedrock", Mode: "unary"})
+			p.Capabilities = append(p.Capabilities, routing.Capability{Model: p.Capabilities[0].Model, Operation: "bedrock_invoke", Surface: "bedrock", Mode: "unary"})
 			h.rt.release.Snapshot.Providers[id] = p
 		}
 		route := h.rt.release.Snapshot.Routes[routeSlug]
@@ -689,7 +696,7 @@ func TestRequestsReadBySizeRecordTheirSizeAsTheEstimate(t *testing.T) {
 		h := newHarness(t, Config{})
 		for id, p := range h.rt.release.Snapshot.Providers {
 			p.Kind, p.ProfileID, p.ProfileRevision, p.Endpoint = "gemini", "gemini-interactions", connectors.ProfileRevision, h.upstream.URL+"/v1beta"
-			p.Capabilities = append(p.Capabilities, runtime.Capability{Model: p.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "unary"})
+			p.Capabilities = append(p.Capabilities, routing.Capability{Model: p.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "unary"})
 			h.rt.release.Snapshot.Providers[id] = p
 		}
 		// The mock tells providers apart by the first segment of the path, and an
@@ -754,23 +761,26 @@ func TestMultipartMediaRecordsNoEstimate(t *testing.T) {
 // The text is the same, so each family is counted once for the request and its
 // translation.
 func TestTranslatedPreparedTargetsCountTheSameTextOnce(t *testing.T) {
-	chat, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"gpt-4o","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hello there"}]}`))
+	chat, err := openai.Parse(wire.Chat, []byte(`{"model":"gpt-4o","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hello there"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	anthropic := openai.NewEnvelope(openai.FamilyAnthropic, routeSlug, false, map[string]json.RawMessage{
+	anthropic, err := wire.FromFields(wire.Anthropic, routeSlug, false, map[string]json.RawMessage{
 		"system":   json.RawMessage(`"Be brief."`),
 		"messages": json.RawMessage(`[{"role":"user","content":"hello there"}]`),
 	})
-	responses, err := openai.Parse(openai.FamilyResponses, []byte(`{"model":"team-chat","input":"hello there","instructions":"Be brief."}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, source := range map[string]*openai.Request{"anthropic": anthropic, "responses": responses} {
+	responses, err := openai.Parse(wire.Responses, []byte(`{"model":"team-chat","input":"hello there","instructions":"Be brief."}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]*wire.Request{"anthropic": anthropic, "responses": responses} {
 		t.Run(name, func(t *testing.T) {
 			var mu sync.Mutex
 			counted := map[estimate.Family]int{}
-			x := &execution{parsed: source, request: request{counted: func(f estimate.Family) { mu.Lock(); counted[f]++; mu.Unlock() }}}
+			x := &call{request: request{counted: func(f estimate.Family) { mu.Lock(); counted[f]++; mu.Unlock() }}, generation: generationCall{parsed: source}}
 			for range 2 {
 				admitted, _ := x.preparedEstimate("gpt-4o", x.summarize(chat))
 				// "Be brief." is three tokens and "hello there" two; "system" and

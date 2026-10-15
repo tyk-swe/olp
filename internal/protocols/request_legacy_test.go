@@ -3,6 +3,8 @@ package protocols
 import (
 	"encoding/json"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -11,19 +13,19 @@ import (
 // request when every field of it was json.RawMessage, decoded level by level,
 // before it read the request's parsed document instead. The two are held to the
 // same answer for any request by request_parity_test.go.
-func legacyParse(family openai.Family, data []byte, model string) (*openai.Request, error) {
+func legacyParse(family wire.Format, data []byte, model string) (*wire.Request, error) {
 	if family.Surface() == "openai" {
 		return openai.Parse(family, data)
 	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
 	}
 	f := doc.Fields()
 	if f == nil {
 		return nil, requestError("", "expected a JSON object")
 	}
-	stream := family == openai.FamilyGeminiStream
+	stream := family == wire.GeminiStream
 	if family.Surface() == "anthropic" {
 		model = str(f["model"])
 		if present(f["stream"]) {
@@ -65,7 +67,7 @@ func legacyParse(family openai.Family, data []byte, model string) (*openai.Reque
 		}
 		content := f
 		if present(f["generateContentRequest"]) {
-			if family != openai.FamilyGeminiCount || present(f["contents"]) {
+			if family != wire.GeminiCount || present(f["contents"]) {
 				return nil, requestError("generateContentRequest", "countTokens accepts either contents or generateContentRequest")
 			}
 			content, err = object(f["generateContentRequest"])
@@ -95,5 +97,5 @@ func legacyParse(family openai.Family, data []byte, model string) (*openai.Reque
 	if family.Operation() != "generation" && stream {
 		return nil, requestError("stream", "token counting supports unary requests only")
 	}
-	return openai.NewSourceEnvelope(family, model, stream, doc), nil
+	return wire.NewRequest(family, model, stream, doc)
 }

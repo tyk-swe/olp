@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -32,7 +34,7 @@ func NewResolver(pool *pgxpool.Pool) *Resolver {
 // ResolveCurrent reads historical revisions and current revocation through
 // one connection. READ COMMITTED already gives each SELECT a fresh snapshot,
 // so this read-only path does not need an explicit transaction round trip.
-func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, error) {
+func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
 	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return nil, nil, nil, err
@@ -41,12 +43,12 @@ func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation 
 	return r.resolve(ctx, conn, res, operation)
 }
 
-func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, error) {
+func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
 	return r.resolve(ctx, tx, res, operation)
 }
 
-func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, error) {
-	providerRevision := runtime.ProviderRevision{RevisionID: res.ProviderRevisionID}
+func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
+	providerRevision := routing.ProviderRevision{RevisionID: res.ProviderRevisionID}
 	err := query.QueryRow(ctx,
 		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text,"+runtime.PluginColumn+" FROM olp.provider_revisions r JOIN olp.providers p ON p.id=r.provider_id WHERE r.id=$1",
 		res.ProviderRevisionID).Scan(&providerRevision.ID, &providerRevision.Configuration, &providerRevision.Models, &providerRevision.Slots, &providerRevision.Name, &providerRevision.State, &providerRevision.ProjectID, &providerRevision.InstalledPlugin)
@@ -61,18 +63,18 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 			res.ProviderRevisionID, providerRevision.ID, res.ProviderID, ErrNoRows)
 	}
 
-	provider, err := runtime.DecodeProviderRevision(providerRevision)
+	provider, err := routing.DecodeProviderRevision(providerRevision)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	selected, ok := runtime.PinnedSlot(&provider, res.SlotID, res.CredentialID)
+	selected, ok := routing.PinnedSlot(&provider, res.SlotID, res.CredentialID)
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("slot %s or credential absent from provider revision %s: %w", res.SlotID, res.ProviderRevisionID, ErrNoRows)
 	}
 	slot := &selected
 
-	routeRevision := runtime.RouteRevision{RevisionID: res.RouteRevisionID}
+	routeRevision := routing.RouteRevision{RevisionID: res.RouteRevisionID}
 	err = query.QueryRow(ctx,
 		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.content_policy,v.behavior
          FROM olp.route_revisions v JOIN olp.routes r ON r.id=v.route_id WHERE v.id=$1`,
@@ -88,7 +90,7 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 		return nil, nil, nil, fmt.Errorf("route revision %s is slug %s, not %s: %w",
 			res.RouteRevisionID, routeRevision.Slug, res.RouteSlug, ErrNoRows)
 	}
-	route, err := runtime.DecodeRouteRevision(routeRevision)
+	route, err := routing.DecodeRouteRevision(routeRevision)
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -51,6 +51,8 @@ func reject(code, field, requirement, message string) error {
 // has a durable local resource mapping; list remains an owner-scoped local
 // collection and cannot claim equivalence with a provider project-wide list.
 func Compile(c Config) (*Template, error) {
+	c.Provider = c.Provider.Clone()
+	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, reject("target_capability", "/profile", "explicit_profile", "Strict media requires a registered versioned profile.")
@@ -90,11 +92,7 @@ func Compile(c Config) (*Template, error) {
 	if err != nil {
 		return nil, err
 	}
-	binding := c.Provider.Bindings[c.Model]
-	serving := oif.ServingIdentity{ProviderID: c.ProviderID, RevisionID: c.RevisionID, Model: c.Provider.Model(c.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: c.Provider.ServingPrincipal(c.Model), Snapshot: binding.Snapshot, Region: c.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
-	if binding.Region != "" {
-		serving.Region = binding.Region
-	}
+	serving := c.Provider.ServingIdentity(c.ProviderID, c.RevisionID, c.Model)
 	origins := map[string]oif.Origin{}
 	for _, item := range provenance {
 		for name := range defaults {

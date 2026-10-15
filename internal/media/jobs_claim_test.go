@@ -18,13 +18,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // claimTestEnv names a PostgreSQL admin connection the test creates and drops
@@ -121,13 +122,13 @@ type claimFixture struct {
 
 const claimVideoModel = "upstream-video-model"
 
-func claimVideoCapabilities() []runtime.Capability {
-	out := []runtime.Capability{
+func claimVideoCapabilities() []routing.Capability {
+	out := []routing.Capability{
 		{Model: claimVideoModel, Operation: OpVideoCreate, Surface: "openai", Mode: "async"},
 		{Model: claimVideoModel, Operation: OpVideoList, Surface: "openai", Mode: "unary"},
 	}
 	for _, op := range []string{OpVideoGet, OpVideoContent, OpVideoDelete} {
-		out = append(out, runtime.Capability{Model: claimVideoModel, Operation: op, Surface: "openai", Mode: "unary"})
+		out = append(out, routing.Capability{Model: claimVideoModel, Operation: op, Surface: "openai", Mode: "unary"})
 	}
 	return out
 }
@@ -185,21 +186,21 @@ func seedClaimFixture(t *testing.T) *claimFixture {
 
 	f.generationID = uuid.NewString()
 	routeID := uuid.NewString()
-	provider := runtime.Provider{
+	provider := routing.Provider{
 		ID: f.providerID, Name: "media-claim-provider", Kind: "openai", Enabled: true,
 		RevisionID: f.revisionID, Endpoint: endpoint, AuthMode: "none",
 		Capabilities: claimVideoCapabilities(),
-		Slots:        []runtime.Slot{{ID: f.slotID, Name: "Default", Enabled: true, Weight: 1}},
+		Slots:        []routing.Slot{{ID: f.slotID, Name: "Default", Enabled: true, Weight: 1}},
 	}
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: f.generationID, Ordinal: 1, ActivatedAt: time.Now()},
-		Providers:  map[string]runtime.Provider{f.providerID: provider},
-		Routes: map[string]runtime.Route{"video-default": {
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: f.generationID, Ordinal: 1, ActivatedAt: time.Now()},
+		Providers:  map[string]routing.Provider{f.providerID: provider},
+		Routes: map[string]routing.Route{"video-default": {
 			ID: routeID, Slug: "video-default", RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
 			Operations:     []string{OpVideoCreate, OpVideoList, OpVideoGet, OpVideoContent, OpVideoDelete},
 			OverallTimeout: 8000, MaxAttempts: 1, RoutingID: routeID,
-			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
-			Targets: []runtime.Target{{
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Targets: []routing.Target{{
 				ID: uuid.NewString(), ProviderID: f.providerID, ProviderModel: claimVideoModel,
 				Priority: 0, Weight: 1, Timeout: 6000, RoutingID: uuid.NewString(),
 			}},

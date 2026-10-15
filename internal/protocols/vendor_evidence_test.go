@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -74,11 +76,11 @@ func checkBasis(t *testing.T, what, basis string) {
 }
 
 // sameUsage compares decoded usage with the documented usage by value.
-func sameUsage(got *openai.Usage, documented json.RawMessage) bool {
+func sameUsage(got *wire.Usage, documented json.RawMessage) bool {
 	if got == nil {
 		return len(documented) == 0 || string(documented) == "null"
 	}
-	var want openai.Usage
+	var want wire.Usage
 	if json.Unmarshal(documented, &want) != nil {
 		return false
 	}
@@ -89,10 +91,10 @@ func sameUsage(got *openai.Usage, documented json.RawMessage) bool {
 
 // operationFamilies are the wire families a preset's operations are
 // addressed and decoded with.
-var operationFamilies = map[string]openai.Family{
-	"generation": openai.FamilyChat,
-	"embeddings": openai.FamilyEmbeddings,
-	"rerank":     openai.FamilyRerank,
+var operationFamilies = map[string]wire.Format{
+	"generation": wire.Chat,
+	"embeddings": wire.Embeddings,
+	"rerank":     wire.Rerank,
 }
 
 // unsupportedSamples are valid OpenAI request values for the parameters a
@@ -228,12 +230,12 @@ func checkRefusals(t *testing.T, contract vendors.Contract, evidence vendorEvide
 			t.Fatalf("no sample value for %s", field)
 		}
 		body, _ := json.Marshal(map[string]any{"model": "route", "messages": []any{map[string]string{"role": "user", "content": "hi"}}, field: sample})
-		request, err := Parse(openai.FamilyChat, body, "")
+		request, err := Parse(wire.Chat, body, "")
 		if err != nil {
 			continue // the dialect itself refuses the value
 		}
 		_, _, err = Encode(request, contract.Connector, contract.ID, "model", nil)
-		var refusal *openai.RequestError
+		var refusal *wire.RequestError
 		if !errors.As(err, &refusal) || refusal.Param != field {
 			t.Fatalf("%s was not refused: %v", field, err)
 		}
@@ -252,9 +254,9 @@ func checkResponses(t *testing.T, contract vendors.Contract, evidence vendorEvid
 		if operation == "generation" {
 			family = generationWire(contract)
 		}
-		var request *openai.Request
-		if family == openai.FamilyRerank {
-			request, _ = Parse(openai.FamilyRerank, []byte(`{"model":"route","query":"q","documents":["a","b","c"]}`), "")
+		var request *wire.Request
+		if family == wire.Rerank {
+			request, _ = Parse(wire.Rerank, []byte(`{"model":"route","query":"q","documents":["a","b","c"]}`), "")
 		}
 		completion, err := DecodeRequest(family, family, body, "route", "float", request)
 		if err != nil {
@@ -280,8 +282,8 @@ func checkStream(t *testing.T, contract vendors.Contract, evidence vendorEvidenc
 	checkBasis(t, "stream", evidence.Stream.Basis)
 	stream := vendorFixture(t, contract.ID, evidence.Stream.File)
 	var text strings.Builder
-	wire := generationWire(contract)
-	completion, err := Stream(wire, wire, strings.NewReader(string(stream)), 1<<20, "route", true, func(frame []byte) error {
+	encodedWire := generationWire(contract)
+	completion, err := Stream(encodedWire, encodedWire, strings.NewReader(string(stream)), 1<<20, "route", true, func(frame []byte) error {
 		return sse.Decode(strings.NewReader(string(frame)), 1<<20, func(event sse.Frame) error {
 			var chunk struct {
 				Choices []struct {
@@ -322,14 +324,14 @@ func checkStream(t *testing.T, contract vendors.Contract, evidence vendorEvidenc
 
 // generationWire is the dialect a preset generates in: its profile's, or Chat
 // Completions.
-func generationWire(contract vendors.Contract) openai.Family {
+func generationWire(contract vendors.Contract) wire.Format {
 	if ref := contract.Preset.Profile; ref != nil {
 		config := connectors.Config{Kind: contract.Connector, ProfileID: ref.ID, ProfileRevision: ref.Revision, VendorID: contract.ID}
-		if wire, err := config.TargetFamily(openai.FamilyChat); err == nil {
-			return wire
+		if encodedWire, err := config.TargetFamily(wire.Chat); err == nil {
+			return encodedWire
 		}
 	}
-	return openai.FamilyChat
+	return wire.Chat
 }
 
 func checkError(t *testing.T, contract vendors.Contract, evidence vendorEvidence) {

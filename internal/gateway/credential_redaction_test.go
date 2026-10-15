@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -28,7 +29,7 @@ func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
 						if authMode == "headers" {
 							credential, _ = json.Marshal(values)
 						}
-						h.reissue(func(provider *runtime.Provider) {
+						h.reissue(func(provider *routing.Provider) {
 							provider.AuthMode = authMode
 							provider.CredentialHeaders = []string{"X-Api-Key", "x-tenant", "X-Empty"}
 						}, credential)

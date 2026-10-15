@@ -8,9 +8,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // Retained resources are provider objects a key created earlier and may use
@@ -42,7 +43,7 @@ const (
 // and a transformed one cannot start new work once its route is strict. The
 // owner can always list, delete or cancel, so provider-held data can be
 // removed and running upstream work stopped whatever the route promises now.
-func retainedContract(strict bool, current runtime.RouteFidelity, use retainedUse) *Error {
+func retainedContract(strict bool, current routing.RouteFidelity, use retainedUse) *Error {
 	switch {
 	case use == retainedHousekeeping:
 		return nil
@@ -71,7 +72,7 @@ func strictResourceKind(kind string) (strict, known bool) {
 
 // resolveResource rebuilds the provider pin that owns a retained resource and
 // refuses a use its route no longer promises.
-func (s *Server) resolveResource(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *runtime.Route, *Error) {
+func (s *Server) resolveResource(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
 	if s.Resolver == nil || s.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
@@ -106,7 +107,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	if e := x.checkBody(route); e != nil {
 		return nil, nil, e
 	}
-	var target *runtime.Target
+	var target *routing.Target
 	for i := range route.Targets {
 		if res.TargetID == "" || route.Targets[i].ID != res.TargetID || route.Targets[i].ProviderID != provider.ID || route.Targets[i].ProviderModel != resourceModel(res) {
 			continue
@@ -127,7 +128,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 			return nil, nil, e
 		}
 	}
-	attempt := runtime.Attempt{
+	attempt := routing.Attempt{
 		TargetID:           target.ID,
 		ProviderID:         provider.ID,
 		ProviderRevisionID: provider.RevisionID,
@@ -143,7 +144,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 // admitStoredResponse admits a key to a retained response and returns the pin
 // that serves it. A strict response also needs provider state on the key and
 // the serving identity its contract recorded.
-func (s *Server) admitStoredResponse(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) (*pin, *runtime.Route, *Error) {
+func (s *Server) admitStoredResponse(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) (*pin, *routing.Route, *Error) {
 	if contract != nil {
 		current, ok := x.request.release.Snapshot.Routes[res.RouteSlug]
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
@@ -167,7 +168,7 @@ func (s *Server) admitStoredResponse(ctx context.Context, x *execution, authorit
 
 // authorizeResponseContract checks a key may use a strict retained response
 // whose pin is resolved later.
-func (s *Server) authorizeResponseContract(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) *Error {
+func (s *Server) authorizeResponseContract(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) *Error {
 	_, _, e := s.admitStoredResponse(ctx, x, authority, res, contract, use)
 	return e
 }
@@ -175,7 +176,7 @@ func (s *Server) authorizeResponseContract(ctx context.Context, x *execution, au
 // admitDurable admits a key to a retained file or batch and returns the pin
 // that serves it. A strict one also needs provider state on the key and the
 // serving identity its document recorded.
-func (s *Server) admitDurable(ctx context.Context, x *execution, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) (*pin, *runtime.Route, *Error) {
+func (s *Server) admitDurable(ctx context.Context, x *call, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
 	if doc != nil {
 		current, ok := x.snapshot().Routes[r.RouteSlug]
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
@@ -200,7 +201,7 @@ func (s *Server) admitDurable(ctx context.Context, x *execution, authority acces
 
 // authorizeDurable checks a key may use a strict retained file or batch; a
 // transformed one (doc is nil) is checked when its pin is resolved.
-func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) *Error {
+func (s *Server) authorizeDurable(ctx context.Context, x *call, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) *Error {
 	if doc == nil {
 		return nil
 	}
@@ -210,7 +211,7 @@ func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority a
 
 // Historical protocol and credential identity do not grant historical authority
 // to start fresh inference. Intersect that contract with the installed release.
-func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *runtime.Provider, route *runtime.Route, slot *runtime.Slot, target *runtime.Target, operation string) *Error {
+func restrictRetainedWork(current *routing.Snapshot, keyID string, provider *routing.Provider, route *routing.Route, slot *routing.Slot, target *routing.Target, operation string) *Error {
 	live, ok := current.Providers[provider.ID]
 	if !ok || !live.Enabled {
 		return pinUnavailable()
@@ -235,7 +236,7 @@ func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *run
 	if !foundTarget {
 		return pinUnavailable()
 	}
-	var liveSlot *runtime.Slot
+	var liveSlot *routing.Slot
 	for _, candidate := range live.Slots {
 		if candidate.ID == slot.ID {
 			liveSlot = &candidate
@@ -250,11 +251,11 @@ func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *run
 	slot.MaxConcurrency = tighterRetainedLimit(slot.MaxConcurrency, liveSlot.MaxConcurrency)
 	slot.Supply = tighterRetainedSupply(slot.Supply, liveSlot.Supply)
 	if live.Limits != nil {
-		prior := runtime.Limits{}
+		prior := routing.Limits{}
 		if provider.Limits != nil {
 			prior = *provider.Limits
 		}
-		provider.Limits = &runtime.Limits{
+		provider.Limits = &routing.Limits{
 			RequestsPerMinute: tighterRetainedLimit(prior.RequestsPerMinute, live.Limits.RequestsPerMinute),
 			TokensPerMinute:   tighterRetainedLimit(prior.TokensPerMinute, live.Limits.TokensPerMinute),
 			MaxConcurrency:    tighterRetainedLimit(prior.MaxConcurrency, live.Limits.MaxConcurrency),
@@ -280,20 +281,20 @@ func tighterRetainedLimit(old, current *int64) *int64 {
 
 // Current priority shares govern current capacity allocation. Spend caps stay
 // bounded by both the historical and current contracts, like token windows.
-func tighterRetainedSupply(old, current runtime.Supply) runtime.Supply {
+func tighterRetainedSupply(old, current routing.Supply) routing.Supply {
 	current.DailyCostLimit = tighterRetainedCost(old.DailyCostLimit, current.DailyCostLimit)
 	current.MonthlyCostLimit = tighterRetainedCost(old.MonthlyCostLimit, current.MonthlyCostLimit)
 	return current
 }
 
-func tighterRetainedCosts(old, current *runtime.CostLimits) *runtime.CostLimits {
+func tighterRetainedCosts(old, current *routing.CostLimits) *routing.CostLimits {
 	if old == nil {
 		return current
 	}
 	if current == nil {
 		return old
 	}
-	return &runtime.CostLimits{
+	return &routing.CostLimits{
 		DailyCostLimit:   tighterRetainedCost(old.DailyCostLimit, current.DailyCostLimit),
 		MonthlyCostLimit: tighterRetainedCost(old.MonthlyCostLimit, current.MonthlyCostLimit),
 	}

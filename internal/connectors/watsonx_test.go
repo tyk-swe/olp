@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -32,15 +34,15 @@ func TestWatsonxAddressesItsChatAPI(t *testing.T) {
 		false: "https://us-south.ml.cloud.ibm.com/ml/v1/text/chat?version=2025-10-25",
 		true:  "https://us-south.ml.cloud.ibm.com/ml/v1/text/chat_stream?version=2025-10-25",
 	} {
-		if got, err := c.URL(openai.FamilyChat, "ibm/granite-3-8b-instruct", stream); err != nil || got != want {
+		if got, err := c.URL(wire.Chat, "ibm/granite-3-8b-instruct", stream); err != nil || got != want {
 			t.Fatalf("URL(stream %v) = %s, %v", stream, got, err)
 		}
 	}
 	c.APIVersion = "2026-09-25"
-	if got, _ := c.URL(openai.FamilyChat, "ibm/granite-3-8b-instruct", false); !strings.HasSuffix(got, "?version=2026-09-25") {
+	if got, _ := c.URL(wire.Chat, "ibm/granite-3-8b-instruct", false); !strings.HasSuffix(got, "?version=2026-09-25") {
 		t.Fatalf("configured version lost: %s", got)
 	}
-	if _, err := c.URL(openai.FamilyResponses, "ibm/granite-3-8b-instruct", false); err == nil {
+	if _, err := c.URL(wire.Responses, "ibm/granite-3-8b-instruct", false); err == nil {
 		t.Fatal("watsonx addressed a Responses call")
 	}
 	for model, valid := range map[string]bool{"ibm/granite-3-8b-instruct": true, "meta-llama/llama-3-3-70b-instruct": true, "mistralai/mistral-large": true,
@@ -116,9 +118,9 @@ const watsonxStreamFixture = "id: 1\nevent: message\ndata: {\"id\":\"chat-1\",\"
 
 const watsonxUsageChunk = "id: 4\nevent: message\ndata: {\"id\":\"chat-1\",\"model_id\":\"ibm/granite-3-8b-instruct\",\"choices\":[],\"created\":1728404199,\"usage\":{\"completion_tokens\":3,\"prompt_tokens\":9,\"total_tokens\":12}}\n\n"
 
-func streamWatsonx(fixture string) (*openai.Completion, string, error) {
+func streamWatsonx(fixture string) (*wire.Completion, string, error) {
 	var client strings.Builder
-	completion, err := openai.Stream(openai.FamilyChat, watsonx().StreamPayload(strings.NewReader(fixture), 1<<16), 1<<16, "team-chat", true, func(frame []byte) error {
+	completion, err := openai.Stream(wire.Chat, watsonx().StreamPayload(strings.NewReader(fixture), 1<<16), 1<<16, "team-chat", true, func(frame []byte) error {
 		client.Write(frame)
 		return nil
 	})
@@ -136,7 +138,7 @@ func TestWatsonxStreamEndsWithItsUsageChunk(t *testing.T) {
 		t.Fatalf("client stream:\n%s", client)
 	}
 	_, _, err = streamWatsonx(watsonxStreamFixture)
-	if failure, ok := errors.AsType[*openai.ProtocolError](err); !ok || !failure.Truncated {
+	if failure, ok := errors.AsType[*wire.ProtocolError](err); !ok || !failure.Truncated {
 		t.Fatalf("a stream without its usage chunk ended as %v", err)
 	}
 	unfinished := strings.Replace(watsonxStreamFixture, `"finish_reason":"stop"`, `"finish_reason":null`, 1)
@@ -146,7 +148,7 @@ func TestWatsonxStreamEndsWithItsUsageChunk(t *testing.T) {
 	failed := watsonxStreamFixture[:strings.Index(watsonxStreamFixture, "id: 3")] + "event: error\ndata: {\"errors\":[{\"code\":\"model_overloaded\",\"message\":\"busy\"}],\"trace\":\"t\",\"status_code\":503}\n\n"
 	if _, _, err = streamWatsonx(failed); err == nil {
 		t.Fatal("a watsonx error event did not fail the stream")
-	} else if stated, ok := errors.AsType[*openai.UpstreamError](err); !ok || stated.Code != "model_overloaded" {
+	} else if stated, ok := errors.AsType[*wire.UpstreamError](err); !ok || stated.Code != "model_overloaded" {
 		t.Fatalf("error event = %v", err)
 	}
 }

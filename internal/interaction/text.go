@@ -6,18 +6,19 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // prepareText is a qualified operation mapping, independent of the transformed
 // Parts/Calls converter. Its narrow input and guarded output contract keeps
 // the native baseline explicit instead of approximating unsupported features.
-func (t *Template) prepareText(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {
+func (t *Template) prepareText(request *wire.Request, receipt *oif.Receipt) (oif.Prepared, error) {
 	if request.Stream {
 		return oif.Prepared{}, incompatible("state_carrier", "/stream", "translated_event_contract", "Translated streaming requires a separately qualified event and continuation contract.")
 	}
-	if request.Family != openai.FamilyChat || t.wire != openai.FamilyAnthropic {
+	if request.Family != wire.Chat || t.wire != wire.Anthropic {
 		return oif.Prepared{}, incompatible("target_capability", "/profile", "qualified_mapping", "No qualified mapping exists for this source and target dialect pair.")
 	}
 	if len(request.OIF().Provenance()) != 0 {
@@ -113,7 +114,7 @@ func (t *Template) prepareText(request *openai.Request, receipt *Receipt) (oif.P
 		}
 		if !present {
 			fields[name] = t.defaults[name]
-			receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: "/max_tokens", Disposition: "introduced", Rule: "declared_target_output_cap", Evidence: evidenceText})
+			receipt.Dispositions = append(receipt.Dispositions, oif.Disposition{Field: "/max_tokens", Disposition: "introduced", Rule: "declared_target_output_cap", Evidence: evidenceText})
 		}
 	}
 	var limit int64
@@ -128,13 +129,13 @@ func (t *Template) prepareText(request *openai.Request, receipt *Receipt) (oif.P
 	if err != nil {
 		return oif.Prepared{}, incompatible("target_capability", "/request", "bounded_buffering", "The qualified request exceeds its compiled bounds.")
 	}
-	descriptor := openai.Descriptor(t.wire, false)
+	descriptor := wire.Descriptor(t.wire, false)
 	prepared, err := oif.PrepareDestination(request.OIF(), descriptor, document, oif.QualifiedMapping, "qualified stateless ordered Chat text to Anthropic text; explicit nonreasoning output cap")
 	receipt.Dispositions = append(receipt.Dispositions,
-		Disposition{Field: "/messages", Disposition: "mapped", Rule: "ordered_user_assistant_text", Evidence: evidenceText},
-		Disposition{Field: "/max_tokens", Disposition: "mapped", Rule: "nonreasoning_output_token_cap", Evidence: evidenceText},
-		Disposition{Field: "/model", Disposition: "bound", Rule: "published_serving_identity", Evidence: evidenceText},
-		Disposition{Field: "/result", Disposition: "guarded", Rule: "single_text_result_with_usage_and_finish", Evidence: evidenceText})
+		oif.Disposition{Field: "/messages", Disposition: "mapped", Rule: "ordered_user_assistant_text", Evidence: evidenceText},
+		oif.Disposition{Field: "/max_tokens", Disposition: "mapped", Rule: "nonreasoning_output_token_cap", Evidence: evidenceText},
+		oif.Disposition{Field: "/model", Disposition: "bound", Rule: "published_serving_identity", Evidence: evidenceText},
+		oif.Disposition{Field: "/result", Disposition: "guarded", Rule: "single_text_result_with_usage_and_finish", Evidence: evidenceText})
 	return prepared, err
 }
 func member(value oif.Value, name string) oif.Value { out, _ := value.Lookup(name); return out }

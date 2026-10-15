@@ -6,131 +6,121 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// Planning asks every target whether it can take the request as the caller sent
-// it by encoding the request for it, and the attempt that serves the request
-// encodes it again to send it. The attempt is given the body planning made when
-// that is the body it would make, and makes one when it is not.
 func TestAnAttemptIsSentTheBodyPlanningMadeIfItIsStillTheRequest(t *testing.T) {
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	newProvider := func() *runtime.Provider {
-		return &runtime.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Kind: "openai", ParameterDefaults: map[string]json.RawMessage{"temperature": json.RawMessage(`0.2`)}}
-	}
-	provider, other := newProvider(), newProvider()
-	cfg := provider.Connector()
-	x := &execution{parsed: parsed}
-
-	if err := x.encodes(provider, cfg, "gpt-4o"); err != nil {
+	p := &routing.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Kind: "openai", ParameterDefaults: map[string]json.RawMessage{"temperature": json.RawMessage(`0.2`)}}
+	x := &call{generation: generationCall{parsed: parsed}}
+	if err := x.encodes(p, p.Connector(), "first", "gpt-4o"); err != nil {
 		t.Fatal(err)
 	}
-	if err := x.encodes(other, other.Connector(), "gpt-4o"); err != nil {
-		t.Fatal(err)
-	}
-	want, wire, err := providerinvoke.Encode(parsed, cfg, "gpt-4o", provider.ParameterDefaults)
+	record := x.targetPreparation(p, "first", "gpt-4o")
+	invocation, err := providerinvoke.Prepare(parsed, p.Connector(), "gpt-4o", p.ParameterDefaults)
+	expected, format := invocation.Prepared.Document().Bytes(), invocation.Wire
 	if err != nil {
 		t.Fatal(err)
 	}
-	kept := x.takeEncoded()
-	if len(kept) != 2 || x.encoded != nil || x.takeEncoded() != nil {
-		t.Fatalf("planning kept %d bodies and left %d behind", len(kept), len(x.encoded))
+	body, got, _, err := x.encoding(p, p.Connector(), "first", "gpt-4o")
+	if err != nil || got != format || !bytes.Equal(body, expected) {
+		t.Fatalf("prepared body changed: %s %v", body, err)
 	}
-	if body, got, _, err := x.encoding(kept, provider, cfg, "gpt-4o"); err != nil || got != wire || !bytes.Equal(body, want) {
-		t.Fatalf("the attempt was sent %s in %s (%v), want %s in %s", body, got, err, want, wire)
+	record.encoding.body = []byte("made by planning")
+	body, _, _, err = x.encoding(p, p.Connector(), "first", "gpt-4o")
+	if err != nil || string(body) != "made by planning" {
+		t.Fatal("dispatch did not reuse prepared body", err)
 	}
-
-	// What shows that the attempt is sent the body that was kept and does not
-	// make it again is a body that only planning could have made.
-	key := encodedKey(provider, "gpt-4o")
-	kept[key] = encodedRequest{source: kept[key].source, body: []byte("made by planning"), wire: wire}
-	if body, _, _, _ := x.encoding(kept, provider, cfg, "gpt-4o"); string(body) != "made by planning" {
-		t.Fatalf("the attempt made its own body, %s", body)
-	}
-	// A body is only the right one for the provider revision and model it was made
-	// for, and for the request as it still is: for any other the attempt makes its
-	// own.
-	revised := *provider
+	revised := *p
 	revised.RevisionID = uuid.NewString()
 	for _, tc := range []struct {
-		name     string
-		provider *runtime.Provider
-		model    string
-		change   func()
-	}{
-		{"another model", provider, "gpt-4o-mini", nil},
-		{"another revision", &revised, "gpt-4o", nil},
-		{"a request changed since", provider, "gpt-4o", func() { parsed.SetField("user", json.RawMessage(`"someone"`)) }},
-	} {
-		if tc.change != nil {
-			tc.change()
+		target, model string
+		provider      *routing.Provider
+	}{{"second", "gpt-4o", p}, {"first", "gpt-4o-mini", p}, {"first", "gpt-4o", &revised}} {
+		body, _, _, err = x.encoding(tc.provider, tc.provider.Connector(), tc.target, tc.model)
+		invocation, prepareErr := providerinvoke.Prepare(parsed, tc.provider.Connector(), tc.model, tc.provider.ParameterDefaults)
+		expected := invocation.Prepared.Document().Bytes()
+		if err != nil || prepareErr != nil || !bytes.Equal(body, expected) {
+			t.Fatal("target identity reused another preparation", err, prepareErr)
 		}
-		cfg := tc.provider.Connector()
-		body, wire, _, err := x.encoding(kept, tc.provider, cfg, tc.model)
-		fresh, freshWire, freshErr := providerinvoke.Encode(parsed, cfg, tc.model, tc.provider.ParameterDefaults)
-		if err != nil || freshErr != nil || wire != freshWire || !bytes.Equal(body, fresh) {
-			t.Errorf("%s: the attempt was sent %s (%v), want %s", tc.name, body, err, fresh)
-		}
+	}
+	next, err := parsed.WithField("user", json.RawMessage(`"someone"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x.generation.parsed = next
+	body, _, _, err = x.encoding(p, p.Connector(), "first", "gpt-4o")
+	if err != nil || !bytes.Contains(body, []byte(`"user":"someone"`)) {
+		t.Fatal("changed source reused old preparation", err)
+	}
+	if bytes.Contains(parsed.Field("user"), []byte("someone")) {
+		t.Fatal("transform mutated source")
 	}
 }
 
-// A target that cannot take the request keeps no body, and says why.
 func TestPlanningKeepsNoBodyForATargetThatCannotTakeTheRequest(t *testing.T) {
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_object"},"n":2}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := &runtime.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Kind: "anthropic"}
-	x := &execution{parsed: parsed}
-	if err := x.encodes(provider, provider.Connector(), "claude-sonnet-4-5"); err == nil {
-		t.Skip("this request translates to Anthropic; the test needs one that does not")
+	p := &routing.Provider{ID: "p", Kind: "openai", ProfileID: "missing-profile"}
+	x := &call{generation: generationCall{parsed: parsed}}
+	if err := x.encodes(p, p.Connector(), "target", "model"); err == nil {
+		t.Fatal("invalid profile admitted")
 	}
-	if x.encoded != nil {
-		t.Fatalf("a target that cannot take the request kept %d bodies", len(x.encoded))
+	for _, record := range x.targets {
+		if record.heavy() {
+			t.Fatal("failed preparation retained a body")
+		}
 	}
 }
 
-// A route of many targets does not make a request hold a copy of itself for each
-// of them while planning waits for an attempt.
 func TestPlanningKeepsAFewBodiesAtMost(t *testing.T) {
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{parsed: parsed}
+	x := &call{generation: generationCall{parsed: parsed}}
+	p := &routing.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Kind: "openai"}
 	for range keptEncodings + 3 {
-		provider := &runtime.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Kind: "openai"}
-		if err := x.encodes(provider, provider.Connector(), "gpt-4o"); err != nil {
+		if err := x.encodes(p, p.Connector(), uuid.NewString(), "gpt-4o"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if kept := x.takeEncoded(); len(kept) != keptEncodings {
-		t.Fatalf("planning kept %d bodies, want %d", len(kept), keptEncodings)
+	retained := 0
+	for _, record := range x.targets {
+		if record.heavy() {
+			retained++
+		}
+	}
+	if retained != keptEncodings {
+		t.Fatalf("retained %d plans, want %d", retained, keptEncodings)
 	}
 }
 
 func TestRetentionPolicyAppliesToNativeDestinationAcrossEncodingPaths(t *testing.T) {
 	for _, kind := range []string{"openai", "anthropic", "gemini", "vertex_ai", "bedrock"} {
 		t.Run(kind, func(t *testing.T) {
-			parsed, err := openai.Parse(openai.FamilyResponses, []byte(`{"model":"team-chat","input":"private prompt","max_output_tokens":32}`))
+			parsed, err := openai.Parse(wire.Responses, []byte(`{"model":"team-chat","input":"private prompt","max_output_tokens":32}`))
 			if err != nil {
 				t.Fatal(err)
 			}
-			provider := &runtime.Provider{ID: kind, Kind: kind}
-			x := &execution{parsed: parsed}
-			if err := x.encodes(provider, provider.Connector(), "model"); err != nil {
+			p := &routing.Provider{ID: kind, Kind: kind}
+			x := &call{generation: generationCall{parsed: parsed}}
+			if err := x.encodes(p, p.Connector(), "target", "model"); err != nil {
 				t.Fatal(err)
 			}
-			kept := x.takeEncoded()
-			// The first target reuses planning; later failover targets encode on demand.
-			for _, cache := range []map[string]encodedRequest{kept, nil} {
-				body, wire, _, err := x.encoding(cache, provider, provider.Connector(), "model")
+			for _, evict := range []bool{false, true} {
+				if evict {
+					x.targetPreparation(p, "target", "model").discard(false)
+				}
+				body, format, _, err := x.encoding(p, p.Connector(), "target", "model")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -138,16 +128,16 @@ func TestRetentionPolicyAppliesToNativeDestinationAcrossEncodingPaths(t *testing
 				if err := json.Unmarshal(body, &fields); err != nil {
 					t.Fatal(err)
 				}
-				if wire == openai.FamilyResponses {
+				if format == wire.Responses {
 					if string(fields["store"]) != "false" {
-						t.Fatalf("native destination retained state: %s", body)
+						t.Fatalf("retention allowed: %s", body)
 					}
 				} else if fields["store"] != nil {
-					t.Fatalf("stateless destination received unsupported store: %s", body)
+					t.Fatalf("unsupported retention field: %s", body)
 				}
 			}
 			if parsed.Field("store") != nil {
-				t.Fatal("destination policy mutated source request")
+				t.Fatal("destination policy mutated source")
 			}
 		})
 	}
@@ -156,27 +146,27 @@ func TestRetentionPolicyAppliesToNativeDestinationAcrossEncodingPaths(t *testing
 func TestRetentionPolicyPreservesOptInAndProviderDefaults(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		for _, field := range []string{"", `,"store":null`, `,"store":false`, `,"store":true`} {
-			parsed, err := openai.Parse(openai.FamilyResponses, []byte(`{"model":"team-chat","input":"private prompt","max_output_tokens":32`+field+`}`))
+			parsed, err := openai.Parse(wire.Responses, []byte(`{"model":"team-chat","input":"private prompt","max_output_tokens":32`+field+`}`))
 			if err != nil {
 				t.Fatal(err)
 			}
-			provider := &runtime.Provider{ID: "provider", Kind: "openai", ParameterDefaults: map[string]json.RawMessage{"temperature": json.RawMessage(`0.2`)}}
-			x := &execution{parsed: parsed}
+			p := &routing.Provider{ID: "provider", Kind: "openai", ParameterDefaults: map[string]json.RawMessage{"temperature": json.RawMessage(`0.2`)}}
+			x := &call{generation: generationCall{parsed: parsed}}
 			x.authority.Policy.AllowProviderState = allow
-			prepared, err := x.preparedProvider(provider, "model")
+			prepared, err := x.preparedProvider(p, "target", "model")
 			if err != nil {
 				t.Fatal(err)
 			}
 			body := prepared.invocation.Prepared.Document().Bytes()
 			if allow {
-				original, err := providerinvoke.Prepare(parsed, provider.Connector(), "model", provider.ParameterDefaults)
+				original, err := providerinvoke.Prepare(parsed, p.Connector(), "model", p.ParameterDefaults)
 				if err != nil || !bytes.Equal(body, original.Prepared.Document().Bytes()) {
-					t.Fatalf("state-enabled request changed: field=%s body=%s err=%v", field, body, err)
+					t.Fatal("state-enabled request changed", err)
 				}
 			} else {
 				var fields map[string]json.RawMessage
 				if err := json.Unmarshal(body, &fields); err != nil || string(fields["store"]) != "false" {
-					t.Fatalf("final native request allowed retention: field=%s body=%s err=%v", field, body, err)
+					t.Fatalf("retention allowed: %s %v", body, err)
 				}
 			}
 		}

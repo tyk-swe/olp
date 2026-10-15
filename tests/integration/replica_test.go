@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -103,7 +105,7 @@ func TestManagementReadReplicaLagConsumesTheRevocationDeadline(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
-	if !h.Runtime.Authority().Stale || h.Runtime.Eligibility("credential") != runtime.StaleAuthority {
+	if !h.Runtime.Authority().Stale || h.Runtime.Eligibility("credential") != routing.StaleAuthority {
 		t.Fatal("lagged authority remained eligible")
 	}
 	if status, _, body := h.call(caller, "GET", "/v1/models", nil, nil); status != 503 {

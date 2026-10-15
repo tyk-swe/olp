@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -217,7 +219,7 @@ func TestPinnedReleaseServesCurrentGrantAfterCredentialReplacement(t *testing.T)
 	enrollSlot(t, h, owner, path, provider.DefaultSlotID)
 	activateEnrolled(t, h, owner, path, 200, provider.DefaultSlotID)
 	h.refresh()
-	if h.Runtime.Release() == pinned || h.Runtime.GrantGeneration(credentialID) != 0 || h.Runtime.Eligibility(credentialID) != runtime.Eligible {
+	if h.Runtime.Release() == pinned || h.Runtime.GrantGeneration(credentialID) != 0 || h.Runtime.Eligibility(credentialID) != routing.Eligible {
 		t.Fatal("publication did not remove the eligible old credential from the polled grant set")
 	}
 	for name, release := range map[string]*runtime.Release{"pinned": pinned, "historical": nil} {

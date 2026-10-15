@@ -6,8 +6,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -15,7 +16,7 @@ import (
 // the queried spend caps in one round trip. A slot's headroom is the smaller
 // of its own and its connection's; a slot with no quota has none to report,
 // and ranks after slots whose headroom is known.
-func (a *Admission) ReadSupply(ctx context.Context, query runtime.SupplyQuery) *runtime.SupplyState {
+func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *routing.SupplyState {
 	var quotas []limits.QuotaProbe
 	probe := func(lookup string, rpm, tpm, concurrency *int64) int {
 		if rpm == nil && tpm == nil && concurrency == nil {
@@ -44,7 +45,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query runtime.SupplyQuery) *
 	for i, cap := range query.Caps {
 		caps[i] = limits.CapProbe{OwnerID: cap.OwnerID, DailyCostLimit: cap.Limits.DailyCostLimit, MonthlyCostLimit: cap.Limits.MonthlyCostLimit}
 	}
-	state := &runtime.SupplyState{Headroom: map[string]float64{}, Spend: map[string]runtime.Spend{}}
+	state := &routing.SupplyState{Headroom: map[string]float64{}, Spend: map[string]routing.Spend{}}
 	if len(quotas) == 0 && len(caps) == 0 {
 		return state
 	}
@@ -71,9 +72,9 @@ func (a *Admission) ReadSupply(ctx context.Context, query runtime.SupplyQuery) *
 	for i, cap := range caps {
 		switch spend[i] {
 		case limits.CapAvailable:
-			state.Spend[cap.OwnerID] = runtime.SpendAvailable
+			state.Spend[cap.OwnerID] = routing.SpendAvailable
 		case limits.CapExhausted:
-			state.Spend[cap.OwnerID] = runtime.SpendExhausted
+			state.Spend[cap.OwnerID] = routing.SpendExhausted
 		}
 	}
 	return state
@@ -93,12 +94,12 @@ type capHold struct {
 // cappedOwner is one spend cap an attempt is subject to.
 type cappedOwner struct {
 	id, lookup, quota string
-	limits            *runtime.CostLimits
+	limits            *routing.CostLimits
 }
 
 // attemptCaps lists the caps one attempt spends against: its route's, its
 // connection's and its credential slot's, in that order.
-func attemptCaps(route *runtime.Route, provider *runtime.Provider, slot *runtime.Slot) [3]cappedOwner {
+func attemptCaps(route *routing.Route, provider *routing.Provider, slot *routing.Slot) [3]cappedOwner {
 	owners := [3]cappedOwner{
 		{route.ID, limits.RouteLookup(route.ID), quotaRoute, route.Budget},
 		{provider.ID, limits.ConnectionLookup(provider.ID), quotaConnection, nil},
@@ -123,7 +124,7 @@ type capCheck struct {
 // holdCaps reserves the attempt's estimated cost against every spend cap it
 // is subject to. An exhausted cap refuses the attempt; a cap whose state
 // cannot be read skips the target, as an unreadable quota does.
-func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slot *runtime.Slot, deadline time.Time) capCheck {
+func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, deadline time.Time) capCheck {
 	var check capCheck
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
 		return check
@@ -183,7 +184,7 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 
 // spendCaps marks the caps an attempt was dispatched against, whose
 // reservations settle at cost rather than being given back.
-func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
+func (x *call) spendCaps(owners []string, attempt routing.Attempt) {
 	bound := x.attemptCostBound(attempt)
 	x.spentCost = x.spentCost.Add(bound)
 	x.spentCharge = x.spentCharge.Add(x.attemptChargeBound(attempt, bound))
@@ -197,7 +198,7 @@ func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
 
 // settleCaps replaces each cap reservation with what the attempts counted
 // against its owner cost, or gives it back when none of them was dispatched.
-func (s *Server) settleCaps(ctx context.Context, x *execution) {
+func (s *Server) settleCaps(ctx context.Context, x *call) {
 	for _, hold := range x.caps {
 		if hold.dispatched && hold.lease.HasCostReservation() {
 			actual := x.costOf(hold.owner).String()

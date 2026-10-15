@@ -33,6 +33,8 @@ func refusal(field, requirement, message string) error {
 // Compile fails activation for unreviewed batch hosting/default/policy
 // combinations. A file resource is admitted only under this batch target.
 func Compile(c Config) (*Template, error) {
+	c.Provider = c.Provider.Clone()
+	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, refusal("/profile", "explicit_profile", "Strict batch requires a registered provider profile.")
@@ -50,11 +52,7 @@ func Compile(c Config) (*Template, error) {
 	if contentpolicy.Validate(c.Policy) != nil || c.Policy != nil && len(c.Policy.Rules) != 0 {
 		return nil, operations.Error("policy_conflict", "/content_policy", "inspectable_batch", "Strict batch cannot inspect each queued item for this content policy.")
 	}
-	binding := c.Provider.Bindings[c.Model]
-	serving := oif.ServingIdentity{ProviderID: c.ProviderID, RevisionID: c.RevisionID, Model: c.Provider.Model(c.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: c.Provider.ServingPrincipal(c.Model), Snapshot: binding.Snapshot, Region: c.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
-	if binding.Region != "" {
-		serving.Region = binding.Region
-	}
+	serving := c.Provider.ServingIdentity(c.ProviderID, c.RevisionID, c.Model)
 	return &Template{provider: c.Provider, profile: p, model: c.Provider.Model(c.Model), serving: serving}, nil
 }
 

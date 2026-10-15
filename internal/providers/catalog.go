@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // The reference catalog offers its facts beside a provider's models. Accepting
@@ -35,7 +36,7 @@ type catalogSuggestion struct {
 	CatalogModel  string `json:"catalog_model"`
 	MatchedBy     string `json:"matched_by"`
 	// Facts are what accepting the suggestion stores.
-	Facts runtime.ModelMetadata `json:"facts"`
+	Facts routing.ModelMetadata `json:"facts"`
 	// Changes name the stored facts accepting would change.
 	Changes      []string               `json:"changes"`
 	Capabilities catalog.Capabilities   `json:"capabilities"`
@@ -51,8 +52,8 @@ var catalogFactNames = []string{"canonical_model", "context_length", "max_output
 
 // catalogFacts are the operator facts a catalog model supports, tagged with
 // the catalog's digest and the time the vendor's page was observed.
-func catalogFacts(signed *catalog.Signed, m *catalog.Model) runtime.ModelMetadata {
-	facts := runtime.ModelMetadata{InputModalities: m.InputModalities, OutputModalities: m.OutputModalities, ContextLength: m.ContextLength, MaxOutputTokens: m.MaxOutputTokens, SupportedParameters: m.SupportedParameters,
+func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadata {
+	facts := routing.ModelMetadata{InputModalities: m.InputModalities, OutputModalities: m.OutputModalities, ContextLength: m.ContextLength, MaxOutputTokens: m.MaxOutputTokens, SupportedParameters: m.SupportedParameters,
 		Source: new(signed.Source()), ObservedAt: new(m.Provenance.ObservedAt)}
 	if m.CanonicalModel != "" {
 		facts.CanonicalModel = new(m.CanonicalModel)
@@ -62,7 +63,7 @@ func catalogFacts(signed *catalog.Signed, m *catalog.Model) runtime.ModelMetadat
 
 // applyCatalogFacts overlays catalog facts on a model's stored facts, keeping
 // every fact the catalog does not state, and reports which facts changed.
-func applyCatalogFacts(stored json.RawMessage, facts runtime.ModelMetadata) (json.RawMessage, []string, error) {
+func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (json.RawMessage, []string, error) {
 	current := map[string]json.RawMessage{}
 	if len(stored) > 0 {
 		if err := json.Unmarshal(stored, &current); err != nil {
@@ -107,7 +108,7 @@ func sameFact(a, b json.RawMessage) bool {
 // privacyEvidence reports facts whose source attests a privacy declaration:
 // overwriting their source would make the catalog look like that evidence.
 func privacyEvidence(stored json.RawMessage) bool {
-	var facts runtime.ModelMetadata
+	var facts routing.ModelMetadata
 	_ = json.Unmarshal(stored, &facts)
 	return facts.DataCollection != nil || facts.ZeroDataRetention != nil
 }

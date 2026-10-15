@@ -15,13 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -70,10 +72,10 @@ func resourceCommitContext(ctx context.Context) (context.Context, context.Cancel
 const maxResourceList = 100
 
 type pin struct {
-	target   runtime.Target
-	provider runtime.Provider
-	attempt  runtime.Attempt
-	slot     runtime.Slot
+	target   routing.Target
+	provider routing.Provider
+	attempt  routing.Attempt
+	slot     routing.Slot
 	model    string
 	hold     *dispatchHold
 }
@@ -89,7 +91,7 @@ func readBounded(r io.Reader, limit int64) ([]byte, error) {
 	return body, nil
 }
 
-func stateQualified(p *runtime.Provider, model, operation, mode string) bool {
+func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	if !p.Connector().Supports(operation, "openai", mode) {
 		return false
 	}
@@ -111,13 +113,13 @@ func resourceModel(res *resources.Resource) string {
 	return meta.UpstreamModel
 }
 
-func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Route, operation, mode string) (*pin, *Error) {
-	return s.selectPinSurface(ctx, x, route, operation, "openai", mode, func(p *runtime.Provider, model string) bool {
+func (s *Server) selectPin(ctx context.Context, x *call, route *routing.Route, operation, mode string) (*pin, *Error) {
+	return s.selectPinSurface(ctx, x, route, operation, "openai", mode, func(p *routing.Provider, model string) bool {
 		return stateQualified(p, model, operation, mode)
 	})
 }
 
-func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
+func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -128,13 +130,13 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	// Pinned work must select a target on this route rather than delegate.
 	x.fixed = true
 	options := s.selectionOptions(ctx, x)
-	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+	options.Accept = func(p routing.Provider, t routing.Target) error {
 		if !qualified(&p, t.ProviderModel) {
 			return errors.New("provider capability unavailable")
 		}
 		return nil
 	}
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, operation, surface, mode, x.affinity, options)
+	plan, err := routing.Select(snapshot, route.Slug, operation, surface, mode, x.affinity, options)
 	if err != nil {
 		return nil, requestError(err)
 	}
@@ -143,17 +145,17 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		if x.costExcluded {
 			return nil, costLimitExceeded()
 		}
-		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	attempt := plan.Attempts[0]
 	provider, ok := snapshot.Providers[attempt.ProviderID]
 	if !ok {
-		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
 		return nil, e
 	}
-	var target runtime.Target
+	var target routing.Target
 	for _, candidate := range route.Targets {
 		if candidate.ID == attempt.TargetID {
 			target = candidate
@@ -161,7 +163,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		}
 	}
 	if target.ID == "" {
-		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	x.decisions = plan.Decisions
 	x.policy = plan.Policy
@@ -193,7 +195,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	return nil, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`.")
 }
 
-func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
+func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
@@ -216,7 +218,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if x.mode == "streaming" && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyResponses) {
+	if x.mode == "streaming" && (x.family == wire.GeminiInteractions || x.family == wire.Responses) {
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body, &p.provider, p.model); err != nil {
@@ -235,8 +237,8 @@ func upstreamError(f *attemptFailure) *Error {
 	return serverError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 }
 
-func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family openai.Family) (*execution, access.Authority, bool) {
-	x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, access.Authority, bool) {
+	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 	if !s.admit(r.Context()) {
 		s.stateFail(x, w, overloaded, family)
 		return x, access.Authority{}, true
@@ -256,17 +258,17 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family opena
 	return x, authority, false
 }
 
-func (s *Server) stateFail(x *execution, w http.ResponseWriter, e *Error, family openai.Family) {
+func (s *Server) stateFail(x *call, w http.ResponseWriter, e *Error, family wire.Format) {
 	x.failure = e
 	s.finish(x, nil, e.Status)
 	writeSurfaceError(w, e, family.Surface())
 }
 
-func (s *Server) stateDeadline(ctx context.Context, route *runtime.Route) (context.Context, context.CancelFunc) {
+func (s *Server) stateDeadline(ctx context.Context, route *routing.Route) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, time.Duration(route.OverallTimeout)*time.Millisecond)
 }
 
-func (s *Server) reserveState(ctx context.Context, x *execution, authority access.Authority, overall time.Duration) *Error {
+func (s *Server) reserveState(ctx context.Context, x *call, authority access.Authority, overall time.Duration) *Error {
 	if e := x.checkBody(x.route); e != nil {
 		return e
 	}
@@ -275,7 +277,7 @@ func (s *Server) reserveState(ctx context.Context, x *execution, authority acces
 	return e
 }
 
-func (s *Server) resourceSettle(ctx context.Context, x *execution, p *pin) {
+func (s *Server) resourceSettle(ctx context.Context, x *call, p *pin) {
 	if p != nil {
 		s.settlePinHold(ctx, x, p.hold, nil)
 	}
@@ -613,7 +615,7 @@ func batchMetadata(body []byte, model, localInput string) (json.RawMessage, stri
 }
 
 func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyFile)
+	x, authority, done := s.stateBegin(w, r, wire.File)
 	if done {
 		return
 	}
@@ -821,7 +823,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, out)
 }
 
-func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endpoint, purpose string, extra map[string]string, file *media.Part, fileFirst bool) (*http.Response, *attemptFailure) {
+func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint, purpose string, extra map[string]string, file *media.Part, fileFirst bool) (*http.Response, *attemptFailure) {
 	pipeR, pipeW := io.Pipe()
 	form := multipart.NewWriter(pipeW)
 	sendDone := make(chan error, 1)
@@ -921,7 +923,7 @@ var stateQuoteReplacer = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", ""
 func stateQuote(value string) string { return stateQuoteReplacer(value) }
 
 func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyFile)
+	x, authority, done := s.stateBegin(w, r, wire.File)
 	if done {
 		return
 	}
@@ -968,7 +970,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1033,7 +1035,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1070,7 +1072,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID)+"/content", nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1144,8 +1146,8 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyFile)
+func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
+	x, authority, done := s.stateBegin(w, r, wire.File)
 	if done {
 		return
 	}
@@ -1198,7 +1200,7 @@ func gateError(gate gateResult) *Error {
 	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The pinned credential cannot currently serve this object.")
 }
 
-func (s *Server) writeStateJSON(w http.ResponseWriter, x *execution, body []byte) {
+func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	w.Header().Set("Content-Type", "application/json")
 	x.responseHeaders(w.Header(), false)
@@ -1267,7 +1269,7 @@ func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 }
 
 func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyBatch)
+	x, authority, done := s.stateBegin(w, r, wire.Batch)
 	if done {
 		return
 	}
@@ -1463,8 +1465,8 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, out)
 }
 
-func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyBatch)
+func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
+	x, authority, done := s.stateBegin(w, r, wire.Batch)
 	if done {
 		return
 	}
@@ -1508,7 +1510,7 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 }
 
 func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyBatch)
+	x, authority, done := s.stateBegin(w, r, wire.Batch)
 	if done {
 		return
 	}
@@ -1555,13 +1557,13 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		return s.batchRefresh(ctx, x, res, p, http.MethodGet, "batches/"+url.PathEscape(res.UpstreamID), nil, w)
 	})
 }
 
 func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		if res.Kind == resources.KindStrictBatch {
 			switch res.State {
 			case "completed", "failed", "expired", "cancelled":
@@ -1579,7 +1581,7 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.Resource, p *pin, method, path string, body []byte, w http.ResponseWriter) *Error {
+func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resource, p *pin, method, path string, body []byte, w http.ResponseWriter) *Error {
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")

@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestConfiguredResourceAndRealtimeUseThePinnedConnection(t *testing.T) {
@@ -43,7 +45,7 @@ func TestConfiguredResourceAndRealtimeUseThePinnedConnection(t *testing.T) {
 		io.WriteString(w, `{"id":"resp-owned","status":"completed"}`)
 	}))
 	defer upstream.Close()
-	var provider runtime.Provider
+	var provider routing.Provider
 	for _, value := range h.rt.release.Snapshot.Providers {
 		if value.Name == "a" {
 			provider = value
@@ -55,8 +57,8 @@ func TestConfiguredResourceAndRealtimeUseThePinnedConnection(t *testing.T) {
 	provider.Endpoint = upstream.URL
 	provider.SemanticHeaders = map[string]string{"OpenAI-Beta": "fixture-v1"}
 	provider.Network = &egress.ConnectionOptions{TrustRootsPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstream.Certificate().Raw}))}
-	x := &execution{request: request{release: h.rt.release, startedAt: time.Now()}, family: openai.FamilyResponses, mode: "unary"}
-	p := &pin{provider: provider, slot: provider.Slots[0], model: modelA, attempt: runtime.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: modelA}}
+	x := &call{request: request{release: h.rt.release, startedAt: time.Now()}, family: wire.Responses, mode: "unary"}
+	p := &pin{provider: provider, slot: provider.Slots[0], model: modelA, attempt: routing.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: modelA}}
 	endpoint, err := provider.Connector().ResourceURL(modelA, "responses/resp-owned", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +97,7 @@ func TestConfiguredResourceAndRealtimeUseThePinnedConnection(t *testing.T) {
 
 func TestConfiguredDefaultBoundsReachSharedAdmission(t *testing.T) {
 	h := newHarness(t, Config{})
-	var provider runtime.Provider
+	var provider routing.Provider
 	for _, value := range h.rt.release.Snapshot.Providers {
 		if value.Name == "a" {
 			provider = value
@@ -104,15 +106,15 @@ func TestConfiguredDefaultBoundsReachSharedAdmission(t *testing.T) {
 	provider.ProfileID = "compatible-chat"
 	provider.ProfileRevision = "1"
 	provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`)}}}
-	request, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"abcd"}]}`))
+	request, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"abcd"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{parsed: request, attempts: []runtime.Attempt{{ProviderID: provider.ID, UpstreamModel: modelA}}}
+	x := &call{routeLeg: routeLeg{attempts: []routing.Attempt{{ProviderID: provider.ID, UpstreamModel: modelA}}}, generation: generationCall{parsed: request}}
 	if got := x.attemptReservation(x.attempts[0], &provider); got < 9001 {
 		t.Fatalf("configured bound omitted from shared reservation: %d", got)
 	}
-	prepared, err := x.preparedProvider(&provider, modelA)
+	prepared, err := x.preparedProvider(&provider, "", modelA)
 	if err != nil {
 		t.Fatal(err)
 	}

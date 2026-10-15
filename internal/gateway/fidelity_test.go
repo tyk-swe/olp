@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type changedFidelityRuntime struct {
@@ -20,7 +21,7 @@ type changedFidelityRuntime struct {
 	checks atomic.Int64
 }
 
-func (r *changedFidelityRuntime) CheckRouteFidelity(_ context.Context, route runtime.Route) error {
+func (r *changedFidelityRuntime) CheckRouteFidelity(_ context.Context, route routing.Route) error {
 	r.checks.Add(1)
 	if route.Slug == r.denied {
 		return errors.New("the installed strict contract is no longer published")
@@ -56,11 +57,11 @@ func TestStrictAdmissionConfirmsPublicationBeforeProviderWork(t *testing.T) {
 func TestStrictPublicationCheckFollowsRouteDelegationAndFallback(t *testing.T) {
 	for _, fallback := range []bool{false, true} {
 		h := strictHarness(t, strictEmbeddings)
-		behavior := runtime.Behavior{Selectors: []runtime.Selector{{ID: "delegate", Route: backupSlug}}}
+		behavior := routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}}
 		if fallback {
-			behavior = runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}}
+			behavior = routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}}
 		}
-		h.republish(func(snapshot *runtime.Snapshot, _, b runtime.Provider) { splitRoutes(snapshot, b, behavior) })
+		h.republish(func(snapshot *routing.Snapshot, _, b routing.Provider) { splitRoutes(snapshot, b, behavior) })
 		if fallback {
 			h.gateway.health.cooldown(h.provider("a"), h.slotA, time.Minute)
 		}

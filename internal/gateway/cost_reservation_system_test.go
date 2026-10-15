@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -34,8 +35,8 @@ func TestIntegrationFallbackReservesCallerBudgetsBeforeDispatch(t *testing.T) {
 			for _, affordable := range []bool{true, false} {
 				t.Run(fmt.Sprintf("%s/priced=%t/affordable=%t", owner, firstPriced, affordable), func(t *testing.T) {
 					h := newHarness(t, Config{})
-					h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-						splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}})
+					h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+						splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
 					})
 					price := usage.RoutingPrice{Price: usage.Price{ProviderKind: "openai_compatible", Model: modelB, Operation: "generation",
 						InputPerMillion: costText("10"), OutputPerMillion: costText("100"),
@@ -101,14 +102,14 @@ func TestIntegrationRealtimeSessionsHoldTheirTargetsPrice(t *testing.T) {
 			authority.LookupID = strings.ReplaceAll(uuid.NewString(), "-", "")
 			authority.Policy.DailyCostLimit = &tc.ceiling
 			installBudgetBalance(t, limiter, authority.ID)
-			x := &execution{request: request{id: uuid.NewString(), minted: true, release: h.rt.release}, estimate: resourceEstimate}
+			x := &call{request: request{id: uuid.NewString(), minted: true, release: h.rt.release}, estimate: resourceEstimate}
 			lease, e := h.gateway.Admission.reserveKey(t.Context(), authority, "openai", resourceEstimate, time.Minute)
 			if e != nil {
 				t.Fatal(e)
 			}
 			x.lease = lease
 			t.Cleanup(func() { settleKey(t.Context(), lease, false, nil, h.gateway.log) })
-			attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1000"), OutputPerMillion: costText("1000")}}}
+			attempt := routing.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1000"), OutputPerMillion: costText("1000")}}}
 			e = h.gateway.reserveSessionCost(t.Context(), x, authority, attempt, time.Minute)
 			if (e != nil) != tc.refused || e != nil && e.Status != http.StatusTooManyRequests {
 				t.Fatalf("session hold: %v, want refused=%t", e, tc.refused)

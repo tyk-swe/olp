@@ -24,6 +24,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -69,7 +71,7 @@ func (s *staticRuntime) Authenticate(secret string) (*access.Authority, error) {
 	return &authority, nil
 }
 
-func (s *staticRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
+func (s *staticRuntime) Eligibility(string) routing.Eligibility { return routing.Eligible }
 
 // Secret serves the credentials the pinned release installed.
 func (s *staticRuntime) Secret(_ context.Context, release *runtime.Release, credentialID string) ([]byte, int64, error) {
@@ -180,10 +182,10 @@ var allSurfaces = []string{"openai", "anthropic", "gemini"}
 
 // capabilities certifies the backend's model for generation, token counting
 // and embeddings on the given client surfaces.
-func (b backend) capabilities(surfaces []string) []runtime.Capability {
-	var out []runtime.Capability
+func (b backend) capabilities(surfaces []string) []routing.Capability {
+	var out []routing.Capability
 	add := func(operation, surface, mode string) {
-		out = append(out, runtime.Capability{Model: b.model, Operation: operation, Surface: surface, Mode: mode})
+		out = append(out, routing.Capability{Model: b.model, Operation: operation, Surface: surface, Mode: mode})
 	}
 	for _, surface := range surfaces {
 		add("generation", surface, "unary")
@@ -239,30 +241,30 @@ var routeSpecs = []routeSpec{
 func fixtureRelease(upstreamURL string) (*runtime.Release, error) {
 	now := time.Now().UTC()
 	version := 1
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: now},
-		Providers:  map[string]runtime.Provider{},
-		Routes:     map[string]runtime.Route{},
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: now},
+		Providers:  map[string]routing.Provider{},
+		Routes:     map[string]routing.Route{},
 	}
 	secrets := map[string][]byte{}
 	for _, spec := range routeSpecs {
 		b := backends[spec.backend]
-		mode := runtime.FidelityStrict
+		mode := routing.FidelityStrict
 		profiles := spec.profiles
 		if len(profiles) == 0 {
-			mode, profiles = runtime.FidelityTransformed, []string{""}
+			mode, profiles = routing.FidelityTransformed, []string{""}
 		}
 		routeID := uuid.NewString()
-		route := runtime.Route{
+		route := routing.Route{
 			ID: routeID, Slug: spec.slug, OverallTimeout: 60000, MaxAttempts: 1, RoutingID: routeID,
-			RevisionID: uuid.NewString(), Revision: 1, PublishedAt: now, Fidelity: runtime.RouteFidelity{Mode: mode},
+			RevisionID: uuid.NewString(), Revision: 1, PublishedAt: now, Fidelity: routing.RouteFidelity{Mode: mode},
 		}
 		for _, profile := range profiles {
 			surfaces := allSurfaces
 			if profile != "" {
 				surfaces = []string{b.surface}
 			}
-			caps := slices.DeleteFunc(b.capabilities(surfaces), func(c runtime.Capability) bool {
+			caps := slices.DeleteFunc(b.capabilities(surfaces), func(c routing.Capability) bool {
 				return len(spec.operations) > 0 && !slices.Contains(spec.operations, c.Operation)
 			})
 			if profile != "" {
@@ -271,7 +273,7 @@ func fixtureRelease(upstreamURL string) (*runtime.Release, error) {
 				if err != nil {
 					return nil, err
 				}
-				caps = slices.DeleteFunc(caps, func(c runtime.Capability) bool { return !slices.Contains(declared.Operations, c.Operation) })
+				caps = slices.DeleteFunc(caps, func(c routing.Capability) bool { return !slices.Contains(declared.Operations, c.Operation) })
 			}
 			for _, c := range caps {
 				if !slices.Contains(route.Operations, c.Operation) {
@@ -279,21 +281,21 @@ func fixtureRelease(upstreamURL string) (*runtime.Release, error) {
 				}
 			}
 			providerID, credentialID, slotID, targetID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			provider := runtime.Provider{
+			provider := routing.Provider{
 				ID: providerID, Name: "scripted " + b.name + " for " + spec.slug, Kind: b.kind, VendorID: b.vendor, Enabled: true,
 				ActiveCredential: &credentialID, Capabilities: caps, RevisionID: uuid.NewString(),
 				Endpoint: upstreamURL + b.prefix, AuthMode: "api_key", ProfileID: profile,
 				// A transformed route accepts structured output only from a
 				// model that declares it.
 				Models: map[string]json.RawMessage{b.model: modelMetadata},
-				Slots:  []runtime.Slot{{ID: slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialID, CredentialVersion: &version}},
+				Slots:  []routing.Slot{{ID: slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialID, CredentialVersion: &version}},
 			}
 			if profile != "" {
 				provider.ProfileRevision = connectors.ProfileRevision
 			}
 			snapshot.Providers[providerID] = provider
 			secrets[credentialID] = []byte(credential)
-			route.Targets = append(route.Targets, runtime.Target{ID: targetID, ProviderID: providerID, ProviderModel: b.model, Weight: 1, Timeout: 55000, RoutingID: targetID})
+			route.Targets = append(route.Targets, routing.Target{ID: targetID, ProviderID: providerID, ProviderModel: b.model, Weight: 1, Timeout: 55000, RoutingID: targetID})
 		}
 		snapshot.Routes[spec.slug] = route
 	}
@@ -330,4 +332,4 @@ func environment(origin, upstreamURL string) map[string]string {
 }
 
 // This fixture has no asynchronous publication or external database.
-func (*staticRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }
+func (*staticRuntime) CheckRouteFidelity(context.Context, routing.Route) error { return nil }

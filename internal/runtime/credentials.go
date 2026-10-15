@@ -9,29 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
-)
-
-// Eligibility is whether a credential version may serve and, when it may not,
-// why. Planning, slot availability and dispatch all ask for it, so plan and
-// attempt records name the same reason.
-type Eligibility string
-
-const (
-	// Eligible is the only eligibility that serves.
-	Eligible Eligibility = ""
-	// Revoked marks a credential version an operator revoked.
-	Revoked Eligibility = "revoked"
-	// Lapsed marks a credential version whose grant lapsed: it can no longer
-	// be refreshed, or whose original profile was not recorded. Only a new
-	// grant enrollment replaces it.
-	Lapsed Eligibility = "lapsed"
-	// StaleAuthority withholds every credential version: the last authority
-	// read is too old to vouch for any of them.
-	StaleAuthority Eligibility = "stale_authority"
-	// ExternalUnavailable makes a failed or expired store resolution visible in
-	// route plans; a static credential is never substituted for a reference.
-	ExternalUnavailable Eligibility = "external_secret_unavailable"
 )
 
 // ErrCredentialUnavailable reports a credential version the credential source
@@ -45,7 +24,7 @@ var ErrCredentialUnavailable = errors.New("credential unavailable")
 // reconciliation, passes nil.
 type Credentials interface {
 	// Eligibility reports whether a credential version may serve now.
-	Eligibility(credentialID string) Eligibility
+	Eligibility(credentialID string) routing.Eligibility
 	// Secret returns a credential slot's usable secret and the generation
 	// of the grant that supplied it, or zero for a static credential. The
 	// generation is read together with the secret and travels with an attempt.
@@ -60,28 +39,28 @@ type Credentials interface {
 
 // Eligibility reports whether a credential version may serve as of the last
 // authority read.
-func (m *Manager) Eligibility(credentialID string) Eligibility {
+func (m *Manager) Eligibility(credentialID string) routing.Eligibility {
 	m.mu.RLock()
 	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
 		m.mu.RUnlock()
-		return StaleAuthority
+		return routing.StaleAuthority
 	}
 	eligibility := m.authority.ineligible[credentialID]
 	m.mu.RUnlock()
-	if eligibility != Eligible {
+	if eligibility != routing.Eligible {
 		return eligibility
 	}
 	if known, available := m.external.available(credentialID); known && !available {
-		return ExternalUnavailable
+		return routing.ExternalUnavailable
 	}
-	return Eligible
+	return routing.Eligible
 }
 
 // ReadIneligible reads which credential versions and network credentials may
 // not serve, and why, as key authority records it: an operator revoked them,
 // which prevails, or a credential version's grant lapsed. It reads those among
 // ids, or all of them when ids is nil.
-func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[string]Eligibility, error) {
+func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[string]routing.Eligibility, error) {
 	rows, err := q.Query(ctx, `SELECT c.id::text,CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' ELSE 'lapsed' END
 		FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
 		WHERE (c.revoked_at IS NOT NULL OR g.lapsed_at IS NOT NULL OR c.plugin_digest IS NOT NULL AND c.profile_id IS NULL)
@@ -91,10 +70,10 @@ func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[st
 	if err != nil {
 		return nil, err
 	}
-	ineligible := map[string]Eligibility{}
+	ineligible := map[string]routing.Eligibility{}
 	for rows.Next() {
 		var id string
-		var eligibility Eligibility
+		var eligibility routing.Eligibility
 		if err = rows.Scan(&id, &eligibility); err != nil {
 			rows.Close()
 			return nil, err
@@ -141,7 +120,7 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 	if err != nil {
 		return nil, 0, err
 	}
-	if eligibility := ineligible[credentialID]; eligibility != Eligible {
+	if eligibility := ineligible[credentialID]; eligibility != routing.Eligible {
 		return nil, 0, fmt.Errorf("credential %s: %s: %w", credentialID, eligibility, ErrCredentialUnavailable)
 	}
 	references, err := readExternalReferences(ctx, tx, []string{credentialID})
@@ -210,7 +189,7 @@ func ReadNetworkSecret(ctx context.Context, q access.Queryer, keys *secrets.KeyR
 	if err != nil {
 		return nil, err
 	}
-	if eligibility := ineligible[credentialID]; eligibility != Eligible {
+	if eligibility := ineligible[credentialID]; eligibility != routing.Eligible {
 		return nil, unavailable(errors.New(string(eligibility)))
 	}
 	secret, err := keys.Read(ctx, q, installation, credentialID, secrets.ProviderCredential)
@@ -221,7 +200,7 @@ func ReadNetworkSecret(ctx context.Context, q access.Queryer, keys *secrets.KeyR
 }
 
 func (m *Manager) eligible(credentialID string) error {
-	if eligibility := m.Eligibility(credentialID); eligibility != Eligible {
+	if eligibility := m.Eligibility(credentialID); eligibility != routing.Eligible {
 		return fmt.Errorf("credential %s: %s: %w", credentialID, eligibility, ErrCredentialUnavailable)
 	}
 	return nil

@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func responsePath(cfg connectors.Config, suffix string) string {
@@ -29,7 +31,7 @@ func providerStateForbidden() *Error {
 	return permissionError("provider_state_forbidden", "This API key does not allow provider state; provider-retained content requires the allow_provider_state policy.")
 }
 
-func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority access.Authority, parsed *openai.Request) *Error {
+func (s *Server) responsesStateGate(ctx context.Context, x *call, authority access.Authority, parsed *wire.Request) *Error {
 	var previous string
 	if raw := parsed.Field("previous_response_id"); raw != nil {
 		_ = json.Unmarshal(raw, &previous)
@@ -102,7 +104,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 		if e := s.authorizeResponseContract(ctx, x, authority, res, contract, retainedNewWork); e != nil {
 			return e
 		}
-		x.responseContract = contract
+		x.generation.responseContract = contract
 		x.serving = &contract.Receipt.Serving
 		x.servingSlot = res.SlotID
 		x.servingBinding = contract.Binding
@@ -113,11 +115,15 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if err != nil {
 		return serverError(http.StatusInternalServerError, "internal_error", "The stored response could not be read.")
 	}
-	parsed.SetField("previous_response_id", encoded)
+	next, err := parsed.WithField("previous_response_id", encoded)
+	if err != nil {
+		return requestError(err)
+	}
+	x.generation.parsed = next
 	return nil
 }
 
-func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
+func (s *Server) pinAttempts(ctx context.Context, x *call) *Error {
 	if x.pin == nil {
 		return nil
 	}
@@ -125,8 +131,8 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	if e != nil {
 		return e
 	}
-	if x.continuation != nil && x.continuation.parentState != nil {
-		if e := s.authorizeContinuationPin(ctx, x, x.continuation.parent, x.continuation.parentState, p); e != nil {
+	if x.generation.continuation != nil && x.generation.continuation.parentState != nil {
+		if e := s.authorizeContinuationPin(ctx, x, x.generation.continuation.parent, x.generation.continuation.parentState, p); e != nil {
 			return e
 		}
 	}
@@ -145,27 +151,27 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 		x.historicalSnapshot = retained
 		route := retained.Routes[historical.Slug]
 		x.route = &route
-		x.attempts = []runtime.Attempt{p.attempt}
+		x.attempts = []routing.Attempt{p.attempt}
 		x.budget = 1
 		x.pinnedSlot = &slot
 		return nil
 	}
-	historical.Targets = []runtime.Target{p.target}
-	p.provider.Slots = []runtime.Slot{p.slot}
-	retained := &runtime.Snapshot{Generation: current.Generation, Providers: map[string]runtime.Provider{p.provider.ID: p.provider}, Routes: map[string]runtime.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies}
-	if err := retained.Validate(); err != nil {
+	historical.Targets = []routing.Target{p.target}
+	p.provider.Slots = []routing.Slot{p.slot}
+	retained := &routing.Snapshot{Generation: current.Generation, Providers: map[string]routing.Provider{p.provider.ID: p.provider}, Routes: map[string]routing.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies}
+	if err := retained.Compile(); err != nil {
 		return pinUnavailable()
 	}
 	x.historicalSnapshot = retained
 	route := retained.Routes[historical.Slug]
 	x.route = &route
-	x.attempts = []runtime.Attempt{p.attempt}
+	x.attempts = []routing.Attempt{p.attempt}
 	x.budget = 1
 	x.pinnedSlot = &p.slot
 	return nil
 }
 
-func responseStoreRequested(parsed *openai.Request) bool {
+func responseStoreRequested(parsed *wire.Request) bool {
 	raw := parsed.Field("store")
 	if raw == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return true
@@ -174,8 +180,8 @@ func responseStoreRequested(parsed *openai.Request) bool {
 	return json.Unmarshal(raw, &store) == nil && store
 }
 
-func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority access.Authority, body []byte) ([]byte, *Error) {
-	if s.Resources == nil || len(x.facts) == 0 || !responseStoreRequested(x.parsed) {
+func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority access.Authority, body []byte) ([]byte, *Error) {
+	if s.Resources == nil || len(x.facts) == 0 || !responseStoreRequested(x.generation.parsed) {
 		return body, nil
 	}
 	upstreamID, ok := upstreamString(body, "id")
@@ -319,8 +325,8 @@ func (s *Server) mapPreviousResponse(ctx context.Context, body []byte, identity 
 	return rewritePrevious(body, s.previousResponseLocal(ctx, identity, pin, upstream))
 }
 
-func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyResponses)
+func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
+	x, authority, done := s.stateBegin(w, r, wire.Responses)
 	if done {
 		return
 	}
@@ -344,7 +350,7 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 		return
 	}
 	if contract != nil {
-		x.responseContract = contract
+		x.generation.responseContract = contract
 	}
 	x.route = route
 	ctx, cancel := s.stateDeadline(r.Context(), route)
@@ -365,7 +371,7 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 	}
 }
 
-func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resources.Resource, p *pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *Error {
+func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.Resource, p *pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *Error {
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), suffix), query)
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -423,7 +429,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	var out []byte
 	if res.Kind == resources.KindStrictResponse {
 		projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
-		projection.previousUpstream, projection.previousLocal, err = responseParentProjection(res, x.responseContract)
+		projection.previousUpstream, projection.previousLocal, err = responseParentProjection(res, x.generation.responseContract)
 		if err != nil {
 			return serverError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 		}
@@ -460,7 +466,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 }
 
 func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
 		if e != nil {
 			return e
@@ -473,13 +479,13 @@ func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w, nil)
 	})
 }
 
 func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -518,7 +524,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		query := url.Values{}
 		for _, name := range []string{"limit", "after", "order"} {
 			if value := r.URL.Query().Get(name); value != "" {
@@ -551,7 +557,7 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var errResponseMapping = &openai.ProtocolError{Detail: "stored response mapping failed"}
+var errResponseMapping = &wire.ProtocolError{Detail: "stored response mapping failed"}
 
 type responseLocalRefusal struct{ cause error }
 
@@ -566,14 +572,14 @@ type responseStreamBinding struct {
 	localID        string
 }
 
-func (x *execution) responseStreamIdentity(ordinal int, upstreamID string) (*responseStreamBinding, error) {
-	if x.responseBinding == nil || x.responseBinding.attemptOrdinal != ordinal {
-		x.responseBinding = &responseStreamBinding{attemptOrdinal: ordinal, upstreamID: upstreamID}
+func (x *call) responseStreamIdentity(ordinal int, upstreamID string) (*responseStreamBinding, error) {
+	if x.generation.responseBinding == nil || x.generation.responseBinding.attemptOrdinal != ordinal {
+		x.generation.responseBinding = &responseStreamBinding{attemptOrdinal: ordinal, upstreamID: upstreamID}
 	}
-	if x.responseBinding.upstreamID != upstreamID {
+	if x.generation.responseBinding.upstreamID != upstreamID {
 		return nil, errResponseMapping
 	}
-	return x.responseBinding, nil
+	return x.generation.responseBinding, nil
 }
 
 func (binding *responseStreamBinding) mappedID(ordinal int, upstreamID string) (string, bool) {
@@ -583,8 +589,8 @@ func (binding *responseStreamBinding) mappedID(ordinal int, upstreamID string) (
 	return binding.localID, true
 }
 
-func (s *Server) observeStreamResponseEvent(ctx context.Context, x *execution, fact *AttemptFact, event oif.Event) error {
-	if s.Resources == nil || !responseStoreRequested(x.parsed) {
+func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *AttemptFact, event oif.Event) error {
+	if s.Resources == nil || !responseStoreRequested(x.generation.parsed) {
 		return nil
 	}
 	observation, lifecycle, err := openai.ObserveResponseEventUsage(event)
@@ -626,7 +632,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *execution, f
 			return &responseLocalRefusal{cause: err}
 		}
 		local = res.ID
-		if backgroundResponseRequested(x.parsed) {
+		if backgroundResponseRequested(x.generation.parsed) {
 			if err := attachGenerationHTTP(x, res); err != nil {
 				return &responseLocalRefusal{cause: err}
 			}
@@ -644,8 +650,8 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *execution, f
 	return nil
 }
 
-func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact *AttemptFact, frame []byte, observe bool) ([]byte, error) {
-	if s.Resources == nil || !responseStoreRequested(x.parsed) {
+func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *AttemptFact, frame []byte, observe bool) ([]byte, error) {
+	if s.Resources == nil || !responseStoreRequested(x.generation.parsed) {
 		return frame, nil
 	}
 	i := bytes.Index(frame, []byte("\ndata: "))
@@ -660,7 +666,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, errResponseMapping
 	}
-	nativeEvent, err := oif.NewEvent(openai.Descriptor(openai.FamilyResponses, true), doc, "", 0)
+	nativeEvent, err := oif.NewEvent(wire.Descriptor(wire.Responses, true), doc, "", 0)
 	if err != nil {
 		return nil, errResponseMapping
 	}
@@ -696,7 +702,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		strings.HasPrefix(upstreamID, resources.KindResponse+"_") || strings.HasPrefix(upstreamID, resources.KindStrictResponse+"_") {
 		return nil, errResponseMapping
 	}
-	local, ok := x.responseBinding.mappedID(fact.Ordinal, upstreamID)
+	local, ok := x.generation.responseBinding.mappedID(fact.Ordinal, upstreamID)
 	if !ok {
 		return nil, &responseLocalRefusal{cause: errResponseMapping}
 	}
@@ -743,7 +749,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	return out, nil
 }
 
-func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID, state string, response oif.Value) (*resources.Resource, error) {
+func (s *Server) putStreamResponse(ctx context.Context, x *call, fact *AttemptFact, upstreamID, state string, response oif.Value) (*resources.Resource, error) {
 	metadata := map[string]json.RawMessage{}
 	for _, name := range []string{"object", "status", "status_details", "created_at", "expires_at"} {
 		if value, present := response.Lookup(name); present {

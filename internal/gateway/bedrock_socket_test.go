@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 )
 
 func TestBedrockNativeStreamUnblocksAStalledClient(t *testing.T) {
 	h, x, p := pinnedExchangeFixture(t)
-	x.family = openai.FamilyBedrockInvoke
+	x.family = wire.BedrockInvoke
 	h.gateway.cfg.MaxEventBytes = 2 << 20
 	e := h.gateway.beginPinned(context.Background(), x, p, http.MethodPost)
 	e.state.accepted, x.dispatched = true, true

@@ -3,11 +3,12 @@ package management
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/access"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/access"
 )
 
 func TestMCPRedactsSecretsAtEveryDepth(t *testing.T) {

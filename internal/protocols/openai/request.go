@@ -15,205 +15,31 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
-
-// OperationGeneration is the gateway operation both codecs map to.
-const OperationGeneration = "generation"
-
-// Family selects the wire format of a generation request.
-type Family string
-
-const (
-	FamilyChat               Family = "chat"
-	FamilyResponses          Family = "responses"
-	FamilyInputTokens        Family = "input_tokens"
-	FamilyEmbeddings         Family = "embeddings"
-	FamilyModeration         Family = "moderation"
-	FamilyAnthropic          Family = "anthropic"
-	FamilyAnthropicCount     Family = "anthropic_count"
-	FamilyGemini             Family = "gemini"
-	FamilyGeminiStream       Family = "gemini_stream"
-	FamilyGeminiCount        Family = "gemini_count"
-	FamilyGeminiInteractions Family = "gemini_interactions"
-	FamilyGeminiLive         Family = "gemini_live"
-
-	FamilyGeminiEmbeddings      Family = "gemini_embeddings"
-	FamilyGeminiEmbeddingsBatch Family = "gemini_embeddings_batch"
-	FamilyVertexEmbeddings      Family = "vertex_embeddings"
-	FamilyBedrockEmbeddings     Family = "bedrock_embeddings"
-	FamilyRerank                Family = "rerank"
-	FamilyBedrockRerank         Family = "bedrock_rerank"
-	// Media families name their operation tag directly so the accounting
-	// envelope and selection registry agree on the operation string.
-	FamilyImageGeneration Family = "image_generation"
-	FamilyImageEdit       Family = "image_edit"
-	FamilyImageVariation  Family = "image_variation"
-	FamilySpeech          Family = "speech"
-	FamilyTranscription   Family = "transcription"
-	FamilyTranslation     Family = "translation"
-	FamilyVideoCreate     Family = "video_create"
-	FamilyVideoList       Family = "video_list"
-	FamilyVideoGet        Family = "video_get"
-	FamilyVideoContent    Family = "video_content"
-	FamilyVideoDelete     Family = "video_delete"
-
-	FamilyFile          Family = "file"
-	FamilyBatch         Family = "batch"
-	FamilyRealtime      Family = "realtime"
-	FamilyBedrock       Family = "bedrock"
-	FamilyBedrockInvoke Family = "bedrock_invoke"
-
-	// Native generation families are vendor dialects a client speaks as
-	// they are, at /native/{dialect}/models/{route}: OLP binds the route's
-	// model and meters the result, and never translates them.
-	FamilyMistralFIM Family = "mistral_fim"
-	FamilyCohereChat Family = "cohere_chat"
-)
-
-func (f Family) Operation() string {
-	switch f {
-	case FamilyInputTokens, FamilyAnthropicCount, FamilyGeminiCount:
-		return "token_count"
-	case FamilyEmbeddings, FamilyGeminiEmbeddings, FamilyGeminiEmbeddingsBatch,
-		FamilyVertexEmbeddings, FamilyBedrockEmbeddings:
-		return "embeddings"
-	case FamilyModeration:
-		return "moderation"
-	case FamilyRerank, FamilyBedrockRerank:
-		return "rerank"
-	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
-		FamilyTranscription, FamilyTranslation, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
-		FamilyVideoContent, FamilyVideoDelete, FamilyFile, FamilyBatch,
-		FamilyRealtime, FamilyGeminiLive, FamilyBedrockInvoke:
-		if f == FamilyGeminiLive {
-			return "realtime"
-		}
-		return string(f)
-	}
-	return OperationGeneration
-}
-
-func (f Family) Surface() string {
-	switch f {
-	case FamilyAnthropic, FamilyAnthropicCount:
-		return "anthropic"
-	case FamilyGemini, FamilyGeminiStream, FamilyGeminiCount, FamilyGeminiInteractions, FamilyGeminiLive:
-		return "gemini"
-	case FamilyBedrock, FamilyBedrockInvoke:
-		return "bedrock"
-	case FamilyMistralFIM, FamilyCohereChat:
-		return "native"
-	}
-	return "openai"
-}
 
 // RouteSlug is the published-route identifier carried in the model field.
 var RouteSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
 
-// RequestError rejects a request before any upstream work. It maps to an
-// OpenAI invalid_request_error with HTTP 400.
-type RequestError struct {
-	Code    string
-	Message string
-	Param   string
-}
-
-func (e *RequestError) Error() string { return e.Message }
-
 func invalid(param, message string) error {
-	return &RequestError{Code: "invalid_value", Message: message, Param: param}
-}
-
-// Request is a validated generation request. The gateway decodes the fields
-// it must understand and retains the whole document, including vendor
-// extensions, for upstream encoding.
-type Request struct {
-	Family            Family
-	Route             string
-	Stream            bool
-	IncludeUsage      bool // the caller's chat-stream option, independent of upstream accounting
-	source            oif.Request
-	sourceError       error
-	validatedDocument oif.Document
-	validatedFamily   Family
-}
-
-// Field returns a top-level field verbatim, or nil when absent.
-func (r *Request) Field(name string) json.RawMessage {
-	value, _ := r.source.Document().Root().Lookup(name)
-	return value.Bytes()
-}
-
-func (r *Request) SetField(name string, value json.RawMessage) {
-	next, err := r.source.WithChanges(oif.Change{Pointer: oif.Pointer("", name), Value: string(value), Origin: oif.ResourceBinding, Reason: "gateway resource reference"})
-	if err != nil {
-		r.sourceError = err
-		return
-	}
-	r.source = next
-}
-
-func (r *Request) OIF() oif.Request { return r.source }
-
-// Document returns a copy of the source envelope for a codec to rewrite.
-func (r *Request) Document() map[string]json.RawMessage {
-	return r.source.Document().Fields()
-}
-
-// NewEnvelope is used by native codecs after validating their own wire grammar.
-func NewEnvelope(family Family, route string, stream bool, fields map[string]json.RawMessage) *Request {
-	data, err := json.Marshal(fields)
-	if err != nil {
-		return &Request{Family: family, Route: route, Stream: stream, sourceError: err}
-	}
-	doc, err := oif.ParseJSON(data, oif.Limits{})
-	if err != nil {
-		return &Request{Family: family, Route: route, Stream: stream, sourceError: err}
-	}
-	return NewSourceEnvelope(family, route, stream, doc)
-}
-
-func NewSourceEnvelope(family Family, route string, stream bool, doc oif.Document) *Request {
-	descriptor := Descriptor(family, stream)
-	source, err := oif.NewRequest(descriptor, doc)
-	return &Request{Family: family, Route: route, Stream: stream, source: source, sourceError: err}
-}
-
-// WithFields retains the immutable caller source when an admitted policy
-// produces a different effective document. It records only changed fields.
-func (r *Request) WithFields(fields map[string]json.RawMessage, origin oif.Origin) *Request {
-	out := *r
-	changes := []oif.Change{}
-	for name, value := range fields {
-		if !bytes.Equal(r.Field(name), value) {
-			changes = append(changes, oif.Change{Pointer: oif.Pointer("", name), Value: string(value), Origin: origin, Reason: "explicit input policy"})
-		}
-	}
-	for _, m := range r.source.Document().Root().Members() {
-		if _, ok := fields[m.Name]; !ok {
-			changes = append(changes, oif.Change{Pointer: oif.Pointer("", m.Name), Remove: true, Origin: origin, Reason: "explicit input policy"})
-		}
-	}
-	if len(changes) > 0 {
-		out.source, out.sourceError = r.source.WithChanges(changes...)
-	}
-	return &out
+	return &wire.RequestError{Code: "invalid_value", Message: message, Param: param}
 }
 
 // Parse validates the gateway envelope of one request document.
-func Parse(family Family, data []byte) (*Request, error) {
+func Parse(family wire.Format, data []byte) (*wire.Request, error) {
 	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	return parseDocument(family, doc)
 }
 
-func parseFields(family Family, fields map[string]json.RawMessage) (*Request, error) {
+func parseFields(family wire.Format, fields map[string]json.RawMessage) (*wire.Request, error) {
 	data, err := json.Marshal(fields)
 	if err != nil {
 		return nil, err
@@ -224,26 +50,29 @@ func parseFields(family Family, fields map[string]json.RawMessage) (*Request, er
 	}
 	return parseDocument(family, doc)
 }
-func parseDocument(family Family, doc oif.Document) (*Request, error) {
+func parseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
 	// The members that carry the conversation are read from the document, so
 	// they are not copied into the fields.
 	var read []string
 	switch family {
-	case FamilyChat:
+	case wire.Chat:
 		read = []string{"messages"}
-	case FamilyResponses, FamilyInputTokens:
+	case wire.Responses, wire.InputTokens:
 		read = []string{"input"}
 	}
 	fields := doc.FieldsWithout(read...)
 	if fields == nil {
-		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
-	r := NewSourceEnvelope(family, "", false, doc)
-	if err := r.validateFields(fields, doc.Root()); err != nil {
+	r, err := wire.NewRequest(family, "", false, doc)
+	if err != nil {
 		return nil, err
 	}
-	r.source = r.source.WithDescriptor(Descriptor(family, r.Stream))
-	r.validatedDocument, r.validatedFamily = doc, family
+	if err := validateFields(r, fields, doc.Root()); err != nil {
+		return nil, err
+	}
+
+	r = r.WithValidation("openai")
 	return r, nil
 }
 
@@ -252,12 +81,12 @@ func parseDocument(family Family, doc oif.Document) (*Request, error) {
 // are read from in place of the copies in fields: they are the same text, and a
 // prompt of 400 KB is not scanned again for each level of the conversation it is
 // nested in. It is the zero value for fields that are not those of a document.
-func (r *Request) validateFields(fields map[string]json.RawMessage, doc oif.Value) error {
+func validateFields(r *wire.Request, fields map[string]json.RawMessage, doc oif.Value) error {
 	family := r.Family
 	r.Stream, r.IncludeUsage = false, false
 	model, ok := stringField(fields, "model")
 	if !ok {
-		return &RequestError{Code: "missing_required_parameter", Message: "model must name a published route.", Param: "model"}
+		return &wire.RequestError{Code: "missing_required_parameter", Message: "model must name a published route.", Param: "model"}
 	}
 	if !RouteSlug.MatchString(model) {
 		return invalid("model", "model must name a published route slug; provider-qualified names are not accepted.")
@@ -270,13 +99,13 @@ func (r *Request) validateFields(fields map[string]json.RawMessage, doc oif.Valu
 		}
 	}
 	switch family {
-	case FamilyChat:
-		err = r.validateChat(fields, doc)
-	case FamilyResponses:
+	case wire.Chat:
+		err = validateChat(r, fields, doc)
+	case wire.Responses:
 		err = validateResponses(fields, doc)
-	case FamilyInputTokens:
+	case wire.InputTokens:
 		err = validateResponses(fields, doc)
-	case FamilyEmbeddings, FamilyModeration:
+	case wire.Embeddings, wire.Moderation:
 		if raw, ok := fields["input"]; !ok || isNull(raw) {
 			err = invalid("input", "input is required.")
 		} else if _, ok := stringField(fields, "input"); !ok {
@@ -284,7 +113,7 @@ func (r *Request) validateFields(fields map[string]json.RawMessage, doc oif.Valu
 				err = invalid("input", "input must be text or a non-empty array.")
 			}
 		}
-		if family == FamilyEmbeddings {
+		if family == wire.Embeddings {
 			if !validEmbeddingInput(fields["input"]) {
 				err = invalid("input", "Embedding input must be text, text arrays, token IDs, or batches of token IDs.")
 			}
@@ -298,15 +127,15 @@ func (r *Request) validateFields(fields map[string]json.RawMessage, doc oif.Valu
 				}
 			}
 		}
-	case FamilyRerank:
-		err = r.validateRerank(fields)
+	case wire.Rerank:
+		err = validateRerank(r, fields)
 	default:
 		return errors.New("unknown request family")
 	}
 	if err != nil {
 		return err
 	}
-	if family.Operation() != OperationGeneration && r.Stream {
+	if family.Operation() != wire.OperationGeneration && r.Stream {
 		return invalid("stream", "This operation supports unary requests only.")
 	}
 	if raw, present := fields["top_logprobs"]; present && !isNull(raw) {
@@ -318,7 +147,7 @@ func (r *Request) validateFields(fields map[string]json.RawMessage, doc oif.Valu
 	return nil
 }
 
-func (r *Request) validateChat(fields map[string]json.RawMessage, doc oif.Value) error {
+func validateChat(r *wire.Request, fields map[string]json.RawMessage, doc oif.Value) error {
 	if err := validateChatMessages(fields, doc); err != nil {
 		return err
 	}
@@ -366,7 +195,7 @@ func validateChatMessages(fields map[string]json.RawMessage, doc oif.Value) erro
 		messages, _ := doc.Lookup("messages")
 		elements := messages.Elements()
 		if len(elements) == 0 {
-			return &RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
+			return &wire.RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
 		}
 		for i, message := range elements {
 			if message.Kind() != oif.Object {
@@ -381,7 +210,7 @@ func validateChatMessages(fields map[string]json.RawMessage, doc oif.Value) erro
 	}
 	messages, ok := arrayField(fields, "messages")
 	if !ok || len(messages) == 0 {
-		return &RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
+		return &wire.RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
 	}
 	for i, raw := range messages {
 		message, err := object(raw)
@@ -410,7 +239,7 @@ func validateResponses(fields map[string]json.RawMessage, doc oif.Value) error {
 		}
 	}
 	if raw, present := fields["conversation"]; present && !isNull(raw) {
-		return &RequestError{Code: "unsupported_stateful_reference", Message: "The gateway does not hold prior conversations; conversation is not supported.", Param: "conversation"}
+		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "The gateway does not hold prior conversations; conversation is not supported.", Param: "conversation"}
 	}
 	for _, name := range []string{"background", "store"} {
 		if raw, present := fields[name]; present && !isNull(raw) {
@@ -442,7 +271,7 @@ func validateResponses(fields map[string]json.RawMessage, doc oif.Value) error {
 // account-scoped references, both on ingress and after hosting rewrites.
 func ValidateResponsesInput(raw json.RawMessage) error {
 	if len(raw) == 0 || isNull(raw) {
-		return &RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
+		return &wire.RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
 	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
@@ -473,7 +302,7 @@ func validateResponseInput(raw json.RawMessage, path string) error {
 	// omit type when they have no ID; replayed items with IDs need a type
 	// so they cannot be interpreted as references by the provider.
 	if kind == "item_reference" || (kind == "" && hasID) {
-		return &RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
+		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
 	}
 	if err := validateResponseFileReference(item, path); err != nil {
 		return err
@@ -514,7 +343,7 @@ func validateResponseInput(raw json.RawMessage, path string) error {
 func validateResponsesInputValue(input oif.Value) error {
 	switch input.Kind() {
 	case oif.Absent, oif.Null:
-		return &RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
+		return &wire.RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
 	case oif.String:
 		return nil
 	}
@@ -539,7 +368,7 @@ func validateResponseInputValue(item oif.Value, path string) error {
 	kind := memberText(item, "type")
 	_, hasID := item.Lookup("id")
 	if kind == "item_reference" || (kind == "" && hasID) {
-		return &RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
+		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
 	}
 	if err := validateResponseFileReferenceValue(item, path); err != nil {
 		return err
@@ -587,7 +416,7 @@ func validateResponseFileReferenceValue(part oif.Value, path string) error {
 	switch memberText(part, "type") {
 	case "input_file", "input_image", "computer_screenshot":
 		if fileID, present := part.Lookup("file_id"); present && fileID.Kind() != oif.Null {
-			return &RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
+			return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
 		}
 	}
 	return nil
@@ -598,7 +427,7 @@ func validateResponseFileReference(part map[string]json.RawMessage, path string)
 	switch kind {
 	case "input_file", "input_image", "computer_screenshot":
 		if raw, present := part["file_id"]; present && !isNull(raw) {
-			return &RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
+			return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
 		}
 	}
 	return nil
@@ -662,7 +491,7 @@ func ValidateDefaults(defaults map[string]json.RawMessage) error {
 		}
 		fields[name] = value
 	}
-	for _, family := range []Family{FamilyChat, FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		if _, err := parseFields(family, fields); err != nil {
 			return err
 		}
@@ -673,11 +502,11 @@ func ValidateDefaults(defaults map[string]json.RawMessage) error {
 // Encode produces the upstream document: the retained fields, provider
 // parameter defaults for absent keys, the upstream model, and usage reporting
 // for chat streams so accounting never depends on client options.
-func (r *Request) Encode(upstreamModel string, defaults map[string]json.RawMessage) ([]byte, error) {
-	return r.encode(upstreamModel, defaults, nil)
+func Encode(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage) ([]byte, error) {
+	return encode(r, upstreamModel, defaults, nil)
 }
-func (r *Request) EncodeWithProvenance(upstreamModel string, defaults map[string]json.RawMessage) ([]byte, []oif.Provenance, error) {
-	fields, provenance, err := r.EncodeFieldsWithProvenance(upstreamModel, defaults)
+func EncodeWithProvenance(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage) ([]byte, []oif.Provenance, error) {
+	fields, provenance, err := EncodeFieldsWithProvenance(r, upstreamModel, defaults)
 	if err != nil {
 		return nil, provenance, err
 	}
@@ -688,31 +517,28 @@ func (r *Request) EncodeWithProvenance(upstreamModel string, defaults map[string
 // EncodeFieldsWithProvenance gives the transformed dialect codec its owned
 // destination fields without a serialize/parse round trip. The source remains
 // immutable; profile-specific transformed lowering can inspect this working copy.
-func (r *Request) EncodeFieldsWithProvenance(upstreamModel string, defaults map[string]json.RawMessage) (map[string]json.RawMessage, []oif.Provenance, error) {
+func EncodeFieldsWithProvenance(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage) (map[string]json.RawMessage, []oif.Provenance, error) {
 	var provenance []oif.Provenance
-	fields, err := r.encodeFields(upstreamModel, defaults, func(name string) {
+	fields, err := encodeFields(r, upstreamModel, defaults, func(name string) {
 		provenance = append(provenance, oif.Provenance{Pointer: oif.Pointer("", name), Origin: oif.ProviderDefault, Reason: "absent caller field inherited provider default"})
 	})
 	return fields, provenance, err
 }
-func (r *Request) encode(upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) ([]byte, error) {
-	fields, err := r.encodeFields(upstreamModel, defaults, applied)
+func encode(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) ([]byte, error) {
+	fields, err := encodeFields(r, upstreamModel, defaults, applied)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(fields)
 }
-func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) (map[string]json.RawMessage, error) {
-	if r.sourceError != nil {
-		return nil, r.sourceError
-	}
+func encodeFields(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) (map[string]json.RawMessage, error) {
 	fields := r.Document()
 	out := make(map[string]json.RawMessage, len(fields)+len(defaults))
 	for name, value := range defaults {
 		out[name] = bytes.Clone(value)
 	}
 	maps.Copy(out, fields)
-	if r.Family == FamilyChat {
+	if r.Family == wire.Chat {
 		// Either explicit token limit overrides the same setting under its alias,
 		// including an explicit null that opts out of the provider default.
 		if _, present := fields["max_tokens"]; present {
@@ -723,11 +549,11 @@ func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.Ra
 		}
 	}
 
-	if r.Family == FamilyResponses || r.Family == FamilyInputTokens {
+	if r.Family == wire.Responses || r.Family == wire.InputTokens {
 		for _, name := range []string{"previous_response_id", "conversation", "background", "store"} {
 			if _, injected := defaults[name]; injected {
 				if _, caller := fields[name]; !caller {
-					return nil, &RequestError{Code: "unsupported_stateful_reference", Message: "Provider defaults cannot supply " + name + ".", Param: name}
+					return nil, &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Provider defaults cannot supply " + name + ".", Param: name}
 				}
 			}
 		}
@@ -745,9 +571,9 @@ func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.Ra
 	// rewriting the route to an upstream identifier (which need not be a slug).
 	// Only the exact immutable document and dialect validated by Parse can
 	// reuse that result. Constructors, overlays and defaults still validate.
-	if len(defaults) > 0 || r.validatedFamily != r.Family || r.validatedDocument != r.source.Document() {
+	if len(defaults) > 0 || !r.ValidatedBy("openai") {
 		validation := *r
-		if err := validation.validateFields(out, oif.Value{}); err != nil {
+		if err := validateFields(&validation, out, oif.Value{}); err != nil {
 			return nil, err
 		}
 	}
@@ -758,7 +584,7 @@ func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.Ra
 	out["model"] = model
 	// Keep the established Responses wire normalization while preserving
 	// array inputs and native extension fields without translation.
-	if r.Family == FamilyResponses || r.Family == FamilyInputTokens {
+	if r.Family == wire.Responses || r.Family == wire.InputTokens {
 		if text, ok := stringField(out, "input"); ok {
 			out["input"], _ = json.Marshal([]map[string]any{{
 				"type": "message", "role": "user",
@@ -766,7 +592,7 @@ func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.Ra
 			}})
 		}
 	}
-	if r.Stream && r.Family == FamilyChat {
+	if r.Stream && r.Family == wire.Chat {
 		options := map[string]json.RawMessage{}
 		if raw, present := out["stream_options"]; present && !isNull(raw) {
 			if options, err = object(raw); err != nil {
@@ -783,10 +609,10 @@ func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.Ra
 
 // Extensions lists JSON pointers of fields the gateway does not model. They
 // are forwarded verbatim; the list exists for diagnostics and tests.
-func (r *Request) Extensions() []string {
+func Extensions(r *wire.Request) []string {
 	var paths []string
 	known := chatKnown
-	if r.Family == FamilyResponses {
+	if r.Family == wire.Responses {
 		known = responsesKnown
 	}
 	walk(r.Document(), "", known, &paths)

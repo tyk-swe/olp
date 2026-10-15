@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -48,7 +50,7 @@ type Failure struct {
 	Dispatched bool // request bytes reached the upstream; no client response is implied
 	Ambiguous  bool
 	RetryAfter time.Duration
-	Upstream   *openai.UpstreamError
+	Upstream   *wire.UpstreamError
 	Detail     string
 }
 
@@ -661,7 +663,7 @@ func DecodeTranscript(call *UpstreamCall, format string, body []byte) (*Transcri
 // caller's error; anything else violates the vendor's protocol.
 func decodeFailure(err *Error) *Failure {
 	if err.Status >= 400 && err.Status < 500 {
-		return &Failure{Class: ClassUpstreamClient, Status: err.Status, Upstream: &openai.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
+		return &Failure{Class: ClassUpstreamClient, Status: err.Status, Upstream: &wire.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
 	}
 	return &Failure{Class: ClassProtocol, Detail: err.Message}
 }

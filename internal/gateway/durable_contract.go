@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type durableDocument struct {
@@ -39,7 +40,7 @@ type durableAsset struct {
 // The file is already staged by the bounded media owner. Inspection never
 // rewrites its bytes; it only refuses unqualified mixed endpoints/models and
 // ambiguous per-item identities before an effectful provider upload.
-func (s *Server) validateBatchInput(part *media.Part, model string, provider *runtime.Provider, route *runtime.Route) (string, int, error) {
+func (s *Server) validateBatchInput(part *media.Part, model string, provider *routing.Provider, route *routing.Route) (string, int, error) {
 	opened, err := s.transport().Spool.Open(part.Handle)
 	if err != nil {
 		return "", 0, err

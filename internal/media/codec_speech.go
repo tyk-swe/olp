@@ -133,7 +133,7 @@ func encodeElevenLabsTranscription(r *Request, model string) (*UpstreamCall, *Er
 	fields = textField(fields, "language_code", r.Language)
 	return &UpstreamCall{Method: http.MethodPost, Path: "speech-to-text", Accept: "application/json", Fields: fields, Kind: ResponseTranscription, Ambiguous: true,
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
-			var wire struct {
+			var encodedWire struct {
 				Text     *string  `json:"text"`
 				Language *string  `json:"language_code"`
 				Duration *float64 `json:"audio_duration_secs"`
@@ -144,16 +144,16 @@ func encodeElevenLabsTranscription(r *Request, model string) (*UpstreamCall, *Er
 					End   float64 `json:"end"`
 				} `json:"words"`
 			}
-			if json.Unmarshal(body, &wire) != nil || wire.Text == nil {
+			if json.Unmarshal(body, &encodedWire) != nil || encodedWire.Text == nil {
 				return nil, protocolError("The provider transcript is malformed.")
 			}
 			var words []transcriptWord
-			for _, word := range wire.Words {
+			for _, word := range encodedWire.Words {
 				if word.Type == "word" {
 					words = append(words, transcriptWord{Word: word.Text, Start: word.Start, End: word.End})
 				}
 			}
-			return vendorTranscript(format, *wire.Text, wire.Language, wire.Duration, words), nil
+			return vendorTranscript(format, *encodedWire.Text, encodedWire.Language, encodedWire.Duration, words), nil
 		}}, nil
 }
 
@@ -210,7 +210,7 @@ func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Erro
 	}
 	return &UpstreamCall{Method: http.MethodPost, Path: "listen", Query: query, Accept: "application/json", Upload: r.File, Kind: ResponseTranscription, Ambiguous: true,
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
-			var wire struct {
+			var encodedWire struct {
 				Metadata struct {
 					Duration *float64 `json:"duration"`
 				} `json:"metadata"`
@@ -228,10 +228,10 @@ func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Erro
 					} `json:"channels"`
 				} `json:"results"`
 			}
-			if json.Unmarshal(body, &wire) != nil || len(wire.Results.Channels) == 0 || len(wire.Results.Channels[0].Alternatives) == 0 || wire.Results.Channels[0].Alternatives[0].Transcript == nil {
+			if json.Unmarshal(body, &encodedWire) != nil || len(encodedWire.Results.Channels) == 0 || len(encodedWire.Results.Channels[0].Alternatives) == 0 || encodedWire.Results.Channels[0].Alternatives[0].Transcript == nil {
 				return nil, protocolError("The provider transcript is malformed.")
 			}
-			channel := wire.Results.Channels[0]
+			channel := encodedWire.Results.Channels[0]
 			best := channel.Alternatives[0]
 			words := []transcriptWord{}
 			for _, word := range best.Words {
@@ -241,7 +241,7 @@ func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Erro
 			if language == nil {
 				language = r.Language
 			}
-			return vendorTranscript(format, *best.Transcript, language, wire.Metadata.Duration, words), nil
+			return vendorTranscript(format, *best.Transcript, language, encodedWire.Metadata.Duration, words), nil
 		}}, nil
 }
 
@@ -317,31 +317,31 @@ func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*Upstrea
 	}
 	var transcript string
 	next := func(body []byte) (*Step, *Error) {
-		var wire struct {
+		var encodedWire struct {
 			UploadURL string `json:"upload_url"`
 			ID        string `json:"id"`
 			Status    string `json:"status"`
 		}
-		if json.Unmarshal(body, &wire) != nil {
+		if json.Unmarshal(body, &encodedWire) != nil {
 			return nil, protocolError("The provider's transcription answered with invalid JSON.")
 		}
 		switch {
-		case wire.UploadURL != "" && wire.Status == "":
-			submission["audio_url"] = wire.UploadURL
+		case encodedWire.UploadURL != "" && encodedWire.Status == "":
+			submission["audio_url"] = encodedWire.UploadURL
 			submit, err := json.Marshal(submission)
 			if err != nil {
 				return nil, invalidMedia("The transcription request could not be encoded.")
 			}
 			return &Step{Method: http.MethodPost, URL: base + "/v2/transcript", JSON: submit, Credentials: true}, nil
-		case wire.ID == "" || strings.ContainsAny(wire.ID, "/?#"):
+		case encodedWire.ID == "" || strings.ContainsAny(encodedWire.ID, "/?#"):
 			return nil, protocolError("The provider's transcript names no identity.")
-		case wire.Status == "completed":
-			return &Step{Done: true, Cleanup: &Step{Method: http.MethodDelete, URL: base + "/v2/transcript/" + url.PathEscape(wire.ID), Credentials: true}}, nil
-		case wire.Status == "error":
+		case encodedWire.Status == "completed":
+			return &Step{Done: true, Cleanup: &Step{Method: http.MethodDelete, URL: base + "/v2/transcript/" + url.PathEscape(encodedWire.ID), Credentials: true}}, nil
+		case encodedWire.Status == "error":
 			return nil, Fail(http.StatusBadRequest, "transcription_failed", "The provider could not transcribe the audio.")
 		case transcript == "":
 			// The submission answers with the queued transcript to poll.
-			transcript = base + "/v2/transcript/" + url.PathEscape(wire.ID)
+			transcript = base + "/v2/transcript/" + url.PathEscape(encodedWire.ID)
 			return &Step{URL: transcript, Wait: assemblyAIPoll, Credentials: true}, nil
 		}
 		return nil, nil
@@ -349,7 +349,7 @@ func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*Upstrea
 	return &UpstreamCall{Method: http.MethodPost, Path: "v2/upload", Accept: "application/json", Upload: r.File, Kind: ResponseTranscription, Ambiguous: true,
 		Next: next, StepDomains: []string{"assemblyai.com"},
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
-			var wire struct {
+			var encodedWire struct {
 				Text     *string  `json:"text"`
 				Language *string  `json:"language_code"`
 				Duration *float64 `json:"audio_duration"`
@@ -359,14 +359,14 @@ func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*Upstrea
 					End   float64 `json:"end"`
 				} `json:"words"`
 			}
-			if json.Unmarshal(body, &wire) != nil || wire.Text == nil {
+			if json.Unmarshal(body, &encodedWire) != nil || encodedWire.Text == nil {
 				return nil, protocolError("The provider transcript is malformed.")
 			}
 			words := []transcriptWord{}
-			for _, word := range wire.Words {
+			for _, word := range encodedWire.Words {
 				// AssemblyAI times words in milliseconds.
 				words = append(words, transcriptWord{Word: word.Text, Start: word.Start / 1000, End: word.End / 1000})
 			}
-			return vendorTranscript(format, *wire.Text, wire.Language, wire.Duration, words), nil
+			return vendorTranscript(format, *encodedWire.Text, encodedWire.Language, encodedWire.Duration, words), nil
 		}}, nil
 }

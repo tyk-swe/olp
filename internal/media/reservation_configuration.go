@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // The reservation transaction already holds the provider row lock. Revisions
@@ -40,7 +41,7 @@ func compatibleReservationConfiguration(ctx context.Context, q Querier, revision
 }
 
 func reservationConfiguration(source []byte) ([]byte, error) {
-	var config runtime.Configuration
+	var config routing.Configuration
 	if err := json.Unmarshal(source, &config); err != nil {
 		return nil, err
 	}

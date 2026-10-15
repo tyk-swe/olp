@@ -1,38 +1,39 @@
 package routes
 
 import (
-	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestSimulationSkipsUnusableSlotsWithoutConsumingAttempts(t *testing.T) {
 	credential := uuid.NewString()
 	for _, tc := range []struct {
 		name string
-		slot runtime.Slot
+		slot routing.Slot
 	}{
-		{"disabled", runtime.Slot{CredentialID: &credential}},
-		{"missing credential", runtime.Slot{Enabled: true}},
-		{"model excluded", runtime.Slot{Enabled: true, CredentialID: &credential, AllowedModels: []string{"other"}}},
-		{"route excluded", runtime.Slot{Enabled: true, CredentialID: &credential, AllowedRoutes: []string{"other"}}},
-		{"key excluded", runtime.Slot{Enabled: true, CredentialID: &credential, AllowedAPIKeys: []string{uuid.NewString()}}},
+		{"disabled", routing.Slot{CredentialID: &credential}},
+		{"missing credential", routing.Slot{Enabled: true}},
+		{"model excluded", routing.Slot{Enabled: true, CredentialID: &credential, AllowedModels: []string{"other"}}},
+		{"route excluded", routing.Slot{Enabled: true, CredentialID: &credential, AllowedRoutes: []string{"other"}}},
+		{"key excluded", routing.Slot{Enabled: true, CredentialID: &credential, AllowedAPIKeys: []string{uuid.NewString()}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}, Routes: map[string]runtime.Route{}}
+			snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
 			first, second := uuid.NewString(), uuid.NewString()
-			targets := []runtime.PublishedTarget{}
+			targets := []routing.PublishedTarget{}
 			for i, id := range []string{first, second} {
 				modelID := uuid.NewString()
-				targets = append(targets, runtime.PublishedTarget{ID: uuid.NewString(), ProviderID: id, ProviderModelID: modelID, ProviderModel: "model", Priority: i, Weight: 1})
-				snapshot.Providers[id] = runtime.Provider{ID: id, Kind: "openai", Enabled: true, AuthMode: "api_key", Capabilities: []runtime.Capability{{Model: "model", Operation: "generation", Surface: "openai", Mode: "unary"}}, Slots: []runtime.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}}}
+				targets = append(targets, routing.PublishedTarget{ID: uuid.NewString(), ProviderID: id, ProviderModelID: modelID, ProviderModel: "model", Priority: i, Weight: 1})
+				snapshot.Providers[id] = routing.Provider{ID: id, Kind: "openai", Enabled: true, AuthMode: "api_key", Capabilities: []routing.Capability{{Model: "model", Operation: "generation", Surface: "openai", Mode: "unary"}}, Slots: []routing.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}}}
 			}
 			p := snapshot.Providers[first]
 			tc.slot.ID = uuid.NewString()
-			p.Slots = []runtime.Slot{tc.slot}
+			p.Slots = []routing.Slot{tc.slot}
 			snapshot.Providers[first] = p
-			snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, []string{"generation"}, 3000, 1, targets)
-			plan, err := runtime.PlanRequest(snapshot, "route", "generation", "openai", "unary", []byte("seed"), runtime.SelectionOptions{KeyID: uuid.NewString(), CheckSlots: true})
+			snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", routing.RouteFidelity{Mode: routing.FidelityTransformed}, []string{"generation"}, 3000, 1, targets)
+			plan, err := routing.Select(snapshot, "route", "generation", "openai", "unary", []byte("seed"), routing.Options{KeyID: uuid.NewString(), CheckSlots: true})
 			if err != nil || len(plan.Decisions) != 2 {
 				t.Fatal(plan, err)
 			}

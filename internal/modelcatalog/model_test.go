@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestSamplesMatchAvailableNativeSDKOperations(t *testing.T) {
-	route := runtime.Route{Slug: "embed", Operations: []string{"embeddings", "token_count"}}
+	route := routing.Route{Slug: "embed", Operations: []string{"embeddings", "token_count"}}
 	got := samples(route, "https://gateway.example.com")
 	if len(got) != 4 {
 		t.Fatalf("native operation samples: %v", got)
@@ -29,21 +30,21 @@ func TestSamplesMatchAvailableNativeSDKOperations(t *testing.T) {
 
 func pointer[T any](value T) *T { return &value }
 
-func catalogFixture(t *testing.T) (*runtime.Snapshot, runtime.Route, *usage.RoutingInputs, time.Time) {
+func catalogFixture(t *testing.T) (*routing.Snapshot, routing.Route, *usage.RoutingInputs, time.Time) {
 	t.Helper()
 	now := time.Now()
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}}
-	route := runtime.Route{Slug: "assistant", Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, Operations: []string{"generation"}, Targets: []runtime.Target{}}
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}}
+	route := routing.Route{Slug: "assistant", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Operations: []string{"generation"}, Targets: []routing.Target{}}
 	inputs := &usage.RoutingInputs{RefreshedAt: now}
 	for index, id := range []string{"first", "second"} {
 		name := "private-upstream-" + id
-		facts := runtime.ModelMetadata{ContextLength: pointer(int64(32000 + index*32000)), InputModalities: []string{"text"}, OutputModalities: []string{"text"}, DataCollection: pointer(false), ZeroDataRetention: pointer(true), Region: pointer(id)}
+		facts := routing.ModelMetadata{ContextLength: pointer(int64(32000 + index*32000)), InputModalities: []string{"text"}, OutputModalities: []string{"text"}, DataCollection: pointer(false), ZeroDataRetention: pointer(true), Region: pointer(id)}
 		raw, err := json.Marshal(facts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		snapshot.Providers[id] = runtime.Provider{ID: id, Name: "private-provider-" + id, Kind: "openai_compatible", Enabled: true, Endpoint: "https://private-provider.example", Capabilities: []runtime.Capability{{Model: name, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: name, Operation: "generation", Surface: "anthropic", Mode: "unary"}, {Model: name, Operation: "generation", Surface: "gemini", Mode: "unary"}}, Models: map[string]json.RawMessage{name: raw}}
-		route.Targets = append(route.Targets, runtime.Target{ProviderID: id, ProviderModel: name})
+		snapshot.Providers[id] = routing.Provider{ID: id, Name: "private-provider-" + id, Kind: "openai_compatible", Enabled: true, Endpoint: "https://private-provider.example", Capabilities: []routing.Capability{{Model: name, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: name, Operation: "generation", Surface: "anthropic", Mode: "unary"}, {Model: name, Operation: "generation", Surface: "gemini", Mode: "unary"}}, Models: map[string]json.RawMessage{name: raw}}
+		route.Targets = append(route.Targets, routing.Target{ProviderID: id, ProviderModel: name})
 		input := "1.200000000000000001"
 		if index == 1 {
 			input = "4.000000000000000001"
@@ -129,10 +130,10 @@ func TestCatalogOmitsUnavailablePricesAndKeepsCurrencyCoveragePartial(t *testing
 func TestCatalogGeminiEmbeddingSampleRequiresItsCertifiedSurface(t *testing.T) {
 	snapshot, route, inputs, now := catalogFixture(t)
 	route.Operations = []string{"embeddings"}
-	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 	route.Targets = route.Targets[:1]
 	provider := snapshot.Providers["first"]
-	provider.Capabilities = []runtime.Capability{{Model: route.Targets[0].ProviderModel, Operation: "embeddings", Surface: "gemini", Mode: "unary"}}
+	provider.Capabilities = []routing.Capability{{Model: route.Targets[0].ProviderModel, Operation: "embeddings", Surface: "gemini", Mode: "unary"}}
 	snapshot.Providers["first"] = provider
 	model := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
 	if len(model.Samples) != 1 || model.Samples[0].SDK != "gemini" {
@@ -143,7 +144,7 @@ func TestCatalogGeminiEmbeddingSampleRequiresItsCertifiedSurface(t *testing.T) {
 func TestCatalogSamplesRespectCertifiedModesAndStrictNativeDialect(t *testing.T) {
 	snapshot, route, inputs, now := catalogFixture(t)
 	first := snapshot.Providers["first"]
-	first.Capabilities = []runtime.Capability{{Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "anthropic", Mode: "stream"}}
+	first.Capabilities = []routing.Capability{{Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "anthropic", Mode: "stream"}}
 	second := snapshot.Providers["second"]
 	second.Enabled = false
 	snapshot.Providers["first"], snapshot.Providers["second"] = first, second
@@ -151,7 +152,7 @@ func TestCatalogSamplesRespectCertifiedModesAndStrictNativeDialect(t *testing.T)
 	if len(model.Samples) != 1 || model.Samples[0].SDK != "openai" {
 		t.Fatalf("uncertified examples: %+v", model.Samples)
 	}
-	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 	first.ProfileID = "compatible-responses"
 	first.ProfileRevision = connectors.ProfileRevision
 	snapshot.Providers["first"] = first

@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -363,7 +365,7 @@ func TestStrictVideoJobOnATransformedRouteIsListedAndDeletableButNotServed(t *te
 // credential version.
 type revokedCredentials struct{ runtime.Credentials }
 
-func (revokedCredentials) Eligibility(string) runtime.Eligibility { return runtime.Revoked }
+func (revokedCredentials) Eligibility(string) routing.Eligibility { return routing.Revoked }
 func TestVideoJobOutsideTheKeysRoutesIsMissing(t *testing.T) {
 	h := newAccessHarness(t)
 	upstream := newStrictVideoUpstream(t)

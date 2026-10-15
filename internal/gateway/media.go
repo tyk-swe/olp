@@ -15,14 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -88,7 +89,7 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 			s.mediaFail(x, w, mediaError(failure))
 			return
 		}
-		x.family = openai.Family(request.Op)
+		x.family = wire.Format(request.Op)
 		sized := estimate.HeuristicBytesTokens(len(body))
 		x.estimate, x.sizedInput = sized+1, &sized
 		s.serveMedia(r.Context(), w, x, authority, request)
@@ -117,7 +118,7 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 			return
 		}
 		form.Disarm()
-		x.family = openai.Family(request.Op)
+		x.family = wire.Format(request.Op)
 		s.serveMedia(r.Context(), w, x, authority, request)
 	}
 }
@@ -146,8 +147,8 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 
 // mediaBegin runs the shared prelude: identity, admission, authentication,
 // and the routing header every route-planned media operation shares.
-func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution, access.Authority, bool) {
-	x := &execution{request: s.begin(w, r), family: openai.FamilyChat, actor: "api_key"}
+func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, access.Authority, bool) {
+	x := &call{request: s.begin(w, r), family: wire.Chat, actor: "api_key"}
 	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
@@ -182,14 +183,14 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 }
 
 // mediaFail records and writes a pre-dispatch media failure.
-func (s *Server) mediaFail(x *execution, w http.ResponseWriter, e *Error) {
+func (s *Server) mediaFail(x *call, w http.ResponseWriter, e *Error) {
 	x.failure = e
 	s.finish(x, nil, e.Status)
 	writeSurfaceError(w, e, "openai")
 }
 
 // serveMedia plans and executes one media operation, then renders the result.
-func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execution, authority access.Authority, request *media.Request) {
+func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority access.Authority, request *media.Request) {
 	defer s.release(ctx)
 	x.media = request
 	switch request.Op {
@@ -230,7 +231,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) finishMedia(x *execution, out *mediaOutcome, status int) {
+func (s *Server) finishMedia(x *call, out *mediaOutcome, status int) {
 	s.finish(x, &outcome{err: out.err, committed: out.committed, cancelled: out.cancelled}, status)
 }
 
@@ -248,7 +249,7 @@ func (s *Server) cleanupUploads(request *media.Request) {
 
 // prepareMedia resolves the route, the caller's route permission, and the
 // eligible attempt set for one media operation.
-func (s *Server) prepareMedia(ctx context.Context, x *execution, authority access.Authority) *Error {
+func (s *Server) prepareMedia(ctx context.Context, x *call, authority access.Authority) *Error {
 	request := x.media
 	x.mode = request.Mode()
 	route, ok := x.snapshot().Routes[request.Route]
@@ -267,7 +268,7 @@ func (s *Server) prepareMedia(ctx context.Context, x *execution, authority acces
 }
 
 // planMedia plans x.route for one media operation.
-func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
+func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
@@ -288,8 +289,8 @@ func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
 	// a default or an explicit native null.
 	candidates := make(map[string][]string, len(route.Targets))
 	options := s.selectionOptions(ctx, x)
-	options.Parameters = runtime.Listed(mediaParameterNames(request))
-	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+	options.Parameters = routing.Listed(mediaParameterNames(request))
+	options.Accept = func(p routing.Provider, t routing.Target) error {
 		if !connectorsSupports(p, request.Op, x.mode) {
 			return errors.New("connector capability unavailable")
 		}
@@ -326,22 +327,22 @@ func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
 		}
 		return nil
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
+	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
 		if p.ProfileID == "" {
 			// Automatic providers keep their codec's null/default wire behavior;
 			// only explicit profiles define an exact effective native source.
-			return runtime.Listed(mediaParameterNames(request)), nil
+			return routing.Listed(mediaParameterNames(request)), nil
 		}
 		parameters, ok := candidates[t.ID]
 		if !ok {
 			return nil, nil
 		}
-		return runtime.Listed(parameters), nil
+		return routing.Listed(parameters), nil
 	}
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, options)
+	plan, err := routing.Select(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, options)
 	if err != nil {
-		var se *runtime.SelectionError
-		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
+		var se *routing.SelectionError
+		if errors.As(err, &se) && se.Code != routing.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
 			return selectionError(err, route.Slug)
 		}
 		return requestError(err)
@@ -358,7 +359,7 @@ func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
 		if x.costExcluded {
 			return costLimitExceeded()
 		}
-		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	return nil
 }
@@ -366,14 +367,14 @@ func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
 // Media has no qualified caller semantic-header or query mapping. SDK
 // transport metadata is harmless, but provider settings and idempotency
 // promises must be refused before an effectful strict dispatch.
-func strictMediaContext(x *execution) *Error {
+func strictMediaContext(x *call) *Error {
 	if x.semanticQueryInvalid || len(x.semanticQuery) != 0 {
 		return invalidRequest("target_capability", "This native media route does not qualify caller query settings.", nil)
 	}
 	return strictMediaHeaders(x)
 }
 
-func strictMediaHeaders(x *execution) *Error {
+func strictMediaHeaders(x *call) *Error {
 	for name := range x.semanticHeaders {
 		canonical := http.CanonicalHeaderKey(name)
 		lower := strings.ToLower(canonical)
@@ -475,7 +476,7 @@ func mediaOutboundParameterNames(call *media.UpstreamCall, request *media.Reques
 
 // connectorsSupports mirrors the connector capability check against the
 // matrix in connectors.
-func connectorsSupports(p runtime.Provider, op, mode string) bool {
+func connectorsSupports(p routing.Provider, op, mode string) bool {
 	return p.Connector().Supports(op, "openai", mode)
 }
 
@@ -488,7 +489,7 @@ func videoLifecycleRoute(operations []string) bool {
 	return true
 }
 
-func videoLifecycleProvider(p *runtime.Provider, model string) bool {
+func videoLifecycleProvider(p *routing.Provider, model string) bool {
 	for _, op := range []string{media.OpVideoGet, media.OpVideoContent, media.OpVideoDelete} {
 		if !p.Supports(model, op, "openai", "unary") {
 			return false
@@ -510,10 +511,10 @@ type mediaOutcome struct {
 
 // executeMedia adapts media to shared attempt execution. Media transport
 // retains its absolute attempt deadline and side-effect ambiguity rules.
-func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
+func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *call) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*media.Result]{
-		estimate: func(runtime.Attempt, *runtime.Provider) int64 { return x.estimate },
-		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
+		estimate: func(routing.Attempt, *routing.Provider) int64 { return x.estimate },
+		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},
 	})
@@ -584,7 +585,7 @@ func mediaParameterNames(r *media.Request) []string {
 }
 
 // mediaAttempt performs one upstream media call with one credential.
-func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
+func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
@@ -739,13 +740,13 @@ func mediaClass(f *media.Failure) string {
 }
 
 // mediaUsage builds the accounting usage a media result carries.
-func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
+func mediaUsage(request *media.Request, result *media.Result) *wire.Usage {
 	switch result.Kind {
 	case media.ResponseImages:
 		if result.Images == nil {
 			return nil
 		}
-		usage := &openai.Usage{}
+		usage := &wire.Usage{}
 		if result.Images.Usage != nil {
 			usage = tokenUsage(result.Images.Usage)
 		}
@@ -763,7 +764,7 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 			return nil
 		}
 		units := strconv.FormatInt(*result.BilledCharacters, 10)
-		return &openai.Usage{MediaUnits: &units}
+		return &wire.Usage{MediaUnits: &units}
 	case media.ResponseTranscription:
 		if result.Transcription != nil && result.Transcription.Tokens != nil {
 			return tokenUsage(result.Transcription.Tokens)
@@ -779,26 +780,26 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 		// but quantize its separate billing observation to microseconds so a
 		// more precise vendor duration cannot invalidate the entire event.
 		units := strconv.FormatFloat(duration, 'f', 6, 64)
-		return &openai.Usage{MediaUnits: &units}
+		return &wire.Usage{MediaUnits: &units}
 	case media.ResponseVideoJob:
 		if request == nil || request.Op != media.OpVideoCreate || result.Video == nil || result.Video.Seconds == nil {
 			return nil
 		}
 		units := *result.Video.Seconds
-		return &openai.Usage{MediaUnits: &units}
+		return &wire.Usage{MediaUnits: &units}
 	}
 	return nil
 }
 
 // tokenUsage is the accounting usage of a vendor that bills media by token.
-func tokenUsage(tokens *media.ImageUsage) *openai.Usage {
-	return &openai.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens,
+func tokenUsage(tokens *media.ImageUsage) *wire.Usage {
+	return &wire.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens,
 		AudioInputTokens: tokens.AudioInputTokens, AudioOutputTokens: tokens.AudioOutputTokens,
 		ImageInputTokens: tokens.ImageInputTokens, ImageOutputTokens: tokens.ImageOutputTokens}
 }
 
 // writeMediaResult renders the successful media response.
-func (s *Server) writeMediaResult(w http.ResponseWriter, x *execution, out *mediaOutcome) {
+func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutcome) {
 	result := out.result
 	switch result.Kind {
 	case media.ResponseImages:
@@ -868,7 +869,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *execution, out *medi
 
 // deliverMedia records success only after the bounded body write and flush.
 // Upstream usage remains intact when the client cannot receive the response.
-func (s *Server) deliverMedia(w http.ResponseWriter, x *execution, out *mediaOutcome, contentType string, write func() error) {
+func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome, contentType string, write func() error) {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
 		out.err = serverError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
@@ -899,7 +900,7 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *execution, out *mediaOut
 	}
 }
 
-func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *execution, out *mediaOutcome, body []byte) {
+func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *call, out *mediaOutcome, body []byte) {
 	s.deliverMedia(w, x, out, "application/json", func() error {
 		_, err := w.Write(body)
 		return err
@@ -918,7 +919,7 @@ func outJobID(out *mediaOutcome) string {
 
 // writeImageResult streams the image JSON document: each staged payload is
 // base64-streamed in place of its marker so the response never buffers media.
-func (s *Server) writeImageResult(w http.ResponseWriter, x *execution, out *mediaOutcome) {
+func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutcome) {
 	defer func() {
 		for _, image := range out.result.Images.Images {
 			if image.Handle != nil {
@@ -980,7 +981,7 @@ func (s *Server) streamBase64(w io.Writer, handle media.Handle) error {
 
 // streamArtifact streams a staged binary artifact to the client and removes
 // it once the body is exhausted or the write fails.
-func (s *Server) streamArtifact(w http.ResponseWriter, x *execution, out *mediaOutcome) {
+func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcome) {
 	artifact := out.result.Artifact
 	opened, err := s.Media.Jobs.Transport.Spool.Open(artifact.Handle)
 	if err != nil {
@@ -1003,10 +1004,10 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *execution, out *mediaO
 
 // streamMediaEvents drains a stream inside its attempt's deadline and quota
 // reservation. Only a terminal event proves that the response completed.
-func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *execution, result *media.Result, contract *mediacontract.Template, bound mediacontract.Bound) (*openai.Usage, bool, *attemptFailure) {
+func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *call, result *media.Result, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *attemptFailure) {
 	defer result.Body.Close()
 	sw := &streamWriter{w: w, family: x.family, x: x}
-	var usage *openai.Usage
+	var usage *wire.Usage
 	var sequence uint64
 	terminal := errors.New("media stream completed")
 	decodeErr := sse.Decode(result.Body, int(s.cfg.MaxEventBytes), func(frame sse.Frame) error {
@@ -1053,7 +1054,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		buf.WriteByte('\n')
 		if observed := media.ObserveMediaUsage(frame.Data, x.media.Op); observed != nil {
 			if usage == nil {
-				usage = &openai.Usage{}
+				usage = &wire.Usage{}
 			}
 			if observed.Input != nil {
 				usage.InputTokens = *observed.Input
@@ -1076,7 +1077,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		if completed {
 			if units := x.media.SeedMediaUnits(); units != nil {
 				if usage == nil {
-					usage = &openai.Usage{}
+					usage = &wire.Usage{}
 				}
 				usage.MediaUnits = units
 			}

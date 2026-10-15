@@ -5,7 +5,8 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -21,7 +22,7 @@ func encodeRerank(vendor string, f Object) ([]byte, error) {
 	return json.Marshal(f)
 }
 
-func rerankDocuments(r *openai.Request) int {
+func rerankDocuments(r *wire.Request) int {
 	if r == nil {
 		return -1
 	}
@@ -30,7 +31,7 @@ func rerankDocuments(r *openai.Request) int {
 
 // rerankDocumentTexts returns the request's documents, which the OpenAI rerank
 // parser guarantees are strings, so results can name documents upstream omits.
-func rerankDocumentTexts(r *openai.Request) []string {
+func rerankDocumentTexts(r *wire.Request) []string {
 	if r == nil {
 		return nil
 	}
@@ -41,7 +42,7 @@ func rerankDocumentTexts(r *openai.Request) []string {
 	return texts
 }
 
-func rerankReturnDocuments(r *openai.Request) bool {
+func rerankReturnDocuments(r *wire.Request) bool {
 	if r == nil {
 		return false
 	}
@@ -50,7 +51,7 @@ func rerankReturnDocuments(r *openai.Request) bool {
 	return want
 }
 
-func decodeRerank(body []byte, route string, request *openai.Request) (*openai.Completion, error) {
+func decodeRerank(body []byte, route string, request *wire.Request) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid rerank result")
@@ -58,7 +59,7 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 	documents := rerankDocuments(request)
 	wantDocuments := rerankReturnDocuments(request)
 	texts := rerankDocumentTexts(request)
-	c := &openai.Completion{FinishReason: "stop"}
+	c := &wire.Completion{FinishReason: "stop"}
 	out := Object{"object": raw("list"), "model": raw(route)}
 	if present(f["results"]) {
 		results, err := rerankResults(arr(f["results"]), documents, texts, wantDocuments)
@@ -81,7 +82,7 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 			if billed, e := optionalObject(meta["billed_units"]); e != nil {
 				return nil, e
 			} else if units, ok := decimalField(billed["search_units"]); ok {
-				c.Usage = &openai.Usage{MediaUnits: &units}
+				c.Usage = &wire.Usage{MediaUnits: &units}
 			} else if present(billed["search_units"]) {
 				return nil, protocolError("invalid rerank usage")
 			}
@@ -118,7 +119,7 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 }
 
 // rerankTokenUsage reads the tokens a reranker reports reading.
-func rerankTokenUsage(raw json.RawMessage) (*openai.Usage, error) {
+func rerankTokenUsage(raw json.RawMessage) (*wire.Usage, error) {
 	usage, err := optionalObject(raw)
 	if err != nil {
 		return nil, err
@@ -127,7 +128,7 @@ func rerankTokenUsage(raw json.RawMessage) (*openai.Usage, error) {
 	if !ok {
 		return nil, protocolError("invalid rerank usage")
 	}
-	return &openai.Usage{InputTokens: n, TotalTokens: n}, nil
+	return &wire.Usage{InputTokens: n, TotalTokens: n}, nil
 }
 
 func rerankResults(items []json.RawMessage, documents int, texts []string, wantDocuments bool) ([]Object, error) {

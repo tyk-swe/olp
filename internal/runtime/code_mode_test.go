@@ -11,13 +11,14 @@ import (
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestCodeAdaptersAndProvidersDeriveFromTheRevisionsFrozenConnections(t *testing.T) {
-	grant := func(profile string) Configuration {
-		return Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile}
+	grant := func(profile string) routing.Configuration {
+		return routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile}
 	}
-	s := &Snapshot{Generation: Generation{ID: uuid.NewString()}, CodeConnections: map[string]Configuration{
+	s := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeConnections: map[string]routing.Configuration{
 		"codex:p1": grant(codexauth.ProfileID), "codex:p2": grant("reference-grant-chat"),
 		"zai:p3": grant(codeplans.ZAIProfile), "zai:p4": grant(codeplans.BigModelProfile),
 		"mixed:p7": grant(codeplans.ZAIProfile), "mixed:p5": grant(codeplans.OpenCodeGoProfile), "mixed:p6": grant(codexauth.ProfileID),
@@ -31,11 +32,11 @@ func TestCodeAdaptersAndProvidersDeriveFromTheRevisionsFrozenConnections(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	var loaded Snapshot
+	var loaded routing.Snapshot
 	if err := json.Unmarshal(encoded, &loaded); err != nil {
 		t.Fatal(err)
 	}
-	for name, snapshot := range map[string]*Snapshot{"constructed": s, "loaded": &loaded} {
+	for name, snapshot := range map[string]*routing.Snapshot{"constructed": s, "loaded": &loaded} {
 		t.Run(name, func(t *testing.T) {
 			release, err := NewRelease("release", 1, snapshot, nil)
 			if err != nil {
@@ -90,11 +91,11 @@ func TestCodeAdaptersAndProvidersDeriveFromTheRevisionsFrozenConnections(t *test
 func BenchmarkCodeProviders(b *testing.B) {
 	for _, count := range []int{1, 10000, 100000} {
 		b.Run(fmt.Sprintf("connections=%d", count), func(b *testing.B) {
-			s := &Snapshot{Generation: Generation{ID: uuid.NewString()}, CodeConnections: make(map[string]Configuration, count)}
+			s := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeConnections: make(map[string]routing.Configuration, count)}
 			for i := range count {
-				s.CodeConnections[fmt.Sprintf("revision-%d:provider", i)] = Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID}
+				s.CodeConnections[fmt.Sprintf("revision-%d:provider", i)] = routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID}
 			}
-			if err := s.Validate(); err != nil {
+			if err := s.Compile(); err != nil {
 				b.Fatal(err)
 			}
 			route := codemode.Route{RevisionID: "revision-0"}

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -219,30 +221,32 @@ func (g envelopeGen) tameFields() map[string]json.RawMessage {
 // legacyParseDocument is parseDocument as it validated an envelope when all of
 // its fields, the conversation among them, were copied out of the document as
 // json.RawMessage and read from the copies.
-func legacyParseDocument(family Family, doc oif.Document) (*Request, error) {
+func legacyParseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
 	fields := doc.Fields()
 	if fields == nil {
-		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
-	r := NewSourceEnvelope(family, "", false, doc)
-	if err := r.validateFields(fields, oif.Value{}); err != nil {
+	r, err := wire.NewRequest(family, "", false, doc)
+	if err != nil {
 		return nil, err
 	}
-	r.source = r.source.WithDescriptor(Descriptor(family, r.Stream))
-	r.validatedDocument, r.validatedFamily = doc, family
+	if err := validateFields(r, fields, oif.Value{}); err != nil {
+		return nil, err
+	}
+	r = r.WithValidation("openai")
 	return r, nil
 }
 
 // sameValidation fails the test if the two readings of one envelope differ, and
 // says whether it was accepted.
-func sameValidation(t testing.TB, family Family, doc oif.Document) bool {
+func sameValidation(t testing.TB, family wire.Format, doc oif.Document) bool {
 	t.Helper()
 	got, gotErr := parseDocument(family, doc)
 	want, wantErr := legacyParseDocument(family, doc)
 	if !reflect.DeepEqual(gotErr, wantErr) || (got == nil) != (want == nil) {
 		t.Fatalf("%s\nrequest %.1500s\ndocument: %v\nfields:   %v", family, doc.Raw(), gotErr, wantErr)
 	}
-	if got != nil && (got.Family != want.Family || got.Route != want.Route || got.Stream != want.Stream || got.IncludeUsage != want.IncludeUsage || got.validatedDocument != doc) {
+	if got != nil && (got.Family != want.Family || got.Route != want.Route || got.Stream != want.Stream || got.IncludeUsage != want.IncludeUsage || !got.ValidatedBy("openai")) {
 		t.Fatalf("%s\nrequest %.1500s\ndocument: %+v\nfields:   %+v", family, doc.Raw(), got, want)
 	}
 	return got != nil
@@ -254,7 +258,7 @@ func TestTheConversationIsValidatedAsTheFieldsAreValidated(t *testing.T) {
 		cases = 100
 	}
 	var accepted, refused int
-	for _, family := range []Family{FamilyChat, FamilyResponses, FamilyInputTokens, FamilyEmbeddings, FamilyModeration} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses, wire.InputTokens, wire.Embeddings, wire.Moderation} {
 		g := envelopeGen{rand.New(rand.NewPCG(53, uint64(len(family))))}
 		for range cases {
 			fields := g.fields()
@@ -291,7 +295,7 @@ func FuzzTheConversationIsValidatedAsTheFieldsAreValidated(f *testing.F) {
 		if err != nil {
 			return
 		}
-		for _, family := range []Family{FamilyChat, FamilyResponses, FamilyInputTokens, FamilyEmbeddings} {
+		for _, family := range []wire.Format{wire.Chat, wire.Responses, wire.InputTokens, wire.Embeddings} {
 			sameValidation(t, family, doc)
 		}
 	})

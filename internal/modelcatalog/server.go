@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway"
@@ -46,7 +48,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 }
 
 func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.describe(r, func(route runtime.Route) bool {
+	return s.describe(r, func(route routing.Route) bool {
 		if p.Kind == "key" {
 			return p.KeyAuthority != nil && p.KeyAuthority.Allows("models_read", route.Slug, route.ProjectID, time.Now())
 		}
@@ -66,10 +68,10 @@ func (s *Server) public(r *http.Request) (access.Reply, error) {
 	if !publication.Enabled {
 		return access.Reply{}, access.Fail(404, "not_found", "The resource was not found.")
 	}
-	return s.describe(r, func(route runtime.Route) bool { return route.ProjectID != nil && *route.ProjectID == id }, publication.PricesPublic)
+	return s.describe(r, func(route routing.Route) bool { return route.ProjectID != nil && *route.ProjectID == id }, publication.PricesPublic)
 }
 
-func (s *Server) describe(r *http.Request, visible func(runtime.Route) bool, prices bool) (access.Reply, error) {
+func (s *Server) describe(r *http.Request, visible func(routing.Route) bool, prices bool) (access.Reply, error) {
 	if s.Runtime == nil {
 		return access.Reply{}, access.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
 	}

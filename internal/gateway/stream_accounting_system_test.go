@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestGeminiStreamingAccountingPreservesPartialEvidenceAndScopedAllowances(t *testing.T) {
@@ -35,7 +36,7 @@ func TestGeminiStreamingAccountingPreservesPartialEvidenceAndScopedAllowances(t 
 			}
 			for id, provider := range f.rt.release.Snapshot.Providers {
 				provider.Kind = "gemini"
-				provider.Limits = &runtime.Limits{TokensPerMinute: perMinute(100000)}
+				provider.Limits = &routing.Limits{TokensPerMinute: perMinute(100000)}
 				provider.ParameterDefaults = map[string]json.RawMessage{"generationConfig": json.RawMessage(fmt.Sprintf(`{"candidateCount":%d}`, tc.candidates))}
 				f.rt.release.Snapshot.Providers[id] = provider
 			}

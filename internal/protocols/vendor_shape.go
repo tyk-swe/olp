@@ -3,14 +3,15 @@ package protocols
 import (
 	"maps"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // validateProfile refuses a request outside the vendor's reviewed contract:
 // an operation the vendor does not serve, a field it cannot represent, or
 // non-text input where it requires text.
-func validateProfile(vendor string, family openai.Family, f Object) error {
+func validateProfile(vendor string, family wire.Format, f Object) error {
 	operation := family.Operation()
 	if !vendors.Serves(vendor, operation) {
 		return requestError("operation", "Operation is outside the configured vendor contract")
@@ -31,7 +32,7 @@ func validateProfile(vendor string, family openai.Family, f Object) error {
 
 // refuseRewriteConflicts refuses a request that sets both names of a field
 // the vendor renames, which would otherwise silently lose one value.
-func refuseRewriteConflicts(shape vendors.RequestShape, r *openai.Request) error {
+func refuseRewriteConflicts(shape vendors.RequestShape, r *wire.Request) error {
 	for _, rewrite := range shape.Rewrites {
 		if present(r.Field(rewrite.From)) && present(r.Field(rewrite.To)) {
 			return requestError(rewrite.From, "Use only one of "+rewrite.From+" and "+rewrite.To)
@@ -42,7 +43,7 @@ func refuseRewriteConflicts(shape vendors.RequestShape, r *openai.Request) error
 
 // yieldDefaults drops a provider default whose renamed counterpart the request
 // sets, so the caller's value survives the rewrite.
-func yieldDefaults(shape vendors.RequestShape, r *openai.Request, defaults Object) Object {
+func yieldDefaults(shape vendors.RequestShape, r *wire.Request, defaults Object) Object {
 	if len(shape.Rewrites) == 0 || len(defaults) == 0 {
 		return defaults
 	}

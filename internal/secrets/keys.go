@@ -15,10 +15,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/secretstore"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 func ReadFile(path string) ([]byte, error) {

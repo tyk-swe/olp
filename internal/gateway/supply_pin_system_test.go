@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -31,7 +33,7 @@ func TestIntegrationPinnedRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 				provider := snapshot.Providers[route.Targets[0].ProviderID]
 				provider.Kind, provider.ProfileID, provider.ProfileRevision = "gemini", "gemini-interactions", connectors.ProfileRevision
 				provider.Endpoint = h.upstream.URL + "/v1beta"
-				provider.Capabilities = []runtime.Capability{{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"}}
+				provider.Capabilities = []routing.Capability{{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"}}
 				ceiling, owner := "1", ""
 				if outcome == "refused" {
 					ceiling = "0.000001"
@@ -41,10 +43,10 @@ func TestIntegrationPinnedRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 				}
 				switch scope {
 				case "route":
-					route.Budget = &runtime.CostLimits{DailyCostLimit: &ceiling}
+					route.Budget = &routing.CostLimits{DailyCostLimit: &ceiling}
 					owner = route.ID
 				case "provider":
-					provider.Limits = &runtime.Limits{DailyCostLimit: &ceiling}
+					provider.Limits = &routing.Limits{DailyCostLimit: &ceiling}
 					owner = provider.ID
 				case "slot":
 					provider.Slots[0].DailyCostLimit = &ceiling
@@ -108,20 +110,20 @@ func TestIntegrationBedrockRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 				route := snapshot.Routes[routeSlug]
 				route.Targets = route.Targets[:1]
 				provider := snapshot.Providers[route.Targets[0].ProviderID]
-				family, name, mode := openai.FamilyBedrock, "generation", "unary"
+				family, name, mode := wire.Bedrock, "generation", "unary"
 				profile, model := "bedrock-converse", "anthropic.claude-3-5-sonnet-v2:0"
 				if strings.HasPrefix(operation, "invoke") {
-					family, name, profile = openai.FamilyBedrockInvoke, "bedrock_invoke", "bedrock-invoke"
+					family, name, profile = wire.BedrockInvoke, "bedrock_invoke", "bedrock-invoke"
 				}
 				if strings.Contains(operation, "stream") {
 					mode = "streaming"
 				}
 				provider.Kind, provider.ProfileID, provider.ProfileRevision = "bedrock", profile, connectors.ProfileRevision
 				provider.AuthMode, provider.CloudRegion, provider.Endpoint = "static", "us-east-1", h.upstream.URL+"/a"
-				provider.Capabilities = []runtime.Capability{{Model: model, Operation: name, Surface: "bedrock", Mode: mode}}
+				provider.Capabilities = []routing.Capability{{Model: model, Operation: name, Surface: "bedrock", Mode: mode}}
 				route.Operations, route.Targets[0].ProviderModel = []string{name}, model
-				route.Budget = &runtime.CostLimits{DailyCostLimit: costText("1")}
-				provider.Limits = &runtime.Limits{Supply: runtime.Supply{DailyCostLimit: costText("1")}}
+				route.Budget = &routing.CostLimits{DailyCostLimit: costText("1")}
+				provider.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: costText("1")}}
 				provider.Slots[0].DailyCostLimit = costText("1")
 				if outcome == "cap refused" {
 					// The route's hold must be refunded if the next cap refuses.

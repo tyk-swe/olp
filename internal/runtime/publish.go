@@ -3,15 +3,14 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // Published identifies a recorded release.
@@ -27,7 +26,7 @@ type Published struct {
 // caused it. Republishing unchanged configuration is harmless: it records a
 // new sequence with the same digest.
 func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
-	snapshot, err := Compile(ctx, tx)
+	snapshot, err := ReadSnapshot(ctx, tx)
 	if err != nil {
 		return Published{}, err
 	}
@@ -36,18 +35,11 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 		return Published{}, err
 	}
 	now := time.Now().UTC()
-	snapshot.Generation = Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
-	if err = snapshot.Validate(); err != nil {
-		if refusal := StrictRefusal(err); refusal != nil {
-			return Published{}, refusal
-		}
-		var refusal *Refusal
-		if errors.As(err, &refusal) {
-			return Published{}, access.Fail(422, refusal.Code, refusal.Message)
-		}
+	snapshot.Generation = routing.Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
+	if err = snapshot.Compile(); err != nil {
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}
-	if err = limits.ReplaceSupplyBudgets(ctx, tx, snapshot.SupplyBudgets()); err != nil {
+	if err = limits.ReplaceSupplyBudgets(ctx, tx, supplyBudgets(snapshot)); err != nil {
 		return Published{}, err
 	}
 	digest, err := snapshot.Digest()
@@ -63,48 +55,27 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	return p, err
 }
 
-// StrictRefusal reports an obligation a strict route's target cannot meet as a
-// 422, or returns nil when err is not such an obligation. A refusal that exists
-// only because the target has no provider profile, its profile is not strict or
-// it needs translation tells the author to declare the route transformed.
-func StrictRefusal(err error) error {
-	var incompatible incompatibilityError
-	if !errors.As(err, &incompatible) {
-		return nil
-	}
-	code, _, requirement, message := incompatible.Incompatibility()
-	switch requirement {
-	case "explicit_profile":
-		message += " Declare the route transformed to use a provider without a profile."
-	case "strict_profile":
-		message += " Declare the route transformed to use this profile."
-	case "operation_contract", "native_media_contract", "native_batch_contract", "native_realtime_contract":
-		message += " Declare the route transformed to translate for this target."
-	}
-	return access.Fail(422, code, message)
-}
-
-// Compile reads the serving configuration without recording a release. Draft
+// ReadSnapshot reads the serving configuration without recording a release. Draft
 // state never appears here: providers serve their active revision and routes
 // their latest published revision.
-func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
-	snapshot := &Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}
+func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
 	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var revision ProviderRevision
+		var revision routing.ProviderRevision
 		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.InstalledPlugin); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		provider, err := DecodeProviderRevision(revision)
+		provider, err := routing.DecodeProviderRevision(revision)
 		if err != nil {
 			rows.Close()
 			return nil, err
 		}
-		provider.Limits = publishedLimits(provider.Limits)
+		provider.Limits = provider.Limits.Configured()
 		snapshot.Providers[provider.ID] = provider
 	}
 	rows.Close()
@@ -117,11 +88,11 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var revision RouteRevision
+		var revision routing.RouteRevision
 		if err = rows.Scan(&revision.ID, &revision.Slug, &revision.RevisionID, &revision.Revision, &revision.Operations, &revision.OverallTimeout, &revision.MaxAttempts, &revision.Targets, &revision.PublishedAt, &revision.Policy, &revision.ProjectID, &revision.ContentPolicy, &revision.Fidelity, &revision.Behavior); err != nil {
 			return nil, err
 		}
-		route, err := DecodeRouteRevision(revision)
+		route, err := routing.DecodeRouteRevision(revision)
 		if err != nil {
 			return nil, err
 		}
@@ -142,7 +113,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		if err = rows.Scan(&scope, &id, &raw); err != nil {
 			return nil, err
 		}
-		var p Policy
+		var p routing.Policy
 		if err = json.Unmarshal(raw, &p); err != nil {
 			return nil, err
 		}
@@ -150,7 +121,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			snapshot.InstallationPolicy = &p
 		} else {
 			if snapshot.KeyPolicies == nil {
-				snapshot.KeyPolicies = map[string]*Policy{}
+				snapshot.KeyPolicies = map[string]*routing.Policy{}
 			}
 			snapshot.KeyPolicies[id] = &p
 		}
@@ -160,13 +131,4 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		return snapshot, err
 	}
 	return snapshot, compileCodeMode(ctx, tx, snapshot)
-}
-
-// publishedLimits drops a connection quota that bounds nothing so clearing
-// every limit publishes the same snapshot as never setting one.
-func publishedLimits(l *Limits) *Limits {
-	if l == nil || (l.RequestsPerMinute == nil && l.TokensPerMinute == nil && l.MaxConcurrency == nil && l.Costs() == nil) {
-		return nil
-	}
-	return l
 }

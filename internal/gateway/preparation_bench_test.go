@@ -8,6 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -16,20 +20,20 @@ import (
 
 // Keep the measurement's requests live across GC, as a slow stream does. This
 // measures reachable memory, independently of total allocation during planning.
-var preparationMemory []*execution
+var preparationMemory []*call
 
-func preparationFixture(tb testing.TB, strict bool, count, bytes int) (*serving.Release, *openai.Request, []serving.Provider) {
+func preparationFixture(tb testing.TB, strict bool, count, bytes int) (*serving.Release, *wire.Request, []routing.Provider) {
 	tb.Helper()
-	providers := make([]serving.Provider, count)
-	route := serving.Route{RoutingID: uuid.NewString(), ID: uuid.NewString(), Slug: routeSlug, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(), OverallTimeout: 10000, MaxAttempts: count, Operations: []string{"generation"}, Fidelity: serving.RouteFidelity{Mode: serving.FidelityTransformed}}
-	snapshot := &serving.Snapshot{Generation: serving.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()}, Providers: map[string]serving.Provider{}, Routes: map[string]serving.Route{}}
+	providers := make([]routing.Provider, count)
+	route := routing.Route{RoutingID: uuid.NewString(), ID: uuid.NewString(), Slug: routeSlug, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(), OverallTimeout: 10000, MaxAttempts: count, Operations: []string{"generation"}, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}}
+	snapshot := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()}, Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
 	if strict {
-		route.Fidelity.Mode = serving.FidelityStrict
+		route.Fidelity.Mode = routing.FidelityStrict
 	}
 	for i := range providers {
-		providers[i] = serving.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Name: fmt.Sprint(i), Enabled: true, Kind: "openai_compatible", AuthMode: "none", Endpoint: "https://upstream.example/v1", ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision, Capabilities: []serving.Capability{{Model: "model", Operation: "generation", Surface: "openai", Mode: "streaming"}}, Slots: []serving.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1}}}
+		providers[i] = routing.Provider{ID: uuid.NewString(), RevisionID: uuid.NewString(), Name: fmt.Sprint(i), Enabled: true, Kind: "openai_compatible", AuthMode: "none", Endpoint: "https://upstream.example/v1", ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision, Capabilities: []routing.Capability{{Model: "model", Operation: "generation", Surface: "openai", Mode: "streaming"}}, Slots: []routing.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1}}}
 		snapshot.Providers[providers[i].ID] = providers[i]
-		route.Targets = append(route.Targets, serving.Target{RoutingID: uuid.NewString(), ID: uuid.NewString(), ProviderID: providers[i].ID, ProviderModel: "model", Weight: 1, Timeout: 9000})
+		route.Targets = append(route.Targets, routing.Target{RoutingID: uuid.NewString(), ID: uuid.NewString(), ProviderID: providers[i].ID, ProviderModel: "model", Weight: 1, Timeout: 9000})
 	}
 	snapshot.Routes[routeSlug] = route
 	release, err := serving.NewRelease(snapshot.Generation.ID, 1, snapshot, nil)
@@ -37,7 +41,7 @@ func preparationFixture(tb testing.TB, strict bool, count, bytes int) (*serving.
 		tb.Fatal(err)
 	}
 	body, _ := json.Marshal(map[string]any{"model": routeSlug, "messages": []any{map[string]any{"role": "user", "content": strings.Repeat("a", bytes)}}, "stream": true, "max_tokens": 16})
-	parsed, err := openai.Parse(openai.FamilyChat, body)
+	parsed, err := openai.Parse(wire.Chat, body)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -52,9 +56,9 @@ func BenchmarkPreparedPlanning(b *testing.B) {
 				route := release.Snapshot.Routes[routeSlug]
 				b.ReportAllocs()
 				for b.Loop() {
-					x := &execution{request: request{release: release}, parsed: parsed, route: &route}
+					x := &call{request: request{release: release}, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed}}
 					for i := range providers {
-						if _, err := x.preparedProvider(&providers[i], "model"); err != nil {
+						if _, err := x.preparedProvider(&providers[i], route.Targets[i].ID, "model"); err != nil {
 							b.Fatal(err)
 						}
 					}
@@ -75,18 +79,18 @@ func BenchmarkPreparedRetention(b *testing.B) {
 				var before, after runtime.MemStats
 				runtime.ReadMemStats(&before)
 				for range 8 {
-					x := &execution{request: request{release: release}, parsed: parsed, route: &route}
+					x := &call{request: request{release: release}, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed}}
 					for i := range providers {
-						if _, err := x.preparedProvider(&providers[i], "model"); err != nil {
+						if _, err := x.preparedProvider(&providers[i], route.Targets[i].ID, "model"); err != nil {
 							b.Fatal(err)
 						}
 					}
 
-					for _, p := range providers {
-						x.attempts = append(x.attempts, serving.Attempt{ProviderID: p.ID, ProviderRevisionID: p.RevisionID, UpstreamModel: "model"})
+					for i, p := range providers {
+						x.attempts = append(x.attempts, routing.Attempt{TargetID: route.Targets[i].ID, ProviderID: p.ID, ProviderRevisionID: p.RevisionID, UpstreamModel: "model"})
 					}
 					x.finishPreparationPlanning()
-					x.activatePreparation(&providers[0], "model")
+					x.activatePreparation(&providers[0], route.Targets[0].ID, "model")
 					preparationMemory = append(preparationMemory, x)
 				}
 				runtime.GC()

@@ -13,9 +13,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
@@ -107,7 +108,7 @@ func TestALapsedGrantFailsOverUntilItIsReenrolled(t *testing.T) {
 	// planning skips it as lapsed, the one attempt the route allows goes to
 	// the fallback, and traffic fails over.
 	h.refresh()
-	if eligibility := h.Runtime.Eligibility(credentialID); eligibility != runtime.Lapsed {
+	if eligibility := h.Runtime.Eligibility(credentialID); eligibility != routing.Lapsed {
 		t.Fatalf("the gateway finds the lapsed credential version %q", eligibility)
 	}
 	if reasons := simulated(); reasons[lapsingID] != "credential_lapsed" || reasons[fallbackID] != "attempt 1" {
@@ -203,7 +204,7 @@ func TestALapsedSlotIsReenrolledByDeviceAuthorization(t *testing.T) {
 	}
 	activateEnrolled(t, h, owner, path, 200, slot)
 	h.refresh()
-	if lapsed, served := h.Runtime.Eligibility(lapsedID), h.Runtime.Eligibility(reenrolled["credential_id"].(string)); lapsed != runtime.Lapsed || served != runtime.Eligible {
+	if lapsed, served := h.Runtime.Eligibility(lapsedID), h.Runtime.Eligibility(reenrolled["credential_id"].(string)); lapsed != routing.Lapsed || served != routing.Eligible {
 		t.Fatalf("the gateway finds the lapsed version %q and the re-enrolled one %q", lapsed, served)
 	}
 }

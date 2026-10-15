@@ -5,19 +5,20 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestRetainedNewWorkUsesCurrentRestrictions(t *testing.T) {
 	for _, change := range []string{"allowed", "provider disabled", "slot removed", "slot disabled", "key removed", "model removed", "route removed", "target removed", "operation removed", "route replaced", "target shadowed", "historical slot disabled"} {
 		t.Run(change, func(t *testing.T) {
-			slot := runtime.Slot{ID: "slot", Enabled: true}
-			provider := runtime.Provider{ID: "provider", Enabled: true, Slots: []runtime.Slot{slot}}
-			target := runtime.Target{ProviderID: "provider", ProviderModel: "model"}
-			route := runtime.Route{Slug: "route", Operations: []string{"generation"}, Targets: []runtime.Target{target}}
+			slot := routing.Slot{ID: "slot", Enabled: true}
+			provider := routing.Provider{ID: "provider", Enabled: true, Slots: []routing.Slot{slot}}
+			target := routing.Target{ProviderID: "provider", ProviderModel: "model"}
+			route := routing.Route{Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}}
 			live := provider
-			live.Slots = []runtime.Slot{slot}
+			live.Slots = []routing.Slot{slot}
 			switch change {
 			case "provider disabled":
 				live.Enabled = false
@@ -36,11 +37,11 @@ func TestRetainedNewWorkUsesCurrentRestrictions(t *testing.T) {
 			case "operation removed":
 				route.Operations = nil
 			case "target shadowed":
-				route.Targets[0].Shadow = &runtime.Shadow{SampleRate: 1}
+				route.Targets[0].Shadow = &routing.Shadow{SampleRate: 1}
 			case "historical slot disabled":
 				slot.Enabled = false
 			}
-			snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{"provider": live}, Routes: map[string]runtime.Route{"route": route}}
+			snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{"provider": live}, Routes: map[string]routing.Route{"route": route}}
 			if change == "route replaced" {
 				replaced := route
 				replaced.ID = "replacement"
@@ -57,14 +58,14 @@ func TestRetainedNewWorkUsesCurrentRestrictions(t *testing.T) {
 func TestRetainedNewWorkUsesTighterLimitsWithoutChangingCredential(t *testing.T) {
 	old, current := int64(100), int64(10)
 	credential := "historical-secret"
-	slot := runtime.Slot{ID: "slot", Enabled: true, CredentialID: &credential, TokensPerMinute: &old, MaxConcurrency: &current}
-	provider := runtime.Provider{ID: "provider", Enabled: true, Limits: &runtime.Limits{TokensPerMinute: &old}}
-	target := runtime.Target{ProviderID: "provider", ProviderModel: "model"}
-	route := runtime.Route{Slug: "route", Operations: []string{"generation"}, Targets: []runtime.Target{target}}
+	slot := routing.Slot{ID: "slot", Enabled: true, CredentialID: &credential, TokensPerMinute: &old, MaxConcurrency: &current}
+	provider := routing.Provider{ID: "provider", Enabled: true, Limits: &routing.Limits{TokensPerMinute: &old}}
+	target := routing.Target{ProviderID: "provider", ProviderModel: "model"}
+	route := routing.Route{Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}}
 	live := provider
-	live.Limits = &runtime.Limits{TokensPerMinute: &current}
-	live.Slots = []runtime.Slot{{ID: "slot", Enabled: true, TokensPerMinute: &current, MaxConcurrency: &old}}
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{"provider": live}, Routes: map[string]runtime.Route{"route": route}}
+	live.Limits = &routing.Limits{TokensPerMinute: &current}
+	live.Slots = []routing.Slot{{ID: "slot", Enabled: true, TokensPerMinute: &current, MaxConcurrency: &old}}
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{"provider": live}, Routes: map[string]routing.Route{"route": route}}
 	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
 		t.Fatal(e)
 	}
@@ -81,21 +82,21 @@ func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 	defaultValue := json.RawMessage(`32`)
 	before := int64(2048)
 	now := int64(1024)
-	slot := runtime.Slot{ID: "slot", Enabled: true, CredentialID: &credential, Supply: runtime.Supply{DailyCostLimit: new("100"), MonthlyCostLimit: new("50")}}
-	provider := runtime.Provider{ID: "provider", Enabled: true, Endpoint: "https://old.example/v1", ParameterDefaults: map[string]json.RawMessage{"max_tokens": defaultValue}}
-	target := runtime.Target{ProviderID: provider.ID, ProviderModel: "model"}
-	route := runtime.Route{ID: "route-id", Slug: "route", Operations: []string{"generation"}, Targets: []runtime.Target{target}, OverallTimeout: 2000, MaxAttempts: 2,
-		Behavior: runtime.Behavior{MaxBodyBytes: &before, CallerCostExempt: true, Budget: &runtime.CostLimits{DailyCostLimit: new("100"), MonthlyCostLimit: new("5")}}}
-	policy := &runtime.Policy{Constraints: runtime.Preferences{Only: []string{provider.ID}}}
+	slot := routing.Slot{ID: "slot", Enabled: true, CredentialID: &credential, Supply: routing.Supply{DailyCostLimit: new("100"), MonthlyCostLimit: new("50")}}
+	provider := routing.Provider{ID: "provider", Enabled: true, Endpoint: "https://old.example/v1", ParameterDefaults: map[string]json.RawMessage{"max_tokens": defaultValue}}
+	target := routing.Target{ProviderID: provider.ID, ProviderModel: "model"}
+	route := routing.Route{ID: "route-id", Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}, OverallTimeout: 2000, MaxAttempts: 2,
+		Behavior: routing.Behavior{MaxBodyBytes: &before, CallerCostExempt: true, Budget: &routing.CostLimits{DailyCostLimit: new("100"), MonthlyCostLimit: new("5")}}}
+	policy := &routing.Policy{Constraints: routing.Preferences{Only: []string{provider.ID}}}
 	content := &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "block", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Pattern: "secret"}}}
 	liveRoute := route
 	liveRoute.Policy, liveRoute.ContentPolicy = policy, content
 	liveRoute.CallerCostExempt = false
-	liveRoute.Budget = &runtime.CostLimits{DailyCostLimit: new("10"), MonthlyCostLimit: new("50")}
+	liveRoute.Budget = &routing.CostLimits{DailyCostLimit: new("10"), MonthlyCostLimit: new("50")}
 	liveRoute.MaxBodyBytes, liveRoute.OverallTimeout, liveRoute.MaxAttempts = &now, 1000, 1
-	supply := runtime.Supply{DailyCostLimit: new("10"), MonthlyCostLimit: new("100"), SaturationPercent: new(int64(90)), PriorityShares: &runtime.Shares{Critical: 40, High: 30, Normal: 20, Low: 10}}
-	live := runtime.Provider{ID: provider.ID, Enabled: true, Endpoint: "https://new.example/v1", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`999`)}, Limits: &runtime.Limits{Supply: supply}, Slots: []runtime.Slot{{ID: slot.ID, Enabled: true, CredentialID: new("new-secret"), Supply: supply}}}
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: live}, Routes: map[string]runtime.Route{route.Slug: liveRoute}}
+	supply := routing.Supply{DailyCostLimit: new("10"), MonthlyCostLimit: new("100"), SaturationPercent: new(int64(90)), PriorityShares: &routing.Shares{Critical: 40, High: 30, Normal: 20, Low: 10}}
+	live := routing.Provider{ID: provider.ID, Enabled: true, Endpoint: "https://new.example/v1", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`999`)}, Limits: &routing.Limits{Supply: supply}, Slots: []routing.Slot{{ID: slot.ID, Enabled: true, CredentialID: new("new-secret"), Supply: supply}}}
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: live}, Routes: map[string]routing.Route{route.Slug: liveRoute}}
 	beforeSnapshot, _ := json.Marshal(snapshot)
 	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
 		t.Fatal(e)
@@ -116,13 +117,13 @@ func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 }
 
 func TestRetainedNewWorkClampsAttemptTimeoutToCurrentTarget(t *testing.T) {
-	target := runtime.Target{ProviderID: "provider", ProviderModel: "model", Timeout: 5000}
-	route := runtime.Route{ID: "route-id", Slug: "route", Operations: []string{"generation"}, Targets: []runtime.Target{target}}
+	target := routing.Target{ProviderID: "provider", ProviderModel: "model", Timeout: 5000}
+	route := routing.Route{ID: "route-id", Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}}
 	liveRoute := route
-	liveRoute.Targets = []runtime.Target{{ProviderID: "provider", ProviderModel: "model", Timeout: 1000}}
-	provider := runtime.Provider{ID: "provider", Enabled: true, Slots: []runtime.Slot{{ID: "slot", Enabled: true}}}
+	liveRoute.Targets = []routing.Target{{ProviderID: "provider", ProviderModel: "model", Timeout: 1000}}
+	provider := routing.Provider{ID: "provider", Enabled: true, Slots: []routing.Slot{{ID: "slot", Enabled: true}}}
 	slot := provider.Slots[0]
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{"provider": provider}, Routes: map[string]runtime.Route{"route": liveRoute}}
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{"provider": provider}, Routes: map[string]routing.Route{"route": liveRoute}}
 	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
 		t.Fatal(e)
 	}

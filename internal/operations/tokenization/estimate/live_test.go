@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -57,7 +59,7 @@ func TestLiveOpenAIPromptTokensMatchTheEstimate(t *testing.T) {
 	for i, f := range fixtures {
 		text, _ := json.Marshal(f.Text)
 		body := []byte(`{"model":` + string(must(json.Marshal(model))) + `,"max_completion_tokens":1,"messages":[{"role":"system","content":"s"},{"role":"user","content":` + string(text) + `}]}`)
-		request, err := openai.Parse(openai.FamilyChat, body)
+		request, err := openai.Parse(wire.Chat, body)
 		if err != nil {
 			t.Fatalf("%s: %v", f.Name, err)
 		}

@@ -3,54 +3,24 @@ package openai
 import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
-
-// Descriptor adapts family names to independent operation/dialect identities.
-// Wire-v1 describes the checked-in codec contract, not a claim that a
-// provider's moving API or model alias is immutable. Family descriptors carry
-// the transformed codec profile until a provider profile binds the destination.
-var wireDialects = map[Family]string{
-	FamilyChat: "openai-chat", FamilyResponses: "openai-responses", FamilyInputTokens: "openai-input-tokens",
-	FamilyAnthropic: "anthropic-messages", FamilyAnthropicCount: "anthropic-count-tokens",
-	FamilyGemini: "gemini-generate-content", FamilyGeminiStream: "gemini-generate-content", FamilyGeminiCount: "gemini-count-tokens",
-	FamilyEmbeddings: "openai-embeddings", FamilyModeration: "openai-moderation", FamilyRerank: "rerank", FamilyBedrockRerank: "bedrock-rerank",
-	FamilyGeminiEmbeddings: "gemini-embeddings", FamilyGeminiEmbeddingsBatch: "gemini-embeddings-batch",
-	FamilyVertexEmbeddings: "vertex-embeddings", FamilyBedrockEmbeddings: "bedrock-embeddings",
-	FamilyBedrock: "bedrock-converse", "bedrock_count": "bedrock-count-tokens",
-	FamilyMistralFIM: "mistral-fim", FamilyCohereChat: "cohere-chat-v2",
-}
-
-func Descriptor(family Family, stream bool) oif.Descriptor {
-	dialect := wireDialects[family]
-	if dialect == "" {
-		dialect = string(family)
-	}
-	delivery := "unary"
-	if stream {
-		delivery = "incremental"
-	}
-	operation := family.Operation()
-	if family == "bedrock_count" {
-		operation = "token_count"
-	}
-	return oif.Descriptor{Operation: oif.Identity{ID: operation, Revision: "1"}, Dialect: oif.Identity{ID: dialect, Revision: "wire-v1"}, Profile: oif.Identity{ID: "transformed", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
-}
 
 // LiftEvent is shared by the family stream adapters. Framing remains owned by
 // the transport decoder; JSON ambiguity is rejected before dialect projection.
-func LiftEvent(family Family, data, name string, sequence uint64, maxBytes int) (oif.Event, error) {
-	d := Descriptor(family, true)
+func LiftEvent(family wire.Format, data, name string, sequence uint64, maxBytes int) (oif.Event, error) {
+	d := wire.Descriptor(family, true)
 	if data == "[DONE]" {
 		return oif.ControlEvent(d, name, data, sequence), nil
 	}
 	source, err := oif.ParseJSON([]byte(data), oif.Limits{MaxBytes: maxBytes})
 	if err != nil {
-		return oif.Event{}, &ProtocolError{Detail: err.Error()}
+		return oif.Event{}, &wire.ProtocolError{Detail: err.Error()}
 	}
 	return oif.NewEvent(d, source, name, sequence)
 }
 
-func LiftSSE(family Family, frame sse.Frame, sequence uint64, maxBytes int) (oif.Event, error) {
+func LiftSSE(family wire.Format, frame sse.Frame, sequence uint64, maxBytes int) (oif.Event, error) {
 	name := ""
 	if frame.Event != nil {
 		name = *frame.Event
@@ -71,10 +41,10 @@ func LiftSSE(family Family, frame sse.Frame, sequence uint64, maxBytes int) (oif
 	return event.WithFraming(framing), nil
 }
 
-func liftResult(family Family, body []byte) (oif.Result, error) {
+func liftResult(family wire.Format, body []byte) (oif.Result, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil {
-		return oif.Result{}, &ProtocolError{Detail: err.Error()}
+		return oif.Result{}, &wire.ProtocolError{Detail: err.Error()}
 	}
-	return oif.NewResult(Descriptor(family, false), doc, oif.Complete)
+	return oif.NewResult(wire.Descriptor(family, false), doc, oif.Complete)
 }

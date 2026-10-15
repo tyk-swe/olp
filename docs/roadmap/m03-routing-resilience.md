@@ -206,7 +206,7 @@ are recorded as attempts.
 
 | Change | Start here |
 | --- | --- |
-| Fallback chains, selectors, templates, retry policy | `internal/routes/`, `internal/runtime/plan.go` |
+| Fallback chains, selectors, templates, retry policy | `internal/routes/`, `internal/routing/plan.go` |
 | Capacity reads, shares and supply-side caps | `internal/limits/` |
 | Admission queue | `internal/observability/admission.go`, `internal/gateway/` |
 | Shared circuits and probes | `internal/gateway/health.go`, `internal/process/workers.go` |

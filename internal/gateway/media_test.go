@@ -12,8 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func newMediaHarness(t *testing.T) *harness {
@@ -27,7 +28,7 @@ func newMediaHarness(t *testing.T) *harness {
 		model := p.Capabilities[0].Model
 		for _, op := range ops {
 			for _, mode := range []string{"unary", "streaming", "async"} {
-				p.Capabilities = append(p.Capabilities, runtime.Capability{Model: model, Operation: op, Surface: "openai", Mode: mode})
+				p.Capabilities = append(p.Capabilities, routing.Capability{Model: model, Operation: op, Surface: "openai", Mode: mode})
 			}
 		}
 		snapshot.Providers[id] = p
@@ -305,7 +306,7 @@ func TestVideoCreateFailsClosedForUnenforceableTargetQuotas(t *testing.T) {
 			for id, p := range h.rt.release.Snapshot.Providers {
 				one := int64(1)
 				if scope == "provider" {
-					p.Limits = &runtime.Limits{MaxConcurrency: &one}
+					p.Limits = &routing.Limits{MaxConcurrency: &one}
 				} else {
 					p.Slots[0].RequestsPerMinute = &one
 				}

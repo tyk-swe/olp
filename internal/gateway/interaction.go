@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // servingAllowed constrains later Attempts to the baseline selected by the
@@ -11,32 +11,27 @@ import (
 // grant enrollment, is the same for every slot of the provider revision, so
 // later attempts may use its other slots; an unknown principal pins the
 // credential slot. A secret refresh alone does not change a principal.
-func (x *execution) servingAllowed(provider *runtime.Provider, model string, slot runtime.Slot, selectBaseline bool) bool {
+func (x *call) servingAllowed(provider *routing.Provider, targetID, model string, slot routing.Slot, selectBaseline bool) bool {
 	if !x.strict() {
 		return true
 	}
 	var serving oif.ServingIdentity
 	if x.media != nil {
-		var found bool
-		for _, target := range x.route.Targets {
-			if target.ProviderID == provider.ID && target.ProviderModel == model {
-				if template, ok := x.request.release.Snapshot.MediaTemplate(x.route.Slug, target.ID, x.media.Op); ok {
-					serving, found = template.Serving(), true
-				}
-				break
-			}
+		template, found := x.snapshot().MediaTemplate(x.route.Slug, targetID, x.media.Op)
+		if found {
+			serving = template.Serving()
 		}
 		if !found {
 			return false
 		}
 	} else if x.unary != nil {
-		admission, err := x.unaryAdmission(provider, model)
+		admission, err := x.unaryAdmission(provider, targetID, model)
 		if err != nil {
 			return false
 		}
 		serving = admission.receipt.Serving
 	} else {
-		prepared, err := x.providerAdmission(provider, model)
+		prepared, err := x.providerAdmission(provider, targetID, model)
 		if err != nil || prepared.receipt == nil {
 			return false
 		}

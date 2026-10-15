@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestStreamsUsePerEventLimitNotUnaryResponseLimit(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		for _, oversizedEvent := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/oversized-event=%t", family, oversizedEvent), func(t *testing.T) {
 				cfg := Config{MaxInFlight: 1, MaxBodyBytes: 4096, MaxResponseBytes: 1024, MaxEventBytes: 512}
@@ -21,24 +21,24 @@ func TestStreamsUsePerEventLimitNotUnaryResponseLimit(t *testing.T) {
 				chunk := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"piece\"},\"finish_reason\":null}]}\n\n"
 				terminal := "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 				marker := "data: [DONE]"
-				if family == openai.FamilyResponses {
+				if family == wire.Responses {
 					body = `{"model":"team-chat","input":"hi","stream":true}`
 					chunk = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"piece\"}\n\n"
 					terminal = "data: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\n"
 					marker = "event: response.completed"
 				}
 				const chunks = 24
-				wire := strings.Repeat(chunk, chunks)
-				if int64(len(wire)) <= cfg.MaxResponseBytes {
+				encodedWire := strings.Repeat(chunk, chunks)
+				if int64(len(encodedWire)) <= cfg.MaxResponseBytes {
 					t.Fatal("fixture must exceed the unary response limit before its terminal event")
 				}
 				if oversizedEvent {
-					wire += "data: " + strings.Repeat("x", int(cfg.MaxEventBytes)) + "\n\n"
+					encodedWire += "data: " + strings.Repeat("x", int(cfg.MaxEventBytes)) + "\n\n"
 				}
-				wire += terminal
+				encodedWire += terminal
 				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "text/event-stream")
-					io.WriteString(w, wire)
+					io.WriteString(w, encodedWire)
 				})
 				r := httptest.NewRequest(http.MethodPost, "/v1"+endpointPath(family), strings.NewReader(body)).WithContext(t.Context())
 				r.Header.Set("Authorization", "Bearer "+fullKey)

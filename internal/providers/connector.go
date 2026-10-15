@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5"
 
@@ -439,35 +441,35 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	default:
 		return s.certifyNativeMedia(ctx, cfg, credential, model, tuple)
 	}
-	family := openai.FamilyChat
+	family := wire.Chat
 	payload := map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16}
 	switch tuple.Operation {
 	case "token_count":
-		family = openai.FamilyInputTokens
+		family = wire.InputTokens
 		payload = map[string]any{"model": "certification", "input": "Count these tokens."}
 	case "embeddings":
-		family = openai.FamilyEmbeddings
+		family = wire.Embeddings
 		payload = map[string]any{"model": "certification", "input": "embedding probe"}
 	case "moderation":
-		family = openai.FamilyModeration
+		family = wire.Moderation
 		payload = map[string]any{"model": "certification", "input": "A friendly greeting."}
 	case "rerank":
-		family = openai.FamilyRerank
+		family = wire.Rerank
 		payload = map[string]any{"model": "certification", "query": "rerank probe", "documents": []string{"first document", "second document"}}
 	}
 	if tuple.Surface == "anthropic" {
-		family = openai.FamilyAnthropic
+		family = wire.Anthropic
 		if tuple.Operation == "token_count" {
-			family = openai.FamilyAnthropicCount
+			family = wire.AnthropicCount
 			delete(payload, "input")
 			payload["messages"] = []map[string]string{{"role": "user", "content": "Count these tokens."}}
 			delete(payload, "max_tokens")
 		}
 	}
 	if tuple.Surface == "gemini" {
-		family = openai.FamilyGemini
+		family = wire.Gemini
 		if tuple.Operation == "token_count" {
-			family = openai.FamilyGeminiCount
+			family = wire.GeminiCount
 		}
 		payload = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []map[string]string{{"text": "Reply with OK."}}}}}
 		if tuple.Operation == "generation" {
@@ -476,29 +478,29 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	}
 	if tuple.Surface == "native" {
 		// A native generation dialect is probed in its own grammar.
-		family, _ = cfg.transport().TargetFamily(openai.FamilyChat)
+		family, _ = cfg.transport().TargetFamily(wire.Chat)
 		payload = protocols.NativeGenerationProbe(family)
 	}
 	if tuple.Mode == ModeStreaming {
 		if tuple.Surface == "gemini" {
-			family = openai.FamilyGeminiStream
+			family = wire.GeminiStream
 		} else {
 			payload["stream"] = true
 		}
 	}
-	families := []openai.Family{family}
+	families := []wire.Format{family}
 	if cfg.ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
 		profile, _ := cfg.transport().Profile()
 		if profile.Dialect == "openai-responses" {
-			families = []openai.Family{openai.FamilyResponses}
+			families = []wire.Format{wire.Responses}
 		}
 	}
 	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
-		families = append(families, openai.FamilyResponses)
+		families = append(families, wire.Responses)
 	}
 	for _, family := range families {
 		current := payload
-		if family == openai.FamilyResponses {
+		if family == wire.Responses {
 			current = map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": tuple.Mode == ModeStreaming}
 		}
 		data, _ := json.Marshal(current)
@@ -507,14 +509,15 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			return err
 		}
 		transport := cfg.transport()
-		body, wire, err := providerinvoke.Encode(parsed, transport, model, cfg.Options.ParameterDefaults)
+		invocation, err := providerinvoke.Prepare(parsed, transport, model, cfg.Options.ParameterDefaults)
 		if err != nil {
 			return err
 		}
+		body, encodedWire := invocation.Prepared.Document().Bytes(), invocation.Wire
 		// A profile that forces streaming serves a non-streaming tuple through
 		// the stream the gateway aggregates.
 		aggregated := tuple.Mode != ModeStreaming && transport.ForcesStreaming()
-		endpoint, err := transport.URL(wire, model, tuple.Mode == ModeStreaming || aggregated)
+		endpoint, err := transport.URL(encodedWire, model, tuple.Mode == ModeStreaming || aggregated)
 		if err != nil {
 			return err
 		}
@@ -527,14 +530,14 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		}
 		switch {
 		case tuple.Mode == ModeStreaming:
-			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
+			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
 		case aggregated:
-			var streamed *openai.Completion
-			if streamed, err = openai.Aggregate(wire, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, probeBodyLimit); err == nil {
-				_, err = protocols.DecodeRequest(wire, family, streamed.Body, "certification", "", parsed)
+			var streamed *wire.Completion
+			if streamed, err = openai.Aggregate(encodedWire, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, probeBodyLimit); err == nil {
+				_, err = protocols.DecodeRequest(encodedWire, family, streamed.Body, "certification", "", parsed)
 			}
 		default:
-			_, err = protocols.DecodeRequest(wire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
+			_, err = protocols.DecodeRequest(encodedWire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
 		}
 		if err != nil {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
@@ -624,7 +627,7 @@ func (s *Server) certifyBedrockIngress(ctx context.Context, cfg *Configuration, 
 			return &probeError{Code: "capability_unavailable", Detail: "InvokeModel ingress supports only qualified Anthropic Claude, Titan embeddings, and Titan image models."}
 		}
 		if tuple.Mode == ModeStreaming {
-			if family != openai.FamilyAnthropic {
+			if family != wire.Anthropic {
 				return &probeError{Code: "capability_unavailable", Detail: "InvokeModelWithResponseStream ingress supports only qualified Anthropic Claude models."}
 			}
 			return s.bedrockProbe(ctx, cfg, credential, base+"invoke-with-response-stream", body, func(data []byte) error {
@@ -632,7 +635,7 @@ func (s *Server) certifyBedrockIngress(ctx context.Context, cfg *Configuration, 
 			})
 		}
 		return s.bedrockProbe(ctx, cfg, credential, base+"invoke", body, func(data []byte) error {
-			if family == openai.FamilyAnthropic || family == openai.FamilyBedrockEmbeddings {
+			if family == wire.Anthropic || family == wire.BedrockEmbeddings {
 				if _, err := protocols.Decode(family, family, data, upstream, ""); err != nil {
 					return err
 				}
@@ -651,7 +654,7 @@ func (s *Server) certifyBedrockIngress(ctx context.Context, cfg *Configuration, 
 		})
 	}
 	return s.bedrockProbe(ctx, cfg, credential, base+"converse", body, func(data []byte) error {
-		_, err := protocols.Decode(openai.FamilyBedrock, openai.FamilyBedrock, data, upstream, "")
+		_, err := protocols.Decode(wire.Bedrock, wire.Bedrock, data, upstream, "")
 		return err
 	})
 }
@@ -670,24 +673,24 @@ func (s *Server) bedrockProbe(ctx context.Context, cfg *Configuration, credentia
 	return nil
 }
 
-func bedrockInvokeProbe(model string) ([]byte, openai.Family) {
+func bedrockInvokeProbe(model string) ([]byte, wire.Format) {
 	switch {
 	case strings.Contains(model, "anthropic.claude"):
-		return []byte(`{"anthropic_version":"bedrock-2023-05-31","max_tokens":16,"messages":[{"role":"user","content":[{"type":"text","text":"Reply with OK."}]}]}`), openai.FamilyAnthropic
+		return []byte(`{"anthropic_version":"bedrock-2023-05-31","max_tokens":16,"messages":[{"role":"user","content":[{"type":"text","text":"Reply with OK."}]}]}`), wire.Anthropic
 	case strings.HasPrefix(model, "amazon.titan-embed-text-"):
-		return []byte(`{"inputText":"Reply with OK."}`), openai.FamilyBedrockEmbeddings
+		return []byte(`{"inputText":"Reply with OK."}`), wire.BedrockEmbeddings
 	case strings.HasPrefix(model, "amazon.titan-image-generator-"):
-		return []byte(`{"taskType":"TEXT_IMAGE","textToImageParams":{"text":"A small blue square."},"imageGenerationConfig":{"numberOfImages":1,"width":512,"height":512}}`), openai.FamilyImageGeneration
+		return []byte(`{"taskType":"TEXT_IMAGE","textToImageParams":{"text":"A small blue square."},"imageGenerationConfig":{"numberOfImages":1,"width":512,"height":512}}`), wire.ImageGeneration
 	}
 	return nil, ""
 }
 
 func validateBedrockImageProbe(data []byte) error {
-	var wire struct {
+	var encodedWire struct {
 		Images []string `json:"images"`
 		Error  *string  `json:"error"`
 	}
-	if json.Unmarshal(data, &wire) != nil || wire.Error != nil && *wire.Error != "" || len(wire.Images) == 0 {
+	if json.Unmarshal(data, &encodedWire) != nil || encodedWire.Error != nil && *encodedWire.Error != "" || len(encodedWire.Images) == 0 {
 		return errors.New("invalid Titan image response")
 	}
 	return nil

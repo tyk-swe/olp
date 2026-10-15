@@ -4,10 +4,11 @@ package tokenization
 
 import (
 	"encoding/json"
+	"slices"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"slices"
 )
 
 var identity = oif.Identity{ID: "token_count", Revision: operations.Revision}

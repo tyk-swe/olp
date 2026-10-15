@@ -5,11 +5,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // maxAnthropicBeta is the longest Anthropic-Beta list a request may carry, as
@@ -26,8 +27,8 @@ func anthropicBeta(header http.Header) (beta string, ok bool) {
 
 // carriesAnthropicSource is whether the caller's request is in the Anthropic
 // Messages dialect, so that its Anthropic-Beta header has meaning.
-func carriesAnthropicSource(x *execution) bool {
-	return x.parsed.Family == openai.FamilyAnthropic || x.parsed.Family == openai.FamilyAnthropicCount
+func carriesAnthropicSource(x *call) bool {
+	return x.generation.parsed.Family == wire.Anthropic || x.generation.parsed.Family == wire.AnthropicCount
 }
 
 // takesAnthropicBeta is whether a provider is sent the Anthropic-Beta header:
@@ -43,9 +44,9 @@ func takesAnthropicBeta(cfg connectors.Config) bool {
 
 // servesAnthropicBeta is whether a target of the route is a provider that
 // takes the header.
-func (x *execution) servesAnthropicBeta() bool {
+func (x *call) servesAnthropicBeta() bool {
 	providers := x.snapshot().Providers
-	return slices.ContainsFunc(x.route.Targets, func(t runtime.Target) bool {
+	return slices.ContainsFunc(x.route.Targets, func(t routing.Target) bool {
 		provider := providers[t.ProviderID]
 		return takesAnthropicBeta(provider.Connector())
 	})
@@ -54,7 +55,7 @@ func (x *execution) servesAnthropicBeta() bool {
 // sendsAnthropicBeta is whether the caller sent an Anthropic-Beta header at all,
 // which is all a request that sent none has to learn: its providers' own betas
 // are sent as the provider publishes them.
-func (x *execution) sendsAnthropicBeta() bool {
+func (x *call) sendsAnthropicBeta() bool {
 	return len(x.semanticHeaders.Values("Anthropic-Beta")) > 0
 }
 
@@ -88,7 +89,7 @@ func anthropicBetaFor(cfg connectors.Config, caller string) (beta string, ok boo
 // a provider publishes. Dropping it would send the beta fields of the body
 // without their header, which the upstream refuses. A strict route validates the
 // header when its profile binds it.
-func (x *execution) checkAnthropicBeta() *Error {
+func (x *call) checkAnthropicBeta() *Error {
 	if x.strict() || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !x.servesAnthropicBeta() {
 		return nil
 	}
@@ -124,8 +125,8 @@ func (x *execution) checkAnthropicBeta() *Error {
 // A provider whose profile publishes betas of its own has them applied when the
 // request is hosted, which would replace a header set here, so the list to send
 // is published in the connector the request is hosted by instead.
-func forwardAnthropicBeta(header http.Header, x *execution, wire openai.Family, cfg connectors.Config) connectors.Config {
-	if wire != x.parsed.Family || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !takesAnthropicBeta(cfg) {
+func forwardAnthropicBeta(header http.Header, x *call, encodedWire wire.Format, cfg connectors.Config) connectors.Config {
+	if encodedWire != x.generation.parsed.Family || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !takesAnthropicBeta(cfg) {
 		return cfg
 	}
 	caller, ok := anthropicBeta(x.semanticHeaders)

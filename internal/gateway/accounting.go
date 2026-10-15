@@ -6,9 +6,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -264,7 +265,7 @@ func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
 	return evidence
 }
 
-func observedAttemptUsage(u *openai.Usage, complete bool, operation string) usage.AttemptUsage {
+func observedAttemptUsage(u *wire.Usage, complete bool, operation string) usage.AttemptUsage {
 	fact := AttemptFact{Usage: u, UsageObserved: true, UsageComplete: complete}
 	evidence := usage.AttemptUsage{
 		Observed:         true,

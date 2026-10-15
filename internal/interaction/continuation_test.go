@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/tests/fidelity"
 )
 
@@ -26,7 +27,7 @@ func toolContext() Context {
 	return Context{ContinuationVersion: ContinuationV1, DurableContinuation: true, AllowProviderState: true}
 }
 func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
-	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, toolSource), toolContext())
+	plan := bind(t, toolsTemplate(t), request(t, wire.Chat, toolSource), toolContext())
 	raw, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +37,7 @@ func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var early [][]byte
-	completion, err := protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, bytes.NewReader(raw), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+	completion, err := protocols.StreamWithEvents(wire.Anthropic, wire.Anthropic, bytes.NewReader(raw), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
 		frames, err := projection.Observe(event)
 		for _, f := range frames {
 			early = append(early, f)
@@ -68,7 +69,7 @@ func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 	nextRaw, _ := json.Marshal(next)
 	ctx := toolContext()
 	ctx.Continuation = state
-	nextPlan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, string(nextRaw)), ctx)
+	nextPlan := bind(t, toolsTemplate(t), request(t, wire.Chat, string(nextRaw)), ctx)
 	golden, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-next-request.json")
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +78,7 @@ func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, changed := range []string{strings.Replace(string(nextRaw), "sunny", "sunny", 1), strings.Replace(string(nextRaw), "Weather and time in Paris?", "edited", 1), strings.Replace(string(nextRaw), "call-weather", "tampered", 1)} {
-		_, err := toolsTemplate(t).Bind(request(t, openai.FamilyChat, changed), ctx)
+		_, err := toolsTemplate(t).Bind(request(t, wire.Chat, changed), ctx)
 		if changed == string(nextRaw) {
 			if err != nil {
 				t.Fatal(err)
@@ -91,13 +92,13 @@ func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 func TestNegotiatedToolGuardsDependenciesAndVersion(t *testing.T) {
 	tpl := toolsTemplate(t)
 	for _, ctx := range []Context{{}, {ContinuationVersion: "future-v2", DurableContinuation: true}, {ContinuationVersion: ContinuationV1}} {
-		_, err := tpl.Bind(request(t, openai.FamilyChat, toolSource), ctx)
+		_, err := tpl.Bind(request(t, wire.Chat, toolSource), ctx)
 		if err == nil {
 			t.Fatal("unqualified carrier accepted")
 		}
 	}
 	for _, change := range []string{strings.Replace(toolSource, `"stream":true`, `"stream":true,"reasoning_effort":"high"`, 1), strings.Replace(toolSource, `"stream":true`, `"stream":true,"max_tokens":2048`, 1)} {
-		_, err := tpl.Bind(request(t, openai.FamilyChat, change), toolContext())
+		_, err := tpl.Bind(request(t, wire.Chat, change), toolContext())
 		assertReason(t, err, "reasoning_budget")
 	}
 	raw, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")
@@ -114,12 +115,12 @@ func TestNegotiatedToolGuardsDependenciesAndVersion(t *testing.T) {
 		{"bounded queue", string(raw), 256},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			plan := bind(t, tpl, request(t, openai.FamilyChat, toolSource), toolContext())
+			plan := bind(t, tpl, request(t, wire.Chat, toolSource), toolContext())
 			projection, err := plan.NewToolProjection(tc.limit)
 			if err != nil {
 				t.Fatal(err)
 			}
-			completion, streamErr := protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(tc.stream), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+			completion, streamErr := protocols.StreamWithEvents(wire.Anthropic, wire.Anthropic, strings.NewReader(tc.stream), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
 				frames, e := projection.Observe(event)
 				for _, frame := range frames {
 					if bytes.Contains(frame, []byte("tool_calls")) {
@@ -138,9 +139,9 @@ func TestNegotiatedToolGuardsDependenciesAndVersion(t *testing.T) {
 
 func TestNegotiatedUnaryUsesSameNativeOrderedProjection(t *testing.T) {
 	source := strings.Replace(toolSource, `"stream":true,`, "", 1)
-	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, source), toolContext())
+	plan := bind(t, toolsTemplate(t), request(t, wire.Chat, source), toolContext())
 	body := []byte(`{"id":"message-final","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"text","text":"Both tools completed."}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":30,"output_tokens":4}}`)
-	native, err := protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "route", "", plan.EffectiveRequest())
+	native, err := protocols.DecodeRequest(wire.Anthropic, wire.Anthropic, body, "route", "", plan.EffectiveRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +156,7 @@ func TestNegotiatedUnaryUsesSameNativeOrderedProjection(t *testing.T) {
 
 func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
 	expectedUsage := []byte(`{"input_tokens":3,"output_tokens":28,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":5}}`)
-	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, toolSource), toolContext())
+	plan := bind(t, toolsTemplate(t), request(t, wire.Chat, toolSource), toolContext())
 	frozen, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +166,7 @@ func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(withCache), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+	completion, err := protocols.StreamWithEvents(wire.Anthropic, wire.Anthropic, strings.NewReader(withCache), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
 		_, err := projection.Observe(event)
 		return err
 	})
@@ -193,9 +194,9 @@ func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
 	// The unary path must expose the same native categories while projecting a
 	// standard Chat response. Unknown categories cannot silently disappear.
 	unary := strings.Replace(toolSource, `"stream":true,`, "", 1)
-	unaryPlan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, unary), toolContext())
+	unaryPlan := bind(t, toolsTemplate(t), request(t, wire.Chat, unary), toolContext())
 	body := []byte(`{"id":"message-usage","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"tool_use","id":"call-weather","name":"weather","input":{"city":"Paris"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":28,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":5}}}`)
-	native, err := protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "route", "", unaryPlan.EffectiveRequest())
+	native, err := protocols.DecodeRequest(wire.Anthropic, wire.Anthropic, body, "route", "", unaryPlan.EffectiveRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,13 +217,13 @@ func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(withUnknown), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+	_, err = protocols.StreamWithEvents(wire.Anthropic, wire.Anthropic, strings.NewReader(withUnknown), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
 		_, err := projection.Observe(event)
 		return err
 	})
 	assertReason(t, err, "fidelity_protocol_violation")
 	unknownUnary := bytes.Replace(body, []byte(`"cache_read_input_tokens":20`), []byte(`"future_token_category":1,"cache_read_input_tokens":20`), 1)
-	native, err = protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, unknownUnary, "route", "", unaryPlan.EffectiveRequest())
+	native, err = protocols.DecodeRequest(wire.Anthropic, wire.Anthropic, unknownUnary, "route", "", unaryPlan.EffectiveRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
 }
 
 func TestNegotiatedToolAcceptsNativeServiceTierUsage(t *testing.T) {
-	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, toolSource), toolContext())
+	plan := bind(t, toolsTemplate(t), request(t, wire.Chat, toolSource), toolContext())
 	frozen, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")
 	if err != nil {
 		t.Fatal(err)
@@ -242,7 +243,7 @@ func TestNegotiatedToolAcceptsNativeServiceTierUsage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		completion, err := protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(stream), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+		completion, err := protocols.StreamWithEvents(wire.Anthropic, wire.Anthropic, strings.NewReader(stream), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
 			_, err := projection.Observe(event)
 			return err
 		})
@@ -270,9 +271,9 @@ func TestNegotiatedToolAcceptsNativeServiceTierUsage(t *testing.T) {
 	assertReason(t, err, "fidelity_protocol_violation")
 
 	unary := strings.Replace(toolSource, `"stream":true,`, "", 1)
-	unaryPlan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, unary), toolContext())
+	unaryPlan := bind(t, toolsTemplate(t), request(t, wire.Chat, unary), toolContext())
 	body := []byte(`{"id":"message-usage","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"tool_use","id":"call-weather","name":"weather","input":{"city":"Paris"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":28,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"}}`)
-	native, err := protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "route", "", unaryPlan.EffectiveRequest())
+	native, err := protocols.DecodeRequest(wire.Anthropic, wire.Anthropic, body, "route", "", unaryPlan.EffectiveRequest())
 	if err != nil {
 		t.Fatal(err)
 	}

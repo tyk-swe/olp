@@ -3,8 +3,9 @@ package connectors
 import (
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // TestNativeGenerationProfilesServeOnlyTheirDialect covers the Mistral
@@ -13,20 +14,20 @@ import (
 func TestNativeGenerationProfilesServeOnlyTheirDialect(t *testing.T) {
 	for _, test := range []struct {
 		config Config
-		family openai.Family
+		family wire.Format
 		url    string
 	}{
 		{Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: "mistral-fim", ProfileRevision: ProfileRevision, VendorID: "mistral", Endpoint: "https://api.mistral.ai/v1"},
-			openai.FamilyMistralFIM, "https://api.mistral.ai/v1/fim/completions"},
+			wire.MistralFIM, "https://api.mistral.ai/v1/fim/completions"},
 		{Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: "cohere-v2", ProfileRevision: ProfileRevision, VendorID: "cohere-native-v2", Endpoint: "https://api.cohere.ai/v2"},
-			openai.FamilyCohereChat, "https://api.cohere.ai/v2/chat"},
+			wire.CohereChat, "https://api.cohere.ai/v2/chat"},
 	} {
 		c := test.config
 		if err := c.Validate(&egress.Policy{}); err != nil {
 			t.Fatal(err)
 		}
-		if wire, err := c.TargetFamily(openai.FamilyChat); err != nil || wire != test.family {
-			t.Fatalf("%s generates in %s, %v", c.ProfileID, wire, err)
+		if encodedWire, err := c.TargetFamily(wire.Chat); err != nil || encodedWire != test.family {
+			t.Fatalf("%s generates in %s, %v", c.ProfileID, encodedWire, err)
 		}
 		for _, stream := range []bool{false, true} {
 			if got, err := c.URL(test.family, "model", stream); err != nil || got != test.url {

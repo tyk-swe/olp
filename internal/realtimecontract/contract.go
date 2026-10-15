@@ -34,6 +34,8 @@ func refuse(code, field, requirement, message string) error {
 // A realtime tuple on a versioned Chat/Responses profile uses its own operation
 // dialect; neither generation codec is asked to interpret duplex events.
 func Compile(c Config) (*Template, error) {
+	c.Provider = c.Provider.Clone()
+	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, refuse("target_capability", "/profile", "explicit_profile", "Strict realtime requires a registered versioned provider profile.")

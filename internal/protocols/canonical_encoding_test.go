@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func decodeBody(t *testing.T, family openai.Family, body string) *Generation {
+func decodeBody(t *testing.T, family wire.Format, body string) *Generation {
 	t.Helper()
 	fields := Object{}
 	if err := json.Unmarshal([]byte(body), &fields); err != nil {
@@ -22,7 +22,7 @@ func decodeBody(t *testing.T, family openai.Family, body string) *Generation {
 	return g
 }
 
-func encodeBody(t *testing.T, g *Generation, family openai.Family, operation string) map[string]any {
+func encodeBody(t *testing.T, g *Generation, family wire.Format, operation string) map[string]any {
 	t.Helper()
 	out, err := encodeCanonical(g, family, "m", operation)
 	if err != nil {
@@ -58,14 +58,14 @@ func at(v any, path ...any) any {
 
 func TestToolOnlyAssistantTurnsEncodeNullChatContent(t *testing.T) {
 	for _, tc := range []struct {
-		family openai.Family
+		family wire.Format
 		body   string
 	}{
-		{openai.FamilyAnthropic, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"f","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`},
-		{openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"t1","content":"ok"}]}`},
+		{wire.Anthropic, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"f","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`},
+		{wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"t1","content":"ok"}]}`},
 	} {
 		t.Run(string(tc.family), func(t *testing.T) {
-			out := encodeBody(t, decodeBody(t, tc.family, tc.body), openai.FamilyChat, "generation")
+			out := encodeBody(t, decodeBody(t, tc.family, tc.body), wire.Chat, "generation")
 			assistant, _ := at(out, "messages", 1).(map[string]any)
 			if content, ok := assistant["content"]; !ok || content != nil {
 				t.Fatalf("assistant content = %#v, want null", content)
@@ -78,8 +78,8 @@ func TestToolOnlyAssistantTurnsEncodeNullChatContent(t *testing.T) {
 }
 
 func TestToolsWithoutParametersEncodeValidSchemas(t *testing.T) {
-	g := decodeBody(t, openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":5},"tools":[{"functionDeclarations":[{"name":"now","description":"time"},{"name":"get","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}]}]}`)
-	anthropic := encodeBody(t, g, openai.FamilyAnthropic, "generation")
+	g := decodeBody(t, wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":5},"tools":[{"functionDeclarations":[{"name":"now","description":"time"},{"name":"get","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}]}]}`)
+	anthropic := encodeBody(t, g, wire.Anthropic, "generation")
 	schema, _ := json.Marshal(at(anthropic, "tools", 0, "input_schema"))
 	if string(schema) != `{"properties":{},"type":"object"}` {
 		t.Fatalf("anthropic input_schema = %s", schema)
@@ -87,26 +87,26 @@ func TestToolsWithoutParametersEncodeValidSchemas(t *testing.T) {
 	if at(anthropic, "tools", 1, "input_schema", "properties", "q", "type") != "string" {
 		t.Fatalf("anthropic dropped declared schema: %#v", at(anthropic, "tools", 1))
 	}
-	chat := encodeBody(t, g, openai.FamilyChat, "generation")
+	chat := encodeBody(t, g, wire.Chat, "generation")
 	if _, ok := at(chat, "tools", 0, "function").(map[string]any)["parameters"]; ok {
 		t.Fatalf("chat tool has parameters: %#v", at(chat, "tools", 0))
 	}
 	if at(chat, "tools", 1, "function", "parameters", "properties", "q", "type") != "string" {
 		t.Fatalf("chat dropped declared schema: %#v", at(chat, "tools", 1))
 	}
-	count := encodeBody(t, g, openai.FamilyInputTokens, "token_count")
+	count := encodeBody(t, g, wire.InputTokens, "token_count")
 	if _, ok := at(count, "tools", 0).(map[string]any)["parameters"]; ok {
 		t.Fatalf("responses tool has parameters: %#v", at(count, "tools", 0))
 	}
-	chatSource := decodeBody(t, openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"now"}}]}`)
-	gemini := encodeBody(t, chatSource, openai.FamilyGemini, "generation")
+	chatSource := decodeBody(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"now"}}]}`)
+	gemini := encodeBody(t, chatSource, wire.Gemini, "generation")
 	if _, ok := at(gemini, "tools", 0, "functionDeclarations", 0).(map[string]any)["parameters"]; ok {
 		t.Fatalf("gemini declaration has parameters: %#v", at(gemini, "tools"))
 	}
 }
 
 func TestEmptyTextPartsAreNotEncoded(t *testing.T) {
-	r := parse(t, openai.FamilyChat, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c1","content":""}]}`)
+	r := parse(t, wire.Chat, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c1","content":""}]}`)
 	for _, kind := range []string{"anthropic", "gemini"} {
 		body, _, err := Encode(r, kind, kind, "wire-model", nil)
 		if err != nil {
@@ -134,8 +134,8 @@ func TestEmptyTextPartsAreNotEncoded(t *testing.T) {
 }
 
 func TestGeminiGroupsParallelToolResultsIntoOneTurn(t *testing.T) {
-	g := decodeBody(t, openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":null,"tool_calls":[{"id":"a","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"b","type":"function","function":{"name":"y","arguments":"{}"}}]},{"role":"tool","tool_call_id":"a","content":"1"},{"role":"tool","tool_call_id":"b","content":"2"},{"role":"user","content":"again"},{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"x","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c","content":"3"}]}`)
-	out := encodeBody(t, g, openai.FamilyGemini, "generation")
+	g := decodeBody(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":null,"tool_calls":[{"id":"a","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"b","type":"function","function":{"name":"y","arguments":"{}"}}]},{"role":"tool","tool_call_id":"a","content":"1"},{"role":"tool","tool_call_id":"b","content":"2"},{"role":"user","content":"again"},{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"x","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c","content":"3"}]}`)
+	out := encodeBody(t, g, wire.Gemini, "generation")
 	contents, _ := out["contents"].([]any)
 	if len(contents) != 6 {
 		t.Fatalf("contents = %#v", contents)
@@ -150,13 +150,13 @@ func TestGeminiGroupsParallelToolResultsIntoOneTurn(t *testing.T) {
 }
 
 func TestTranslatedCountToOpenAIUsesResponsesShape(t *testing.T) {
-	r := parse(t, openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]},{"role":"model","parts":[{"text":"yo"}]}],"generationConfig":{"maxOutputTokens":5,"temperature":0.2,"stopSequences":["x"],"responseMimeType":"application/json"}}}`)
-	body, wire, err := Encode(r, "openai", "openai", "wire-model", nil)
+	r := parse(t, wire.GeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]},{"role":"model","parts":[{"text":"yo"}]}],"generationConfig":{"maxOutputTokens":5,"temperature":0.2,"stopSequences":["x"],"responseMimeType":"application/json"}}}`)
+	body, encodedWire, err := Encode(r, "openai", "openai", "wire-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wire != openai.FamilyInputTokens {
-		t.Fatalf("wire = %s", wire)
+	if encodedWire != wire.InputTokens {
+		t.Fatalf("wire = %s", encodedWire)
 	}
 	var v map[string]any
 	if err := json.Unmarshal(body, &v); err != nil {
@@ -171,7 +171,7 @@ func TestTranslatedCountToOpenAIUsesResponsesShape(t *testing.T) {
 		t.Fatalf("count body = %s", body)
 	}
 
-	r = parse(t, openai.FamilyAnthropicCount, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"f"}}`)
+	r = parse(t, wire.AnthropicCount, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"f"}}`)
 	body, _, err = Encode(r, "openai", "openai", "wire-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -184,14 +184,14 @@ func TestTranslatedCountToOpenAIUsesResponsesShape(t *testing.T) {
 func TestCountRequestsOmitGenerationDefaults(t *testing.T) {
 	defaults := Object{"max_tokens": json.RawMessage(`100`), "temperature": json.RawMessage(`0.2`)}
 	for _, tc := range []struct {
-		family openai.Family
+		family wire.Format
 		kind   string
 		body   string
 	}{
-		{openai.FamilyAnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`},
-		{openai.FamilyInputTokens, "openai", `{"model":"m","input":"hi"}`},
-		{openai.FamilyInputTokens, "anthropic", `{"model":"m","input":"hi"}`},
-		{openai.FamilyGeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`},
+		{wire.AnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`},
+		{wire.InputTokens, "openai", `{"model":"m","input":"hi"}`},
+		{wire.InputTokens, "anthropic", `{"model":"m","input":"hi"}`},
+		{wire.GeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`},
 	} {
 		t.Run(string(tc.family)+"->"+tc.kind, func(t *testing.T) {
 			body, _, err := Encode(parse(t, tc.family, tc.body), tc.kind, tc.kind, "wire-model", defaults)
@@ -210,20 +210,20 @@ func TestCountRequestsOmitGenerationDefaults(t *testing.T) {
 	openaiDefaults := Object{"response_format": json.RawMessage(`{"type":"text"}`), "reasoning_effort": json.RawMessage(`"low"`), "verbosity": json.RawMessage(`"low"`), "service_tier": json.RawMessage(`"auto"`)}
 	for _, tc := range []struct {
 		name     string
-		family   openai.Family
+		family   wire.Format
 		kind     string
 		body     string
 		defaults Object
 		allowed  []string
 	}{
-		{"gemini native", openai.FamilyGeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, gemini, []string{"contents"}},
-		{"gemini nested", openai.FamilyGeminiCount, "gemini", `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`, gemini, []string{"generateContentRequest"}},
-		{"anthropic to gemini", openai.FamilyAnthropicCount, "gemini", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, gemini, []string{"contents", "generateContentRequest"}},
-		{"anthropic to bedrock", openai.FamilyAnthropicCount, "bedrock", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, bedrock, []string{"input"}},
-		{"openai to bedrock", openai.FamilyInputTokens, "bedrock", `{"model":"m","input":"hi"}`, bedrock, []string{"input"}},
-		{"openai native", openai.FamilyInputTokens, "openai", `{"model":"m","input":"hi"}`, openaiDefaults, []string{"model", "input"}},
-		{"anthropic to openai", openai.FamilyAnthropicCount, "openai", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, openaiDefaults, []string{"model", "input"}},
-		{"anthropic native", openai.FamilyAnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, Object{"service_tier": json.RawMessage(`"auto"`)}, []string{"model", "messages"}},
+		{"gemini native", wire.GeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, gemini, []string{"contents"}},
+		{"gemini nested", wire.GeminiCount, "gemini", `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`, gemini, []string{"generateContentRequest"}},
+		{"anthropic to gemini", wire.AnthropicCount, "gemini", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, gemini, []string{"contents", "generateContentRequest"}},
+		{"anthropic to bedrock", wire.AnthropicCount, "bedrock", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, bedrock, []string{"input"}},
+		{"openai to bedrock", wire.InputTokens, "bedrock", `{"model":"m","input":"hi"}`, bedrock, []string{"input"}},
+		{"openai native", wire.InputTokens, "openai", `{"model":"m","input":"hi"}`, openaiDefaults, []string{"model", "input"}},
+		{"anthropic to openai", wire.AnthropicCount, "openai", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, openaiDefaults, []string{"model", "input"}},
+		{"anthropic native", wire.AnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, Object{"service_tier": json.RawMessage(`"auto"`)}, []string{"model", "messages"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _, err := Encode(parse(t, tc.family, tc.body), tc.kind, tc.kind, "wire-model", tc.defaults)
@@ -241,7 +241,7 @@ func TestCountRequestsOmitGenerationDefaults(t *testing.T) {
 			}
 		})
 	}
-	body, _, err := Encode(parse(t, openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`), "anthropic", "anthropic", "wire-model", defaults)
+	body, _, err := Encode(parse(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`), "anthropic", "anthropic", "wire-model", defaults)
 	if err != nil {
 		t.Fatal(err)
 	}

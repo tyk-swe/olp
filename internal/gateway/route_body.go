@@ -3,7 +3,7 @@ package gateway
 import (
 	"io"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // measuredBody counts ingress bytes only when a pinned release has route body
@@ -25,7 +25,7 @@ func (b *measuredBody) size() int64 {
 	}
 	return max(b.read, b.declared, b.decoded)
 }
-func (x *execution) checkBody(route *runtime.Route) *Error {
+func (x *call) checkBody(route *routing.Route) *Error {
 	if route == nil || x.request.body == nil {
 		return nil
 	}

@@ -3,9 +3,10 @@
 package integration_test
 
 import (
-	"github.com/google/uuid"
 	"net/http"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestCredentialSlotMutationsExposeOnlyTheirAtomicParentTransition(t *testing.T) {

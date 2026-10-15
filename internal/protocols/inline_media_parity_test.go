@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // ValidateInlineMedia reads a request's parsed document and legacyValidateInlineMedia
@@ -18,10 +19,10 @@ import (
 // shapes clients send, with media of every kind and every dialect, and in any JSON
 // at all.
 
-var inlineMediaFamilies = []openai.Family{
-	openai.FamilyChat, openai.FamilyResponses, openai.FamilyInputTokens, openai.FamilyAnthropic, openai.FamilyAnthropicCount,
-	openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount, openai.FamilyBedrock, openai.FamilyEmbeddings,
-	openai.FamilyGeminiInteractions, openai.FamilyImageGeneration,
+var inlineMediaFamilies = []wire.Format{
+	wire.Chat, wire.Responses, wire.InputTokens, wire.Anthropic, wire.AnthropicCount,
+	wire.Gemini, wire.GeminiStream, wire.GeminiCount, wire.Bedrock, wire.Embeddings,
+	wire.GeminiInteractions, wire.ImageGeneration,
 }
 
 type mediaGen struct{ r *rand.Rand }
@@ -205,7 +206,7 @@ func (g mediaGen) limits() InlineMediaLimits {
 	return InlineMediaLimits{Items: g.intn(4), ItemBytes: int64(g.intn(10)), TotalBytes: int64(g.intn(20))}
 }
 
-func sameMediaAnswer(t testing.TB, request *openai.Request, limits InlineMediaLimits, body any) (accepted bool) {
+func sameMediaAnswer(t testing.TB, request *wire.Request, limits InlineMediaLimits, body any) (accepted bool) {
 	t.Helper()
 	got, want := ValidateInlineMedia(request, limits), legacyValidateInlineMedia(request, limits)
 	if !reflect.DeepEqual(got, want) {
@@ -228,7 +229,10 @@ func TestInlineMediaIsValidatedAsTheLegacyValidationDid(t *testing.T) {
 		g := mediaGen{rand.New(rand.NewPCG(41, uint64(len(family))))}
 		for range cases {
 			fields := g.fields()
-			request := openai.NewEnvelope(family, "route", false, fields)
+			request, err := wire.FromFields(family, "route", false, fields)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if sameMediaAnswer(t, request, g.limits(), fields) {
 				accepted++
 			} else {
@@ -255,7 +259,11 @@ func FuzzInlineMediaIsValidatedAsTheLegacyValidationDid(f *testing.F) {
 		}
 		limits := []InlineMediaLimits{{Items: 1, ItemBytes: 2, TotalBytes: 2}, {Items: 100, ItemBytes: 1 << 20, TotalBytes: 1 << 20}, {}}[int(which)%3]
 		for _, family := range inlineMediaFamilies {
-			sameMediaAnswer(t, openai.NewSourceEnvelope(family, "route", false, doc), limits, json.RawMessage(data))
+			request, err := wire.NewRequest(family, "route", false, doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sameMediaAnswer(t, request, limits, json.RawMessage(data))
 		}
 	})
 }

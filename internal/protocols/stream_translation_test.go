@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
@@ -27,10 +28,10 @@ data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_toke
 data: [DONE]
 
 `
-	for _, target := range []openai.Family{openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyResponses} {
+	for _, target := range []wire.Format{wire.Anthropic, wire.Gemini, wire.Responses} {
 		t.Run(string(target), func(t *testing.T) {
 			var out bytes.Buffer
-			c, err := Stream(openai.FamilyChat, target, strings.NewReader(source), 8192, "team-model", true, func(frame []byte) error { out.Write(frame); return nil })
+			c, err := Stream(wire.Chat, target, strings.NewReader(source), 8192, "team-model", true, func(frame []byte) error { out.Write(frame); return nil })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -43,7 +44,7 @@ data: [DONE]
 			if _, err = Stream(target, target, bytes.NewReader(out.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
 				t.Fatalf("invalid destination: %v\n%s", err, out.String())
 			}
-			if target == openai.FamilyResponses {
+			if target == wire.Responses {
 				last := -1
 				events := map[string]bool{}
 				var terminal Object
@@ -80,7 +81,7 @@ data: [DONE]
 
 func TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming(t *testing.T) {
 	source := []byte(`{"id":"multi","choices":[{"index":0,"message":{"role":"assistant","content":"alpha"},"finish_reason":"stop"},{"index":1,"message":{"role":"assistant","content":"beta"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}`)
-	c, err := Decode(openai.FamilyChat, openai.FamilyGemini, source, "team-model", "")
+	c, err := Decode(wire.Chat, wire.Gemini, source, "team-model", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,38 +89,38 @@ func TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming(t *testing.T) {
 	if len(arr(f["candidates"])) != 2 || !bytes.Contains(c.Body, []byte("beta")) {
 		t.Fatalf("candidates %s", c.Body)
 	}
-	if _, err = Decode(openai.FamilyChat, openai.FamilyAnthropic, source, "team-model", ""); err == nil {
+	if _, err = Decode(wire.Chat, wire.Anthropic, source, "team-model", ""); err == nil {
 		t.Fatal("silently dropped a candidate")
 	}
 	streamed := "data: " + `{"id":"multi","choices":[{"index":0,"delta":{"content":"alpha"},"finish_reason":"stop"},{"index":1,"delta":{"content":"beta"},"finish_reason":"stop"}]}` + "\n\ndata: " + `{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}` + "\n\ndata: [DONE]\n\n"
 	var gem bytes.Buffer
-	_, err = Stream(openai.FamilyChat, openai.FamilyGemini, strings.NewReader(streamed), 8192, "team-model", true, func(b []byte) error { gem.Write(b); return nil })
+	_, err = Stream(wire.Chat, wire.Gemini, strings.NewReader(streamed), 8192, "team-model", true, func(b []byte) error { gem.Write(b); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	var chat bytes.Buffer
-	summary, err := Stream(openai.FamilyGemini, openai.FamilyChat, bytes.NewReader(gem.Bytes()), 8192, "team-model", true, func(b []byte) error { chat.Write(b); return nil })
+	summary, err := Stream(wire.Gemini, wire.Chat, bytes.NewReader(gem.Bytes()), 8192, "team-model", true, func(b []byte) error { chat.Write(b); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.Usage == nil || summary.Usage.TotalTokens != 4 || strings.Count(chat.String(), "[DONE]") != 1 || !strings.Contains(chat.String(), `"index":1`) || !strings.Contains(chat.String(), `"role":"assistant"`) {
 		t.Fatalf("lost candidate/usage/completion: %s", chat.String())
 	}
-	if _, err = Stream(openai.FamilyChat, openai.FamilyChat, bytes.NewReader(chat.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
+	if _, err = Stream(wire.Chat, wire.Chat, bytes.NewReader(chat.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestRefusalAndEmbeddingEncodingArePreserved(t *testing.T) {
 	refused := []byte(`{"id":"r","choices":[{"index":0,"message":{"role":"assistant","content":null,"refusal":"Cannot answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`)
-	for _, target := range []openai.Family{openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini} {
-		c, err := Decode(openai.FamilyChat, target, refused, "team-model", "")
+	for _, target := range []wire.Format{wire.Responses, wire.Anthropic, wire.Gemini} {
+		c, err := Decode(wire.Chat, target, refused, "team-model", "")
 		if err != nil || !bytes.Contains(c.Body, []byte("Cannot answer")) {
 			t.Fatalf("%s refusal: %#v %v", target, c, err)
 		}
 	}
 	floats := []byte(`{"data":[{"index":0,"embedding":[0.5,-1.25]}],"usage":{"total_tokens":2}}`)
-	c, err := Decode(openai.FamilyEmbeddings, openai.FamilyEmbeddings, floats, "team-model", "base64")
+	c, err := Decode(wire.Embeddings, wire.Embeddings, floats, "team-model", "base64")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestRefusalAndEmbeddingEncodingArePreserved(t *testing.T) {
 	if err != nil || len(encoded) != 8 || math.Float32frombits(binary.LittleEndian.Uint32(encoded)) != 0.5 {
 		t.Fatalf("vector %s %v", raw(item), err)
 	}
-	c, err = Decode(openai.FamilyEmbeddings, openai.FamilyEmbeddings, c.Body, "team-model", "float")
+	c, err = Decode(wire.Embeddings, wire.Embeddings, c.Body, "team-model", "float")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestBedrockStreamTranslationAndAggregateToolBound(t *testing.T) {
 	add("contentBlockStop", map[string]int{"contentBlockIndex": 0})
 	add("messageStop", map[string]string{"stopReason": "end_turn"})
 	add("metadata", map[string]any{"usage": map[string]int{"inputTokens": 3, "outputTokens": 2, "totalTokens": 5}})
-	for _, target := range []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini} {
+	for _, target := range []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini} {
 		var out bytes.Buffer
 		c, err := Stream("bedrock", target, bytes.NewReader(encoded.Bytes()), 8192, "team-model", true, func(b []byte) error { out.Write(b); return nil })
 		if err != nil || c.Usage == nil || c.Usage.TotalTokens != 5 {
@@ -176,14 +177,14 @@ func TestBedrockStreamTranslationAndAggregateToolBound(t *testing.T) {
 		frame("content_block_start", map[string]any{"type": "content_block_start", "index": i, "content_block": map[string]any{"type": "tool_use", "id": "call", "name": "tool", "input": map[string]any{}}})
 		frame("content_block_delta", map[string]any{"type": "content_block_delta", "index": i, "delta": map[string]any{"type": "input_json_delta", "partial_json": `{"x":"` + strings.Repeat("a", 550)}})
 	}
-	_, err := Stream(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(source.String()), 1024, "team-model", true, func([]byte) error { return nil })
-	if !errors.Is(err, openai.ErrEventTooLarge) {
+	_, err := Stream(wire.Anthropic, wire.Anthropic, strings.NewReader(source.String()), 1024, "team-model", true, func([]byte) error { return nil })
+	if !errors.Is(err, wire.ErrEventTooLarge) {
 		t.Fatalf("aggregate retained state escaped its bound: %v", err)
 	}
 }
 
 func TestCountingKeepsBedrockToolsAndInvalidGeneratedArgumentsRefuseTranslation(t *testing.T) {
-	request, err := Parse(openai.FamilyInputTokens, []byte(`{"model":"team-model","input":"hello","tools":[{"type":"function","name":"weather","parameters":{"type":"object","properties":{}}}]}`), "team-model")
+	request, err := Parse(wire.InputTokens, []byte(`{"model":"team-model","input":"hello","tools":[{"type":"function","name":"weather","parameters":{"type":"object","properties":{}}}]}`), "team-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,14 +193,14 @@ func TestCountingKeepsBedrockToolsAndInvalidGeneratedArgumentsRefuseTranslation(
 		t.Fatalf("count input lost tool tokens: %s %v", body, err)
 	}
 	malformed := []byte(`{"id":"t","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call","type":"function","function":{"name":"weather","arguments":"not-json"}}]},"finish_reason":"tool_calls"}]}`)
-	if _, err = Decode(openai.FamilyChat, openai.FamilyAnthropic, malformed, "team-model", ""); err == nil {
+	if _, err = Decode(wire.Chat, wire.Anthropic, malformed, "team-model", ""); err == nil {
 		t.Fatal("fabricated a native tool input from malformed generated arguments")
 	}
 }
 
 func TestGeminiParallelResultsKeepDistinctCallRelationships(t *testing.T) {
 	input := []byte(`{"contents":[{"role":"model","parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}}},{"functionCall":{"name":"weather","args":{"city":"London"}}}]},{"role":"user","parts":[{"functionResponse":{"name":"weather","response":{"temperature":20}}},{"functionResponse":{"name":"weather","response":{"temperature":16}}}]}]}`)
-	request, err := Parse(openai.FamilyGemini, input, "team-model")
+	request, err := Parse(wire.Gemini, input, "team-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +224,7 @@ func TestGeminiParallelResultsKeepDistinctCallRelationships(t *testing.T) {
 	}
 	for _, mime := range []string{"", "text/plain"} {
 		bad := []byte(`{"contents":[{"parts":[{"text":"hello"}]}],"generationConfig":{"responseMimeType":"` + mime + `","responseSchema":{"type":"object"}}}`)
-		request, err = Parse(openai.FamilyGemini, bad, "team-model")
+		request, err = Parse(wire.Gemini, bad, "team-model")
 		if err != nil {
 			continue
 		}

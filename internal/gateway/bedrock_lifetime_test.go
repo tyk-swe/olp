@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 
@@ -16,14 +19,13 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestBedrockRelayKeepsPartialUsageUncertainUntilNativeTerminal(t *testing.T) {
 	for _, mode := range []string{"partial EOF", "malformed frame", "valid terminal", "terminal delivery failure", "terminal flush failure"} {
 		t.Run(mode, func(t *testing.T) {
 			h, x, p := pinnedExchangeFixture(t)
-			x.family, x.mode = openai.FamilyBedrockInvoke, "streaming"
+			x.family, x.mode = wire.BedrockInvoke, "streaming"
 			x.dispatched = true
 			e := h.gateway.beginPinned(t.Context(), x, p, http.MethodPost)
 			e.state.accepted = true
@@ -79,7 +81,7 @@ func TestBedrockNativeFailuresScrubAppliedCredentials(t *testing.T) {
 	for _, mode := range []string{"exception", "model error"} {
 		t.Run(mode, func(t *testing.T) {
 			h, x, p := pinnedExchangeFixture(t)
-			x.family = openai.FamilyBedrockInvoke
+			x.family = wire.BedrockInvoke
 			x.sensitive.Add("applied-provider-secret")
 			e := h.gateway.beginPinned(t.Context(), x, p, http.MethodPost)
 			e.state.accepted = true
@@ -137,7 +139,7 @@ func TestBedrockRelayRequiresExplicitUsageCounts(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, x, p := pinnedExchangeFixture(t)
-			x.family, x.mode = openai.FamilyBedrockInvoke, "streaming"
+			x.family, x.mode = wire.BedrockInvoke, "streaming"
 			e := h.gateway.beginPinned(t.Context(), x, p, http.MethodPost)
 			e.state.accepted = true
 			e.state.dispatched.Store(true)
@@ -175,7 +177,7 @@ func TestBedrockRelayRetainsKnownCountsAfterMalformedUsage(t *testing.T) {
 	for _, count := range []string{"-1", "1.5", "9223372036854775808"} {
 		t.Run(count, func(t *testing.T) {
 			h, x, p := pinnedExchangeFixture(t)
-			x.family, x.mode = openai.FamilyBedrockInvoke, "streaming"
+			x.family, x.mode = wire.BedrockInvoke, "streaming"
 			e := h.gateway.beginPinned(t.Context(), x, p, http.MethodPost)
 			e.state.accepted = true
 			e.state.dispatched.Store(true)
@@ -204,7 +206,7 @@ func TestBedrockUnaryFlushFailureRetainsUpstreamUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var snapshot runtime.Snapshot
+	var snapshot routing.Snapshot
 	if err = json.Unmarshal(raw, &snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +216,7 @@ func TestBedrockUnaryFlushFailureRetainsUpstreamUsage(t *testing.T) {
 	const model = "anthropic.claude-3-5-sonnet-v2:0"
 	provider.Kind, provider.ProfileID, provider.ProfileRevision = "bedrock", "bedrock-invoke", connectors.ProfileRevision
 	provider.AuthMode, provider.CloudRegion, provider.Endpoint = "static", "us-east-1", h.upstream.URL+"/a"
-	provider.Capabilities = []runtime.Capability{{Model: model, Operation: "bedrock_invoke", Surface: "bedrock", Mode: "unary"}}
+	provider.Capabilities = []routing.Capability{{Model: model, Operation: "bedrock_invoke", Surface: "bedrock", Mode: "unary"}}
 	route.Operations, route.Targets[0].ProviderModel = []string{"bedrock_invoke"}, model
 	snapshot.Providers[provider.ID], snapshot.Routes[route.Slug] = provider, route
 	h.rt.release, err = runtime.NewRelease(uuid.NewString(), 8, &snapshot, map[string][]byte{h.credA: []byte(`{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`)})
@@ -227,7 +229,7 @@ func TestBedrockUnaryFlushFailureRetainsUpstreamUsage(t *testing.T) {
 	r.Header.Set("X-OLP-API-Key", fullKey)
 	r.Header.Set("Content-Type", "application/json")
 	w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), flushErr: io.ErrClosedPipe, beforeDelivery: func() {}}
-	h.gateway.bedrockServe(w, r, openai.FamilyBedrockInvoke, "bedrock_invoke", "unary", "invoke")
+	h.gateway.bedrockServe(w, r, wire.BedrockInvoke, "bedrock_invoke", "unary", "invoke")
 	env := h.sink.last(t)
 	if env.Outcome != "cancelled" || !env.Committed || env.Status != 0 || len(env.Attempts) != 1 {
 		t.Fatalf("buffered write claimed success: %+v", env)

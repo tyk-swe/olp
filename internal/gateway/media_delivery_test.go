@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 type mediaDeadlineWriter struct {
@@ -131,7 +132,7 @@ func TestMissingMediaArtifactReportsDeliveryFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := &mediaOutcome{result: &media.Result{Artifact: artifact, ContentType: "audio/mpeg"}, status: 200}
-	x := &execution{family: openai.FamilySpeech}
+	x := &call{family: wire.Speech}
 	w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}
 	h.gateway.streamArtifact(w, x, out)
 	h.gateway.finishMedia(x, out, out.status)

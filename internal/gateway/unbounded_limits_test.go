@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -20,9 +22,9 @@ func TestUnboundedWorkRejectsEveryConsumptionBudget(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			n, cost, group := int64(100), "1.00", benchOwner
 			a := access.Authority{BudgetGroupID: &group, EndUserDigest: "user", Attribution: map[string]string{"team": "core"}}
-			p := runtime.Provider{Limits: &runtime.Limits{}}
-			s := runtime.Slot{}
-			route := runtime.Route{Slug: "chat"}
+			p := routing.Provider{Limits: &routing.Limits{}}
+			s := routing.Slot{}
+			route := routing.Route{Slug: "chat"}
 			switch name {
 			case "key tokens":
 				a.Policy.TokensPerMinute = &n
@@ -64,9 +66,9 @@ func TestUnboundedWorkRejectsEveryConsumptionBudget(t *testing.T) {
 			case "attribution":
 				a.ProjectAttributionBudgets = access.AttributionBudgets{"team": {"core": {WeeklyCostLimit: &cost}}}
 			case "route daily":
-				route.Budget = &runtime.CostLimits{DailyCostLimit: &cost}
+				route.Budget = &routing.CostLimits{DailyCostLimit: &cost}
 			case "route monthly":
-				route.Budget = &runtime.CostLimits{MonthlyCostLimit: &cost}
+				route.Budget = &routing.CostLimits{MonthlyCostLimit: &cost}
 			case "provider tokens":
 				p.Limits.TokensPerMinute = &n
 			case "provider daily":
@@ -96,9 +98,9 @@ func TestUnboundedWorkKeepsEnforceableLimitsAndUnrelatedBudgets(t *testing.T) {
 	a.Policy.EndUserPolicy = &access.EndUserPolicy{Defaults: policy, Overrides: map[string]access.AdmissionLimits{"other": {WeeklyCostLimit: &cost}}}
 	a.ProjectAttributionBudgets = access.AttributionBudgets{"team": {"other": {WeeklyCostLimit: &cost}}}
 	a.Attribution = map[string]string{"team": "current"}
-	p := runtime.Provider{Limits: &runtime.Limits{RequestsPerMinute: &n, MaxConcurrency: &n}}
-	s := runtime.Slot{RequestsPerMinute: &n, MaxConcurrency: &n}
-	if e := unboundedWorkLimits(a, &p, &s, &runtime.Route{Slug: "chat", Budget: &runtime.CostLimits{}}); e != nil {
+	p := routing.Provider{Limits: &routing.Limits{RequestsPerMinute: &n, MaxConcurrency: &n}}
+	s := routing.Slot{RequestsPerMinute: &n, MaxConcurrency: &n}
+	if e := unboundedWorkLimits(a, &p, &s, &routing.Route{Slug: "chat", Budget: &routing.CostLimits{}}); e != nil {
 		t.Fatalf("enforceable session refused: %v", e)
 	}
 	if e := unboundedWorkLimits(access.Authority{}, nil, nil, nil); e != nil {
@@ -109,10 +111,10 @@ func TestUnboundedWorkKeepsEnforceableLimitsAndUnrelatedBudgets(t *testing.T) {
 func TestUnboundedPinObservesCurrentRouteProviderAndSlotBudgets(t *testing.T) {
 	for _, scope := range []string{"route", "provider", "slot"} {
 		t.Run(scope, func(t *testing.T) {
-			provider := runtime.Provider{ID: "provider", Slots: []runtime.Slot{{ID: "slot"}}}
-			route := runtime.Route{Slug: "chat"}
+			provider := routing.Provider{ID: "provider", Slots: []routing.Slot{{ID: "slot"}}}
+			route := routing.Route{Slug: "chat"}
 			p := &pin{provider: provider, slot: provider.Slots[0]}
-			snapshot := &runtime.Snapshot{Routes: map[string]runtime.Route{"chat": route}, Providers: map[string]runtime.Provider{"provider": provider}}
+			snapshot := &routing.Snapshot{Routes: map[string]routing.Route{"chat": route}, Providers: map[string]routing.Provider{"provider": provider}}
 			s := &Server{Runtime: &fakeRuntime{release: &runtime.Release{Snapshot: snapshot}}}
 			if e := s.unboundedPinLimits(access.Authority{}, p, &route); e != nil {
 				t.Fatal(e)
@@ -121,13 +123,13 @@ func TestUnboundedPinObservesCurrentRouteProviderAndSlotBudgets(t *testing.T) {
 			switch scope {
 			case "route":
 				current := route
-				current.Budget = &runtime.CostLimits{MonthlyCostLimit: &cost}
+				current.Budget = &routing.CostLimits{MonthlyCostLimit: &cost}
 				snapshot.Routes["chat"] = current
 			case "provider":
-				provider.Limits = &runtime.Limits{Supply: runtime.Supply{DailyCostLimit: &cost}}
+				provider.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: &cost}}
 				snapshot.Providers[provider.ID] = provider
 			case "slot":
-				provider.Slots = []runtime.Slot{{ID: "slot", Supply: runtime.Supply{DailyCostLimit: &cost}}}
+				provider.Slots = []routing.Slot{{ID: "slot", Supply: routing.Supply{DailyCostLimit: &cost}}}
 				snapshot.Providers[provider.ID] = provider
 			}
 			if e := s.unboundedPinLimits(access.Authority{}, p, &route); e == nil || e.Code != "unbounded_work_budget" {
@@ -245,7 +247,7 @@ func TestSystemCostAdmissionRefusesIncompleteAccounting(t *testing.T) {
 			}
 			checked := false
 			s := &Server{Runtime: budgetRuntime{authority: authority}, Admission: &Admission{CostAccountingReady: func(context.Context) error { checked = true; return errors.New("lost") }}}
-			x := &execution{route: &runtime.Route{Slug: "chat"}, attribution: map[string]string{"team": "core"}}
+			x := &call{attribution: map[string]string{"team": "core"}, routeLeg: routeLeg{route: &routing.Route{Slug: "chat"}}}
 			if e := s.reserveSystemBudgets(t.Context(), x); !checked || e == nil || e.Code != "cost_accounting_incomplete" {
 				t.Fatalf("system budget admitted against lost accounting: checked=%v refusal=%v", checked, e)
 			}
@@ -257,13 +259,13 @@ func TestSupplyCostAdmissionRefusesIncompleteAccountingBeforeReserving(t *testin
 	for _, scope := range []string{quotaRoute, quotaConnection, quotaSlot} {
 		t.Run(scope, func(t *testing.T) {
 			cost := "1"
-			x := &execution{route: &runtime.Route{Slug: "chat"}}
-			provider, slot := runtime.Provider{}, runtime.Slot{}
+			x := &call{routeLeg: routeLeg{route: &routing.Route{Slug: "chat"}}}
+			provider, slot := routing.Provider{}, routing.Slot{}
 			switch scope {
 			case quotaRoute:
-				x.route.Budget = &runtime.CostLimits{DailyCostLimit: &cost}
+				x.route.Budget = &routing.CostLimits{DailyCostLimit: &cost}
 			case quotaConnection:
-				provider.Limits = &runtime.Limits{Supply: runtime.Supply{MonthlyCostLimit: &cost}}
+				provider.Limits = &routing.Limits{Supply: routing.Supply{MonthlyCostLimit: &cost}}
 			case quotaSlot:
 				slot.DailyCostLimit = &cost
 			}
@@ -271,7 +273,7 @@ func TestSupplyCostAdmissionRefusesIncompleteAccountingBeforeReserving(t *testin
 			a := newAdmission(t, client)
 			a.CostAccountingReady = func(context.Context) error { return errors.New("lost") }
 			s := &Server{Admission: a}
-			check := s.holdCaps(t.Context(), x, runtime.Attempt{}, &provider, &slot, time.Now().Add(time.Minute))
+			check := s.holdCaps(t.Context(), x, routing.Attempt{}, &provider, &slot, time.Now().Add(time.Minute))
 			if check.quota != scope || client.calls.Load() != 0 {
 				t.Fatalf("supply cap admitted: %+v calls=%d", check, client.calls.Load())
 			}

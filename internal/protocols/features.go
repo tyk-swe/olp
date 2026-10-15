@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Features are the request properties a route selector can test, read from
@@ -24,7 +24,7 @@ var modalities = []string{"text", "image", "audio", "video", "file"}
 
 // RequestFeatures reads the features of a generation request. A request the
 // canonical form cannot represent reports what its raw fields show.
-func RequestFeatures(r *openai.Request) Features {
+func RequestFeatures(r *wire.Request) Features {
 	var f Features
 	fields := r.Document()
 	f.Tools = len(arr(fields["tools"])) > 0 || len(arr(fields["functions"])) > 0
@@ -75,7 +75,7 @@ func RequestFeatures(r *openai.Request) Features {
 // RequestText is the text a classifier judges: the text parts of the request's
 // last user turn, cut to at most limit bytes on a character boundary. It is
 // empty when the request has no user text the canonical form can represent.
-func RequestText(r *openai.Request, limit int) string {
+func RequestText(r *wire.Request, limit int) string {
 	c, err := decodeCanonical(r.Family, r.Document())
 	if err != nil {
 		return ""

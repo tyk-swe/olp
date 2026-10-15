@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func parse(t *testing.T, family openai.Family, body string) *openai.Request {
+func parse(t *testing.T, family wire.Format, body string) *wire.Request {
 	t.Helper()
 	r, err := Parse(family, []byte(body), "route")
 	if err != nil {
@@ -17,7 +17,7 @@ func parse(t *testing.T, family openai.Family, body string) *openai.Request {
 	return r
 }
 
-func inspectInputText(t *testing.T, r *openai.Request, fn TextSlot) *openai.Request {
+func inspectInputText(t *testing.T, r *wire.Request, fn TextSlot) *wire.Request {
 	t.Helper()
 	out, err := InspectInputText(r, fn)
 	if err != nil {
@@ -34,7 +34,7 @@ func blockOnForbid(text string) (string, bool) {
 	return text, strings.Contains(text, "forbidden")
 }
 
-func fieldText(t *testing.T, r *openai.Request, path ...string) string {
+func fieldText(t *testing.T, r *wire.Request, path ...string) string {
 	t.Helper()
 	var node json.RawMessage = r.Field(path[0])
 	for _, name := range path[1:] {
@@ -52,7 +52,7 @@ func fieldText(t *testing.T, r *openai.Request, path ...string) string {
 }
 
 func TestInspectInputTextChat(t *testing.T) {
-	r := parse(t, openai.FamilyChat, `{
+	r := parse(t, wire.Chat, `{
 		"model":"route",
 		"messages":[
 			{"role":"system","content":"keep s3cr3t safe"},
@@ -104,7 +104,7 @@ func TestInspectInputTextChat(t *testing.T) {
 }
 
 func TestInspectInputTextChatBlockStopsWalk(t *testing.T) {
-	r := parse(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"forbidden"}]}`)
+	r := parse(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"forbidden"}]}`)
 	out := inspectInputText(t, r, blockOnForbid)
 	if out == nil {
 		t.Fatal("nil envelope")
@@ -112,7 +112,7 @@ func TestInspectInputTextChatBlockStopsWalk(t *testing.T) {
 }
 
 func TestInspectInputTextResponses(t *testing.T) {
-	r := parse(t, openai.FamilyResponses, `{
+	r := parse(t, wire.Responses, `{
 		"model":"route",
 		"instructions":"guard s3cr3t",
 		"input":[
@@ -147,7 +147,7 @@ func TestInspectInputTextResponses(t *testing.T) {
 }
 
 func TestInspectInputTextResponsesString(t *testing.T) {
-	r := parse(t, openai.FamilyResponses, `{"model":"route","input":"raw s3cr3t"}`)
+	r := parse(t, wire.Responses, `{"model":"route","input":"raw s3cr3t"}`)
 	out := inspectInputText(t, r, redactSecret)
 	if got := fieldText(t, out, "input"); got != "raw [REDACTED]" {
 		t.Fatalf("input=%q", got)
@@ -155,24 +155,24 @@ func TestInspectInputTextResponsesString(t *testing.T) {
 }
 
 func TestInspectInputTextEmbeddingsAndModeration(t *testing.T) {
-	single := parse(t, openai.FamilyEmbeddings, `{"model":"route","input":"embed s3cr3t"}`)
+	single := parse(t, wire.Embeddings, `{"model":"route","input":"embed s3cr3t"}`)
 	if got := fieldText(t, inspectInputText(t, single, redactSecret), "input"); got != "embed [REDACTED]" {
 		t.Fatalf("embed input=%q", got)
 	}
-	list := parse(t, openai.FamilyEmbeddings, `{"model":"route","input":["one s3cr3t","two"]}`)
+	list := parse(t, wire.Embeddings, `{"model":"route","input":["one s3cr3t","two"]}`)
 	var inputs []string
 	json.Unmarshal(inspectInputText(t, list, redactSecret).Field("input"), &inputs)
 	if inputs[0] != "one [REDACTED]" || inputs[1] != "two" {
 		t.Fatalf("inputs=%v", inputs)
 	}
-	moderation := parse(t, openai.FamilyModeration, `{"model":"route","input":"mod s3cr3t"}`)
+	moderation := parse(t, wire.Moderation, `{"model":"route","input":"mod s3cr3t"}`)
 	if got := fieldText(t, inspectInputText(t, moderation, redactSecret), "input"); got != "mod [REDACTED]" {
 		t.Fatalf("moderation input=%q", got)
 	}
 }
 
 func TestInspectInputTextRerank(t *testing.T) {
-	r := parse(t, openai.FamilyRerank, `{"model":"route","query":"find s3cr3t","documents":["doc s3cr3t","clean"]}`)
+	r := parse(t, wire.Rerank, `{"model":"route","query":"find s3cr3t","documents":["doc s3cr3t","clean"]}`)
 	out := inspectInputText(t, r, redactSecret)
 	if got := fieldText(t, out, "query"); got != "find [REDACTED]" {
 		t.Fatalf("query=%q", got)
@@ -185,7 +185,7 @@ func TestInspectInputTextRerank(t *testing.T) {
 }
 
 func TestInspectInputTextAnthropic(t *testing.T) {
-	r := parse(t, openai.FamilyAnthropic, `{
+	r := parse(t, wire.Anthropic, `{
 		"model":"route","max_tokens":16,
 		"system":[{"type":"text","text":"sys s3cr3t"}],
 		"messages":[
@@ -220,7 +220,7 @@ func TestInspectInputTextAnthropic(t *testing.T) {
 }
 
 func TestInspectInputTextGemini(t *testing.T) {
-	r := parse(t, openai.FamilyGemini, `{
+	r := parse(t, wire.Gemini, `{
 		"systemInstruction":{"parts":[{"text":"sys s3cr3t"}]},
 		"contents":[{"role":"user","parts":[{"text":"hi s3cr3t"},{"inlineData":{"mimeType":"image/png","data":"s3cr3t"}}]}]}`)
 	out := inspectInputText(t, r, redactSecret)
@@ -250,7 +250,7 @@ func TestInspectInputTextGemini(t *testing.T) {
 	}
 }
 
-func outputText(t *testing.T, family openai.Family, body string) []byte {
+func outputText(t *testing.T, family wire.Format, body string) []byte {
 	t.Helper()
 	out, err := InspectOutputText(family, []byte(body), redactSecret)
 	if err != nil {
@@ -260,7 +260,7 @@ func outputText(t *testing.T, family openai.Family, body string) []byte {
 }
 
 func TestInspectOutputTextChat(t *testing.T) {
-	out := outputText(t, openai.FamilyChat, `{
+	out := outputText(t, wire.Chat, `{
 		"id":"chatcmpl-1","object":"chat.completion",
 		"choices":[{"index":0,"message":{"role":"assistant","content":"the s3cr3t is safe","refusal":null,"reasoning_content":"s3cr3t thinking","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"q\":\"s3cr3t\"}"}}]}}],
 		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
@@ -297,7 +297,7 @@ func TestInspectOutputTextChat(t *testing.T) {
 }
 
 func TestInspectOutputTextResponses(t *testing.T) {
-	out := outputText(t, openai.FamilyResponses, `{
+	out := outputText(t, wire.Responses, `{
 		"id":"resp-1","object":"response","status":"completed",
 		"output":[
 			{"type":"reasoning","summary":[{"type":"summary_text","text":"s3cr3t chain"}],"content":[{"type":"reasoning_text","text":"s3cr3t hidden"}]},
@@ -337,7 +337,7 @@ func TestInspectOutputTextResponses(t *testing.T) {
 }
 
 func TestInspectOutputTextAnthropic(t *testing.T) {
-	out := outputText(t, openai.FamilyAnthropic, `{
+	out := outputText(t, wire.Anthropic, `{
 		"id":"msg-1","type":"message","role":"assistant",
 		"content":[{"type":"thinking","thinking":"s3cr3t chain"},{"type":"text","text":"the s3cr3t"}],
 		"stop_reason":"end_turn"}`)
@@ -358,7 +358,7 @@ func TestInspectOutputTextAnthropic(t *testing.T) {
 }
 
 func TestInspectOutputTextGemini(t *testing.T) {
-	out := outputText(t, openai.FamilyGemini, `{
+	out := outputText(t, wire.Gemini, `{
 		"candidates":[{"content":{"role":"model","parts":[{"text":"gem s3cr3t"},{"thought":true,"text":"s3cr3t chain"}]}}],
 		"usageMetadata":{"totalTokenCount":2}}`)
 	var doc map[string]json.RawMessage
@@ -382,11 +382,11 @@ func TestInspectOutputTextGemini(t *testing.T) {
 }
 
 func TestInspectOutputTextNonObjectAndUnknownFamily(t *testing.T) {
-	if out, err := InspectOutputText(openai.FamilyChat, []byte(`"str"`), redactSecret); err == nil || string(out) != `"str"` {
+	if out, err := InspectOutputText(wire.Chat, []byte(`"str"`), redactSecret); err == nil || string(out) != `"str"` {
 		t.Fatalf("non-object: %v %s", err, out)
 	}
 	body := []byte(`{"data":[{"embedding":[0.1]}]}`)
-	out, err := InspectOutputText(openai.FamilyEmbeddings, body, redactSecret)
+	out, err := InspectOutputText(wire.Embeddings, body, redactSecret)
 	if err != nil || string(out) != string(body) {
 		t.Fatalf("embeddings body rewritten: %v %s", err, out)
 	}
@@ -394,7 +394,7 @@ func TestInspectOutputTextNonObjectAndUnknownFamily(t *testing.T) {
 
 func TestInspectOutputTextStop(t *testing.T) {
 	body := []byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"forbidden"}}]}`)
-	out, err := InspectOutputText(openai.FamilyChat, body, blockOnForbid)
+	out, err := InspectOutputText(wire.Chat, body, blockOnForbid)
 	if err != nil {
 		t.Fatal(err)
 	}

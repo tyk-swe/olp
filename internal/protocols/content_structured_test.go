@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func structuredToolRequest(t *testing.T, family openai.Family, surface, value string) (*openai.Request, string) {
+func structuredToolRequest(t *testing.T, family wire.Format, surface, value string) (*wire.Request, string) {
 	t.Helper()
 	block := `{"toolUse":{"toolUseId":"call","name":"lookup","input":` + value + `}}`
 	path := "/messages/0/content/0/toolUse/input"
@@ -24,7 +24,11 @@ func structuredToolRequest(t *testing.T, family openai.Family, surface, value st
 		body = `{"input":{"converse":` + body + `}}`
 		path = "/input/converse" + path
 	}
-	return openai.NewEnvelope(family, "route", false, decodeFields(t, body)), path
+	request, err := wire.FromFields(family, "route", false, decodeFields(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request, path
 }
 
 func TestInspectInputTextBedrockStructuredBlock(t *testing.T) {
@@ -38,7 +42,7 @@ func TestInspectInputTextBedrockStructuredBlock(t *testing.T) {
 		{"nested array", `{"items":[{"forbidden":0}]}`, "forbidden"},
 		{"deep structure", strings.Repeat(`{"nested":`, 80) + `{"forbidden":0}` + strings.Repeat("}", 80), "forbidden"},
 	}
-	for _, family := range []openai.Family{openai.FamilyBedrock, "bedrock_count"} {
+	for _, family := range []wire.Format{wire.Bedrock, "bedrock_count"} {
 		for _, surface := range []string{"input", "result"} {
 			for _, tc := range cases {
 				t.Run(string(family)+"/"+surface+"/"+tc.name, func(t *testing.T) {
@@ -78,7 +82,7 @@ func TestInspectInputTextBedrockStructuredRedact(t *testing.T) {
 		{"preserve types", `{"n":9007199254740993,"e":1e-9,"b":false,"z":null,"a":[],"o":{}}`, "absent", "[MASK]", `{"n":9007199254740993,"e":1e-9,"b":false,"z":null,"a":[],"o":{}}`},
 		{"nested array", `{"items":[{"s3cr3t":"s3cr3t"},12345]}`, "s3cr3t|12345", "[MASK]", `{"items":[{"[MASK]":"[MASK]"},"[MASK]"]}`},
 	}
-	for _, family := range []openai.Family{openai.FamilyBedrock, "bedrock_count"} {
+	for _, family := range []wire.Format{wire.Bedrock, "bedrock_count"} {
 		for _, surface := range []string{"input", "result"} {
 			for _, tc := range cases {
 				t.Run(string(family)+"/"+surface+"/"+tc.name, func(t *testing.T) {
@@ -115,7 +119,7 @@ func TestInspectInputTextBedrockStructuredRedact(t *testing.T) {
 }
 
 func TestInspectInputTextBedrockStructuredKeyCollisionFailsClosed(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyBedrock, "bedrock_count"} {
+	for _, family := range []wire.Format{wire.Bedrock, "bedrock_count"} {
 		for _, surface := range []string{"input", "result"} {
 			for _, input := range []string{`{"s3cr3t":1,"[REDACTED]":2}`, `{"[REDACTED]":1,"s3cr3t":2}`} {
 				r, _ := structuredToolRequest(t, family, surface, input)

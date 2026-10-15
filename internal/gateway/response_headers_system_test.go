@@ -14,12 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -189,7 +190,7 @@ func newHeaderFixture(t *testing.T) *headerFixture {
 	h := newHarness(t, Config{})
 	window := admitThrough(t, h)
 	snapshot := h.rt.release.Snapshot
-	price := func(provider runtime.Provider, input, output string) usage.RoutingPrice {
+	price := func(provider routing.Provider, input, output string) usage.RoutingPrice {
 		id := provider.ID
 		return usage.RoutingPrice{
 			Price: usage.Price{
@@ -205,7 +206,7 @@ func newHeaderFixture(t *testing.T) *headerFixture {
 		provider.Kind, provider.VendorID, provider.Capabilities = "openai", "vendor-"+provider.Name, nil
 		for _, surface := range []string{"openai", "anthropic", "gemini"} {
 			for _, mode := range []string{"unary", "streaming"} {
-				provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: model, Operation: "generation", Surface: surface, Mode: mode})
+				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: model, Operation: "generation", Surface: surface, Mode: mode})
 			}
 		}
 		snapshot.Providers[id] = provider
@@ -788,7 +789,7 @@ func TestEveryHeaderOfAResponseFitsTogether(t *testing.T) {
 func TestOnlyTheKeysReservationAsksForTheAllowance(t *testing.T) {
 	f := newHeaderFixture(t)
 	for id, provider := range f.rt.release.Snapshot.Providers {
-		provider.Limits = &runtime.Limits{RequestsPerMinute: perMinute(1000), TokensPerMinute: perMinute(10_000_000), MaxConcurrency: perMinute(10)}
+		provider.Limits = &routing.Limits{RequestsPerMinute: perMinute(1000), TokensPerMinute: perMinute(10_000_000), MaxConcurrency: perMinute(10)}
 		for index := range provider.Slots {
 			provider.Slots[index].RequestsPerMinute = perMinute(1000)
 			provider.Slots[index].TokensPerMinute = perMinute(10_000_000)
@@ -956,7 +957,7 @@ func metadataOfPrefix(resp *http.Response, prefix string) map[string]string {
 // never read it back, list its jobs, download or delete one.
 func TestVideoJobCallsAreAdmittedForAKeyWithATokenLimit(t *testing.T) {
 	policy := access.KeyPolicy{RequestsPerMinute: perMinute(10), TokensPerMinute: perMinute(1_000_000)}
-	for _, family := range []openai.Family{openai.FamilyVideoList, openai.FamilyVideoGet, openai.FamilyVideoContent, openai.FamilyVideoDelete} {
+	for _, family := range []wire.Format{wire.VideoList, wire.VideoGet, wire.VideoContent, wire.VideoDelete} {
 		t.Run(string(family), func(t *testing.T) {
 			w := &window{}
 			limiter, err := limits.New(w, "olp:test")
@@ -964,7 +965,7 @@ func TestVideoJobCallsAreAdmittedForAKeyWithATokenLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := &Server{Admission: NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, quiet), log: quiet}
-			x := &execution{family: family}
+			x := &call{family: family}
 			_, complete, e := s.admitVideoRequest(t.Context(), x, admissionAuthority(policy))
 			if e != nil {
 				t.Fatalf("a job call was refused for a key with a token limit: %+v", e)

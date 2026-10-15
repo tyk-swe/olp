@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func guardFailure(field, requirement string) error {
@@ -35,7 +36,7 @@ func (p *Plan) ValidateUnary(body []byte) error {
 // guard refuses delivery. No second native decode runs on the gateway hot path.
 func (p *Plan) ValidateResult(result oif.Result) error {
 	document := result.Source()
-	if !document.Valid() || document.Len() > p.receipt.Obligations.MaxBodyBytes || result.Descriptor().Dialect != openai.Descriptor(p.Wire(), false).Dialect {
+	if !document.Valid() || document.Len() > p.receipt.Obligations.MaxBodyBytes || result.Descriptor().Dialect != wire.Descriptor(p.Wire(), false).Dialect {
 		return guardFailure("/result", "native_result_grammar")
 	}
 	if p.receipt.Class == QualifiedInteraction && !p.ToolContinuation() {
@@ -133,7 +134,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 		return guardFailure("/events", "event_dialect")
 	}
 	if event.Control() != "" {
-		if (p.Wire() == openai.FamilyChat || p.Wire() == openai.FamilyResponses || p.Wire() == openai.FamilyMistralFIM) && event.Control() == "[DONE]" {
+		if (p.Wire() == wire.Chat || p.Wire() == wire.Responses || p.Wire() == wire.MistralFIM) && event.Control() == "[DONE]" {
 			return nil
 		}
 		return guardFailure("/events", "control_grammar")
@@ -144,7 +145,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 	}
 	root := document.Root()
 	switch p.Wire() {
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		kind := valueText(member(root, "type"))
 		if kind == "" || event.Name() != "" && event.Name() != kind {
 			return guardFailure("/events/type", "event_identity")
@@ -171,20 +172,20 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 				return guardFailure("/events/delta", "message_delta")
 			}
 		}
-	case openai.FamilyChat, openai.FamilyMistralFIM:
+	case wire.Chat, wire.MistralFIM:
 		if choices, present := root.Lookup("choices"); present && choices.Kind() != oif.Array {
 			return guardFailure("/events/choices", "candidate_grammar")
 		}
-	case openai.FamilyCohereChat:
+	case wire.CohereChat:
 		kind := valueText(member(root, "type"))
 		if kind == "" || event.Name() != "" && event.Name() != kind {
 			return guardFailure("/events/type", "event_identity")
 		}
-	case openai.FamilyResponses:
+	case wire.Responses:
 		if valueText(member(root, "type")) == "" {
 			return guardFailure("/events/type", "event_identity")
 		}
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		if candidates, present := root.Lookup("candidates"); present && candidates.Kind() != oif.Array {
 			return guardFailure("/events/candidates", "candidate_grammar")
 		}
@@ -192,14 +193,14 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 	return nil
 }
 
-func outputPolicyCoverage(wire openai.Family, document oif.Document) error {
+func outputPolicyCoverage(encodedWire wire.Format, document oif.Document) error {
 	fail := func() error {
 		return incompatible("policy_conflict", "/result", "output_policy_coverage", "The output policy cannot inspect native opaque or nontext result content.")
 	}
 	root := document.Root()
 	var contents []oif.Value
-	switch wire {
-	case openai.FamilyChat:
+	switch encodedWire {
+	case wire.Chat:
 		if !onlyMembers(root, "id object created model choices usage system_fingerprint service_tier") {
 			return fail()
 		}
@@ -213,7 +214,7 @@ func outputPolicyCoverage(wire openai.Family, document oif.Document) error {
 			}
 			contents = append(contents, member(message, "content"), member(message, "refusal"))
 		}
-	case openai.FamilyResponses:
+	case wire.Responses:
 		if !onlyMembers(root, "id object created_at status background error incomplete_details instructions max_output_tokens max_tool_calls model output parallel_tool_calls previous_response_id prompt_cache_key reasoning safety_identifier service_tier store temperature text tool_choice tools top_logprobs top_p truncation usage user metadata conversation") {
 			return fail()
 		}
@@ -223,12 +224,12 @@ func outputPolicyCoverage(wire openai.Family, document oif.Document) error {
 			}
 			contents = append(contents, member(item, "content"))
 		}
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		if !onlyMembers(root, "id type role model content stop_reason stop_sequence usage") {
 			return fail()
 		}
 		contents = append(contents, member(root, "content"))
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		if !onlyMembers(root, "candidates usageMetadata modelVersion responseId promptFeedback") {
 			return fail()
 		}

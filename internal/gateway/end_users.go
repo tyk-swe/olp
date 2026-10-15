@@ -51,9 +51,9 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 		if surface := requestSurface(r); surface == "openai" || surface == "anthropic" {
 			// Inspect decoded JSON while retaining the bounded original wire body
 			// for strict forwarding, including its content encoding.
-			var wire bytes.Buffer
+			var encodedWire bytes.Buffer
 			original := r.Body
-			r.Body = io.NopCloser(io.TeeReader(original, &wire))
+			r.Body = io.NopCloser(io.TeeReader(original, &encodedWire))
 			body, err := s.readBody(r)
 			_ = original.Close()
 			if err != nil {
@@ -62,8 +62,8 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 			if measured, ok := original.(*measuredBody); ok {
 				measured.decoded = int64(len(body))
 			}
-			r.Body = io.NopCloser(bytes.NewReader(wire.Bytes()))
-			r.ContentLength = int64(wire.Len())
+			r.Body = io.NopCloser(bytes.NewReader(encodedWire.Bytes()))
+			r.ContentLength = int64(encodedWire.Len())
 			identifier = nativeEndUser(body, surface)
 		}
 	}

@@ -135,7 +135,7 @@ func (s *Server) authorizeKey(token, scope string) (access.Authority, *Error) {
 
 // dropIngressQuery removes the query parameters a client surface sends that
 // are not native semantics.
-func (x *execution) dropIngressQuery() *Error {
+func (x *call) dropIngressQuery() *Error {
 	switch x.clientSurface() {
 	case "gemini":
 		return x.dropQueryKey()
@@ -152,7 +152,7 @@ func (x *execution) dropIngressQuery() *Error {
 // dropQueryKey removes the Gemini key query parameter from a request's
 // native semantics: authentication already consumed it, and it is neither
 // native semantics nor anything an upstream may receive.
-func (x *execution) dropQueryKey() *Error {
+func (x *call) dropQueryKey() *Error {
 	keys, present := x.semanticQuery["key"]
 	if !present {
 		return nil

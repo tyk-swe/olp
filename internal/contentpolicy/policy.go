@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -43,6 +44,16 @@ type Policy struct {
 	Rules []Rule `json:"rules"`
 }
 
+// Clone returns an independent policy, preserving nil and rule order.
+func (p *Policy) Clone() *Policy {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.Rules = slices.Clone(p.Rules)
+	return &out
+}
+
 type Decision struct {
 	RuleID  string `json:"rule_id"`
 	Phase   string `json:"phase"`
@@ -65,25 +76,25 @@ type policyWire struct {
 func Decode(raw json.RawMessage) (*Policy, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	var wire policyWire
+	var encodedWire policyWire
 	var trailing any
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&trailing) != io.EOF {
+	if err := decoder.Decode(&encodedWire); err != nil || decoder.Decode(&trailing) != io.EOF {
 		return nil, errors.New("content_policy must be one JSON object")
 	}
-	if wire.Rules == nil {
+	if encodedWire.Rules == nil {
 		return &Policy{Rules: []Rule{}}, nil
 	}
-	return validateRules(*wire.Rules)
+	return validateRules(*encodedWire.Rules)
 }
 
-func validateRules(wire []ruleWire) (*Policy, error) {
-	if len(wire) > MaxRules {
+func validateRules(encodedWire []ruleWire) (*Policy, error) {
+	if len(encodedWire) > MaxRules {
 		return nil, fmt.Errorf("content_policy allows at most %d rules", MaxRules)
 	}
 	seen := map[string]bool{}
 	patternBytes := 0
-	rules := make([]Rule, 0, len(wire))
-	for i, w := range wire {
+	rules := make([]Rule, 0, len(encodedWire))
+	for i, w := range encodedWire {
 		if w.ID == nil || !RuleID.MatchString(*w.ID) {
 			return nil, fmt.Errorf("content_policy rule %d id must match %s", i, RuleID.String())
 		}
@@ -136,16 +147,16 @@ func Validate(p *Policy) error {
 	if p == nil {
 		return nil
 	}
-	wire := make([]ruleWire, 0, len(p.Rules))
+	encodedWire := make([]ruleWire, 0, len(p.Rules))
 	for i := range p.Rules {
 		r := &p.Rules[i]
 		replacement := &r.Replacement
 		if r.Action == ActionBlock {
 			replacement = nil
 		}
-		wire = append(wire, ruleWire{ID: &r.ID, Phase: &r.Phase, Pattern: &r.Pattern, Action: &r.Action, Replacement: replacement})
+		encodedWire = append(encodedWire, ruleWire{ID: &r.ID, Phase: &r.Phase, Pattern: &r.Pattern, Action: &r.Action, Replacement: replacement})
 	}
-	_, err := validateRules(wire)
+	_, err := validateRules(encodedWire)
 	return err
 }
 

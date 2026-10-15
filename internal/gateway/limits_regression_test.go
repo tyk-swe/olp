@@ -5,6 +5,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -14,26 +17,26 @@ import (
 func TestEstimateUsesTheEffectiveProviderRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		family         openai.Family
+		family         wire.Format
 		body, defaults string
 		want           int64
 	}{
-		{"default output and candidates", openai.FamilyChat,
+		{"default output and candidates", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":"abcd"}]}`,
 			`{"max_tokens":100,"n":3}`, 301},
-		{"explicit alias overrides default", openai.FamilyChat,
+		{"explicit alias overrides default", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":""}],"max_completion_tokens":7}`,
 			`{"max_tokens":100}`, 7},
-		{"explicit null opts out of default", openai.FamilyChat,
+		{"explicit null opts out of default", wire.Chat,
 			`{"model":"m","messages":[{"role":"user","content":""}],"max_tokens":null}`,
 			`{"max_completion_tokens":100}`, estimate.DefaultOutputTokens},
-		{"responses instructions", openai.FamilyResponses,
+		{"responses instructions", wire.Responses,
 			`{"model":"m","input":"abcd","instructions":"abcdefgh","max_output_tokens":7}`,
 			`{}`, 10},
-		{"default instructions", openai.FamilyResponses,
+		{"default instructions", wire.Responses,
 			`{"model":"m","input":"abcd"}`,
 			`{"instructions":"abcdefgh","max_output_tokens":7}`, 10},
-		{"null output is not one token", openai.FamilyResponses,
+		{"null output is not one token", wire.Responses,
 			`{"model":"m","input":"abcd","max_output_tokens":null}`,
 			`{}`, 1 + estimate.DefaultOutputTokens},
 	} {
@@ -46,7 +49,7 @@ func TestEstimateUsesTheEffectiveProviderRequest(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.defaults), &defaults); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := parsed.Encode("upstream", defaults); err != nil {
+			if _, err := openai.Encode(parsed, "upstream", defaults); err != nil {
 				t.Fatal(err)
 			}
 			if got := reserved(parsed, modelA, defaults); got != tc.want {
@@ -57,20 +60,19 @@ func TestEstimateUsesTheEffectiveProviderRequest(t *testing.T) {
 }
 
 func TestKeyEstimateCoversEveryCandidate(t *testing.T) {
-	parsed, err := openai.Parse(openai.FamilyChat,
+	parsed, err := openai.Parse(wire.Chat,
 		[]byte(`{"model":"m","messages":[{"role":"user","content":"abcd"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{
-		parsed: parsed,
-		request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{
-			Providers: map[string]runtime.Provider{
+	x := &call{
+
+		request: request{release: &runtime.Release{Snapshot: &routing.Snapshot{
+			Providers: map[string]routing.Provider{
 				"a": {ID: "a", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage("10")}},
 				"b": {ID: "b", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage("100")}},
 			},
-		}}},
-		attempts: []runtime.Attempt{{ProviderID: "a"}, {ProviderID: "b"}},
+		}}}, routeLeg: routeLeg{attempts: []routing.Attempt{{ProviderID: "a"}, {ProviderID: "b"}}}, generation: generationCall{parsed: parsed},
 	}
 	if got := requestEstimate(x); got != 101 {
 		t.Fatalf("key estimate = %d, want the largest effective request", got)
@@ -79,7 +81,7 @@ func TestKeyEstimateCoversEveryCandidate(t *testing.T) {
 
 func TestPreparedRoutingKeepsTargetDefaultsDistinctThroughReservation(t *testing.T) {
 	h := newHarness(t, Config{})
-	var first runtime.Provider
+	var first routing.Provider
 	for _, provider := range h.rt.release.Snapshot.Providers {
 		if provider.Name == "a" {
 			first = provider
@@ -91,24 +93,23 @@ func TestPreparedRoutingKeepsTargetDefaultsDistinctThroughReservation(t *testing
 	second := first
 	second.ID, second.RevisionID = "different-provider", "different-revision"
 	second.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`)}}}
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"abcd"}]}`))
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"abcd"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{
-		parsed: parsed,
-		request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{
+	x := &call{
+
+		request: request{release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{
 			first.ID: first, second.ID: second,
-		}}}},
-		attempts: []runtime.Attempt{{ProviderID: first.ID, UpstreamModel: modelA}, {ProviderID: second.ID, UpstreamModel: modelA}},
+		}}}}, routeLeg: routeLeg{attempts: []routing.Attempt{{ProviderID: first.ID, UpstreamModel: modelA}, {ProviderID: second.ID, UpstreamModel: modelA}}}, generation: generationCall{parsed: parsed},
 	}
 	for i, tc := range []struct {
-		provider *runtime.Provider
+		provider *routing.Provider
 		bound    int64
 	}{
 		{&first, 5000}, {&second, 9000},
 	} {
-		prepared, err := x.preparedProvider(tc.provider, modelA)
+		prepared, err := x.preparedProvider(tc.provider, "", modelA)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,16 +141,15 @@ func TestKeyReservationCapsAtDispatchableAttempts(t *testing.T) {
 	h := newHarness(t, Config{})
 	snapshot := h.rt.release.Snapshot
 	route := snapshot.Routes[routeSlug]
-	attempts, err := runtime.Select(snapshot, routeSlug, operationGeneration, surfaceOpenAI, "unary", []byte(h.keyID))
+	plan, err := routing.Select(snapshot, routeSlug, operationGeneration, surfaceOpenAI, "unary", []byte(h.keyID), routing.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{
-		request:  request{release: h.rt.release},
-		keyID:    h.keyID,
-		route:    &route,
-		attempts: attempts[:1],
-		budget:   3,
+	x := &call{
+		request: request{release: h.rt.release},
+		keyID:   h.keyID, routeLeg: routeLeg{route: &route,
+			attempts: plan.Attempts[:1],
+			budget:   3},
 	}
 	got := h.gateway.dispatchableAttempts(x)
 	if got != 1 {
@@ -161,11 +161,11 @@ func TestKeyReservationCapsAtDispatchableAttempts(t *testing.T) {
 }
 
 func TestKeySettlementPreservesAllAttemptUsage(t *testing.T) {
-	x := &execution{estimate: 100, facts: []AttemptFact{
-		{Usage: &openai.Usage{InputTokens: 2, OutputTokens: 3}, UsageObserved: true},
+	x := &call{estimate: 100, facts: []AttemptFact{
+		{Usage: &wire.Usage{InputTokens: 2, OutputTokens: 3}, UsageObserved: true},
 		{BillingUncertain: true},
 		{UsageComplete: true}, // an explicit rejection costs no tokens
-		{Usage: &openai.Usage{InputTokens: 7, OutputTokens: 5}, UsageObserved: true},
+		{Usage: &wire.Usage{InputTokens: 7, OutputTokens: 5}, UsageObserved: true},
 	}}
 	if got := *x.settledTokens(); got != 117 {
 		t.Fatalf("settled = %d, want 5 + 100 + 12", got)
@@ -173,11 +173,11 @@ func TestKeySettlementPreservesAllAttemptUsage(t *testing.T) {
 }
 
 func TestTokenSettlementSaturatesBeforeAdding(t *testing.T) {
-	huge := &openai.Usage{InputTokens: math.MaxInt64, OutputTokens: math.MaxInt64}
+	huge := &wire.Usage{InputTokens: math.MaxInt64, OutputTokens: math.MaxInt64}
 	if got := totalTokens(huge); got == nil || *got != maxEstimate {
 		t.Fatalf("overflowing usage = %v, want saturation", got)
 	}
-	if got := totalTokens(&openai.Usage{InputTokens: 7, OutputTokens: 5, TotalTokens: 1}); got == nil || *got != 12 {
+	if got := totalTokens(&wire.Usage{InputTokens: 7, OutputTokens: 5, TotalTokens: 1}); got == nil || *got != 12 {
 		t.Fatalf("contradictory total = %v, want at least the reported components", got)
 	}
 }
@@ -197,25 +197,25 @@ func TestPartialTokenSettlementPreservesOrIncreasesTheReservation(t *testing.T) 
 		fact AttemptFact
 		want int64
 	}{
-		{"partial below estimate", AttemptFact{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, BillingUncertain: true}, 100},
-		{"partial above estimate", AttemptFact{Usage: &openai.Usage{InputTokens: 150, OutputTokens: 3}, UsageObserved: true, BillingUncertain: true}, 153},
-		{"complete observed", AttemptFact{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, UsageComplete: true}, 12},
+		{"partial below estimate", AttemptFact{Usage: &wire.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, BillingUncertain: true}, 100},
+		{"partial above estimate", AttemptFact{Usage: &wire.Usage{InputTokens: 150, OutputTokens: 3}, UsageObserved: true, BillingUncertain: true}, 153},
+		{"complete observed", AttemptFact{Usage: &wire.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, UsageComplete: true}, 12},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := settledAttemptTokens(&tc.fact, 100)
 			if actual == nil || *actual != tc.want {
 				t.Fatalf("target settlement=%v want%d", actual, tc.want)
 			}
-			x := execution{estimate: 100, facts: []AttemptFact{tc.fact}}
+			x := call{estimate: 100, facts: []AttemptFact{tc.fact}}
 			if got := *x.settledTokens(); got != tc.want {
 				t.Fatalf("key settlement=%d want%d", got, tc.want)
 			}
 		})
 	}
-	x := execution{estimate: 100, facts: []AttemptFact{
-		{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, BillingUncertain: true},
-		{Usage: &openai.Usage{InputTokens: 150, OutputTokens: 3}, UsageObserved: true, BillingUncertain: true},
-		{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, UsageComplete: true},
+	x := call{estimate: 100, facts: []AttemptFact{
+		{Usage: &wire.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, BillingUncertain: true},
+		{Usage: &wire.Usage{InputTokens: 150, OutputTokens: 3}, UsageObserved: true, BillingUncertain: true},
+		{Usage: &wire.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, UsageComplete: true},
 		{BillingUncertain: true}, {UsageComplete: true},
 	}}
 	if got := *x.settledTokens(); got != 365 {

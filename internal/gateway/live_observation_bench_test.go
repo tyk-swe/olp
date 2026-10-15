@@ -1,8 +1,9 @@
 package gateway
 
 import (
-	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/geminilifecycle"
 )
 
 func BenchmarkGeminiLiveServerObservation(b *testing.B) {

@@ -8,9 +8,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"github.com/coder/websocket"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"io"
 	"log/slog"
 	"net/http"
@@ -19,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/runtime"
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/tyk-swe/olp/internal/gateway"

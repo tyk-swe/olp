@@ -11,10 +11,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func strictMediaHarness(t *testing.T, op string, policy *contentpolicy.Policy, defaults map[string]json.RawMessage) *harness {
@@ -34,10 +35,10 @@ func strictMediaHarness(t *testing.T, op string, policy *contentpolicy.Policy, d
 	}
 	route := snapshot.Routes[routeSlug]
 	route.Operations = []string{op}
-	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 	route.ContentPolicy = policy
 	snapshot.Routes[routeSlug] = route
-	if err := snapshot.Validate(); err != nil {
+	if err := snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
 	return h
@@ -301,10 +302,10 @@ func TestStrictMediaActivationRejectsUnqualifiedLifecycleAndPolicy(t *testing.T)
 		}
 		route := snapshot.Routes[routeSlug]
 		route.Operations = []string{tc.op}
-		route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+		route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 		route.ContentPolicy = tc.policy
 		snapshot.Routes[routeSlug] = route
-		if err := snapshot.Validate(); err == nil {
+		if err := snapshot.Compile(); err == nil {
 			t.Fatalf("strict %s policy=%v activated without complete contract", tc.op, tc.policy)
 		}
 	}

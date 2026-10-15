@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestCodeProviderLimitsFailClosedBeforeDispatch(t *testing.T) {
@@ -19,7 +20,7 @@ func TestCodeProviderLimitsFailClosedBeforeDispatch(t *testing.T) {
 		t.Run(dimension, func(t *testing.T) {
 			h, ledger, server := newCodeForwardHarness(t)
 			one := int64(1)
-			quota := &runtime.Limits{}
+			quota := &routing.Limits{}
 			switch dimension {
 			case "requests":
 				quota.RequestsPerMinute = &one

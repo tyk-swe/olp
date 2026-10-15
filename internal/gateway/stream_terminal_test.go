@@ -8,25 +8,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestTerminalStreamReleasesAdmissionAndRecordsSuccessWithoutEOF(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		t.Run(string(family), func(t *testing.T) {
 			h := newHarness(t, Config{})
 			closed := make(chan struct{})
 			terminal := "[DONE]"
 			body := `{"model":"team-chat","messages":[{"role":"user","content":"hi"}],"stream":true}`
-			wire := "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"
-			if family == openai.FamilyResponses {
+			encodedWire := "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"
+			if family == wire.Responses {
 				terminal = "response.completed"
 				body = `{"model":"team-chat","input":"hi","stream":true}`
-				wire = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"model-a\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n"
+				encodedWire = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"model-a\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n"
 			}
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
-				io.WriteString(w, wire)
+				io.WriteString(w, encodedWire)
 				w.(http.Flusher).Flush()
 				<-r.Context().Done()
 				close(closed)

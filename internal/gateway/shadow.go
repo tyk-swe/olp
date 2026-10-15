@@ -5,9 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -70,8 +71,8 @@ func (s *Server) DrainShadows(ctx context.Context) error {
 // embeddings and rerank, whose repetition at another target has no effect a
 // caller could observe. Stateful Responses, pinned resources, files,
 // batches, realtime and media never are.
-func (x *execution) mirrorable() bool {
-	if !x.mirrors || x.fixed || x.unary != nil || x.parsed == nil {
+func (x *call) mirrorable() bool {
+	if !x.mirrors || x.fixed || x.unary != nil || x.generation.parsed == nil {
 		return false
 	}
 	switch x.family.Operation() {
@@ -85,7 +86,7 @@ func (x *execution) mirrorable() bool {
 // durable identity, so the decision is stable for the request and uniform
 // across requests. It is nil unless the route has a shadow target, which
 // keeps the sampling out of every other request.
-func (x *execution) mirrorSeed() []byte {
+func (x *call) mirrorSeed() []byte {
 	if x.route == nil || !x.route.Shadowed() || !x.mirrorable() {
 		return nil
 	}
@@ -96,7 +97,7 @@ func (x *execution) mirrorSeed() []byte {
 // caller has its response. Each mirror is a request of its own: a fresh
 // identity that names the caller's request as its parent, its own deadline and
 // attempt, and accounting to the route rather than to the caller's key.
-func (s *Server) mirror(x *execution) {
+func (s *Server) mirror(x *call) {
 	if len(x.shadows) == 0 {
 		return
 	}
@@ -128,10 +129,10 @@ func (s *Server) mirror(x *execution) {
 // runShadow serves one mirror. It shares the caller's parsed request, which is
 // no longer written once the caller's response is complete; everything the
 // attempt prepares from it is built afresh.
-func (s *Server) runShadow(parent *execution, attempt runtime.Attempt) {
+func (s *Server) runShadow(parent *call, attempt routing.Attempt) {
 	id := uuid.Must(uuid.NewV7()).String()
 	route := parent.route
-	x := &execution{
+	x := &call{
 		request: request{
 			id:        id,
 			minted:    true,
@@ -139,9 +140,9 @@ func (s *Server) runShadow(parent *execution, attempt runtime.Attempt) {
 			startedAt: s.now(),
 			release:   parent.request.release,
 		},
-		family:          parent.family,
-		ingress:         parent.ingress,
-		parsed:          parent.parsed,
+		family:  parent.family,
+		ingress: parent.ingress,
+
 		semanticHeaders: parent.semanticHeaders,
 		semanticQuery:   parent.semanticQuery,
 		actor:           "system",
@@ -152,21 +153,23 @@ func (s *Server) runShadow(parent *execution, attempt runtime.Attempt) {
 		cardRev:         parent.cardRev,
 		routingInputs:   parent.routingInputs,
 		attribution:     parent.attribution,
-		affinity:        parent.affinity,
-		route:           route,
-		primary:         route,
-		mode:            parent.mode,
-		policy:          parent.policy,
-		attempts:        []runtime.Attempt{attempt},
-		budget:          1,
-		allowance:       1,
-		fixed:           true,
-		origin:          usage.OriginShadow,
-		parent:          parent.request.accountingID(),
-		priority:        runtime.PriorityLow,
+
+		primary: route,
+		mode:    parent.mode,
+
+		allowance: 1,
+		fixed:     true,
+		origin:    usage.OriginShadow,
+		parent:    parent.request.accountingID(),
+		priority:  routing.PriorityLow, routeLeg: routeLeg{affinity: parent.affinity,
+			route: route,
+
+			policy:   parent.policy,
+			attempts: []routing.Attempt{attempt},
+			budget:   1}, generation: generationCall{parsed: parent.generation.parsed},
 	}
-	if x.parsed.Stream {
-		x.emit = func([]byte) error {
+	if x.generation.parsed.Stream {
+		x.generation.emit = func([]byte) error {
 			x.delivered(s.now())
 			return nil
 		}

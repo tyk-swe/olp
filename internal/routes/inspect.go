@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -18,13 +21,11 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type inspectedDecision struct {
-	runtime.Decision
+	routing.Decision
 	// EstimateProvenance and ModelFamily say how the estimated input of the
 	// decision was counted and for which family of models. They are null when
 	// the caller supplied the estimate or sent no request to count.
@@ -66,7 +67,7 @@ type inspectedServing struct {
 // inspectServing reports which facts a target's serving identity carries,
 // never their values. Its principal is observed when grant enrollment reported
 // it for the provider, which replaces any a serving binding declares.
-func inspectServing(provider runtime.Provider, serving oif.ServingIdentity) *inspectedServing {
+func inspectServing(provider routing.Provider, serving oif.ServingIdentity) *inspectedServing {
 	observed := provider.ObservedPrincipal != ""
 	return &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "" && !observed, PrincipalObserved: observed, SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}
 }
@@ -142,7 +143,7 @@ func inspectionContext(headers, query map[string]string, allowState bool) (inter
 	return context, nil
 }
 
-func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*openai.Request, error) {
+func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -173,16 +174,16 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	if _, canonical := fields["route"]; canonical {
 		return nil, access.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
 	}
-	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank, openai.FamilyMistralFIM, openai.FamilyCohereChat}
-	var family openai.Family
+	families := []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiStream, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation, wire.Rerank, wire.MistralFIM, wire.CohereChat}
+	var family wire.Format
 	for _, candidate := range families {
 		if candidate.Operation() != operation || candidate.Surface() != surface {
 			continue
 		}
-		if candidate == openai.FamilyGemini && mode == "streaming" || candidate == openai.FamilyGeminiStream && mode != "streaming" {
+		if candidate == wire.Gemini && mode == "streaming" || candidate == wire.GeminiStream && mode != "streaming" {
 			continue
 		}
-		if dialect == "" || openai.Descriptor(candidate, mode == "streaming").Dialect.ID == dialect {
+		if dialect == "" || wire.Descriptor(candidate, mode == "streaming").Dialect.ID == dialect {
 			family = candidate
 			break
 		}
@@ -216,25 +217,25 @@ func (b *inspectionBudget) reserve(size int) error {
 	return nil
 }
 
-func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
 		return nil, nil, inspections
 	}
 	fidelity := route.Fidelity.Mode
-	effectiveRequests := map[string]*openai.Request{}
-	var effective func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand)
+	effectiveRequests := map[string]*wire.Request{}
+	var effective func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand)
 	if route.Fidelity.Strict() {
-		effective = func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
+		effective = func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
 			request := effectiveRequests[target.ID]
 			delete(effectiveRequests, target.ID)
 			if request == nil {
 				return nil, demand.source(target)
 			}
 			output := demand.outputBound(request)
-			var resolved *runtime.TokenDemand
+			var resolved *routing.TokenDemand
 			if prepared := demand.prepared(target, request); prepared != nil || output != nil {
-				resolved = &runtime.TokenDemand{MaxOutputTokens: output}
+				resolved = &routing.TokenDemand{MaxOutputTokens: output}
 				if prepared != nil {
 					resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
 					if output == nil {
@@ -245,7 +246,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			return sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), resolved
 		}
 	}
-	accept := func(provider runtime.Provider, target runtime.Target) error {
+	accept := func(provider routing.Provider, target routing.Target) error {
 		result := &interactionInspection{Status: "incompatible", Fidelity: fidelity, Evidence: []string{}}
 		inspections[target.ID] = result
 		config := provider.Connector()
@@ -259,10 +260,10 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			if err != nil {
 				return err
 			}
-			result.Status, result.Class = runtime.FidelityTransformed, fidelity
+			result.Status, result.Class = routing.FidelityTransformed, fidelity
 			result.Operation = parsed.Family.Operation()
-			result.IngressDialect = openai.Descriptor(parsed.Family, parsed.Stream).Dialect.ID
-			result.EgressDialect = openai.Descriptor(invocation.Wire, parsed.Stream).Dialect.ID
+			result.IngressDialect = wire.Descriptor(parsed.Family, parsed.Stream).Dialect.ID
+			result.EgressDialect = wire.Descriptor(invocation.Wire, parsed.Stream).Dialect.ID
 			result.ReturnDialect = result.IngressDialect
 			result.Representation = "oif"
 			summary := inspectRequest(invocation.Prepared.Document(), invocation.Prepared.Provenance())
@@ -334,7 +335,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 	return accept, effective, inspections
 }
 
-func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate) []inspectedDecision {
+func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate) []inspectedDecision {
 	result := make([]inspectedDecision, 0, len(decisions))
 	for _, decision := range decisions {
 		inspection := details[decision.TargetID]

@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -81,7 +82,7 @@ func TestPluginProfileHostingPlacesTheStaticCredential(t *testing.T) {
 	if err := c.Validate(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+	endpoint, err := c.URL(wire.Chat, "acme-large", false)
 	if err != nil || endpoint != "https://api.acme.example/v2/chat/completions" {
 		t.Fatalf("addressed %q: %v", endpoint, err)
 	}
@@ -390,7 +391,7 @@ func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each value fills its part of one path segment, whatever it contains.
-	endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+	endpoint, err := c.URL(wire.Chat, "acme-large", false)
 	if err != nil || endpoint != "https://api.acme.example/accounts/acme%2Fprod/v2/chat/completions" {
 		t.Fatalf("addressed %q: %v", endpoint, err)
 	}
@@ -636,7 +637,7 @@ func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
 		"HTTPS://api.acme.example:443/": "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
 	} {
 		for _, c := range []Config{c, published} {
-			endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+			endpoint, err := c.URL(wire.Chat, "acme-large", false)
 			if err != nil {
 				t.Fatal(err)
 			}

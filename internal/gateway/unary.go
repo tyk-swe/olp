@@ -6,28 +6,29 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-type unaryExecution struct {
+type unaryCall struct {
 	source         oif.Request
 	dialect        operations.Dialect
 	route, surface string
 }
 
-func (x *execution) operationName() string {
+func (x *call) operationName() string {
 	if x.unary != nil {
 		return x.unary.dialect.Operation.ID
 	}
 	return x.family.Operation()
 }
-func (x *execution) surfaceName() string {
+func (x *call) surfaceName() string {
 	if x.unary != nil {
 		return x.unary.surface
 	}
@@ -37,7 +38,7 @@ func (x *execution) surfaceName() string {
 // clientSurface is the wire surface the caller speaks, which shapes error
 // envelopes and credential query parameters. It can differ from surfaceName,
 // the capability surface: Gemini embeddings match OpenAI embedding targets.
-func (x *execution) clientSurface() string {
+func (x *call) clientSurface() string {
 	if x.unary != nil && x.unary.surface == "native" {
 		return "native"
 	}
@@ -46,10 +47,10 @@ func (x *execution) clientSurface() string {
 	}
 	return x.surfaceName()
 }
-func (s *Server) selectUnary(x *execution, family openai.Family, dialect string, body []byte, pathModel string) (bool, error) {
+func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body []byte, pathModel string) (bool, error) {
 	explicit := dialect != ""
 	if !explicit {
-		ids := map[openai.Family]string{openai.FamilyEmbeddings: "openai-embeddings", openai.FamilyRerank: "rerank", openai.FamilyModeration: "openai-moderation", openai.FamilyInputTokens: "openai-input-tokens", openai.FamilyAnthropicCount: "anthropic-count-tokens", openai.FamilyGeminiCount: "gemini-count-tokens", openai.FamilyGeminiEmbeddings: "gemini-embeddings", openai.FamilyGeminiEmbeddingsBatch: "gemini-batch-embeddings", openai.Family("bedrock_count"): "bedrock-count-tokens"}
+		ids := map[wire.Format]string{wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.Format("bedrock_count"): "bedrock-count-tokens"}
 		dialect = ids[family]
 		if dialect == "" {
 			return false, nil
@@ -67,7 +68,7 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	// The native Gemini embedding methods exist only on strict routes, and the
 	// parser that takes any other request cannot read their bodies, so an
 	// unknown or transformed route is refused here with its own error.
-	nativeOnly := family == openai.FamilyGeminiEmbeddings || family == openai.FamilyGeminiEmbeddingsBatch
+	nativeOnly := family == wire.GeminiEmbeddings || family == wire.GeminiEmbeddingsBatch
 	if !explicit && !nativeOnly && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
@@ -88,7 +89,7 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	}
 	// Classify before the body can fail to parse: a malformed request is still
 	// this dialect's operation on its native surface in the terminal envelope.
-	x.unary = &unaryExecution{dialect: codec, route: model, surface: surface}
+	x.unary = &unaryCall{dialect: codec, route: model, surface: surface}
 	x.mode = "unary"
 	source, err := operationplan.Parse(dialect, body, int(s.cfg.MaxBodyBytes))
 	if err != nil {
@@ -97,19 +98,13 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	x.unary.source = source
 	return true, nil
 }
-func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan.Plan, error) {
+func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
 	x.prepareSource()
-	key := encodedKey(p, model)
-	if admission, ok := x.unaryAdmissions[key]; ok && admission.plan != nil {
-		return admission.plan, nil
+	record := x.targetPreparation(p, targetID, model)
+	if record.unary.plan != nil {
+		return record.unary.plan, nil
 	}
-	var template *operationplan.Template
-	for _, target := range x.route.Targets {
-		if target.ProviderID == p.ID && target.ProviderModel == model {
-			template, _ = x.request.release.Snapshot.OperationTemplate(x.route.Slug, target.ID, x.operationName())
-			break
-		}
-	}
+	template, _ := x.snapshot().OperationTemplate(x.route.Slug, targetID, x.operationName())
 	if template == nil {
 		return nil, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
 	}
@@ -132,13 +127,11 @@ func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan
 	if err != nil {
 		return nil, err
 	}
-	if x.unaryAdmissions == nil {
-		x.unaryAdmissions = map[string]unaryAdmission{}
-	}
-	x.unaryAdmissions[key] = unaryAdmission{plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: runtime.Listed(plan.Parameters())}
+	record.unary = unaryAdmission{plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: routing.Listed(plan.Parameters())}
+	x.retainPreparation(record)
 	return plan, nil
 }
-func (s *Server) prepareUnary(ctx context.Context, x *execution) *Error {
+func (s *Server) prepareUnary(ctx context.Context, x *call) *Error {
 	authorize := s.keyAuthorizer(x.authority)
 	if e := authorize(x.route); e != nil {
 		return e
@@ -154,27 +147,27 @@ func (s *Server) prepareUnary(ctx context.Context, x *execution) *Error {
 }
 
 // planUnary plans x.route for a registered native operation.
-func (s *Server) planUnary(ctx context.Context, x *execution) *Error {
+func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
 	var incompatible error
 	options := s.selectionOptions(ctx, x)
-	options.Accept = func(p runtime.Provider, t runtime.Target) error {
-		_, err := x.unaryAdmission(&p, t.ProviderModel)
+	options.Accept = func(p routing.Provider, t routing.Target) error {
+		_, err := x.unaryAdmission(&p, t.ID, t.ProviderModel)
 		if err != nil {
 			incompatible = err
 		}
 		return err
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
-		admission, err := x.unaryAdmission(&p, t.ProviderModel)
+	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
+		admission, err := x.unaryAdmission(&p, t.ID, t.ProviderModel)
 		if err != nil {
 			return nil, nil
 		}
 		return admission.parameters, nil
 	}
-	plan, err := runtime.PlanRequest(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
+	plan, err := routing.Select(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {
 		return requestError(err)
 	}
@@ -190,11 +183,11 @@ func (s *Server) planUnary(ctx context.Context, x *execution) *Error {
 		if x.costExcluded {
 			return costLimitExceeded()
 		}
-		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, x.route.Slug)
+		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, x.route.Slug)
 	}
 	return nil
 }
-func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution, body []byte) (*outcome, int) {
+func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, body []byte) (*outcome, int) {
 	fail := func(e *Error) (*outcome, int) {
 		if x.dispatched && e.Status >= 500 {
 			copy := *e
@@ -227,7 +220,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 	if e != nil {
 		return fail(e)
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {

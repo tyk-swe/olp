@@ -3,9 +3,10 @@ package gateway
 import (
 	"context"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // CodeLedger is the durable authority and admission boundary used before each
@@ -27,5 +28,5 @@ type CodeLedger interface {
 // adapter and protocol, on an account whose provider connection the route
 // revision froze.
 type CodeAuthorizer interface {
-	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error)
+	AuthorizeCode(context.Context, routing.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error)
 }

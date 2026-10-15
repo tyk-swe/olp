@@ -19,13 +19,15 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -42,7 +44,7 @@ var errRealtimeResponseIncomplete = errors.New("realtime response ended before i
 
 // realtimeCredentialError ends a realtime session whose provider credential
 // is no longer eligible; the session's failure names why.
-type realtimeCredentialError struct{ eligibility runtime.Eligibility }
+type realtimeCredentialError struct{ eligibility routing.Eligibility }
 
 func (e *realtimeCredentialError) Error() string {
 	return "realtime provider credential " + string(e.eligibility)
@@ -445,7 +447,7 @@ func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
 	return true
 }
 
-func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte, strict bool) *openai.Usage {
+func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte, strict bool) *wire.Usage {
 	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
 		s.unknown = true
 		return nil
@@ -520,7 +522,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 	if u.InputTokens < 0 || u.OutputTokens < 0 {
 		return nil
 	}
-	out := &openai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+	out := &wire.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 	if u.InputDetails != nil {
 		if u.InputDetails.CachedTokens != nil {
 			cached := *u.InputDetails.CachedTokens
@@ -543,7 +545,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 }
 
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
-	x := &execution{request: s.begin(w, r), family: openai.FamilyRealtime, actor: "api_key"}
+	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "realtime"
 	fail := func(e *Error) {
 		x.failure = e
@@ -622,7 +624,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	if x.strict() {
 		// Realtime has an operation-owned duplex contract. Retained Responses
 		// eligibility and the unary codec say nothing about a native session.
-		p, e = s.selectPinSurface(ctx, x, &route, "realtime", "openai", "realtime", func(provider *runtime.Provider, model string) bool {
+		p, e = s.selectPinSurface(ctx, x, &route, "realtime", "openai", "realtime", func(provider *routing.Provider, model string) bool {
 			return provider.Connector().Supports("realtime", "openai", "realtime") && provider.Supports(model, "realtime", "openai", "realtime")
 		})
 	} else {
@@ -772,7 +774,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	s.finish(x, &outcome{committed: true}, terminalStatus)
 }
 
-func strictRealtimeHandshake(snapshot *runtime.Snapshot, route *runtime.Route, r *http.Request) *Error {
+func strictRealtimeHandshake(snapshot *routing.Snapshot, route *routing.Route, r *http.Request) *Error {
 	for _, target := range route.Targets {
 		template, ok := snapshot.RealtimeTemplate(route.Slug, target.ID)
 		if !ok {
@@ -821,7 +823,7 @@ func realtimeURL(p *pin) (string, *Error) {
 	return endpoint, nil
 }
 
-func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint string) (*websocket.Conn, *Error) {
+func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint string) (*websocket.Conn, *Error) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = "realtime"
 	state := attemptState{parent: ctx, classifier: upstream.Classifier{Declared: p.provider.Connector().Classification()}}
@@ -887,7 +889,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	return conn, nil
 }
 
-func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
+func upstreamResponseError(resp *http.Response) *wire.UpstreamError {
 	if resp == nil || resp.Body == nil {
 		return nil
 	}
@@ -981,11 +983,11 @@ func (w *realtimeBoundedWriter) write(typ websocket.MessageType, data []byte) er
 	return err
 }
 
-func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn duplexPeer, token, keyID string) (*openai.Usage, bool, error) {
+func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, conn duplexPeer, token, keyID string) (*wire.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var usageMu sync.Mutex
-	usage := &openai.Usage{}
+	usage := &wire.Usage{}
 	have := false
 	observed := false
 	var responses realtimeResponseState
@@ -1071,7 +1073,7 @@ loop:
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop
 			}
-			if eligibility := s.pinEligibility(p); eligibility != runtime.Eligible {
+			if eligibility := s.pinEligibility(p); eligibility != routing.Eligible {
 				first = &realtimeCredentialError{eligibility}
 				closeCode = websocket.StatusPolicyViolation
 				client.Close(websocket.StatusPolicyViolation, "provider credential "+string(eligibility))
@@ -1120,7 +1122,7 @@ loop:
 	}
 	usageMu.Lock()
 	defer usageMu.Unlock()
-	var observedUsage *openai.Usage
+	var observedUsage *wire.Usage
 	if have {
 		observedUsage = usage
 	}

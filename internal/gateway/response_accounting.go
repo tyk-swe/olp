@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func backgroundResponseRequested(parsed *openai.Request) bool {
+func backgroundResponseRequested(parsed *wire.Request) bool {
 	var background bool
 	return json.Unmarshal(parsed.Field("background"), &background) == nil && background
 }
@@ -20,14 +22,14 @@ func backgroundResponseRequested(parsed *openai.Request) bool {
 // A background response may outlive its POST or stream. Keep a content-free
 // accounting template on the resource so polling uses the generation's key,
 // attribution, pricing and request identity.
-func (s *Server) pendingResponseUsage(x *execution, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
-	if !backgroundResponseRequested(x.parsed) {
+func (s *Server) pendingResponseUsage(x *call, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
+	if !backgroundResponseRequested(x.generation.parsed) {
 		return false
 	}
 	return s.pendingGenerationUsage(x, fact, metadata)
 }
 
-func (s *Server) pendingGenerationUsage(x *execution, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
+func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
 	copyFact := *fact
 	copyFact.GenerationUsageDeferred = false
 	copyFact.recordEvidence(true)
@@ -74,7 +76,7 @@ func (s *Server) pendingGenerationUsage(x *execution, fact *AttemptFact, metadat
 		return false
 	}
 	metadata["pending_usage"] = encoded
-	x.generationHTTP = &generationHTTPFinalizer{event: ev}
+	x.generation.generationHTTP = &generationHTTPFinalizer{event: ev}
 	return true
 }
 
@@ -85,8 +87,8 @@ type generationHTTPFinalizer struct {
 
 // Attach only the generation identity actually published by this execution.
 // Reused native mappings may belong to another original request.
-func attachGenerationHTTP(x *execution, resource *resources.Resource) error {
-	if x.generationHTTP == nil || resource == nil {
+func attachGenerationHTTP(x *call, resource *resources.Resource) error {
+	if x.generation.generationHTTP == nil || resource == nil {
 		return errors.New("deferred generation HTTP owner is unavailable")
 	}
 	var metadata map[string]json.RawMessage
@@ -97,7 +99,7 @@ func attachGenerationHTTP(x *execution, resource *resources.Resource) error {
 	if err != nil {
 		return err
 	}
-	owner := x.generationHTTP
+	owner := x.generation.generationHTTP
 	if retained.EventID != owner.event.EventID || retained.RequestID != owner.event.RequestID || retained.APIKeyID != owner.event.APIKeyID ||
 		resource.APIKeyID != owner.event.APIKeyID || owner.event.ProviderID == nil || resource.ProviderID != *owner.event.ProviderID || len(retained.Attempts) != len(owner.event.Attempts) {
 		return errors.New("deferred generation HTTP identity does not own the retained resource")
@@ -111,8 +113,8 @@ func attachGenerationHTTP(x *execution, resource *resources.Resource) error {
 	return nil
 }
 
-func (s *Server) finalizeGenerationHTTP(x *execution, env Envelope) {
-	owner := x.generationHTTP
+func (s *Server) finalizeGenerationHTTP(x *call, env Envelope) {
+	owner := x.generation.generationHTTP
 	if owner == nil || owner.localID == "" || s.Resources == nil || len(env.Attempts) == 0 {
 		return
 	}

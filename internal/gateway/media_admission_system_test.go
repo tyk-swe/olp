@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -134,8 +136,8 @@ func TestIntegrationMediaConnectionQuotaRejectsOnceForSiblingCredentials(t *test
 		}
 		if provider.Name == "a" {
 			one := int64(1)
-			provider.Limits = &runtime.Limits{RequestsPerMinute: &one}
-			provider.Slots = append(provider.Slots, runtime.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
+			provider.Limits = &routing.Limits{RequestsPerMinute: &one}
+			provider.Slots = append(provider.Slots, routing.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
 			snapshot.Providers[id] = provider
 		}
 	}
@@ -183,7 +185,7 @@ func TestIntegrationVideoCreatePreservesAttemptOrdinalsAfterSlotQuotaRejection(t
 	rejected.Priority = -1
 	one := int64(1)
 	rejected.RequestsPerMinute = &one
-	provider.Slots = append([]runtime.Slot{rejected}, provider.Slots...)
+	provider.Slots = append([]routing.Slot{rejected}, provider.Slots...)
 	f.snapshot.Providers[f.providerID] = provider
 	f.republish(t)
 	held, err := limiter.Reserve(t.Context(), slotRequest(&rejected, 0, time.Minute, ""))

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 var rerankKnown = map[string]bool{
@@ -12,7 +14,7 @@ var rerankKnown = map[string]bool{
 	"top_n": true, "return_documents": true, "truncation": true,
 }
 
-func (r *Request) validateRerank(fields map[string]json.RawMessage) error {
+func validateRerank(r *wire.Request, fields map[string]json.RawMessage) error {
 	for name := range fields {
 		if !rerankKnown[name] {
 			return invalid(name, "The rerank request supports model, query, documents, top_n, return_documents, and truncation only.")

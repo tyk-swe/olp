@@ -16,12 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -36,10 +37,10 @@ func TestIntegrationVideoCreateReservesAndSettlesSupplyCaps(t *testing.T) {
 			ceiling, owner := "1", ""
 			switch scope {
 			case "route":
-				route.Budget = &runtime.CostLimits{DailyCostLimit: &ceiling}
+				route.Budget = &routing.CostLimits{DailyCostLimit: &ceiling}
 				owner = route.ID
 			case "provider":
-				provider.Limits = &runtime.Limits{Supply: runtime.Supply{DailyCostLimit: &ceiling}}
+				provider.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: &ceiling}}
 				owner = provider.ID
 			case "slot":
 				provider.Slots[0].DailyCostLimit = &ceiling
@@ -119,7 +120,7 @@ func TestIntegrationVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 			case "key":
 				request = keyRequest(authority, 0, time.Minute)
 			case "provider":
-				provider.Limits = &runtime.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
+				provider.Limits = &routing.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
 				request = connectionRequest(&provider, 0, time.Minute, "")
 			case "credential":
 				provider.Slots[0].RequestsPerMinute = &one
@@ -209,7 +210,7 @@ func TestIntegrationVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 					authority.Policy.RequestsPerMinute = &one
 					request = keyRequest(authority, 0, time.Minute)
 				case "provider":
-					provider.Limits = &runtime.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
+					provider.Limits = &routing.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
 					request = connectionRequest(&provider, 0, time.Minute, "")
 				case "credential":
 					provider.Slots[0].RequestsPerMinute = &one
@@ -441,7 +442,7 @@ func TestIntegrationMediaStreamHoldsTargetConcurrencyUntilCompletion(t *testing.
 				}
 				one := int64(1)
 				if scope == "provider" {
-					p.Limits = &runtime.Limits{MaxConcurrency: &one}
+					p.Limits = &routing.Limits{MaxConcurrency: &one}
 					request = connectionRequest(&p, 0, time.Second, "")
 				} else {
 					p.Slots[0].MaxConcurrency = &one

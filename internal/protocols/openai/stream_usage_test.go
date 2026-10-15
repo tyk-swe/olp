@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestFailedChatStreamRetainsObservedUsage(t *testing.T) {
@@ -33,7 +35,7 @@ func TestFailedChatStreamRetainsObservedUsage(t *testing.T) {
 					reader = io.MultiReader(reader, failedStreamReader{tc.readErr})
 				}
 				var frames strings.Builder
-				completion, err := Stream(FamilyChat, reader, 4096, "route", includeUsage, func(frame []byte) error {
+				completion, err := Stream(wire.Chat, reader, 4096, "route", includeUsage, func(frame []byte) error {
 					frames.Write(frame)
 					return tc.writeErr
 				})
@@ -44,7 +46,7 @@ func TestFailedChatStreamRetainsObservedUsage(t *testing.T) {
 					t.Fatalf("I/O error changed: %v", err)
 				}
 				cached, reasoning := int64(1), int64(2)
-				want := &Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5, CachedInputTokens: &cached, ReasoningTokens: &reasoning}
+				want := &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5, CachedInputTokens: &cached, ReasoningTokens: &reasoning}
 				if completion == nil || !reflect.DeepEqual(completion.Usage, want) {
 					t.Fatalf("observed usage lost: %+v", completion)
 				}

@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"math"
 	"regexp"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/protocols/awsframe"
@@ -217,7 +219,7 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 	}
 	return f, nil
 }
-func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
+func bedrockUsage(v json.RawMessage) (*wire.Usage, error) {
 	u, e := optionalObject(v)
 	if e != nil {
 		return nil, e
@@ -230,7 +232,7 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	if !hasIn || !hasOut {
 		return nil, protocolError("invalid Bedrock usage")
 	}
-	usage := &openai.Usage{InputTokens: in, OutputTokens: out}
+	usage := &wire.Usage{InputTokens: in, OutputTokens: out}
 	optional := func(key string) (*int64, error) {
 		if !present(u[key]) {
 			return nil, nil
@@ -311,7 +313,7 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	return usage, nil
 }
 
-func decodeBedrock(body []byte, route string) (*openai.Completion, error) {
+func decodeBedrock(body []byte, route string) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid Converse result")
@@ -327,7 +329,7 @@ func decodeBedrock(body []byte, route string) (*openai.Completion, error) {
 	if str(f["stopReason"]) == "" {
 		return nil, protocolError("missing Converse stop reason")
 	}
-	c := &openai.Completion{ProviderModel: route, FinishReason: bedrockFinish(str(f["stopReason"]))}
+	c := &wire.Completion{ProviderModel: route, FinishReason: bedrockFinish(str(f["stopReason"]))}
 	for _, v := range arr(message["content"]) {
 		part, e := object(v)
 		if e != nil {
@@ -342,7 +344,7 @@ func decodeBedrock(body []byte, route string) (*openai.Completion, error) {
 			if _, e := object(call["input"]); e != nil {
 				return nil, protocolError("invalid Converse tool input")
 			}
-			c.ToolCalls = append(c.ToolCalls, openai.ToolCall{ID: str(call["toolUseId"]), Name: str(call["name"]), Arguments: string(call["input"])})
+			c.ToolCalls = append(c.ToolCalls, wire.ToolCall{ID: str(call["toolUseId"]), Name: str(call["name"]), Arguments: string(call["input"])})
 		}
 	}
 	c.Usage, e = bedrockUsage(f["usage"])
@@ -370,7 +372,7 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	}
 	size := binary.BigEndian.Uint32(prelude[:4])
 	if size > uint32(limit) {
-		return eventstream.Message{}, openai.ErrEventTooLarge
+		return eventstream.Message{}, wire.ErrEventTooLarge
 	}
 	if size < 16 {
 		return eventstream.Message{}, protocolError("invalid AWS event length")
@@ -394,8 +396,8 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	return eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
 }
 
-func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error, native bool) (*openai.Completion, error) {
-	c := &openai.Completion{ProviderModel: route}
+func streamBedrockEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error, native bool) (*wire.Completion, error) {
+	c := &wire.Completion{ProviderModel: route}
 	started, stopped := false, false
 	blocks := map[int64]*contentBlock{}
 	retained := 0
@@ -406,14 +408,14 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 			if stopped {
 				return c, nil
 			}
-			return c, &openai.ProtocolError{Detail: "Converse stream ended before messageStop", Truncated: true}
+			return c, &wire.ProtocolError{Detail: "Converse stream ended before messageStop", Truncated: true}
 		}
 		if e != nil {
-			if errors.Is(e, openai.ErrEventTooLarge) {
+			if errors.Is(e, wire.ErrEventTooLarge) {
 				return c, e
 			}
 			if errors.Is(e, io.ErrUnexpectedEOF) {
-				return c, &openai.ProtocolError{Detail: "truncated AWS event", Truncated: true}
+				return c, &wire.ProtocolError{Detail: "truncated AWS event", Truncated: true}
 			}
 			return c, protocolError("invalid bounded AWS event stream")
 		}
@@ -424,10 +426,10 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 			return ""
 		}
 		if header(":message-type") != "event" {
-			return c, &openai.UpstreamError{Code: header(":exception-type"), Message: "Bedrock stream failed"}
+			return c, &wire.UpstreamError{Code: header(":exception-type"), Message: "Bedrock stream failed"}
 		}
 		kind := header(":event-type")
-		event, e := openai.LiftEvent(openai.FamilyBedrock, string(message.Payload), kind, sequence, limit)
+		event, e := openai.LiftEvent(wire.Bedrock, string(message.Payload), kind, sequence, limit)
 		if e != nil {
 			return c, e
 		}
@@ -435,7 +437,7 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 		f := event.Source().Fields()
 		var accountingErr error
 		if kind == "metadata" && stopped && f != nil {
-			var observed *openai.Usage
+			var observed *wire.Usage
 			observed, accountingErr = bedrockUsage(f["usage"])
 			if accountingErr == nil {
 				c.Usage = observed
@@ -484,7 +486,7 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 			} else if call != nil {
 				part := str(call["input"])
 				if retained+len(part) > limit {
-					return c, openai.ErrEventTooLarge
+					return c, wire.ErrEventTooLarge
 				}
 				retained += len(part)
 				block.args += part
@@ -514,7 +516,7 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 			}
 		default:
 			if strings.HasSuffix(kind, "Exception") {
-				return c, &openai.UpstreamError{Code: kind, Message: "Bedrock stream failed"}
+				return c, &wire.UpstreamError{Code: kind, Message: "Bedrock stream failed"}
 			}
 		}
 		var frame []byte

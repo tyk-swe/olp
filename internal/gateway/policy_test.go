@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
@@ -28,7 +29,7 @@ func policyDecisions(h *harness) []contentpolicy.Decision {
 	return h.sink.last(h.t).PolicyDecisions
 }
 
-func providerByName(h *harness, name string) runtime.Provider {
+func providerByName(h *harness, name string) routing.Provider {
 	h.t.Helper()
 	for _, p := range h.rt.release.Snapshot.Providers {
 		if p.Name == name {
@@ -36,7 +37,7 @@ func providerByName(h *harness, name string) runtime.Provider {
 		}
 	}
 	h.t.Fatalf("provider %s missing", name)
-	return runtime.Provider{}
+	return routing.Provider{}
 }
 
 func TestContentPolicyInputBlocksBeforeDispatch(t *testing.T) {
@@ -224,7 +225,7 @@ func TestContentPolicyAnthropicInputAndOutput(t *testing.T) {
 	provider := providerByName(h, "a")
 	provider.Kind = "openai"
 	provider.Capabilities = append(provider.Capabilities,
-		runtime.Capability{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "unary"})
+		routing.Capability{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "unary"})
 	snapshot.Providers[provider.ID] = provider
 	setRoutePolicy(h,
 		contentpolicy.Rule{ID: "mask-in", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionRedact, Replacement: "[REDACTED]"},
@@ -254,7 +255,7 @@ func TestContentPolicyGeminiInputRedact(t *testing.T) {
 	provider := providerByName(h, "a")
 	provider.Kind = "openai"
 	provider.Capabilities = append(provider.Capabilities,
-		runtime.Capability{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"})
+		routing.Capability{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"})
 	snapshot.Providers[provider.ID] = provider
 	setRoutePolicy(h, contentpolicy.Rule{ID: "mask-in", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionRedact, Replacement: "[REDACTED]"})
 	seen := make(chan string, 1)
@@ -279,7 +280,7 @@ func TestContentPolicyEmbeddingsInput(t *testing.T) {
 	h := newHarness(t, Config{})
 	snapshot := h.rt.release.Snapshot
 	for id, p := range snapshot.Providers {
-		p.Capabilities = append(p.Capabilities, runtime.Capability{Model: p.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"})
+		p.Capabilities = append(p.Capabilities, routing.Capability{Model: p.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"})
 		snapshot.Providers[id] = p
 	}
 	route := snapshot.Routes[routeSlug]
@@ -396,10 +397,10 @@ func TestContentPolicyDecisionDedupOutputSlots(t *testing.T) {
 func TestContentPolicyDecisionDedupCompletion(t *testing.T) {
 	h := newHarness(t, Config{})
 	s := h.gateway
-	x := &execution{route: &runtime.Route{Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
+	x := &call{routeLeg: routeLeg{route: &routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
 		{ID: "mask-out", Phase: contentpolicy.PhaseOutput, Pattern: "secret", Action: contentpolicy.ActionRedact, Replacement: "[X]"},
-	}}}}
-	completion := &openai.Completion{OutputText: "a secret", Refusal: "another secret"}
+	}}}}}
+	completion := &wire.Completion{OutputText: "a secret", Refusal: "another secret"}
 	if e := s.enforceCompletionOutput(x, completion); e != nil {
 		t.Fatalf("enforce: %+v", e)
 	}
@@ -415,7 +416,7 @@ func TestPolicySurfaceGate(t *testing.T) {
 	if e := policySurfaceGate(nil); e != nil {
 		t.Fatalf("nil route: %v", e)
 	}
-	route := &runtime.Route{Slug: "r"}
+	route := &routing.Route{Slug: "r"}
 	if e := policySurfaceGate(route); e != nil {
 		t.Fatalf("no policy: %v", e)
 	}

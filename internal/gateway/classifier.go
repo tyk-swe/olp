@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -49,15 +50,15 @@ type RoutePredicates interface {
 // evaluator answers the dynamic predicates of a request's route selectors,
 // over the features the selectors already see. A classifier is asked before a
 // plugin, and both must match.
-func (s *Server) evaluator(ctx context.Context, x *execution, features *runtime.Features) func(runtime.Selector) runtime.PredicateResult {
-	return func(selector runtime.Selector) runtime.PredicateResult {
-		var result runtime.PredicateResult
+func (s *Server) evaluator(ctx context.Context, x *call, features *routing.Features) func(routing.Selector) routing.PredicateResult {
+	return func(selector routing.Selector) routing.PredicateResult {
+		var result routing.PredicateResult
 		if c := selector.When.Classifier; c != nil {
 			answer := s.classify(ctx, x, c)
 			if answer.failure != "" {
-				return runtime.PredicateResult{Failure: answer.failure}
+				return routing.PredicateResult{Failure: answer.failure}
 			}
-			result = runtime.PredicateResult{Matched: c.Accepts(answer.label, answer.score), Label: answer.label}
+			result = routing.PredicateResult{Matched: c.Accepts(answer.label, answer.score), Label: answer.label}
 			if !result.Matched {
 				return result
 			}
@@ -74,9 +75,9 @@ func (s *Server) evaluator(ctx context.Context, x *execution, features *runtime.
 // pluginPredicate asks a confined plugin whether the selector applies. A
 // failure, including a missing or unconfined plugin, falls through to the
 // next selector.
-func (s *Server) pluginPredicate(ctx context.Context, route, selector string, p *runtime.PluginPredicate, features *runtime.Features) runtime.PredicateResult {
+func (s *Server) pluginPredicate(ctx context.Context, route, selector string, p *routing.PluginPredicate, features *routing.Features) routing.PredicateResult {
 	if s.cfg.Predicates == nil || features == nil {
-		return runtime.PredicateResult{Failure: pluginFailed}
+		return routing.PredicateResult{Failure: pluginFailed}
 	}
 	ctx, cancel := context.WithTimeout(ctx, pluginPredicateTimeout)
 	defer cancel()
@@ -87,14 +88,14 @@ func (s *Server) pluginPredicate(ctx context.Context, route, selector string, p 
 		StructuredOutput: features.StructuredOutput, ReasoningEffort: features.ReasoningEffort,
 	})
 	if err != nil {
-		return runtime.PredicateResult{Failure: pluginFailed}
+		return routing.PredicateResult{Failure: pluginFailed}
 	}
-	return runtime.PredicateResult{Matched: match}
+	return routing.PredicateResult{Matched: match}
 }
 
 // classify asks a classifier route about the caller's request, once per
 // route and request however many selectors consult it.
-func (s *Server) classify(ctx context.Context, x *execution, c *runtime.ClassifierPredicate) classification {
+func (s *Server) classify(ctx context.Context, x *call, c *routing.ClassifierPredicate) classification {
 	if answer, ok := x.classified[c.Route]; ok {
 		return answer
 	}
@@ -112,22 +113,22 @@ func (s *Server) classify(ctx context.Context, x *execution, c *runtime.Classifi
 // predicate's deadline. The caller is still being planned and has no lease. A
 // classification route answers with its highest-scoring label, a generation
 // route with its trimmed reply.
-func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runtime.ClassifierPredicate) classification {
+func (s *Server) callClassifier(ctx context.Context, parent *call, c *routing.ClassifierPredicate) classification {
 	route, ok := parent.snapshot().Routes[c.Route]
 	switch {
-	case !ok || parent.parsed == nil:
+	case !ok || parent.generation.parsed == nil:
 		return classification{failure: classifierFailed}
 	case parent.authorize != nil && parent.authorize(&route) != nil:
 		return classification{failure: classifierForbidden}
 	}
-	text := protocols.RequestText(parent.parsed, classifierText)
+	text := protocols.RequestText(parent.generation.parsed, classifierText)
 	if text == "" {
 		return classification{failure: classifierFailed}
 	}
 	timeout := time.Duration(min(c.TimeoutMS, route.OverallTimeout)) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	x := &execution{
+	x := &call{
 		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
 		actor:          parent.actor,
 		keyID:          parent.keyID,
@@ -140,11 +141,12 @@ func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runti
 		cardRevisionID: parent.cardRevisionID,
 		cardRev:        parent.cardRev,
 		routingInputs:  parent.routingInputs,
-		affinity:       []byte(parent.keyID),
-		origin:         usage.OriginClassifier,
-		parent:         parent.request.accountingID(),
-		priority:       parent.priority,
-		route:          &route,
+
+		origin:   usage.OriginClassifier,
+		parent:   parent.request.accountingID(),
+		priority: parent.priority, routeLeg: routeLeg{affinity: []byte(parent.keyID),
+
+			route: &route},
 	}
 	defer s.settleAdmission(ctx, x)
 	var answer classification
@@ -166,14 +168,14 @@ type prediction struct {
 
 // predict asks a strict classification route, in the TEI dialect, for the
 // labels of the text.
-func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (classification, *outcome) {
+func (s *Server) predict(ctx context.Context, x *call, slug, text string) (classification, *outcome) {
 	failed := classification{failure: classifierFailed}
 	codec, _ := operationregistry.Lookup("tei-classification")
 	body, _ := json.Marshal(map[string]string{"inputs": text})
 	if x.snapshot().HasBodyLimits() {
 		x.request.body = &measuredBody{decoded: int64(len(body))}
 	}
-	x.unary = &unaryExecution{dialect: codec, route: slug, surface: "native"}
+	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
 	x.mode = "unary"
 	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.cfg.MaxBodyBytes))
 	if err != nil {
@@ -186,7 +188,7 @@ func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (
 	if e := s.admitClassifier(ctx, x); e != nil {
 		return failed, &outcome{err: e}
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {
@@ -203,17 +205,17 @@ func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (
 
 // generateLabel asks a generation route for a reply to the text and takes the
 // reply as the label.
-func (s *Server) generateLabel(ctx context.Context, x *execution, slug, text string) (classification, *outcome) {
+func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) (classification, *outcome) {
 	failed := classification{failure: classifierFailed}
 	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
 	if x.snapshot().HasBodyLimits() {
 		x.request.body = &measuredBody{decoded: int64(len(body))}
 	}
-	parsed, err := protocols.Parse(openai.FamilyChat, body, "")
+	parsed, err := protocols.Parse(wire.Chat, body, "")
 	if err != nil {
 		return failed, &outcome{err: requestError(err)}
 	}
-	x.family, x.parsed = openai.FamilyChat, parsed
+	x.family, x.generation.parsed = wire.Chat, parsed
 	if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
 		return failed, &outcome{err: e}
 	}
@@ -236,7 +238,7 @@ func (s *Server) generateLabel(ctx context.Context, x *execution, slug, text str
 // admitClassifier budgets the classifier independently of its caller, which
 // cannot finish planning until the label is known. It shares the caller's
 // admission permit, awaiting it before any upstream work.
-func (s *Server) admitClassifier(ctx context.Context, x *execution) *Error {
+func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
 	if e := s.awaitAdmission(ctx, x); e != nil {
 		return e
 	}

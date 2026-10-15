@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
@@ -41,7 +42,10 @@ func TestCorpusMediaIsValidatedAsItWasValidated(t *testing.T) {
 			t.Fatalf("%s is not an object: %v", name, err)
 		}
 		for _, family := range inlineMediaFamilies {
-			request := openai.NewSourceEnvelope(family, "route", false, doc)
+			request, err := wire.NewRequest(family, "route", false, doc)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, limits := range []InlineMediaLimits{{Items: 100, ItemBytes: 1 << 20, TotalBytes: 1 << 20}, {Items: 1, ItemBytes: 2, TotalBytes: 2}} {
 				if sameMediaAnswer(t, request, limits, json.RawMessage(body)) {
 					accepted++

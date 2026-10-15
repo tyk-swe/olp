@@ -7,14 +7,14 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type Part struct{ Text, URL, MIME, Detail string }
 type Message struct {
 	Role, Name, ToolID string
 	Parts              []Part
-	Calls              []openai.ToolCall
+	Calls              []wire.ToolCall
 }
 type Tool struct {
 	Name, Description string
@@ -70,7 +70,7 @@ func (r *reader) parameter(from, to string) {
 	}
 }
 
-func decodeCanonical(family openai.Family, fields Object) (*Generation, error) {
+func decodeCanonical(family wire.Format, fields Object) (*Generation, error) {
 	c := &Generation{Parameters: Object{}}
 	f := Object{}
 	maps.Copy(f, fields)
@@ -183,16 +183,16 @@ func decodeParts(v json.RawMessage, family, path string, c *Generation) ([]Part,
 	return parts, nil
 }
 
-func encodeCanonical(c *Generation, family openai.Family, model, operation string) (Object, error) {
+func encodeCanonical(c *Generation, family wire.Format, model, operation string) (Object, error) {
 	count := operation == "token_count"
 	switch family {
 	case "bedrock", "bedrock_count":
 		return encodeBedrock(c, model, operation)
-	case openai.FamilyChat, openai.FamilyInputTokens:
+	case wire.Chat, wire.InputTokens:
 		return encodeOpenAIGeneration(c, model, count)
-	case openai.FamilyAnthropic, openai.FamilyAnthropicCount:
+	case wire.Anthropic, wire.AnthropicCount:
 		return encodeAnthropicGeneration(c, model, count)
-	case openai.FamilyGemini, openai.FamilyGeminiCount:
+	case wire.Gemini, wire.GeminiCount:
 		return encodeGeminiGeneration(c, model, count)
 	default:
 		return nil, unsupported("operation")

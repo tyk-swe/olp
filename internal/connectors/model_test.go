@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestBoundModelResourceNameIsNormalizedInURL(t *testing.T) {
 	gemini := Config{Kind: "gemini", Endpoint: "https://generativelanguage.googleapis.com/v1beta", Bindings: map[string]Binding{"g": {Model: "models/gemini-2.5-pro"}}}
-	got, err := gemini.URL(openai.FamilyGemini, "g", false)
+	got, err := gemini.URL(wire.Gemini, "g", false)
 	if want := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"; err != nil || got != want {
 		t.Fatalf("binding URL = %q, %v; want %q", got, err, want)
 	}
@@ -23,7 +23,7 @@ func TestBoundModelResourceNameIsNormalizedInURL(t *testing.T) {
 	}
 	vertex := Config{Kind: "vertex_ai", AuthMode: "service_account", CloudRegion: "global", CloudProject: "project", Bindings: map[string]Binding{"g": {Model: "models/gemini-2.5-pro"}}}
 	vertex.Endpoint = DefaultEndpoint(vertex.Kind, vertex.CloudRegion, vertex.CloudProject)
-	got, err = vertex.URL(openai.FamilyGeminiCount, "g", false)
+	got, err = vertex.URL(wire.GeminiCount, "g", false)
 	if err != nil || strings.Contains(got, "%2F") || !strings.HasSuffix(got, "/models/gemini-2.5-pro:countTokens") {
 		t.Fatalf("vertex count URL = %q, %v", got, err)
 	}

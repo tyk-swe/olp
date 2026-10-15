@@ -15,11 +15,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // TestProviderKindsServeTheirCertifiedNativeSurfaces is a deterministic
@@ -118,7 +119,7 @@ func TestProviderKindsServeTheirCertifiedNativeSurfaces(t *testing.T) {
 			key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "native inference", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			read := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "models only", "scopes": []string{"models_read"}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.refresh()
-			for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, openai.FamilyEmbeddings, openai.FamilyModeration} {
+			for _, family := range []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation} {
 				for _, stream := range []bool{false, true} {
 					if stream && family.Operation() != "generation" {
 						continue
@@ -145,13 +146,13 @@ func TestProviderKindsServeTheirCertifiedNativeSurfaces(t *testing.T) {
 						if status != 200 {
 							t.Fatalf("%s stream=%v: %d %s", family, stream, status, data)
 						}
-						var completion *openai.Completion
+						var completion *wire.Completion
 						if stream {
-							wire := transport
-							if wire == openai.FamilyGeminiStream {
-								wire = openai.FamilyGemini
+							encodedWire := transport
+							if encodedWire == wire.GeminiStream {
+								encodedWire = wire.Gemini
 							}
-							completion, err = protocols.Stream(wire, transport, bytes.NewReader(data), 65536, routeSlug, true, func([]byte) error { return nil })
+							completion, err = protocols.Stream(encodedWire, transport, bytes.NewReader(data), 65536, routeSlug, true, func([]byte) error { return nil })
 						} else {
 							completion, err = protocols.Decode(transport, transport, data, routeSlug, "")
 						}
@@ -174,50 +175,50 @@ func TestProviderKindsServeTheirCertifiedNativeSurfaces(t *testing.T) {
 	}
 }
 
-func surfaceRequest(family openai.Family, stream bool) (string, map[string]any, openai.Family) {
+func surfaceRequest(family wire.Format, stream bool) (string, map[string]any, wire.Format) {
 	body := map[string]any{"model": routeSlug}
 	path := "/v1/chat/completions"
 	transport := family
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		body["messages"] = []any{map[string]any{"role": "user", "content": "hello"}}
 		body["max_tokens"] = 16
 		body["stream"] = stream
 		if stream {
 			body["stream_options"] = map[string]any{"include_usage": true}
 		}
-	case openai.FamilyResponses, openai.FamilyInputTokens:
+	case wire.Responses, wire.InputTokens:
 		body["input"] = "hello"
-		if family == openai.FamilyResponses {
+		if family == wire.Responses {
 			path = "/v1/responses"
 			body["max_output_tokens"] = 16
 			body["stream"] = stream
 		} else {
 			path = "/v1/responses/input_tokens"
 		}
-	case openai.FamilyEmbeddings:
+	case wire.Embeddings:
 		path = "/v1/embeddings"
 		body["input"] = []string{"hello", "world"}
-	case openai.FamilyModeration:
+	case wire.Moderation:
 		path = "/v1/moderations"
 		body["input"] = "hello"
-	case openai.FamilyAnthropic, openai.FamilyAnthropicCount:
+	case wire.Anthropic, wire.AnthropicCount:
 		path = "/anthropic/v1/messages"
 		body["messages"] = []any{map[string]any{"role": "user", "content": "hello"}}
-		if family == openai.FamilyAnthropic {
+		if family == wire.Anthropic {
 			body["max_tokens"] = 16
 			body["stream"] = stream
 		} else {
 			path += "/count_tokens"
 		}
-	case openai.FamilyGemini, openai.FamilyGeminiCount:
+	case wire.Gemini, wire.GeminiCount:
 		body = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": "hello"}}}}}
 		action := "generateContent"
 		if stream {
 			action = "streamGenerateContent"
-			transport = openai.FamilyGeminiStream
+			transport = wire.GeminiStream
 		}
-		if family == openai.FamilyGeminiCount {
+		if family == wire.GeminiCount {
 			action = "countTokens"
 		} else {
 			body["generationConfig"] = map[string]int{"maxOutputTokens": 16}

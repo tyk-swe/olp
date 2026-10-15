@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // gateVerdict is the shared pre-dispatch decision for one candidate slot.
@@ -53,7 +54,7 @@ type dispatchHold struct {
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
 // Its hold carries the owners that accounting and settlement must charge.
-func (s *Server) gateAttempt(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
+func (s *Server) gateAttempt(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
 	caps := s.holdCaps(ctx, x, attempt, provider, slot, deadline)
 	if caps.quota != "" {
 		if caps.refusal != nil {
@@ -96,7 +97,7 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 // loop. When it carries the half-open probe, the attempt's outcome lands on
 // the circuit through record, or the probe is released when nothing reached
 // the upstream, so a pinned call never leaves the circuit wedged half-open.
-func (s *Server) settlePinHold(ctx context.Context, x *execution, hold *dispatchHold, actual *int64) {
+func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold, actual *int64) {
 	if hold == nil {
 		return
 	}
@@ -115,7 +116,7 @@ func (s *Server) settlePinHold(ctx context.Context, x *execution, hold *dispatch
 // cooling reports whether a candidate slot is parked: the shared credential
 // or slot cooldown when distributed coordination is configured, or this
 // replica's local cooldown when it is not.
-func (s *Server) cooling(ctx context.Context, providerID string, slot *runtime.Slot) bool {
+func (s *Server) cooling(ctx context.Context, providerID string, slot *routing.Slot) bool {
 	generation := s.slotGrantGeneration(slot)
 	if s.Admission.ready() {
 		return s.Admission.cooling(ctx, providerID, slot, generation)
@@ -124,7 +125,7 @@ func (s *Server) cooling(ctx context.Context, providerID string, slot *runtime.S
 		s.health.coolingDown(providerID, credentialHealthKey(slot, generation))
 }
 
-func (s *Server) slotGrantGeneration(slot *runtime.Slot) int64 {
+func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 	if slot.CredentialID == nil {
 		return 0
 	}
@@ -139,12 +140,12 @@ func (s *Server) slotGrantGeneration(slot *runtime.Slot) int64 {
 // connection and slot quota reservations, and the provider circuit's exclusive
 // half-open probe. An admitted slot's hold carries the reservation and the probe
 // until the attempt settles or releaseHold abandons them before dispatch.
-func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time, priority string) gateResult {
+func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time, priority string) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
-	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) != runtime.Eligible {
+	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
-	if provider.Network != nil && provider.Network.CredentialID != "" && s.Runtime.Eligibility(provider.Network.CredentialID) != runtime.Eligible {
+	if provider.Network != nil && provider.Network.CredentialID != "" && s.Runtime.Eligibility(provider.Network.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
 	// attempt.Timeout bounds first-byte/idle waits, not the lifetime of a
@@ -180,7 +181,7 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 // upstream failure and reports whether the provider's remaining slots should
 // be skipped: credential and rate-limit failures stay slot-scoped while every
 // other failure belongs to the endpoint the siblings share.
-func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, failure *attemptFailure, caller ...bool) bool {
+func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *routing.Slot, generation int64, failure *attemptFailure, caller ...bool) bool {
 	if len(caller) != 0 && caller[0] && (failure.class == classCredential || failure.class == classRateLimit || failure.credentialRefused) {
 		return true
 	}
@@ -218,6 +219,6 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 	// their cooldowns expire. A delayed notifier must never clear a refusal
 	// of the newly served token.
 	generation := max(0, s.Runtime.GrantGeneration(credentialID)-1)
-	s.health.endCooldown(providerID, credentialHealthKey(&runtime.Slot{CredentialID: &credentialID}, generation))
+	s.health.endCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
 	s.Admission.endCredentialCooldown(context.Background(), providerID, credentialID, generation)
 }

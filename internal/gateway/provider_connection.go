@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -11,7 +13,7 @@ import (
 // slotSecret asks for a credential slot's usable secret and remembers its
 // grant generation for this attempt. A slot without a credential version
 // authenticates without one.
-func (s *Server) slotSecret(ctx context.Context, x *execution, slot runtime.Slot, provider *runtime.Provider, model string) ([]byte, error) {
+func (s *Server) slotSecret(ctx context.Context, x *call, slot routing.Slot, provider *routing.Provider, model string) ([]byte, error) {
 	x.grantGeneration = 0
 	if provider.CredentialSource == "caller" && x.origin != "probe" {
 		return x.callerSecret(provider.ID, model)
@@ -29,7 +31,7 @@ func (s *Server) slotSecret(ctx context.Context, x *execution, slot runtime.Slot
 // authenticates and signs the request. It records the values to redact. The
 // caller classifies a failure of either step alike, so a secret read the
 // context interrupted is not blamed on the credential.
-func (s *Server) applySlotCredential(ctx context.Context, x *execution, req *http.Request, cfg connectors.Config, slot runtime.Slot, body []byte, provider *runtime.Provider, model string) error {
+func (s *Server) applySlotCredential(ctx context.Context, x *call, req *http.Request, cfg connectors.Config, slot routing.Slot, body []byte, provider *routing.Provider, model string) error {
 	secret, err := s.slotSecret(ctx, x, slot, provider, model)
 	if err != nil {
 		return err
@@ -41,7 +43,7 @@ func (s *Server) applySlotCredential(ctx context.Context, x *execution, req *htt
 // credential. A resource can retain a compatible historical profile and
 // network credential after the current release changed; current revocation
 // still wins.
-func (s *Server) providerNetworkSecret(ctx context.Context, release *runtime.Release, provider *runtime.Provider) ([]byte, error) {
+func (s *Server) providerNetworkSecret(ctx context.Context, release *runtime.Release, provider *routing.Provider) ([]byte, error) {
 	if provider.Network == nil || provider.Network.CredentialID == "" {
 		return nil, nil
 	}
@@ -50,19 +52,19 @@ func (s *Server) providerNetworkSecret(ctx context.Context, release *runtime.Rel
 
 // pinEligibility reports whether a pinned slot's credential version and its
 // provider's network credential may still serve.
-func (s *Server) pinEligibility(p *pin) runtime.Eligibility {
+func (s *Server) pinEligibility(p *pin) routing.Eligibility {
 	if p.slot.CredentialID != nil {
-		if eligibility := s.Runtime.Eligibility(*p.slot.CredentialID); eligibility != runtime.Eligible {
+		if eligibility := s.Runtime.Eligibility(*p.slot.CredentialID); eligibility != routing.Eligible {
 			return eligibility
 		}
 	}
 	if p.provider.Network != nil && p.provider.Network.CredentialID != "" {
 		return s.Runtime.Eligibility(p.provider.Network.CredentialID)
 	}
-	return runtime.Eligible
+	return routing.Eligible
 }
 
-func providerConnectionScope(provider *runtime.Provider, slot runtime.Slot) string {
+func providerConnectionScope(provider *routing.Provider, slot routing.Slot) string {
 	credential := "none"
 	if slot.CredentialID != nil {
 		credential = *slot.CredentialID
@@ -70,7 +72,7 @@ func providerConnectionScope(provider *runtime.Provider, slot runtime.Slot) stri
 	return provider.ID + "/" + provider.RevisionID + "/" + slot.ID + "/" + credential
 }
 
-func (s *Server) providerClient(ctx context.Context, release *runtime.Release, provider *runtime.Provider, slot runtime.Slot) (*http.Client, error) {
+func (s *Server) providerClient(ctx context.Context, release *runtime.Release, provider *routing.Provider, slot routing.Slot) (*http.Client, error) {
 	if provider.CredentialSource == "caller" {
 		secret, err := s.providerNetworkSecret(ctx, release, provider)
 		if err != nil {

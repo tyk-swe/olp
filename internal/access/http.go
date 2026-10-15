@@ -256,6 +256,20 @@ func WriteProblem(w http.ResponseWriter, err error) {
 	var pg *pgconn.PgError
 	if known, ok := errors.AsType[*Problem](err); ok {
 		p = known
+	} else if contract := ContractProblem(err); contract != nil {
+		p = contract
+	} else if refusal, ok := errors.AsType[interface {
+		error
+		RoutingRefusal() (string, string)
+	}](err); ok {
+		code, message := refusal.RoutingRefusal()
+		p = &Problem{Status: 422, Code: code, Detail: message}
+	} else if validation, ok := errors.AsType[interface {
+		error
+		RoutingValidation() (string, string)
+	}](err); ok {
+		field, message := validation.RoutingValidation()
+		p = &Problem{Status: 422, Code: "validation_failed", Detail: message, Field: field}
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		p = &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}
 	} else if errors.As(err, &pg) && pg.Code == "23505" {

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -527,7 +529,7 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 	if err := f.h.Pool.QueryRow(t.Context(), `SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1`).Scan(&document); err != nil {
 		t.Fatal(err)
 	}
-	var snapshot runtime.Snapshot
+	var snapshot routing.Snapshot
 	if err := json.Unmarshal(document, &snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +556,7 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := runtime.Compile(t.Context(), tx)
+	compiled, err := runtime.ReadSnapshot(t.Context(), tx)
 	_ = tx.Rollback(t.Context())
 	if err != nil {
 		t.Fatal(err)

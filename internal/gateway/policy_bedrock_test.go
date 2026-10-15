@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -111,32 +113,32 @@ func TestContentPolicyBedrockInputRedactReachesConverse(t *testing.T) {
 // body is refused by the encoder first), so the fail-closed gate is checked
 // directly against wires the input rules cannot read.
 func TestContentPolicyUninspectableWireFailsClosed(t *testing.T) {
-	route := &runtime.Route{Slug: routeSlug, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
+	route := &routing.Route{Slug: routeSlug, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
 		{ID: "no-secrets", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionBlock},
 	}}}
 	compiled, e := compiledPolicy(route)
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, wire := range []openai.Family{openai.FamilyBedrockInvoke, openai.FamilyGeminiInteractions, openai.FamilyRealtime, openai.FamilyImageGeneration} {
-		e := inputPolicyWireGate(route, compiled, wire)
-		if e == nil || e.Status != http.StatusUnprocessableEntity || e.Code != "content_policy_surface_unavailable" || !strings.Contains(e.Message, string(wire)) {
-			t.Fatalf("%s: gate=%+v", wire, e)
+	for _, encodedWire := range []wire.Format{wire.BedrockInvoke, wire.GeminiInteractions, wire.Realtime, wire.ImageGeneration} {
+		e := inputPolicyWireGate(route, compiled, encodedWire)
+		if e == nil || e.Status != http.StatusUnprocessableEntity || e.Code != "content_policy_surface_unavailable" || !strings.Contains(e.Message, string(encodedWire)) {
+			t.Fatalf("%s: gate=%+v", encodedWire, e)
 		}
 	}
-	for _, wire := range []openai.Family{openai.FamilyBedrock, "bedrock_count", openai.FamilyBedrockEmbeddings, openai.FamilyChat, openai.FamilyAnthropic, openai.FamilyGemini} {
-		if e := inputPolicyWireGate(route, compiled, wire); e != nil {
-			t.Fatalf("%s: inspectable wire refused: %+v", wire, e)
+	for _, encodedWire := range []wire.Format{wire.Bedrock, "bedrock_count", wire.BedrockEmbeddings, wire.Chat, wire.Anthropic, wire.Gemini} {
+		if e := inputPolicyWireGate(route, compiled, encodedWire); e != nil {
+			t.Fatalf("%s: inspectable wire refused: %+v", encodedWire, e)
 		}
 	}
-	outputOnly := &runtime.Route{Slug: routeSlug, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
+	outputOnly := &routing.Route{Slug: routeSlug, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
 		{ID: "mask-out", Phase: contentpolicy.PhaseOutput, Pattern: "s3cr3t", Action: contentpolicy.ActionRedact, Replacement: "x"},
 	}}}
 	compiled, e = compiledPolicy(outputOnly)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e := inputPolicyWireGate(outputOnly, compiled, openai.FamilyBedrockInvoke); e != nil {
+	if e := inputPolicyWireGate(outputOnly, compiled, wire.BedrockInvoke); e != nil {
 		t.Fatalf("output-only policy refused: %+v", e)
 	}
 }
@@ -147,7 +149,7 @@ func useOnlyBedrockProvider(h *harness) {
 	useBedrockProvider(h)
 	snapshot := h.rt.release.Snapshot
 	route := snapshot.Routes[routeSlug]
-	var targets []runtime.Target
+	var targets []routing.Target
 	for _, target := range route.Targets {
 		if snapshot.Providers[target.ProviderID].Kind == "bedrock" {
 			targets = append(targets, target)

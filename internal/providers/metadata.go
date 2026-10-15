@@ -7,7 +7,7 @@ import (
 	"io"
 	"maps"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // mergeDiscoveredFacts places upstream-listed facts under the operator's
@@ -36,7 +36,7 @@ func mergeDiscoveredFacts(cfg *Configuration, model string, discovered map[strin
 }
 
 func validateMetadata(raw json.RawMessage) error {
-	var m runtime.ModelMetadata
+	var m routing.ModelMetadata
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if d.Decode(&m) != nil || d.Decode(new(any)) != io.EOF {

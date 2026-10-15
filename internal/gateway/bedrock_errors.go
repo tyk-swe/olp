@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 )
 
-func (x *execution) redactBedrockFailure(message *eventstream.Message, observation protocols.BedrockObservation) error {
+func (x *call) redactBedrockFailure(message *eventstream.Message, observation protocols.BedrockObservation) error {
 	source := observation.Source
 	if observation.Native.Valid() {
 		redacted, err := redactNativeFailureDocument(observation.Native, x.sensitive)

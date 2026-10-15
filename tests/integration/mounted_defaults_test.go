@@ -14,12 +14,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -67,7 +69,7 @@ func TestMountedDefaultsServeWithoutMasterKeyAndKeepPublishedOwnership(t *testin
 	if published.Limits != nil {
 		t.Fatalf("mounted limits replaced published quota ownership: %+v", published.Limits)
 	}
-	var metadata runtime.ModelMetadata
+	var metadata routing.ModelMetadata
 	if err = json.Unmarshal(published.Models[vendorModel], &metadata); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestMountedDefaultsServeWithoutMasterKeyAndKeepPublishedOwnership(t *testin
 	serving.Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	path, body, _ := surfaceRequest(openai.FamilyChat, false)
+	path, body, _ := surfaceRequest(wire.Chat, false)
 	payload, _ := json.Marshal(body)
 	request, _ := http.NewRequestWithContext(t.Context(), "POST", server.URL+path, bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")

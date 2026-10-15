@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func decodeAnthropicGeneration(r *reader) error {
@@ -43,7 +43,7 @@ func decodeAnthropicGeneration(r *reader) error {
 				kind := str(f.take("type"))
 				switch kind {
 				case "tool_use":
-					base.Calls = append(base.Calls, openai.ToolCall{ID: str(f.take("id")), Name: str(f.take("name")), Arguments: string(f.take("input"))})
+					base.Calls = append(base.Calls, wire.ToolCall{ID: str(f.take("id")), Name: str(f.take("name")), Arguments: string(f.take("input"))})
 				case "tool_result":
 					if len(base.Parts) > 0 || len(base.Calls) > 0 {
 						c.Messages = append(c.Messages, base)

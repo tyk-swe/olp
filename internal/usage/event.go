@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/operationregistry"
 	"math"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/operationregistry"
 
 	"github.com/google/uuid"
 

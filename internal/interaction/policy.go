@@ -4,31 +4,32 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
-func inputFields(wire openai.Family) []string {
+func inputFields(encodedWire wire.Format) []string {
 	common := "model stream tools tool_choice temperature top_p top_k max_tokens metadata"
-	switch wire {
-	case openai.FamilyChat:
+	switch encodedWire {
+	case wire.Chat:
 		return strings.Fields(common + " messages max_completion_tokens stream_options stop n presence_penalty frequency_penalty logit_bias seed response_format parallel_tool_calls logprobs top_logprobs user service_tier store")
-	case openai.FamilyResponses:
+	case wire.Responses:
 		return strings.Fields(common + " input instructions max_output_tokens text parallel_tool_calls truncation service_tier store previous_response_id conversation background")
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		return strings.Fields(common + " messages system stop_sequences anthropic_version")
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		return strings.Fields("contents systemInstruction generationConfig tools toolConfig safetySettings cachedContent")
-	case openai.FamilyBedrock:
+	case wire.Bedrock:
 		return strings.Fields("messages system inferenceConfig toolConfig guardrailConfig additionalModelResponseFieldPaths requestMetadata performanceConfig")
 	}
 	return nil
 }
 
-func checkInputCoverage(wire openai.Family, document oif.Document) error {
+func checkInputCoverage(encodedWire wire.Format, document oif.Document) error {
 	for _, field := range document.Root().Members() {
-		if !slices.Contains(inputFields(wire), field.Name) {
+		if !slices.Contains(inputFields(encodedWire), field.Name) {
 			return incompatible("policy_conflict", safeField(field.Name), "input_policy_coverage", "The input policy cannot inspect an unknown or opaque native control.")
 		}
 	}
@@ -56,13 +57,13 @@ func checkInputCoverage(wire openai.Family, document oif.Document) error {
 	// state. Outside those positions, unknown message/part members fail closed.
 	for _, name := range []string{"messages", "contents", "input", "system", "systemInstruction"} {
 		if value, present := document.Root().Lookup(name); present {
-			if err := inspectableContent(value, name == "input" && wire == openai.FamilyResponses); err != nil {
+			if err := inspectableContent(value, name == "input" && encodedWire == wire.Responses); err != nil {
 				return err
 			}
 		}
 	}
 	for _, name := range []string{"tools", "toolConfig"} {
-		if value, present := document.Root().Lookup(name); present && !inspectableTools(wire, name, value) {
+		if value, present := document.Root().Lookup(name); present && !inspectableTools(encodedWire, name, value) {
 			return incompatible("policy_conflict", "/"+name, "input_policy_coverage", "The input policy has no inspection contract for this native tool definition.")
 		}
 	}
@@ -194,15 +195,15 @@ func collectPolicyText(value oif.Value, texts *[]string, schema bool) {
 	}
 }
 
-func inspectableTools(wire openai.Family, name string, value oif.Value) bool {
+func inspectableTools(encodedWire wire.Format, name string, value oif.Value) bool {
 	if value.Kind() == oif.Null {
 		return true
 	}
 	if name == "toolConfig" {
-		switch wire {
-		case openai.FamilyGemini:
+		switch encodedWire {
+		case wire.Gemini:
 			return onlyMembers(value, "functionCallingConfig") && onlyMembers(member(value, "functionCallingConfig"), "mode allowedFunctionNames streamFunctionCallArguments")
-		case openai.FamilyBedrock:
+		case wire.Bedrock:
 			if !onlyMembers(value, "tools toolChoice") {
 				return false
 			}
@@ -215,20 +216,20 @@ func inspectableTools(wire openai.Family, name string, value oif.Value) bool {
 		return false
 	}
 	for _, tool := range value.Elements() {
-		switch wire {
-		case openai.FamilyChat:
+		switch encodedWire {
+		case wire.Chat:
 			if !onlyMembers(tool, "type function") || valueText(member(tool, "type")) != "function" || !onlyMembers(member(tool, "function"), "name description parameters strict") {
 				return false
 			}
-		case openai.FamilyResponses:
+		case wire.Responses:
 			if !onlyMembers(tool, "type name description parameters strict") || valueText(member(tool, "type")) != "function" {
 				return false
 			}
-		case openai.FamilyAnthropic:
+		case wire.Anthropic:
 			if !onlyMembers(tool, "name description input_schema cache_control") || member(tool, "name").Kind() != oif.String {
 				return false
 			}
-		case openai.FamilyGemini:
+		case wire.Gemini:
 			if !onlyMembers(tool, "functionDeclarations") {
 				return false
 			}
@@ -241,7 +242,7 @@ func inspectableTools(wire openai.Family, name string, value oif.Value) bool {
 					return false
 				}
 			}
-		case openai.FamilyBedrock:
+		case wire.Bedrock:
 			if !onlyMembers(tool, "toolSpec") || !onlyMembers(member(tool, "toolSpec"), "name description inputSchema") {
 				return false
 			}

@@ -6,9 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestPublishedSlotsUseOnlyCredentialsRequiredByAuthMode(t *testing.T) {
@@ -100,11 +101,11 @@ func TestActivationPublishesTheOnePrincipalItsSlotsObserve(t *testing.T) {
 	if err := onePrincipal(pooled, grant); err != nil {
 		t.Fatal(err)
 	}
-	var published []runtime.RevisionSlot
+	var published []routing.RevisionSlot
 	for i := range pooled {
 		published = append(published, pooled[i].published(grant.AuthMode))
 	}
-	if principal := runtime.ObservedPrincipal(published); principal != "operator@example.com" || published[1].ObservedPrincipal != principal ||
+	if principal := routing.ObservedPrincipal(published); principal != "operator@example.com" || published[1].ObservedPrincipal != principal ||
 		published[2].ObservedPrincipal != "" || published[2].Enabled || published[3].ObservedPrincipal != "" || published[4].ObservedPrincipal != "" {
 		t.Fatalf("published %+v", published)
 	}

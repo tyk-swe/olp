@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -38,14 +40,18 @@ func template(t *testing.T, config Config) *Template {
 	}
 	return result
 }
-func request(t *testing.T, family openai.Family, body string) *openai.Request {
+func request(t *testing.T, family wire.Format, body string) *wire.Request {
 	t.Helper()
-	if family == openai.FamilyBedrock {
+	if family == wire.Bedrock {
 		document, err := oif.ParseJSON([]byte(body), oif.Limits{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return openai.NewSourceEnvelope(family, "route", false, document)
+		request, err := wire.NewRequest(family, "route", false, document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return request
 	}
 	result, err := protocols.Parse(family, []byte(body), "route")
 	if err != nil {
@@ -53,7 +59,7 @@ func request(t *testing.T, family openai.Family, body string) *openai.Request {
 	}
 	return result
 }
-func bind(t *testing.T, template *Template, request *openai.Request, context Context) *Plan {
+func bind(t *testing.T, template *Template, request *wire.Request, context Context) *Plan {
 	t.Helper()
 	plan, err := template.Bind(request, context)
 	if err != nil {
@@ -71,7 +77,7 @@ func field(t *testing.T, body []byte, name string) json.RawMessage {
 }
 func assertReason(t *testing.T, err error, reason string) {
 	t.Helper()
-	var failure *Error
+	var failure *oif.Incompatibility
 	if !errors.As(err, &failure) || failure.Code != reason {
 		t.Fatalf("reason: got %v, want %s", err, reason)
 	}
@@ -82,23 +88,23 @@ func TestNativeProfilesPreserveOriginalGenerationDocuments(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			config := configuration(t, id)
 			profile, _ := config.Provider.Profile()
-			var family openai.Family
+			var family wire.Format
 			var raw string
 			switch profile.Dialect {
 			case "openai-chat":
-				family = openai.FamilyChat
+				family = wire.Chat
 				raw = `{"model":"route","messages":[{"role":"system","content":"system scope"},{"role":"developer","content":"developer scope"},{"role":"user","content":"literal"}],"max_completion_tokens":64,"temperature":null,"future_native":{"integer":123456789012345678901234567890,"array":[false,0,"",null]}}`
 			case "openai-responses":
-				family = openai.FamilyResponses
+				family = wire.Responses
 				raw = `{"model":"route","input":"exact scalar","store":false,"reasoning":{"effort":"high"},"future_native":{"integer":123456789012345678901234567890,"array":[false,0,"",null]}}`
 			case "anthropic-messages":
-				family = openai.FamilyAnthropic
+				family = wire.Anthropic
 				raw = `{"model":"route","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"opaque reasoning","signature":"exact-state"},{"type":"text","text":"before"},{"type":"tool_use","id":"call-1","name":"f","input":{}},{"type":"text","text":"after"}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"result"}]}],"max_tokens":64,"future_native":{"integer":123456789012345678901234567890,"array":[false,0,"",null]}}`
 			case "gemini-generate-content":
-				family = openai.FamilyGemini
+				family = wire.Gemini
 				raw = `{"contents":[{"role":"user","parts":[{"text":"exact"},{"functionCall":{"name":"f","args":{}},"thoughtSignature":"opaque-state"}]}],"generationConfig":{"maxOutputTokens":64},"future_native":{"integer":123456789012345678901234567890,"array":[false,0,"",null]}}`
 			case "bedrock-converse":
-				family = openai.FamilyBedrock
+				family = wire.Bedrock
 				raw = `{"messages":[{"role":"user","content":[{"text":"exact"}]}],"inferenceConfig":{"maxTokens":64},"future_native":{"integer":123456789012345678901234567890,"array":[false,0,"",null]}}`
 			default:
 				t.Fatal("missing generation fixture")
@@ -124,10 +130,10 @@ func TestNativeProfilesPreserveOriginalGenerationDocuments(t *testing.T) {
 			if !bytes.Equal(before, source.OIF().Document().Bytes()) {
 				t.Fatal("source mutated")
 			}
-			if family == openai.FamilyResponses && string(field(t, plan.Body(), "input")) != `"exact scalar"` {
+			if family == wire.Responses && string(field(t, plan.Body(), "input")) != `"exact scalar"` {
 				t.Fatal("scalar Responses input normalized")
 			}
-			if family == openai.FamilyChat && string(field(t, plan.Body(), "max_completion_tokens")) != "64" {
+			if family == wire.Chat && string(field(t, plan.Body(), "max_completion_tokens")) != "64" {
 				t.Fatal("native token control renamed")
 			}
 			for _, entry := range plan.Prepared().Provenance() {
@@ -142,7 +148,7 @@ func TestNativeProfilesPreserveOriginalGenerationDocuments(t *testing.T) {
 func TestNativeResponsesRetainScalarAndArrayDistinction(t *testing.T) {
 	compiled := template(t, configuration(t, "azure-v1-responses"))
 	for _, input := range []string{`"literal"`, `[{"role":"user","content":"literal"}]`, `[{"role":"user","content":[{"type":"input_text","text":"literal"}]}]`} {
-		source := request(t, openai.FamilyResponses, `{"model":"route","store":false,"input":`+input+`}`)
+		source := request(t, wire.Responses, `{"model":"route","store":false,"input":`+input+`}`)
 		plan := bind(t, compiled, source, Context{})
 		if string(field(t, plan.Body(), "input")) != input {
 			t.Fatalf("input shape changed: %s", plan.Body())
@@ -156,7 +162,7 @@ func TestNativeDefaultsRespectPresenceAndBindingAtoms(t *testing.T) {
 	config.Provider.Bindings = map[string]connectors.Binding{"native-model": {Model: "bound-model", Defaults: map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"tools": json.RawMessage(`[{"type":"function","function":{"name":"binding","description":"binding description","parameters":{"type":"object","additionalProperties":false}}}]`)}}}}}
 	compiled := template(t, config)
 	config.Provider.OperationDefaults["generation"].Values["temperature"][0] = '9'
-	source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"temperature":null,"native_false":false,"native_zero":0,"native_empty":""}`)
+	source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"temperature":null,"native_false":false,"native_zero":0,"native_empty":""}`)
 	plan := bind(t, compiled, source, Context{})
 	for name, want := range map[string]string{"model": `"bound-model"`, "temperature": "null", "native_false": "false", "native_zero": "0", "native_empty": `""`} {
 		if string(field(t, plan.Body(), name)) != want {
@@ -180,7 +186,7 @@ func TestNativeDefaultsRespectPresenceAndBindingAtoms(t *testing.T) {
 func TestQualifiedTextMatchesIndependentNativeFixture(t *testing.T) {
 	config := configuration(t, "anthropic-messages")
 	config.Model = "model-a"
-	source := request(t, openai.FamilyChat, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`)
+	source := request(t, wire.Chat, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`)
 	plan := bind(t, template(t, config), source, Context{})
 	want := `{"model":"model-a","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"max_tokens":64,"stream":false}`
 	var actual, expected any
@@ -204,7 +210,7 @@ func TestQualifiedTextMatchesIndependentNativeFixture(t *testing.T) {
 	if err := plan.ValidateUnary([]byte(valid)); err != nil {
 		t.Fatal(err)
 	}
-	result, err := protocols.DecodeRequest(plan.Wire(), openai.FamilyChat, []byte(valid), "team-chat", "", source)
+	result, err := protocols.DecodeRequest(plan.Wire(), wire.Chat, []byte(valid), "team-chat", "", source)
 	if err != nil || result.OutputText != "hello" || result.FinishReason != "stop" || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 1 {
 		t.Fatalf("qualified client projection lost text/usage: %+v %v", result, err)
 	}
@@ -212,7 +218,7 @@ func TestQualifiedTextMatchesIndependentNativeFixture(t *testing.T) {
 	if err := plan.ValidateUnary([]byte(realistic)); err != nil {
 		t.Fatalf("real Anthropic usage shape rejected: %v", err)
 	}
-	result, err = protocols.DecodeRequest(plan.Wire(), openai.FamilyChat, []byte(realistic), "team-chat", "", source)
+	result, err = protocols.DecodeRequest(plan.Wire(), wire.Chat, []byte(realistic), "team-chat", "", source)
 	if err != nil || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 1 {
 		t.Fatalf("qualified client projection lost realistic usage: %+v %v", result, err)
 	}
@@ -242,7 +248,7 @@ func TestQualifiedMappingRejectsUndischargedRequirements(t *testing.T) {
 		{"native null", `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":null}`, "reasoning_budget"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := compiled.Bind(request(t, openai.FamilyChat, test.body), Context{})
+			_, err := compiled.Bind(request(t, wire.Chat, test.body), Context{})
 			assertReason(t, err, test.reason)
 			if strings.Contains(err.Error(), "secret_extension_name") {
 				t.Fatal("error leaked untrusted native field name")
@@ -252,7 +258,7 @@ func TestQualifiedMappingRejectsUndischargedRequirements(t *testing.T) {
 }
 
 func TestNativeSemanticHeadersAndServingHintsNeverDisappear(t *testing.T) {
-	source := request(t, openai.FamilyAnthropic, `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":64}`)
+	source := request(t, wire.Anthropic, `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":64}`)
 	config := configuration(t, "anthropic-messages")
 	compiled := template(t, config)
 	plan := bind(t, compiled, source, Context{Headers: http.Header{"Anthropic-Version": {"2023-06-01"}, "Anthropic-Beta": {"feature-2026-09-01"}, "Authorization": {"Bearer gateway-key"}}})
@@ -271,7 +277,7 @@ func TestNativeSemanticHeadersAndServingHintsNeverDisappear(t *testing.T) {
 	_, err := template(t, config).Bind(source, Context{Headers: http.Header{"Anthropic-Beta": {"caller"}}})
 	assertReason(t, err, "target_capability")
 	gemini := template(t, configuration(t, "gemini-generation"))
-	googleRequest := request(t, openai.FamilyGemini, `{"contents":[{"parts":[{"text":"x"}]}]}`)
+	googleRequest := request(t, wire.Gemini, `{"contents":[{"parts":[{"text":"x"}]}]}`)
 	googlePlan := bind(t, gemini, googleRequest, Context{Query: url.Values{"$xgafv": {"2"}}})
 	if googlePlan.Config().QuerySettings["$xgafv"] != "2" {
 		t.Fatal("caller semantic query dropped")
@@ -282,13 +288,13 @@ func TestNativeSemanticHeadersAndServingHintsNeverDisappear(t *testing.T) {
 
 func TestNativeStateOmissionAndResourceAffinityAreExplicit(t *testing.T) {
 	compiled := template(t, configuration(t, "openai-responses"))
-	source := request(t, openai.FamilyResponses, `{"model":"route","input":"hello"}`)
+	source := request(t, wire.Responses, `{"model":"route","input":"hello"}`)
 	_, err := compiled.Bind(source, Context{})
 	assertReason(t, err, "policy_conflict")
 	_, err = compiled.Bind(source, Context{AllowProviderState: true})
 	assertReason(t, err, "state_carrier")
-	plan := bind(t, compiled, request(t, openai.FamilyResponses, `{"model":"route","input":"hello","store":false}`), Context{})
-	prior := request(t, openai.FamilyResponses, `{"model":"route","input":"follow up","previous_response_id":"opaque-native-id","store":false}`)
+	plan := bind(t, compiled, request(t, wire.Responses, `{"model":"route","input":"hello","store":false}`), Context{})
+	prior := request(t, wire.Responses, `{"model":"route","input":"follow up","previous_response_id":"opaque-native-id","store":false}`)
 	_, err = compiled.Bind(prior, Context{AllowProviderState: true})
 	assertReason(t, err, "resource_affinity")
 	identity := plan.Serving()
@@ -305,7 +311,7 @@ func TestNativeStateOmissionAndResourceAffinityAreExplicit(t *testing.T) {
 func TestObservedPrincipalIsPartOfServingIdentity(t *testing.T) {
 	config := configuration(t, "openai-chat")
 	config.Provider.Bindings = map[string]connectors.Binding{"native-model": {PrincipalID: "declared-account"}}
-	source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"hello"}]}`)
+	source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"hello"}]}`)
 	if declared := bind(t, template(t, config), source, Context{}).Serving(); declared.PrincipalID != "declared-account" {
 		t.Fatalf("declared serving identity %+v", declared)
 	}
@@ -323,7 +329,7 @@ func TestNativeCloudAnthropicRevisionHeaderBindsToBody(t *testing.T) {
 	for _, id := range []string{"vertex-anthropic", "bedrock-anthropic-invoke"} {
 		t.Run(id, func(t *testing.T) {
 			compiled := template(t, configuration(t, id))
-			source := request(t, openai.FamilyAnthropic, `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"native"}]}`)
+			source := request(t, wire.Anthropic, `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"native"}]}`)
 			plan := bind(t, compiled, source, Context{Headers: http.Header{"Anthropic-Version": {"2023-06-01"}}})
 			if len(field(t, plan.Body(), "anthropic_version")) == 0 || plan.Config().SemanticHeaders["Anthropic-Version"] != "" {
 				t.Fatal("cloud API revision was not bound into the hosting body")
@@ -346,7 +352,7 @@ func TestEffectivePolicyChecksDefaultsAndRejectsOpaqueCoverage(t *testing.T) {
 	config := configuration(t, "openai-chat")
 	config.Policy = policy
 	config.Provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"tools": json.RawMessage(`[{"type":"function","function":{"name":"f","description":"classified default instruction","parameters":{"type":"object"}}}]`)}}}
-	plan := bind(t, template(t, config), request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"harmless"}]}`), Context{})
+	plan := bind(t, template(t, config), request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"harmless"}]}`), Context{})
 	decisions, err := plan.CheckInput()
 	assertReason(t, err, "content_policy_blocked")
 	if len(decisions) != 1 || decisions[0].Outcome != contentpolicy.OutcomeBlocked {
@@ -359,10 +365,10 @@ func TestEffectivePolicyChecksDefaultsAndRejectsOpaqueCoverage(t *testing.T) {
 	config.Provider.OperationDefaults = nil
 	compiled := template(t, config)
 	for _, body := range []string{`{"model":"route","messages":[{"role":"user","content":"x"}],"future_native":"opaque"}`, `{"model":"route","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`} {
-		_, err := compiled.Bind(request(t, openai.FamilyChat, body), Context{})
+		_, err := compiled.Bind(request(t, wire.Chat, body), Context{})
 		assertReason(t, err, "policy_conflict")
 	}
-	ordinary := bind(t, compiled, request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"public"}]}`), Context{})
+	ordinary := bind(t, compiled, request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"public"}]}`), Context{})
 	if _, err := ordinary.CheckInput(); err != nil {
 		t.Fatal(err)
 	}
@@ -378,14 +384,14 @@ func TestResponsesToolLoopIsInspectableByInputPolicy(t *testing.T) {
 	loop := func(arguments string) string {
 		return `{"model":"route","store":false,"input":[{"role":"user","content":"hi"},{"type":"function_call","call_id":"c1","name":"f","arguments":` + arguments + `,"status":"completed"},{"type":"function_call_output","call_id":"c1","output":"ok"}]}`
 	}
-	plan := bind(t, compiled, request(t, openai.FamilyResponses, loop(`"{}"`)), Context{})
+	plan := bind(t, compiled, request(t, wire.Responses, loop(`"{}"`)), Context{})
 	if _, err := plan.CheckInput(); err != nil {
 		t.Fatal(err)
 	}
-	blocked := bind(t, compiled, request(t, openai.FamilyResponses, loop(`"{\"q\":\"secret\"}"`)), Context{})
+	blocked := bind(t, compiled, request(t, wire.Responses, loop(`"{\"q\":\"secret\"}"`)), Context{})
 	_, err := blocked.CheckInput()
 	assertReason(t, err, "content_policy_blocked")
-	_, err = compiled.Bind(request(t, openai.FamilyResponses, `{"model":"route","store":false,"input":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{}","future_opaque":"x"}]}`), Context{})
+	_, err = compiled.Bind(request(t, wire.Responses, `{"model":"route","store":false,"input":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{}","future_opaque":"x"}]}`), Context{})
 	assertReason(t, err, "policy_conflict")
 }
 
@@ -397,14 +403,14 @@ func TestInputPolicyInspectsStructuredToolInputKeys(t *testing.T) {
 		config := configuration(t, "anthropic-messages")
 		config.Policy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "block", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Pattern: test.pattern}}}
 		body := `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f","input":` + test.input + `}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]}]}`
-		plan := bind(t, template(t, config), request(t, openai.FamilyAnthropic, body), Context{})
+		plan := bind(t, template(t, config), request(t, wire.Anthropic, body), Context{})
 		_, err := plan.CheckInput()
 		assertReason(t, err, "content_policy_blocked")
 	}
 }
 
 func TestQualifiedOutputGuardRejectsLossBeforeProjection(t *testing.T) {
-	plan := bind(t, template(t, configuration(t, "anthropic-messages")), request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":64}`), Context{})
+	plan := bind(t, template(t, configuration(t, "anthropic-messages")), request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":64}`), Context{})
 	valid := map[string]any{"id": "message-1", "type": "message", "role": "assistant", "model": "native-model", "content": []any{map[string]any{"type": "text", "text": "visible"}}, "stop_reason": "end_turn", "stop_sequence": nil, "usage": map[string]any{"input_tokens": 2, "output_tokens": 1}}
 	for _, mutate := range []func(map[string]any){
 		func(v map[string]any) {
@@ -433,23 +439,23 @@ func TestQualifiedOutputGuardRejectsLossBeforeProjection(t *testing.T) {
 
 func TestNativeGuardsKeepExtensionsAndRejectCorruption(t *testing.T) {
 	compiled := template(t, configuration(t, "anthropic-messages"))
-	source := request(t, openai.FamilyAnthropic, `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":64,"stream":true}`)
+	source := request(t, wire.Anthropic, `{"model":"route","messages":[{"role":"user","content":"x"}],"max_tokens":64,"stream":true}`)
 	plan := bind(t, compiled, source, Context{})
-	event, err := openai.LiftEvent(openai.FamilyAnthropic, `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque"},"future":{"exact":true}}`, "content_block_delta", 2, 8192)
+	event, err := openai.LiftEvent(wire.Anthropic, `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque"},"future":{"exact":true}}`, "content_block_delta", 2, 8192)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := plan.ValidateEvent(event); err != nil {
 		t.Fatal(err)
 	}
-	invalid, _ := openai.LiftEvent(openai.FamilyAnthropic, `{"type":"content_block_delta","index":"zero","delta":{}}`, "content_block_delta", 3, 8192)
+	invalid, _ := openai.LiftEvent(wire.Anthropic, `{"type":"content_block_delta","index":"zero","delta":{}}`, "content_block_delta", 3, 8192)
 	assertReason(t, plan.ValidateEvent(invalid), "fidelity_protocol_violation")
 	assertReason(t, plan.ValidateUnary([]byte(`{"content":[]}`)), "fidelity_protocol_violation")
 }
 
 func TestSharedTemplateConcurrentBindingsRemainIndependent(t *testing.T) {
 	compiled := template(t, configuration(t, "openai-chat"))
-	source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"unchanged"}]}`)
+	source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"unchanged"}]}`)
 	var group sync.WaitGroup
 	for range 20 {
 		group.Go(func() {
@@ -473,7 +479,7 @@ func TestSharedTemplateConcurrentBindingsRemainIndependent(t *testing.T) {
 func TestNativeStreamingDefaultsPrecedeTransportOverlay(t *testing.T) {
 	config := configuration(t, "openai-chat")
 	config.Provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"stream_options": json.RawMessage(`{"include_usage":false,"include_obfuscation":false}`)}}}
-	source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	plan := bind(t, template(t, config), source, Context{})
 	var options map[string]bool
 	if err := json.Unmarshal(field(t, plan.Body(), "stream_options"), &options); err != nil {
@@ -492,7 +498,7 @@ func TestNativeStreamingDefaultsPrecedeTransportOverlay(t *testing.T) {
 
 func TestNativeExecutionEffectsAreScopedAndImmutable(t *testing.T) {
 	compiled := template(t, configuration(t, "openai-responses"))
-	source := request(t, openai.FamilyResponses, `{"model":"route","input":"hello","store":false,"tools":[{"type":"function","name":"local","parameters":{"type":"object"}}]}`)
+	source := request(t, wire.Responses, `{"model":"route","input":"hello","store":false,"tools":[{"type":"function","name":"local","parameters":{"type":"object"}}]}`)
 	plan := bind(t, compiled, source, Context{AllowProviderState: true})
 	effects := plan.Obligations().Effects
 	if !reflect.DeepEqual(effects, []string{"inference", "client_tool_call"}) {
@@ -504,7 +510,7 @@ func TestNativeExecutionEffectsAreScopedAndImmutable(t *testing.T) {
 	if plan.Obligations().Effects[0] != "inference" {
 		t.Fatal("effect metadata exposes mutable aliases")
 	}
-	hosted := request(t, openai.FamilyResponses, `{"model":"route","input":"hello","tools":[{"type":"web_search"}]}`)
+	hosted := request(t, wire.Responses, `{"model":"route","input":"hello","tools":[{"type":"web_search"}]}`)
 	_, err := compiled.Bind(hosted, Context{AllowProviderState: true})
 	assertReason(t, err, "state_carrier")
 }
@@ -512,19 +518,19 @@ func TestNativeExecutionEffectsAreScopedAndImmutable(t *testing.T) {
 func TestNestedUnknownControlsCannotBypassInputPolicyCoverage(t *testing.T) {
 	config := configuration(t, "gemini-generation")
 	config.Policy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "input", Phase: "input", Action: "block", Pattern: "secret"}}}
-	source := request(t, openai.FamilyGemini, `{"contents":[{"parts":[{"text":"safe"}]}],"generationConfig":{"future_encoded":"c2VjcmV0"}}`)
+	source := request(t, wire.Gemini, `{"contents":[{"parts":[{"text":"safe"}]}],"generationConfig":{"future_encoded":"c2VjcmV0"}}`)
 	_, err := template(t, config).Bind(source, Context{})
 	assertReason(t, err, "policy_conflict")
 }
 
 func TestNativeAdapterCannotOverrideImmutableSourceIdentity(t *testing.T) {
 	compiled := template(t, configuration(t, "openai-chat"))
-	source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"safe"}]}`)
+	source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"safe"}]}`)
 	source.Stream = true
 	_, err := compiled.Bind(source, Context{})
 	assertReason(t, err, "target_capability")
 	source.Stream = false
-	source.Family = openai.FamilyResponses
+	source.Family = wire.Responses
 	_, err = compiled.Bind(source, Context{})
 	assertReason(t, err, "target_capability")
 }
@@ -538,7 +544,7 @@ func TestNativeChatDefaultCannotIntroduceConflictingBudgetScope(t *testing.T) {
 		t.Run(test.caller+"_"+test.value, func(t *testing.T) {
 			config := configuration(t, "openai-chat")
 			config.Provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{test.configured: json.RawMessage(`128`)}}}
-			source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"`+test.caller+`":`+test.value+`}`)
+			source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"`+test.caller+`":`+test.value+`}`)
 			before := source.OIF().Document().Bytes()
 			_, err := template(t, config).Bind(source, Context{})
 			assertReason(t, err, "reasoning_budget")

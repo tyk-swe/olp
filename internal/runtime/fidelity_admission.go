@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"errors"
+
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // CheckRouteFidelity fences a strict admission against the published route.
@@ -10,7 +12,7 @@ import (
 // refresh. A last-known-good strict reader must not bypass a newer transformed
 // revision's redaction policy. Requests admitted before publication retain their
 // pinned contract; each new admission checks the database and fails closed.
-func (m *Manager) CheckRouteFidelity(ctx context.Context, route Route) error {
+func (m *Manager) CheckRouteFidelity(ctx context.Context, route routing.Route) error {
 	if !route.Fidelity.Strict() {
 		return nil
 	}

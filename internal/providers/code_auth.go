@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -27,7 +29,7 @@ type CodeAuthorizer struct {
 // AuthorizeCode returns the upstream authorization of one request on account,
 // whose provider connection is cfg. The connection's plugin must be the
 // adapter's own, unaltered, and the request's protocol one its routes serve.
-func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
+func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	vendor, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
 	if a == nil || a.Pool == nil || a.Credentials == nil || a.Plugins == nil || !ok || vendor.Adapter != dispatch.Adapter || !vendor.Serves(dispatch.Protocol) || !codeConfiguration(cfg, vendor) {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_configuration_unsupported")
@@ -45,7 +47,7 @@ func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configur
 		AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
 		AND CASE WHEN $6 THEN g.expires_at IS NULL AND g.refresh_token_id IS NULL ELSE g.expires_at>now() END)`,
 		account.CredentialID, account.ProviderID, account.ProjectID, account.Principal, cfg.ProfileRevision, vendor.KeyGrant, cfg.ProfileID).Scan(&eligible)
-	if err != nil || !eligible || !account.Enabled || account.Principal == "" || a.Credentials.Eligibility(account.CredentialID) != runtime.Eligible {
+	if err != nil || !eligible || !account.Enabled || account.Principal == "" || a.Credentials.Eligibility(account.CredentialID) != routing.Eligible {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
 	}
 	secret, generation, err := a.Credentials.Secret(ctx, nil, account.CredentialID)
@@ -68,7 +70,7 @@ func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configur
 
 // codeConfiguration admits only the adapter's own plugin profile at its own
 // upstream, with nothing that would change or add to the forwarded request.
-func codeConfiguration(c runtime.Configuration, vendor codeadapter.Vendor) bool {
+func codeConfiguration(c routing.Configuration, vendor codeadapter.Vendor) bool {
 	o := c.Options
 	address, ok := vendor.Address(c.ProfileID)
 	return ok && c.Kind == connectors.KindPlugin && c.AuthMode == connectors.AuthGrant && c.ProfileRevision != "" &&

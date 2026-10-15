@@ -16,13 +16,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -33,15 +35,15 @@ const backupSlug = "team-backup"
 // republish installs a release whose snapshot edit has changed. The harness
 // route serves provider a first and b second; edit may reshape it and add
 // routes of its own.
-func (h *harness) republish(edit func(s *runtime.Snapshot, a, b runtime.Provider)) {
+func (h *harness) republish(edit func(s *routing.Snapshot, a, b routing.Provider)) {
 	h.t.Helper()
 	old := h.rt.Release()
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: uuid.NewString(), Ordinal: old.Snapshot.Generation.Ordinal + 1, ActivatedAt: old.Snapshot.Generation.ActivatedAt},
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: old.Snapshot.Generation.Ordinal + 1, ActivatedAt: old.Snapshot.Generation.ActivatedAt},
 		Providers:  maps.Clone(old.Snapshot.Providers),
 		Routes:     maps.Clone(old.Snapshot.Routes),
 	}
-	var a, b runtime.Provider
+	var a, b routing.Provider
 	credentials := map[string][]byte{}
 	for _, provider := range snapshot.Providers {
 		switch provider.Name {
@@ -78,32 +80,32 @@ func (h *harness) provider(name string) string {
 
 // splitRoutes leaves the harness route serving only provider a and adds a
 // backup route that serves only provider b.
-func splitRoutes(s *runtime.Snapshot, b runtime.Provider, behavior runtime.Behavior) {
+func splitRoutes(s *routing.Snapshot, b routing.Provider, behavior routing.Behavior) {
 	primary := s.Routes[routeSlug]
 	backup := primary
 	primary.Targets = primary.Targets[:1]
 	primary.Behavior = behavior
 	backupID := uuid.NewString()
 	backup.ID, backup.RoutingID, backup.RevisionID, backup.Slug = backupID, backupID, uuid.NewString(), backupSlug
-	backup.Targets = []runtime.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
+	backup.Targets = []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
 	s.Routes[routeSlug], s.Routes[backupSlug] = primary, backup
 }
 
 func TestRetainedResponsesIgnoreRouteDelegatingSelectors(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
 		for id, provider := range s.Providers {
 			provider.Kind, provider.Endpoint = "openai", ""
 			s.Providers[id] = provider
 		}
-		splitRoutes(s, b, runtime.Behavior{Selectors: []runtime.Selector{{ID: "delegate", Route: backupSlug}}})
+		splitRoutes(s, b, routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}})
 	})
 	for _, retained := range []bool{false, true} {
-		parsed, err := protocols.Parse(openai.FamilyResponses, []byte(`{"model":"team-chat","input":"hi","store":true}`), routeSlug)
+		parsed, err := protocols.Parse(wire.Responses, []byte(`{"model":"team-chat","input":"hi","store":true}`), routeSlug)
 		if err != nil {
 			t.Fatal(err)
 		}
-		x := &execution{request: request{release: h.rt.Release()}, parsed: parsed, family: openai.FamilyResponses, mode: "unary", providerState: retained}
+		x := &call{request: request{release: h.rt.Release()}, family: wire.Responses, mode: "unary", providerState: retained, generation: generationCall{parsed: parsed}}
 		if e := h.gateway.prepare(t.Context(), x, h.gateway.keyAuthorizer(h.rt.keys[fullKey])); e != nil {
 			t.Fatal(e)
 		}
@@ -119,12 +121,12 @@ func TestRetainedResponsesIgnoreRouteDelegatingSelectors(t *testing.T) {
 
 func TestPinnedInteractionsIgnoreRouteDelegatingSelectors(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(snapshot *runtime.Snapshot, a, b runtime.Provider) {
+	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 		a.Kind, a.ProfileID, a.ProfileRevision = "gemini", "gemini-interactions", connectors.ProfileRevision
 		a.Endpoint = h.upstream.URL + "/v1beta"
-		a.Capabilities = []runtime.Capability{{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"}}
+		a.Capabilities = []routing.Capability{{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"}}
 		snapshot.Providers[a.ID] = a
-		splitRoutes(snapshot, b, runtime.Behavior{Selectors: []runtime.Selector{{ID: "delegate", Route: backupSlug}}})
+		splitRoutes(snapshot, b, routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}})
 	})
 	h.mock.set("v1beta", status(http.StatusOK, `{"id":"int_1","status":"completed","steps":[],"usage":{"total_input_tokens":3,"total_output_tokens":2}}`))
 	request := httptest.NewRequest(http.MethodPost, "/gemini/v1beta/interactions", strings.NewReader(`{"model":"`+routeSlug+`","input":"hello","store":false}`))
@@ -139,8 +141,8 @@ func TestPinnedInteractionsIgnoreRouteDelegatingSelectors(t *testing.T) {
 
 func TestFallbackRouteServesOnceThePrimaryIsExhausted(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
 	})
 	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
 	resp, body := h.chat(fullKey, nil)
@@ -163,8 +165,8 @@ func TestFallbackRouteServesOnceThePrimaryIsExhausted(t *testing.T) {
 
 func TestFallbackFollowsOnlyTheConditionsItNames(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackContextWindow}}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackContextWindow}}}})
 	})
 	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
 	if resp, _ := h.chat(fullKey, nil); resp.StatusCode == http.StatusOK || h.mock.count("b") != 0 {
@@ -179,8 +181,8 @@ func TestFallbackFollowsOnlyTheConditionsItNames(t *testing.T) {
 
 func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackContentFilter}}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackContentFilter}}}})
 	})
 	h.mock.set("a", status(http.StatusBadRequest, `{"error":{"message":"refused","type":"invalid_request_error","code":"content_filter"}}`))
 	for range circuitFailures + 1 {
@@ -196,7 +198,7 @@ func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {
 		t.Fatalf("a content filter opened a circuit: open %d, calls to a %d", h.gateway.OpenCircuits(), h.mock.count("a"))
 	}
 	// Without a content_filter fallback the refusal reaches the caller.
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		route := s.Routes[routeSlug]
 		route.Fallbacks = nil
 		s.Routes[routeSlug] = route
@@ -209,8 +211,8 @@ func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {
 
 func TestFallbackNeverFollowsACommittedStream(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: runtime.FallbackConditions}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: routing.FallbackConditions}}})
 	})
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -233,8 +235,8 @@ func TestFallbackNeverFollowsACommittedStream(t *testing.T) {
 
 func TestFallbackSkipsRoutesTheKeyMayNotUse(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
 	})
 	authority := h.rt.keys[fullKey]
 	authority.Policy.AllowedRoutes = []string{routeSlug}
@@ -248,8 +250,8 @@ func TestFallbackSkipsRoutesTheKeyMayNotUse(t *testing.T) {
 
 func TestFallbacksShareThePrimaryAttemptBudget(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
 		primary := s.Routes[routeSlug]
 		primary.MaxAttempts = 1
 		s.Routes[routeSlug] = primary
@@ -262,9 +264,9 @@ func TestFallbacksShareThePrimaryAttemptBudget(t *testing.T) {
 
 func TestRetryPolicyRepeatsTheSameSlotBeforeFailingOver(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		route := s.Routes[routeSlug]
-		route.Retry = runtime.Retry{classUpstreamServer: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 2}}
+		route.Retry = routing.Retry{classUpstreamServer: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 2}}
 		s.Routes[routeSlug] = route
 	})
 	var calls atomic.Int32
@@ -302,9 +304,9 @@ func TestRetryPolicyRepeatsTheSameSlotBeforeFailingOver(t *testing.T) {
 
 func TestShadowTargetsMirrorTrafficAccountedToTheRoute(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		route := s.Routes[routeSlug]
-		route.Targets[1].Shadow = &runtime.Shadow{SampleRate: 1}
+		route.Targets[1].Shadow = &routing.Shadow{SampleRate: 1}
 		s.Routes[routeSlug] = route
 	})
 	resp, body := h.chat(fullKey, nil)
@@ -345,12 +347,12 @@ func TestShadowTargetsMirrorTrafficAccountedToTheRoute(t *testing.T) {
 
 func TestSelectorsNarrowTargetsByRequestFeatures(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		route := s.Routes[routeSlug]
 		route.Targets[0].Tags, route.Targets[1].Tags = []string{"fast"}, []string{"tools"}
 		tools := true
-		route.Selectors = []runtime.Selector{
-			{ID: "tool-calls", When: runtime.Predicate{Tools: &tools}, Tags: []string{"tools"}},
+		route.Selectors = []routing.Selector{
+			{ID: "tool-calls", When: routing.Predicate{Tools: &tools}, Tags: []string{"tools"}},
 			{ID: "plain", Tags: []string{"fast"}},
 		}
 		s.Routes[routeSlug] = route
@@ -372,10 +374,10 @@ func TestSelectorsNarrowTargetsByRequestFeatures(t *testing.T) {
 
 func TestSessionAffinityKeepsACacheKeyOnOneTarget(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		route := s.Routes[routeSlug]
 		route.Targets[1].Priority = route.Targets[0].Priority
-		route.Affinity = &runtime.Affinity{Source: runtime.AffinityCacheKey}
+		route.Affinity = &routing.Affinity{Source: routing.AffinityCacheKey}
 		s.Routes[routeSlug] = route
 	})
 	served := map[string]bool{}
@@ -523,25 +525,25 @@ const classifierSlug = "team-classifier"
 
 // triage tags provider a simple and provider b complex, adds a classifier
 // route that b serves, and routes complex requests by the given predicate.
-func triage(s *runtime.Snapshot, b runtime.Provider, when runtime.Predicate) {
+func triage(s *routing.Snapshot, b routing.Provider, when routing.Predicate) {
 	route := s.Routes[routeSlug]
 	route.Targets[0].Tags, route.Targets[1].Tags = []string{"simple"}, []string{"complex"}
-	route.Selectors = []runtime.Selector{
+	route.Selectors = []routing.Selector{
 		{ID: "hard", When: when, Tags: []string{"complex"}},
 		{ID: "easy", Tags: []string{"simple"}},
 	}
 	classifier := route
-	classifier.Behavior = runtime.Behavior{}
+	classifier.Behavior = routing.Behavior{}
 	id := uuid.NewString()
 	classifier.ID, classifier.RoutingID, classifier.RevisionID, classifier.Slug = id, id, uuid.NewString(), classifierSlug
-	classifier.Targets = []runtime.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
+	classifier.Targets = []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
 	s.Routes[routeSlug], s.Routes[classifierSlug] = route, classifier
 }
 
 func TestClassifierPredicateRoutesByTheLabelAGenerationRouteReturns(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
 	})
 	for _, tc := range []struct {
 		name, selector, served string
@@ -601,8 +603,8 @@ func TestPluginPredicateNarrowsByFeaturesAndFallsThroughOnFailure(t *testing.T) 
 			}
 			return input.Tools, nil
 		})})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		triage(s, b, runtime.Predicate{Plugin: &runtime.PluginPredicate{Digest: digest}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		triage(s, b, routing.Predicate{Plugin: &routing.PluginPredicate{Digest: digest}})
 	})
 	h.mock.set("b", completion(modelB, answerText))
 	tools := `,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]`
@@ -649,9 +651,9 @@ func (p *pipelining) trips() int64 { return p.calls.Load() + p.pipelines.Load() 
 // round trip, and costs nothing beyond it.
 func TestCapacityStrategyAddsOneValkeyRoundTrip(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, a, b runtime.Provider) {
-		for _, provider := range []runtime.Provider{a, b} {
-			provider.Limits = &runtime.Limits{MaxConcurrency: int64ptr(8)}
+	h.republish(func(s *routing.Snapshot, a, b routing.Provider) {
+		for _, provider := range []routing.Provider{a, b} {
+			provider.Limits = &routing.Limits{MaxConcurrency: int64ptr(8)}
 			s.Providers[provider.ID] = provider
 		}
 	})

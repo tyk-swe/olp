@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -62,7 +64,7 @@ func (s *staticRuntime) Authenticate(secret string) (*access.Authority, error) {
 	return &authority, nil
 }
 
-func (s *staticRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
+func (s *staticRuntime) Eligibility(string) routing.Eligibility { return routing.Eligible }
 
 // Secret serves the credentials the pinned release installed.
 func (s *staticRuntime) Secret(_ context.Context, release *runtime.Release, credentialID string) ([]byte, int64, error) {
@@ -172,55 +174,55 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 	routeID, targetID := uuid.NewString(), uuid.NewString()
 	now := time.Now().UTC()
 	version := 1
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: now},
-		Providers: map[string]runtime.Provider{providerID: {
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: now},
+		Providers: map[string]routing.Provider{providerID: {
 			ID:               providerID,
 			Name:             "fixture",
 			Kind:             "openai_compatible",
 			Enabled:          true,
 			ActiveCredential: &credentialID,
-			Capabilities: []runtime.Capability{
+			Capabilities: []routing.Capability{
 				{Model: upstreamModel, Operation: "generation", Surface: "openai", Mode: "unary"},
 				{Model: upstreamModel, Operation: "generation", Surface: "openai", Mode: "streaming"},
 			},
 			RevisionID: uuid.NewString(),
 			Endpoint:   endpoint,
 			AuthMode:   "api_key",
-			Slots:      []runtime.Slot{{ID: slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialID, CredentialVersion: &version}},
+			Slots:      []routing.Slot{{ID: slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialID, CredentialVersion: &version}},
 		}},
-		Routes: map[string]runtime.Route{routeSlug: {
+		Routes: map[string]routing.Route{routeSlug: {
 			ID:             routeID,
 			Slug:           routeSlug,
 			Operations:     []string{"generation", "token_count"},
 			OverallTimeout: 5000,
 			MaxAttempts:    2,
-			Targets:        []runtime.Target{{ID: targetID, ProviderID: providerID, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: targetID}},
+			Targets:        []routing.Target{{ID: targetID, ProviderID: providerID, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: targetID}},
 			RoutingID:      routeID,
 			RevisionID:     uuid.NewString(),
 			Revision:       1,
 			PublishedAt:    now,
 			// The official SDK surfaces reach providers without profiles and
 			// across dialects, which only a transformed route permits.
-			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
 		}},
 	}
 	secrets := map[string][]byte{credentialID: []byte(credential)}
 	for _, kind := range []string{"anthropic", "gemini"} {
 		id, secretID, slot := uuid.NewString(), uuid.NewString(), uuid.NewString()
-		p := runtime.Provider{ID: id, Name: kind, Kind: kind, VendorID: kind, Enabled: true, RevisionID: uuid.NewString(), Endpoint: strings.TrimSuffix(endpoint, "/v1") + "/" + kind + "/v1", AuthMode: "api_key", ActiveCredential: &secretID, Slots: []runtime.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &secretID, CredentialVersion: &version}}}
+		p := routing.Provider{ID: id, Name: kind, Kind: kind, VendorID: kind, Enabled: true, RevisionID: uuid.NewString(), Endpoint: strings.TrimSuffix(endpoint, "/v1") + "/" + kind + "/v1", AuthMode: "api_key", ActiveCredential: &secretID, Slots: []routing.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &secretID, CredentialVersion: &version}}}
 		if kind == "gemini" {
 			p.Endpoint += "beta"
 		}
 		for _, mode := range []string{"unary", "streaming"} {
-			p.Capabilities = append(p.Capabilities, runtime.Capability{Model: upstreamModel, Operation: "generation", Surface: kind, Mode: mode})
+			p.Capabilities = append(p.Capabilities, routing.Capability{Model: upstreamModel, Operation: "generation", Surface: kind, Mode: mode})
 		}
-		p.Capabilities = append(p.Capabilities, runtime.Capability{Model: upstreamModel, Operation: "token_count", Surface: kind, Mode: "unary"})
+		p.Capabilities = append(p.Capabilities, routing.Capability{Model: upstreamModel, Operation: "token_count", Surface: kind, Mode: "unary"})
 		snapshot.Providers[id] = p
 		secrets[secretID] = []byte(credential)
 		route := snapshot.Routes[routeSlug]
 		target := uuid.NewString()
-		route.Targets = append(route.Targets, runtime.Target{ID: target, ProviderID: id, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: target})
+		route.Targets = append(route.Targets, routing.Target{ID: target, ProviderID: id, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: target})
 		snapshot.Routes[routeSlug] = route
 		if kind == "anthropic" {
 			// A dedicated provider path lets the independent script count every
@@ -233,7 +235,7 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 			toolProvider.Name = "native tool workflow"
 			toolProvider.Endpoint = strings.TrimSuffix(endpoint, "/v1") + "/native-tools/v1"
 			toolProvider.ActiveCredential = &toolCredentialID
-			toolProvider.Slots = []runtime.Slot{{ID: toolSlotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &toolCredentialID, CredentialVersion: &version}}
+			toolProvider.Slots = []routing.Slot{{ID: toolSlotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &toolCredentialID, CredentialVersion: &version}}
 			snapshot.Providers[toolProviderID] = toolProvider
 			secrets[toolCredentialID] = []byte(credential)
 			toolRoute := route
@@ -241,7 +243,7 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 			toolRoute.Slug, toolRoute.MaxAttempts = nativeToolRoute, 1
 			toolRoute.Operations = []string{"generation"}
 			toolTarget := uuid.NewString()
-			toolRoute.Targets = []runtime.Target{{ID: toolTarget, ProviderID: toolProviderID, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: toolTarget}}
+			toolRoute.Targets = []routing.Target{{ID: toolTarget, ProviderID: toolProviderID, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: toolTarget}}
 			snapshot.Routes[nativeToolRoute] = toolRoute
 		}
 	}
@@ -402,4 +404,4 @@ func registerNativeMock(mux *http.ServeMux) {
 }
 
 // This fixture has no asynchronous publication or external database.
-func (*staticRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }
+func (*staticRuntime) CheckRouteFidelity(context.Context, routing.Route) error { return nil }

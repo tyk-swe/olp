@@ -1,9 +1,10 @@
 package gateway
 
 import (
-	"github.com/tyk-swe/olp/internal/runtime"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestHalfOpenCredentialFailureReleasesSiblingProbe(t *testing.T) {
@@ -34,7 +35,7 @@ func TestCredentialRotationClears401ButRetains429(t *testing.T) {
 	now := time.Now()
 	h := newHealthTracker(func() time.Time { return now })
 	oldID, newID := "old-version", "new-version"
-	slot := runtime.Slot{ID: "logical-slot", CredentialID: &oldID}
+	slot := routing.Slot{ID: "logical-slot", CredentialID: &oldID}
 	h.cooldown("provider", credentialHealthKey(&slot, 0), credentialCooldown)
 	slot.CredentialID = &newID
 	if h.coolingDown("provider", credentialHealthKey(&slot, 0)) {

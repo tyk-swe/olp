@@ -1,11 +1,12 @@
 package tokenization
 
 import (
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operations"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations"
 )
 
 func policyConflict(path string) error {

@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func CaptureStreamFrame(family openai.Family, frame []byte, text func(string), tool func(json.RawMessage)) {
+func CaptureStreamFrame(family wire.Format, frame []byte, text func(string), tool func(json.RawMessage)) {
 	if family.Surface() == "bedrock" {
 		captureBedrockFrame(frame, text, tool)
 		return
@@ -59,7 +59,7 @@ func CaptureStreamFrame(family openai.Family, frame []byte, text func(string), t
 				}
 			}
 		case "native":
-			if family == openai.FamilyCohereChat {
+			if family == wire.CohereChat {
 				delta, _ := object(f["delta"])
 				message, _ := object(delta["message"])
 				switch str(f["type"]) {
@@ -89,7 +89,7 @@ func CaptureStreamFrame(family openai.Family, frame []byte, text func(string), t
 				}
 			}
 		default:
-			if family == openai.FamilyResponses {
+			if family == wire.Responses {
 				switch str(f["type"]) {
 				case "response.output_text.delta", "response.refusal.delta":
 					if t := str(f["delta"]); t != "" {
@@ -161,7 +161,7 @@ func captureBedrockFrame(frame []byte, text func(string), tool func(json.RawMess
 	}
 }
 
-func CaptureDocumentToolCalls(family openai.Family, body []byte) []json.RawMessage {
+func CaptureDocumentToolCalls(family wire.Format, body []byte) []json.RawMessage {
 	fields, err := object(body)
 	if err != nil {
 		return nil
@@ -195,7 +195,7 @@ func CaptureDocumentToolCalls(family openai.Family, body []byte) []json.RawMessa
 			}
 		}
 	case "native":
-		if family == openai.FamilyCohereChat {
+		if family == wire.CohereChat {
 			message, _ := object(fields["message"])
 			for _, call := range arr(message["tool_calls"]) {
 				calls = append(calls, call)
@@ -210,7 +210,7 @@ func CaptureDocumentToolCalls(family openai.Family, body []byte) []json.RawMessa
 			}
 		}
 	default:
-		if family == openai.FamilyResponses {
+		if family == wire.Responses {
 			for _, item := range arr(fields["output"]) {
 				if i, _ := object(item); str(i["type"]) == "function_call" {
 					calls = append(calls, item)

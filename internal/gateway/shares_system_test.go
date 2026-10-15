@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestIntegrationCapacitySharesHoldConnectionHeadroomForPriorityWorkAcrossGateways(t *testing.T) {
@@ -28,9 +28,9 @@ func TestIntegrationCapacitySharesHoldConnectionHeadroomForPriorityWorkAcrossGat
 	// Connection a serves two requests at once. Either class may take the
 	// idle first half; beyond it low work has no share and critical work has
 	// half of the connection.
-	h.republish(func(s *runtime.Snapshot, a, _ runtime.Provider) {
-		a.Limits = &runtime.Limits{MaxConcurrency: new(int64(2)), Supply: runtime.Supply{
-			PriorityShares:    &runtime.Shares{Critical: 50, High: 25, Normal: 25},
+	h.republish(func(s *routing.Snapshot, a, _ routing.Provider) {
+		a.Limits = &routing.Limits{MaxConcurrency: new(int64(2)), Supply: routing.Supply{
+			PriorityShares:    &routing.Shares{Critical: 50, High: 25, Normal: 25},
 			SaturationPercent: new(int64(50)),
 		}}
 		s.Providers[a.ID] = a

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -53,7 +55,7 @@ func check(d *draft, live map[string]*resolved) error {
 // approved confined plugin, so activation never dangles. A route retired
 // afterwards is skipped at request time with a recorded reason.
 func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
-	behavior, err := runtime.DecodeBehavior(d.Behavior)
+	behavior, err := routing.DecodeBehavior(d.Behavior)
 	if err != nil {
 		return err
 	}
@@ -81,8 +83,8 @@ func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
 }
 
 func sameBehavior(a, b []byte) bool {
-	left, _ := runtime.DecodeBehavior(a)
-	right, _ := runtime.DecodeBehavior(b)
+	left, _ := routing.DecodeBehavior(a)
+	right, _ := routing.DecodeBehavior(b)
 	return reflect.DeepEqual(left, right)
 }
 
@@ -290,14 +292,14 @@ type revisionRow struct {
 	Operations       []string
 	OverallTimeoutMS int
 	MaxAttempts      int
-	Targets          []runtime.PublishedTarget
+	Targets          []routing.PublishedTarget
 	ContentPolicy    []byte
 	Fidelity         []byte
 	Behavior         []byte
 	SourceDraftID    string
 	ActivatedBy      string
 	ActivatedAt      time.Time
-	Policy           *runtime.Policy
+	Policy           *routing.Policy
 }
 
 const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy,v.fidelity,v.behavior"
@@ -471,7 +473,7 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 	}
 	defer rows.Close()
 	var revisions []*revisionRow
-	var all []runtime.PublishedTarget
+	var all []routing.PublishedTarget
 	for rows.Next() {
 		v, err := scanRevision(rows)
 		if err != nil {
@@ -594,12 +596,12 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	label := func(t runtime.PublishedTarget) string { return t.ProviderName + "/" + t.ProviderModel }
-	before := map[string]runtime.PublishedTarget{}
+	label := func(t routing.PublishedTarget) string { return t.ProviderName + "/" + t.ProviderModel }
+	before := map[string]routing.PublishedTarget{}
 	for _, t := range from.Targets {
 		before[t.ProviderModelID] = t
 	}
-	after := map[string]runtime.PublishedTarget{}
+	after := map[string]routing.PublishedTarget{}
 	for _, t := range to.Targets {
 		after[t.ProviderModelID] = t
 	}

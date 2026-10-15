@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestUnaryChatRejectsMalformedChoicesAtEveryPosition(t *testing.T) {
@@ -31,7 +33,7 @@ func TestUnaryChatRejectsMalformedChoicesAtEveryPosition(t *testing.T) {
 			for _, prefix := range []string{"", `{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"},`} {
 				body := []byte(`{"choices":[` + prefix + tc.choice + `]}`)
 				completion, err := DecodeChat(body, "route")
-				var protocol *ProtocolError
+				var protocol *wire.ProtocolError
 				if completion != nil || !errors.As(err, &protocol) {
 					t.Fatalf("malformed choice accepted: %s: %+v, %v", body, completion, err)
 				}

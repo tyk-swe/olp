@@ -31,7 +31,7 @@ func TestGeminiInteractionUsageCountsThinkingAndToolUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{dispatched: true, facts: []AttemptFact{{}}}
+	x := &call{dispatched: true, facts: []AttemptFact{{}}}
 	(&Server{}).recordGeminiInteractionUsage(x, doc.Root())
 	u := x.facts[0].Usage
 	if u == nil || u.InputTokens != 520 || u.OutputTokens != 980 || u.ReasoningTokens == nil || *u.ReasoningTokens != 900 {

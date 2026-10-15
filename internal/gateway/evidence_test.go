@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -145,9 +146,9 @@ func TestStrictUnreadableUnaryResultLeavesBillingUncertain(t *testing.T) {
 
 func testStrictUnreadableUnaryResult(t *testing.T, body string) {
 	t.Helper()
-	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
-			provider.Capabilities = []runtime.Capability{{Model: provider.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+			provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
 			snapshot.Providers[id] = provider
 		}
 		route := snapshot.Routes[routeSlug]
@@ -172,7 +173,7 @@ func testStrictUnreadableUnaryResult(t *testing.T, body string) {
 	if a.Status != http.StatusOK || a.UsageObserved || a.UsageComplete || !a.BillingUncertain {
 		t.Errorf("an accepted but unreadable result settled billing: %+v", a)
 	}
-	x := &execution{estimate: 100, facts: env.Attempts}
+	x := &call{estimate: 100, facts: env.Attempts}
 	if got := *x.settledTokens(); got != x.estimate {
 		t.Errorf("unmetered accepted work settled %d tokens, want estimate %d", got, x.estimate)
 	}

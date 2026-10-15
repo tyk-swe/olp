@@ -12,14 +12,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
+func bedrockQualified(p *routing.Provider, model, operation, mode string) bool {
 	return p.Kind == "bedrock" &&
 		p.Connector().Supports(operation, "bedrock", mode) &&
 		p.Supports(model, operation, "bedrock", mode)
@@ -29,14 +31,14 @@ func (s *Server) bedrockConverse(w http.ResponseWriter, r *http.Request) {
 	if s.strictBedrockConverse(w, r) {
 		return
 	}
-	s.bedrockServe(w, r, openai.FamilyBedrock, "generation", "unary", "converse")
+	s.bedrockServe(w, r, wire.Bedrock, "generation", "unary", "converse")
 }
 
 func (s *Server) bedrockConverseStream(w http.ResponseWriter, r *http.Request) {
 	if s.strictBedrockConverse(w, r) {
 		return
 	}
-	s.bedrockServe(w, r, openai.FamilyBedrock, "generation", "streaming", "converse-stream")
+	s.bedrockServe(w, r, wire.Bedrock, "generation", "streaming", "converse-stream")
 }
 
 // Strict Converse uses the same prepared invocation and Attempt owner as the
@@ -54,20 +56,20 @@ func (s *Server) strictBedrockConverse(w http.ResponseWriter, r *http.Request) b
 	if token := strings.TrimSpace(r.Header.Get("X-OLP-API-Key")); token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
-	s.inference(openai.FamilyBedrock)(w, r)
+	s.inference(wire.Bedrock)(w, r)
 	return true
 }
 
 func (s *Server) bedrockInvoke(w http.ResponseWriter, r *http.Request) {
-	s.bedrockServe(w, r, openai.FamilyBedrockInvoke, "bedrock_invoke", "unary", "invoke")
+	s.bedrockServe(w, r, wire.BedrockInvoke, "bedrock_invoke", "unary", "invoke")
 }
 
 func (s *Server) bedrockInvokeStream(w http.ResponseWriter, r *http.Request) {
-	s.bedrockServe(w, r, openai.FamilyBedrockInvoke, "bedrock_invoke", "streaming", "invoke-with-response-stream")
+	s.bedrockServe(w, r, wire.BedrockInvoke, "bedrock_invoke", "streaming", "invoke-with-response-stream")
 }
 
-func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family openai.Family, operation, mode, upstreamOp string) {
-	x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wire.Format, operation, mode, upstreamOp string) {
+	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 	x.mode = mode
 	fail := func(e *Error) {
 		x.failure = e
@@ -129,7 +131,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
 	defer s.settleCaps(r.Context(), x)
-	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *runtime.Provider, model string) bool {
+	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *routing.Provider, model string) bool {
 		return bedrockQualified(provider, model, operation, mode)
 	})
 	if e != nil {
@@ -203,7 +205,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
-func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint string, body []byte, stream bool) (*http.Response, *attemptFailure) {
+func (s *Server) bedrockCall(ctx context.Context, x *call, p *pin, endpoint string, body []byte, stream bool) (*http.Response, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -224,26 +226,26 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	return s.doPinnedRequest(ctx, x, p, exchange, req, bedrockErrorBody)
 }
 
-func bedrockErrorBody(body []byte) *openai.UpstreamError {
-	var wire struct {
+func bedrockErrorBody(body []byte) *wire.UpstreamError {
+	var encodedWire struct {
 		Message string `json:"message"`
 		Type    string `json:"__type"`
 	}
-	if json.Unmarshal(body, &wire) != nil || wire.Message == "" {
+	if json.Unmarshal(body, &encodedWire) != nil || encodedWire.Message == "" {
 		return openai.ParseErrorBody(body)
 	}
-	code := wire.Type
+	code := encodedWire.Type
 	if i := strings.LastIndex(code, "#"); i >= 0 {
 		code = code[i+1:]
 	}
-	return &openai.UpstreamError{Type: "upstream_error", Code: code, Message: wire.Message}
+	return &wire.UpstreamError{Type: "upstream_error", Code: code, Message: encodedWire.Message}
 }
 
-func (s *Server) validateBedrockResult(x *execution, p *pin, upstreamOp string, body []byte, w http.ResponseWriter) *Error {
+func (s *Server) validateBedrockResult(x *call, p *pin, upstreamOp string, body []byte, w http.ResponseWriter) *Error {
 	model := p.provider.Connector().Model(p.model)
 	switch upstreamOp {
 	case "converse":
-		completion, err := protocols.Decode(openai.FamilyBedrock, openai.FamilyBedrock, body, model, "")
+		completion, err := protocols.Decode(wire.Bedrock, wire.Bedrock, body, model, "")
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Converse response.")
 		}
@@ -255,17 +257,17 @@ func (s *Server) validateBedrockResult(x *execution, p *pin, upstreamOp string, 
 	return nil
 }
 
-func (s *Server) validateBedrockInvoke(x *execution, model string, body []byte) *Error {
+func (s *Server) validateBedrockInvoke(x *call, model string, body []byte) *Error {
 	switch {
 	case strings.Contains(model, "anthropic.claude"):
-		completion, err := protocols.Decode(openai.FamilyAnthropic, openai.FamilyAnthropic, body, model, "")
+		completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, body, model, "")
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Claude response.")
 		}
 		s.recordBedrockUsage(x, completion.Usage)
 		return nil
 	case strings.HasPrefix(model, "amazon.titan-embed-text-"):
-		completion, err := protocols.Decode(openai.FamilyBedrockEmbeddings, openai.FamilyBedrockEmbeddings, body, model, "")
+		completion, err := protocols.Decode(wire.BedrockEmbeddings, wire.BedrockEmbeddings, body, model, "")
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan embeddings response.")
 		}
@@ -288,20 +290,20 @@ func (s *Server) validateBedrockInvoke(x *execution, model string, body []byte) 
 }
 
 func validateTitanImage(body []byte) error {
-	var wire struct {
+	var encodedWire struct {
 		Images []string `json:"images"`
 		Error  *string  `json:"error"`
 	}
-	if json.Unmarshal(body, &wire) != nil {
+	if json.Unmarshal(body, &encodedWire) != nil {
 		return errors.New("invalid Titan image response")
 	}
-	if wire.Error != nil && *wire.Error != "" {
+	if encodedWire.Error != nil && *encodedWire.Error != "" {
 		return errors.New("provider image error")
 	}
-	if len(wire.Images) == 0 {
+	if len(encodedWire.Images) == 0 {
 		return errors.New("missing images")
 	}
-	for _, image := range wire.Images {
+	for _, image := range encodedWire.Images {
 		if image == "" {
 			return errors.New("empty image payload")
 		}
@@ -309,7 +311,7 @@ func validateTitanImage(body []byte) error {
 	return nil
 }
 
-func (s *Server) recordBedrockUsage(x *execution, usage *openai.Usage) {
+func (s *Server) recordBedrockUsage(x *call, usage *wire.Usage) {
 	if usage == nil || len(x.facts) == 0 {
 		return
 	}
@@ -318,7 +320,7 @@ func (s *Server) recordBedrockUsage(x *execution, usage *openai.Usage) {
 	fact.recordEvidence(false)
 }
 
-func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *execution, p *pin, resp *http.Response) {
+func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *call, p *pin, resp *http.Response) {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/vnd.amazon.eventstream"
@@ -332,7 +334,7 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	var usage *openai.Usage
+	var usage *wire.Usage
 	var failure *Error
 	class := classProtocol
 	terminal, authoritativeUsage, initialUsage, finalUsage := false, false, false, false

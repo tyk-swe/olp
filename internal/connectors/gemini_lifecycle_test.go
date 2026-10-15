@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestGeminiLifecycleProfilesHaveDistinctAddressAndCapability(t *testing.T) {
@@ -40,7 +41,7 @@ func TestGeminiLifecycleProfilesHaveDistinctAddressAndCapability(t *testing.T) {
 	if _, err := interactions.InteractionsURL("../other", ""); err == nil {
 		t.Fatal("resource ID could change the target path")
 	}
-	if _, err := interactions.TargetFamily(openai.FamilyGemini); err == nil {
+	if _, err := interactions.TargetFamily(wire.Gemini); err == nil {
 		t.Fatal("Interactions profile silently fell through GenerateContent")
 	}
 	withDefaults := interactions

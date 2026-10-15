@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func decodeGeminiGeneration(r *reader) error {
@@ -16,7 +16,7 @@ func decodeGeminiGeneration(r *reader) error {
 		if e != nil {
 			return e
 		}
-		nestedC, e := decodeCanonical(openai.FamilyGemini, nested)
+		nestedC, e := decodeCanonical(wire.Gemini, nested)
 		if e != nil {
 			return e
 		}
@@ -102,7 +102,7 @@ func decodeGeminiGeneration(r *reader) error {
 					id = fmt.Sprintf("call_%d_%d", i, j)
 				}
 				calls[name] = append(calls[name], id)
-				base.Calls = append(base.Calls, openai.ToolCall{ID: id, Name: name, Arguments: string(f.take("args"))})
+				base.Calls = append(base.Calls, wire.ToolCall{ID: id, Name: name, Arguments: string(f.take("args"))})
 				f.finish()
 			} else if fr := part.take("functionResponse"); present(fr) {
 				f, e := read(fr, path+"/functionResponse", c)

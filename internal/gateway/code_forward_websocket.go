@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -239,11 +241,11 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			// The socket still uses the authorization sent at its handshake,
 			// even if this generation's admission reads a refreshed credential.
 			active.auth = connection.auth
-			if s.Runtime.Eligibility(connection.auth.CredentialID) != runtime.Eligible {
+			if s.Runtime.Eligibility(connection.auth.CredentialID) != routing.Eligible {
 				refuse(codemode.Refuse(503, "code_account_unavailable"))
 				return
 			}
-			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && s.Runtime.Eligibility(network.CredentialID) != runtime.Eligible {
+			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && s.Runtime.Eligibility(network.CredentialID) != routing.Eligible {
 				refuse(codemode.Refuse(503, "code_network_credential_unavailable"))
 				return
 			}

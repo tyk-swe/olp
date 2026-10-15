@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestSamePolicy(t *testing.T) {
@@ -71,7 +71,7 @@ func TestSamePolicy(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var left, right *runtime.Policy
+			var left, right *routing.Policy
 			if err := json.Unmarshal([]byte(tc.left), &left); err != nil {
 				t.Fatal(err)
 			}
@@ -89,16 +89,16 @@ func TestPolicyResponseEncoding(t *testing.T) {
 	maxAttempts := 2
 	for _, tc := range []struct {
 		name   string
-		policy *runtime.Policy
+		policy *routing.Policy
 	}{
 		{name: "missing policy", policy: nil},
-		{name: "empty policy", policy: &runtime.Policy{}},
+		{name: "empty policy", policy: &routing.Policy{}},
 		{
 			name: "populated policy",
-			policy: &runtime.Policy{
+			policy: &routing.Policy{
 				AllowedStrategies: []string{"price"},
-				Constraints:       runtime.Preferences{Ignore: []string{"vendor:openai"}},
-				Defaults:          runtime.Preferences{MaxAttempts: &maxAttempts},
+				Constraints:       routing.Preferences{Ignore: []string{"vendor:openai"}},
+				Defaults:          routing.Preferences{MaxAttempts: &maxAttempts},
 			},
 		},
 	} {

@@ -5,8 +5,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -23,7 +24,7 @@ const (
 // fallbackFrame is a failed route whose declared fallbacks remain to be tried
 // for the conditions it met.
 type fallbackFrame struct {
-	route      *runtime.Route
+	route      *routing.Route
 	conditions []string
 	next       int
 }
@@ -31,7 +32,7 @@ type fallbackFrame struct {
 // bind makes x.route the request's primary route: its deadline and attempt
 // budget bound the request, whichever routes it moves on to. A fixed request
 // belongs to its route and never leaves it.
-func (x *execution) bind(p planner, authorize func(*runtime.Route) *Error, fixed bool) {
+func (x *call) bind(p planner, authorize func(*routing.Route) *Error, fixed bool) {
 	x.primary, x.planner, x.authorize, x.fixed = x.route, p, authorize, fixed
 	x.visited = append(x.visited[:0], x.route.Slug)
 	x.seed = x.affinity
@@ -39,7 +40,7 @@ func (x *execution) bind(p planner, authorize func(*runtime.Route) *Error, fixed
 }
 
 // named is the route the caller named.
-func (x *execution) named() *runtime.Route {
+func (x *call) named() *routing.Route {
 	if x.primary != nil {
 		return x.primary
 	}
@@ -48,7 +49,7 @@ func (x *execution) named() *runtime.Route {
 
 // planNamed plans the primary route. A route that cannot plan any attempt for
 // a reason one of its fallbacks names moves the request on before dispatch.
-func (s *Server) planNamed(ctx context.Context, x *execution) *Error {
+func (s *Server) planNamed(ctx context.Context, x *call) *Error {
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	e := s.replan(ctx, x)
@@ -60,7 +61,7 @@ func (s *Server) planNamed(ctx context.Context, x *execution) *Error {
 
 // routeContext starts the named route's deadline once, before classifiers and
 // other dynamic planning. Admission, dispatch and fallback share what remains.
-func (x *execution) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+func (x *call) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if x.deadline.IsZero() {
 		x.deadline = time.Now().Add(time.Duration(x.named().OverallTimeout) * time.Millisecond)
 	}
@@ -68,7 +69,7 @@ func (x *execution) routeContext(ctx context.Context) (context.Context, context.
 }
 
 // replan plans x.route with the request's own planner.
-func (s *Server) replan(ctx context.Context, x *execution) *Error {
+func (s *Server) replan(ctx context.Context, x *call) *Error {
 	x.planConditions = nil
 	if e := x.checkBody(x.route); e != nil {
 		return e
@@ -85,7 +86,7 @@ func (s *Server) replan(ctx context.Context, x *execution) *Error {
 // adoptPlan takes the plan of the route the request is on. The primary
 // route's attempt budget bounds the request, so a later route receives what
 // remains of it.
-func (x *execution) adoptPlan(plan runtime.Plan) {
+func (x *call) adoptPlan(plan routing.Plan) {
 	if x.allowance == 0 {
 		x.allowance = plan.Budget
 	}
@@ -103,7 +104,7 @@ func (x *execution) adoptPlan(plan runtime.Plan) {
 
 // delegate moves the request to the route its matched selector names. The
 // planner has already checked that the route exists and the key may use it.
-func (s *Server) delegate(ctx context.Context, x *execution, plan runtime.Plan) *Error {
+func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Error {
 	if x.allowance == 0 {
 		x.allowance = plan.Budget
 	}
@@ -112,11 +113,11 @@ func (s *Server) delegate(ctx context.Context, x *execution, plan runtime.Plan) 
 	if e != nil {
 		return e
 	}
-	if outcome != runtime.FallbackPlanned {
+	if outcome != routing.FallbackPlanned {
 		if x.costExcluded {
 			return costLimitExceeded()
 		}
-		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, x.route.Slug)
+		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, x.route.Slug)
 	}
 	if x.selector == "" {
 		x.selector = selector
@@ -126,22 +127,22 @@ func (s *Server) delegate(ctx context.Context, x *execution, plan runtime.Plan) 
 
 // adopt moves the request to the named route and plans it, returning the
 // outcome a fallback step records and the route's planning refusal.
-func (s *Server) adopt(ctx context.Context, x *execution, slug, via string) (string, *Error) {
+func (s *Server) adopt(ctx context.Context, x *call, slug, via string) (string, *Error) {
 	if slices.Contains(x.visited, slug) {
-		return runtime.FallbackRepeated, nil
+		return routing.FallbackRepeated, nil
 	}
 	route, ok := x.snapshot().Routes[slug]
 	if !ok {
-		return runtime.FallbackUnavailable, nil
+		return routing.FallbackUnavailable, nil
 	}
 	if x.authorize(&route) != nil {
-		return runtime.FallbackForbidden, nil
+		return routing.FallbackForbidden, nil
 	}
 	x.useRoute(&route, via)
 	if e := s.replan(ctx, x); e != nil {
 		return e.Code, e
 	}
-	return runtime.FallbackPlanned, nil
+	return routing.FallbackPlanned, nil
 }
 
 // fallBack moves a request whose route failed with conditions to the first
@@ -150,7 +151,7 @@ func (s *Server) adopt(ctx context.Context, x *execution, slug, via string) (str
 // route fails for the route that delegated to it as well. It reports whether
 // a fallback route planned attempts within what remains of the request's
 // attempt budget.
-func (s *Server) fallBack(ctx context.Context, x *execution, conditions []string) bool {
+func (s *Server) fallBack(ctx context.Context, x *call, conditions []string) bool {
 	if x.primary == nil || x.fixed {
 		return false
 	}
@@ -167,10 +168,10 @@ func (s *Server) fallBack(ctx context.Context, x *execution, conditions []string
 		if len(met) == 0 {
 			continue
 		}
-		step := runtime.FallbackStep{From: top.route.Slug, Route: fallback.Route, Conditions: met}
+		step := routing.FallbackStep{From: top.route.Slug, Route: fallback.Route, Conditions: met}
 		step.Outcome, _ = s.adopt(ctx, x, fallback.Route, usage.ViaFallback)
 		x.fallbacks = append(x.fallbacks, step)
-		if step.Outcome == runtime.FallbackPlanned {
+		if step.Outcome == routing.FallbackPlanned {
 			return true
 		}
 		if len(x.planConditions) > 0 {
@@ -182,8 +183,8 @@ func (s *Server) fallBack(ctx context.Context, x *execution, conditions []string
 
 // pushFrames records that x.route, and every route that delegated to it,
 // failed with conditions.
-func (x *execution) pushFrames(conditions []string) {
-	push := func(route *runtime.Route) {
+func (x *call) pushFrames(conditions []string) {
+	push := func(route *routing.Route) {
 		if len(route.Fallbacks) > 0 && !slices.ContainsFunc(x.frames, func(f fallbackFrame) bool { return f.route.Slug == route.Slug }) {
 			x.frames = append(x.frames, fallbackFrame{route: route, conditions: conditions})
 		}
@@ -197,13 +198,13 @@ func (x *execution) pushFrames(conditions []string) {
 // useRoute moves the request to route. Provider preparation depends on the
 // route's fidelity and content policy, and the session seed on its affinity,
 // so both start over.
-func (x *execution) useRoute(route *runtime.Route, via string) {
+func (x *call) useRoute(route *routing.Route, via string) {
 	if via == usage.ViaSelector {
 		x.delegators = append(x.delegators, x.route)
 	} else {
 		x.delegators = nil
 	}
-	x.route = route
+	x.routeLeg = routeLeg{route: route}
 	x.visited = append(x.visited, route.Slug)
 	x.leg = &usage.RouteLeg{Route: route.Slug, RevisionID: route.RevisionID, Via: via}
 	x.requestPreparation = requestPreparation{}
@@ -214,14 +215,14 @@ func (x *execution) useRoute(route *runtime.Route, via string) {
 // seeds selection with the request's session key, so requests of one session
 // keep reaching the target and slot that hold their prompt cache; any other
 // route keeps the seed the request's surface chose.
-func (x *execution) routeSeed(route *runtime.Route) []byte {
-	return route.Affinity.Seed(x.attribution, x.parsed, x.seed)
+func (x *call) routeSeed(route *routing.Route) []byte {
+	return route.Affinity.Seed(x.attribution, x.generation.parsed, x.seed)
 }
 
 // legPreferences are the caller's preferences for planning x.route. A caller's
 // attempt budget is judged against the primary route only; later routes
 // share what remains of it.
-func (x *execution) legPreferences() *runtime.Preferences {
+func (x *call) legPreferences() *routing.Preferences {
 	if x.preferences == nil || x.preferences.MaxAttempts == nil || x.route == x.primary {
 		return x.preferences
 	}
@@ -232,13 +233,13 @@ func (x *execution) legPreferences() *runtime.Preferences {
 
 // mayLeaveRoute reports whether the request can move on to another route
 // after its own attempts fail, so admission reserves its whole budget.
-func (x *execution) mayLeaveRoute() bool {
+func (x *call) mayLeaveRoute() bool {
 	return x.primary != nil && !x.fixed && (len(x.route.Fallbacks) > 0 || len(x.delegators) > 0 || len(x.frames) > 0)
 }
 
 // keyAuthorizer allows the routes an API key may use for inference.
-func (s *Server) keyAuthorizer(authority access.Authority) func(*runtime.Route) *Error {
-	return func(route *runtime.Route) *Error {
+func (s *Server) keyAuthorizer(authority access.Authority) func(*routing.Route) *Error {
+	return func(route *routing.Route) *Error {
 		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 			return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 		}

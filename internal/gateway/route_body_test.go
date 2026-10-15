@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func routeBodyLimit(t *testing.T, rt *fakeRuntime, slug string, limit int64) {
@@ -18,7 +19,7 @@ func routeBodyLimit(t *testing.T, rt *fakeRuntime, slug string, limit int64) {
 	route := rt.release.Snapshot.Routes[slug]
 	route.MaxBodyBytes = &limit
 	rt.release.Snapshot.Routes[slug] = route
-	if err := rt.release.Snapshot.Validate(); err != nil {
+	if err := rt.release.Snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -75,7 +76,7 @@ func TestRouteBodyLimitDoesNotRaiseInstallationCap(t *testing.T) {
 }
 func TestRouteBodyLimitValidation(t *testing.T) {
 	for _, size := range []int64{-1, 0, 1, 1 << 30, (1 << 30) + 1} {
-		b := runtime.Behavior{MaxBodyBytes: &size}
+		b := routing.Behavior{MaxBodyBytes: &size}
 		if (b.Validate("route", nil) == nil) != (size > 0 && size <= 1<<30) {
 			t.Fatalf("size %d validation", size)
 		}
@@ -87,8 +88,8 @@ func TestRouteBodyLimitValidation(t *testing.T) {
 
 func TestFallbackCannotDispatchThroughASmallerBodyLimit(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
-		splitRoutes(s, b, runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}})
+	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
 		route := s.Routes[backupSlug]
 		limit := int64(1)
 		route.MaxBodyBytes = &limit
@@ -140,7 +141,7 @@ func TestRouteBodyLimitCoversGeminiInteractions(t *testing.T) {
 		h := newHarness(t, Config{})
 		for id, p := range h.rt.release.Snapshot.Providers {
 			p.Kind, p.ProfileID, p.ProfileRevision, p.Endpoint = "gemini", "gemini-interactions", connectors.ProfileRevision, h.upstream.URL+"/v1beta"
-			p.Capabilities = append(p.Capabilities, runtime.Capability{Model: p.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "unary"})
+			p.Capabilities = append(p.Capabilities, routing.Capability{Model: p.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "unary"})
 			h.rt.release.Snapshot.Providers[id] = p
 		}
 		h.mock.set("v1beta", status(200, `{"id":"int_1","status":"completed","outputs":[]}`))

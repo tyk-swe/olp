@@ -7,18 +7,19 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // ApplyEmbeddingDefaults owns the native positions of embedding controls.
 // Gemini batch controls belong to each request, never an invented batch-global
 // field. Vertex parameters and other objects replace atomically when omitted.
-func ApplyEmbeddingDefaults(prepared oif.Prepared, wire openai.Family, defaults Object) (oif.Prepared, error) {
+func ApplyEmbeddingDefaults(prepared oif.Prepared, encodedWire wire.Format, defaults Object) (oif.Prepared, error) {
 	if len(defaults) == 0 {
 		return prepared, nil
 	}
-	if wire != openai.FamilyGeminiEmbeddings && wire != openai.FamilyGeminiEmbeddingsBatch && wire != openai.FamilyVertexEmbeddings && wire != openai.FamilyBedrockEmbeddings {
+	if encodedWire != wire.GeminiEmbeddings && encodedWire != wire.GeminiEmbeddingsBatch && encodedWire != wire.VertexEmbeddings && encodedWire != wire.BedrockEmbeddings {
 		return prepared, nil
 	}
 	body, err := object(prepared.Document().Bytes())
@@ -35,7 +36,7 @@ func ApplyEmbeddingDefaults(prepared oif.Prepared, wire openai.Family, defaults 
 			changes = append(changes, oif.Provenance{Pointer: prefix + "/" + strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1"), Origin: oif.ProviderDefault, Reason: "fill omitted native embedding control"})
 		}
 	}
-	if wire == openai.FamilyGeminiEmbeddingsBatch {
+	if encodedWire == wire.GeminiEmbeddingsBatch {
 		var requests []json.RawMessage
 		if json.Unmarshal(body["requests"], &requests) != nil {
 			return oif.Prepared{}, protocolError("invalid Gemini embedding batch")

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -23,25 +25,25 @@ import (
 func strictDispatchGateway(tb testing.TB, upstream *benchTransport) http.Handler {
 	tb.Helper()
 	credential, version, slot := uuid.NewString(), 1, uuid.NewString()
-	provider := runtime.Provider{
+	provider := routing.Provider{
 		ID: uuid.NewString(), Name: "bench", Kind: "openai_compatible", Enabled: true,
 		ActiveCredential: &credential, RevisionID: uuid.NewString(),
 		Endpoint: "http://127.0.0.1/bench/v1", AuthMode: "api_key",
 		ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision,
-		Slots: []runtime.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version}},
+		Slots: []routing.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version}},
 	}
 	for _, mode := range []string{"unary", "streaming"} {
-		provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: "gpt-bench", Operation: "generation", Surface: "openai", Mode: mode})
+		provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: "gpt-bench", Operation: "generation", Surface: "openai", Mode: mode})
 	}
 	routeID, targetID := uuid.NewString(), uuid.NewString()
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
-		Providers:  map[string]runtime.Provider{provider.ID: provider},
-		Routes: map[string]runtime.Route{routeSlug: {
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
+		Providers:  map[string]routing.Provider{provider.ID: provider},
+		Routes: map[string]routing.Route{routeSlug: {
 			ID: routeID, Slug: routeSlug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 1,
 			RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
-			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityStrict},
-			Targets:  []runtime.Target{{ID: targetID, ProviderID: provider.ID, ProviderModel: "gpt-bench", Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict},
+			Targets:  []routing.Target{{ID: targetID, ProviderID: provider.ID, ProviderModel: "gpt-bench", Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
 		}},
 	}
 	release, err := runtime.NewRelease(uuid.NewString(), 7, snapshot, map[string][]byte{credential: []byte(secretA)})

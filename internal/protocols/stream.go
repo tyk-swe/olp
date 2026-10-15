@@ -3,12 +3,14 @@ package protocols
 import (
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -19,8 +21,8 @@ var streamDone = errors.New("terminal native event")
 // Stream keeps the existing executor's backpressure and commitment boundary.
 // Native streams retain extensions. Translators retain at most maxEvent bytes
 // of text/tool state needed for the destination's terminal envelope.
-func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit) (*openai.Completion, error) {
-	return StreamWithEvents(wire, target, r, maxEvent, route, includeUsage, emit, nil)
+func Stream(encodedWire, target wire.Format, r io.Reader, maxEvent int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
+	return StreamWithEvents(encodedWire, target, r, maxEvent, route, includeUsage, emit, nil)
 }
 
 // StreamWithEvents exposes immutable native events before projection. The
@@ -31,29 +33,29 @@ func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string,
 // Actionability still requires the admitted projection and durable-state barrier.
 // expectedCandidates, when present, is the effective dispatched Gemini request's
 // candidate count. Without that request proof, Gemini totals await clean EOF.
-func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit, observe func(oif.Event) error, expectedCandidates ...int64) (*openai.Completion, error) {
-	native := wire == target || wire == openai.FamilyGemini && target == openai.FamilyGeminiStream
-	if wire.Surface() == "native" && !native {
+func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error, expectedCandidates ...int64) (*wire.Completion, error) {
+	native := encodedWire == target || encodedWire == wire.Gemini && target == wire.GeminiStream
+	if encodedWire.Surface() == "native" && !native {
 		return nil, protocolError("a native generation dialect is never translated")
 	}
-	var finish func(*openai.Completion) error
+	var finish func(*wire.Completion) error
 	upstreamEmit := emit
 	if !native {
-		if supportsCandidates(wire) && supportsCandidates(target) {
-			translator := &candidateStream{source: wire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, children: map[int]*streamTranslator{}, finishes: map[int]string{}}
+		if supportsCandidates(encodedWire) && supportsCandidates(target) {
+			translator := &candidateStream{source: encodedWire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, children: map[int]*streamTranslator{}, finishes: map[int]string{}}
 			upstreamEmit, finish = translator.frame, translator.finish
 		} else {
-			translator := &streamTranslator{source: wire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, calls: map[int]*openai.ToolCall{}, blocks: map[int]int{}}
+			translator := &streamTranslator{source: encodedWire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, calls: map[int]*wire.ToolCall{}, blocks: map[int]int{}}
 			upstreamEmit, finish = translator.frame, translator.finish
 		}
 	}
 
-	var c *openai.Completion
+	var c *wire.Completion
 	var err error
-	switch wire {
-	case openai.FamilyChat, openai.FamilyResponses:
-		c, err = openai.StreamMetadataEvents(wire, r, maxEvent, route, true, func(frame []byte) error {
-			if native && wire == openai.FamilyChat && !includeUsage {
+	switch encodedWire {
+	case wire.Chat, wire.Responses:
+		c, err = openai.StreamMetadataEvents(encodedWire, r, maxEvent, route, true, func(frame []byte) error {
+			if native && encodedWire == wire.Chat && !includeUsage {
 				var f Object
 				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
 				if json.Unmarshal([]byte(payload), &f) == nil {
@@ -66,14 +68,14 @@ func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, rou
 			}
 			return upstreamEmit(frame)
 		}, observe)
-	case openai.FamilyMistralFIM:
+	case wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
-		c, err = openai.StreamMetadataEvents(openai.FamilyMistralFIM, r, maxEvent, route, true, upstreamEmit, observe)
-	case openai.FamilyCohereChat:
+		c, err = openai.StreamMetadataEvents(wire.MistralFIM, r, maxEvent, route, true, upstreamEmit, observe)
+	case wire.CohereChat:
 		c, err = streamCohereEvents(r, maxEvent, upstreamEmit, observe)
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		expected := int64(0)
 		if len(expectedCandidates) != 0 {
 			expected = expectedCandidates[0]
@@ -101,7 +103,7 @@ func eventFrame(event string, v any) []byte {
 }
 func streamError(err error) error {
 	if errors.Is(err, sse.ErrEventTooLarge) {
-		return openai.ErrEventTooLarge
+		return wire.ErrEventTooLarge
 	}
 	if framing, ok := errors.AsType[*sse.DecodeError](err); ok {
 		return protocolError(framing.Detail)
@@ -111,7 +113,7 @@ func streamError(err error) error {
 
 // A native parser retains only its current rebound frame. The observer still
 // sees the immutable source before delivery and retains its refusal priority.
-func emitObservedEvent(event oif.Event, observe func(oif.Event) error, parsed error, frame []byte, emit openai.Emit) error {
+func emitObservedEvent(event oif.Event, observe func(oif.Event) error, parsed error, frame []byte, emit wire.Emit) error {
 	if observe != nil {
 		if err := observe(event); err != nil {
 			return err
@@ -130,8 +132,8 @@ func emitObservedEvent(event oif.Event, observe func(oif.Event) error, parsed er
 
 type contentBlock struct{ kind, args string }
 
-func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
-	c := &openai.Completion{}
+func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+	c := &wire.Completion{}
 	started, finished, done := false, false, false
 	blocks := map[int64]*contentBlock{}
 	next := int64(0)
@@ -139,7 +141,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 	retained := 0
 	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
-		event, e := openai.LiftSSE(openai.FamilyAnthropic, frame, sequence, limit)
+		event, e := openai.LiftSSE(wire.Anthropic, frame, sequence, limit)
 		if e != nil {
 			return e
 		}
@@ -216,7 +218,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 				state.kind = ""
 			}
 			if retained > limit {
-				return openai.ErrEventTooLarge
+				return wire.ErrEventTooLarge
 			}
 			blocks[index] = state
 		case "content_block_delta":
@@ -247,7 +249,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 					return protocolError("invalid tool delta")
 				}
 				if retained+len(part) > limit {
-					return openai.ErrEventTooLarge
+					return wire.ErrEventTooLarge
 				}
 				retained += len(part)
 				block.args += part
@@ -310,13 +312,13 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 		return c, streamError(err)
 	}
 	if !done {
-		return c, &openai.ProtocolError{Detail: "stream ended before message_stop", Truncated: true}
+		return c, &wire.ProtocolError{Detail: "stream ended before message_stop", Truncated: true}
 	}
 	return c, nil
 }
 
-func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error, expectedCandidates int64) (*openai.Completion, error) {
-	c := &openai.Completion{}
+func streamGeminiEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error, expectedCandidates int64) (*wire.Completion, error) {
+	c := &wire.Completion{}
 	finished := map[int64]bool{}
 	hasTools := false
 	seen := false
@@ -324,7 +326,7 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 	usageAtFinish := false
 	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
-		event, e := openai.LiftSSE(openai.FamilyGemini, frame, sequence, limit)
+		event, e := openai.LiftSSE(wire.Gemini, frame, sequence, limit)
 		if e != nil {
 			return e
 		}
@@ -404,14 +406,14 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 		return c, streamError(err)
 	}
 	if !seen {
-		return c, &openai.ProtocolError{Detail: "empty Gemini stream", Truncated: true}
+		return c, &wire.ProtocolError{Detail: "empty Gemini stream", Truncated: true}
 	}
 	if !blocked && expectedCandidates > 0 && int64(len(finished)) != expectedCandidates {
-		return c, &openai.ProtocolError{Detail: "stream ended before all requested candidates", Truncated: true}
+		return c, &wire.ProtocolError{Detail: "stream ended before all requested candidates", Truncated: true}
 	}
 	for _, done := range finished {
 		if !done {
-			return c, &openai.ProtocolError{Detail: "stream ended before candidate finish", Truncated: true}
+			return c, &wire.ProtocolError{Detail: "stream ended before candidate finish", Truncated: true}
 		}
 	}
 	c.UsageComplete = c.Usage != nil && usageAtFinish
@@ -419,14 +421,14 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 }
 
 type streamTranslator struct {
-	source, target            openai.Family
+	source, target            wire.Format
 	route                     string
 	limit                     int
 	includeUsage              bool
-	emit                      openai.Emit
+	emit                      wire.Emit
 	started                   bool
 	id, text                  string
-	calls                     map[int]*openai.ToolCall
+	calls                     map[int]*wire.ToolCall
 	blocks                    map[int]int
 	textBlock                 *int
 	refusalBlock              *int
@@ -437,7 +439,7 @@ type streamTranslator struct {
 }
 
 func (t *streamTranslator) send(event string, f Object) error {
-	if t.target == openai.FamilyResponses {
+	if t.target == wire.Responses {
 		f["sequence_number"] = raw(t.sequence)
 		t.sequence++
 	}
@@ -453,11 +455,11 @@ func (t *streamTranslator) start(id string) error {
 		t.id = "olp_stream"
 	}
 	switch t.target {
-	case openai.FamilyChat:
+	case wire.Chat:
 		return t.chat(Object{"role": raw("assistant")}, nil, nil)
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		return t.send("message_start", Object{"type": raw("message_start"), "message": raw(map[string]any{"id": t.id, "type": "message", "role": "assistant", "model": t.route, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": map[string]int{"input_tokens": 0, "output_tokens": 0}})})
-	case openai.FamilyResponses:
+	case wire.Responses:
 		return t.send("response.created", Object{"type": raw("response.created"), "response": raw(map[string]any{"id": t.id, "object": "response", "created_at": 0, "status": "in_progress", "model": t.route, "output": []any{}})})
 	}
 	return nil
@@ -469,7 +471,7 @@ func (t *streamTranslator) reserve(n int) error {
 	}
 	*used += n
 	if *used > t.limit {
-		return openai.ErrEventTooLarge
+		return wire.ErrEventTooLarge
 	}
 	return nil
 }
@@ -481,9 +483,9 @@ func (t *streamTranslator) textDelta(text string) error {
 		return e
 	}
 	switch t.target {
-	case openai.FamilyChat:
+	case wire.Chat:
 		return t.chat(Object{"content": raw(text)}, nil, nil)
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		if t.textBlock == nil {
 			index := t.nextBlock
 			t.nextBlock++
@@ -493,7 +495,7 @@ func (t *streamTranslator) textDelta(text string) error {
 			}
 		}
 		return t.send("content_block_delta", Object{"type": raw("content_block_delta"), "index": raw(*t.textBlock), "delta": raw(map[string]string{"type": "text_delta", "text": text})})
-	case openai.FamilyResponses:
+	case wire.Responses:
 		if e := t.reserve(len(text)); e != nil {
 			return e
 		}
@@ -524,7 +526,7 @@ func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
 		if e := t.reserve(64); e != nil {
 			return e
 		}
-		call = &openai.ToolCall{}
+		call = &wire.ToolCall{}
 		t.calls[index] = call
 	}
 	if id != "" {
@@ -537,7 +539,7 @@ func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
 		return e
 	}
 	call.Arguments += args
-	if t.target == openai.FamilyChat {
+	if t.target == wire.Chat {
 		fun := Object{}
 		if name != "" {
 			fun["name"] = raw(name)
@@ -566,11 +568,11 @@ func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
 		t.nextBlock++
 		t.blocks[index] = block
 		switch t.target {
-		case openai.FamilyAnthropic:
+		case wire.Anthropic:
 			if e := t.send("content_block_start", Object{"type": raw("content_block_start"), "index": raw(block), "content_block": raw(map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": map[string]any{}})}); e != nil {
 				return e
 			}
-		case openai.FamilyResponses:
+		case wire.Responses:
 			if e := t.send("response.output_item.added", Object{"type": raw("response.output_item.added"), "output_index": raw(block), "item": raw(map[string]any{"type": "function_call", "id": "fc_" + call.ID, "call_id": call.ID, "name": call.Name, "arguments": "", "status": "in_progress"})}); e != nil {
 				return e
 			}
@@ -581,14 +583,14 @@ func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
 		return nil
 	}
 	switch t.target {
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		return t.send("content_block_delta", Object{"type": raw("content_block_delta"), "index": raw(block), "delta": raw(map[string]string{"type": "input_json_delta", "partial_json": args})})
-	case openai.FamilyResponses:
+	case wire.Responses:
 		return t.send("response.function_call_arguments.delta", Object{"type": raw("response.function_call_arguments.delta"), "item_id": raw("fc_" + call.ID), "output_index": raw(block), "delta": raw(args)})
 	}
 	return nil
 }
-func (t *streamTranslator) chat(delta Object, finish *string, usage *openai.Usage) error {
+func (t *streamTranslator) chat(delta Object, finish *string, usage *wire.Usage) error {
 	choices := []Object{}
 	if delta != nil || finish != nil {
 		choices = append(choices, Object{"index": raw(0), "delta": raw(delta), "finish_reason": raw(finish)})
@@ -609,7 +611,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 			return protocolError("invalid translated event")
 		}
 		switch t.source {
-		case openai.FamilyChat:
+		case wire.Chat:
 			if e := t.start(str(f["id"])); e != nil {
 				return e
 			}
@@ -635,7 +637,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 					}
 				}
 			}
-		case openai.FamilyResponses:
+		case wire.Responses:
 			if response, e := optionalObject(f["response"]); e != nil {
 				return e
 			} else if response != nil {
@@ -658,7 +660,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 				index, _ := count(f["output_index"])
 				return t.toolDelta(int(index), "", "", str(f["delta"]))
 			}
-		case openai.FamilyAnthropic:
+		case wire.Anthropic:
 			index, _ := count(f["index"])
 			switch str(f["type"]) {
 			case "message_start":
@@ -685,7 +687,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 					return t.toolDelta(int(index), "", "", str(d["partial_json"]))
 				}
 			}
-		case openai.FamilyGemini:
+		case wire.Gemini:
 			if e := t.start(str(f["responseId"])); e != nil {
 				return e
 			}
@@ -724,7 +726,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 		return nil
 	})
 }
-func (t *streamTranslator) finish(c *openai.Completion) error {
+func (t *streamTranslator) finish(c *wire.Completion) error {
 	if e := t.start(c.UpstreamID); e != nil {
 		return e
 	}
@@ -760,7 +762,7 @@ func (t *streamTranslator) finish(c *openai.Completion) error {
 		summary.FinishReason = "tool_calls"
 	}
 	switch t.target {
-	case openai.FamilyChat:
+	case wire.Chat:
 		if e := t.chat(Object{}, &summary.FinishReason, nil); e != nil {
 			return e
 		}
@@ -770,7 +772,7 @@ func (t *streamTranslator) finish(c *openai.Completion) error {
 			}
 		}
 		return t.emit([]byte("data: [DONE]\n\n"))
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		for i := 0; i < t.nextBlock; i++ {
 			if e := t.send("content_block_stop", Object{"type": raw("content_block_stop"), "index": raw(i)}); e != nil {
 				return e
@@ -793,7 +795,7 @@ func (t *streamTranslator) finish(c *openai.Completion) error {
 			return e
 		}
 		return t.send("message_stop", Object{"type": raw("message_stop")})
-	case openai.FamilyResponses:
+	case wire.Responses:
 		output := make([]Object, t.nextBlock)
 		if t.textBlock != nil {
 			index := *t.textBlock

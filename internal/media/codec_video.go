@@ -64,14 +64,14 @@ func encodeRunwayCreate(r *Request, model string) (*UpstreamCall, *Error) {
 		}
 	}
 	created := func(body []byte) (*VideoJobResult, *Error) {
-		var wire struct {
+		var encodedWire struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal(body, &wire) != nil || wire.ID == "" {
+		if json.Unmarshal(body, &encodedWire) != nil || encodedWire.ID == "" {
 			return nil, protocolError("The provider created no video task.")
 		}
 		now := time.Now().Unix()
-		return &VideoJobResult{ID: wire.ID, Status: "queued", CreatedAt: &now, Prompt: &r.Prompt, Seconds: &duration, Size: r.Size}, nil
+		return &VideoJobResult{ID: encodedWire.ID, Status: "queued", CreatedAt: &now, Prompt: &r.Prompt, Seconds: &duration, Size: r.Size}, nil
 	}
 	call := &UpstreamCall{Method: http.MethodPost, Path: path, Kind: ResponseVideoJob, Ambiguous: true, DecodeVideo: created}
 	call.JSONFrom = func(read func(*Part) ([]byte, *Error)) ([]byte, *Error) {
@@ -93,7 +93,7 @@ func encodeRunwayCreate(r *Request, model string) (*UpstreamCall, *Error) {
 
 // runwayTaskObject is a Runway task as OpenAI's video object.
 func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		ID          string   `json:"id"`
 		Status      string   `json:"status"`
 		CreatedAt   string   `json:"createdAt"`
@@ -101,24 +101,24 @@ func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
 		Failure     *string  `json:"failure"`
 		FailureCode *string  `json:"failureCode"`
 	}
-	if json.Unmarshal(body, &wire) != nil || wire.ID == "" {
+	if json.Unmarshal(body, &encodedWire) != nil || encodedWire.ID == "" {
 		return nil, protocolError("The provider video task is malformed.")
 	}
 	statuses := map[string]string{"PENDING": "queued", "THROTTLED": "queued", "RUNNING": "in_progress", "SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "failed"}
-	status, ok := statuses[wire.Status]
+	status, ok := statuses[encodedWire.Status]
 	if !ok {
 		return nil, protocolError("The provider video task has an unknown status.")
 	}
-	result := &VideoJobResult{ID: wire.ID, Status: status, ErrorCode: wire.FailureCode, ErrorMessage: wire.Failure}
-	if wire.Progress != nil {
-		percent := *wire.Progress * 100
+	result := &VideoJobResult{ID: encodedWire.ID, Status: status, ErrorCode: encodedWire.FailureCode, ErrorMessage: encodedWire.Failure}
+	if encodedWire.Progress != nil {
+		percent := *encodedWire.Progress * 100
 		result.Progress = &percent
 	}
-	if created, err := time.Parse(time.RFC3339, wire.CreatedAt); err == nil {
+	if created, err := time.Parse(time.RFC3339, encodedWire.CreatedAt); err == nil {
 		unix := created.Unix()
 		result.CreatedAt = &unix
 	}
-	if wire.Status == "CANCELLED" {
+	if encodedWire.Status == "CANCELLED" {
 		result.ErrorCode = new("cancelled")
 	}
 	return result, nil
@@ -144,17 +144,17 @@ func encodeRunwayContent(r *Request, _ string) (*UpstreamCall, *Error) {
 	}
 	return &UpstreamCall{Method: http.MethodGet, Path: path, Accept: "application/json", Kind: ResponseVideoContent,
 		Next: func(body []byte) (*Step, *Error) {
-			var wire struct {
+			var encodedWire struct {
 				Status string   `json:"status"`
 				Output []string `json:"output"`
 			}
-			if json.Unmarshal(body, &wire) != nil {
+			if json.Unmarshal(body, &encodedWire) != nil {
 				return nil, protocolError("The provider video task is malformed.")
 			}
-			if wire.Status != "SUCCEEDED" || len(wire.Output) == 0 {
+			if encodedWire.Status != "SUCCEEDED" || len(encodedWire.Output) == 0 {
 				return nil, Fail(http.StatusConflict, "video_not_ready", "The video has no content yet.")
 			}
-			return &Step{URL: wire.Output[0], Asset: "video/"}, nil
+			return &Step{URL: encodedWire.Output[0], Asset: "video/"}, nil
 		}}, nil
 }
 

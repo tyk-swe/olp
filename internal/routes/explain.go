@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -27,27 +28,27 @@ const fallbackStandby = "standby"
 // a provider: classifier predicates use the labels the caller supplies.
 type simulation struct {
 	ctx              context.Context
-	snapshot         *runtime.Snapshot
+	snapshot         *routing.Snapshot
 	input            simulationInput
 	inputs           *usage.RoutingInputs
-	demand           *runtime.TokenDemand
+	demand           *routing.TokenDemand
 	inspectionBudget inspectionBudget
 	// named is the route the request names; every leg parses the request as
 	// addressed to it, as the gateway parses it once.
 	named     string
-	supply    runtime.SupplyReader
+	supply    routing.SupplyReader
 	unhealthy func(providerID string) bool
 	// key reads the selected API key's standing on a route, and eligibility
 	// the credential eligibility of a route's targets.
-	key         func(runtime.Route) (inspectionKeyContext, error)
-	eligibility func(runtime.Route) (func(string) runtime.Eligibility, error)
+	key         func(routing.Route) (inspectionKeyContext, error)
+	eligibility func(routing.Route) (func(string) routing.Eligibility, error)
 }
 
 // simulatedLeg is one route the request plans on.
 type simulatedLeg struct {
 	Route     string                    `json:"route"`
 	Via       *string                   `json:"via"`
-	Selectors []runtime.SelectorOutcome `json:"selectors"`
+	Selectors []routing.SelectorOutcome `json:"selectors"`
 	Affinity  *simulatedAffinity        `json:"affinity"`
 	Decisions []inspectedDecision       `json:"decisions"`
 }
@@ -65,11 +66,11 @@ type simulatedAffinity struct {
 // named route first, and every fallback the gateway would consider.
 type explanation struct {
 	Legs      []simulatedLeg         `json:"legs"`
-	Fallbacks []runtime.FallbackStep `json:"fallbacks"`
+	Fallbacks []routing.FallbackStep `json:"fallbacks"`
 }
 
 // newSimulation reads the shared state a simulation plans with once.
-func (s *Server) newSimulation(ctx context.Context, snapshot *runtime.Snapshot, input simulationInput, inputs *usage.RoutingInputs, demand *runtime.TokenDemand) *simulation {
+func (s *Server) newSimulation(ctx context.Context, snapshot *routing.Snapshot, input simulationInput, inputs *usage.RoutingInputs, demand *routing.TokenDemand) *simulation {
 	m := &simulation{ctx: ctx, snapshot: snapshot, input: input, inputs: inputs, demand: demand, supply: s.Supply}
 	if s.Fleet != nil {
 		if circuits, err := s.Fleet.Circuits(ctx, time.Now()); err == nil && len(circuits) > 0 {
@@ -81,49 +82,49 @@ func (s *Server) newSimulation(ctx context.Context, snapshot *runtime.Snapshot, 
 
 // permitted reports whether the selected key may use a route; without a
 // selected key every route is.
-func (m *simulation) permitted(route runtime.Route) bool {
+func (m *simulation) permitted(route routing.Route) bool {
 	key, err := m.key(route)
 	return err == nil && key.reason == ""
 }
 
 // evaluate answers a selector's classifier from the labels the caller supplied.
 // Plugin predicates are not simulated.
-func (m *simulation) evaluate(selector runtime.Selector) runtime.PredicateResult {
+func (m *simulation) evaluate(selector routing.Selector) routing.PredicateResult {
 	classifier := selector.When.Classifier
 	if classifier == nil {
-		return runtime.PredicateResult{Failure: "plugin_not_simulated"}
+		return routing.PredicateResult{Failure: "plugin_not_simulated"}
 	}
 	label, ok := m.input.ClassifierLabels[selector.ID]
 	if !ok {
-		return runtime.PredicateResult{Failure: "classifier_not_simulated"}
+		return routing.PredicateResult{Failure: "classifier_not_simulated"}
 	}
-	return runtime.PredicateResult{Matched: classifier.Accepts(label, nil), Label: label}
+	return routing.PredicateResult{Matched: classifier.Accepts(label, nil), Label: label}
 }
 
 // leg plans the request on one route. The plan serves only when the key may
 // use the route and it ranks at least one attempt.
-func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Plan, bool, error) {
+func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Plan, bool, error) {
 	route := m.snapshot.Routes[slug]
 	key, err := m.key(route)
 	if err != nil {
-		return simulatedLeg{}, runtime.Plan{}, false, err
+		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	eligibility, err := m.eligibility(route)
 	if err != nil {
-		return simulatedLeg{}, runtime.Plan{}, false, err
+		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	input := m.input
 	semantic, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
 	if err != nil {
-		return simulatedLeg{}, runtime.Plan{}, false, err
+		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, cmp.Or(m.named, slug), route.Fidelity.Strict())
 	if err != nil {
-		return simulatedLeg{}, runtime.Plan{}, false, err
+		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	if input.Operation == "generation" {
 		if err = inspectionClientContract(input.ClientContract, &semantic, s.Access.Keys != nil); err != nil {
-			return simulatedLeg{}, runtime.Plan{}, false, err
+			return simulatedLeg{}, routing.Plan{}, false, err
 		}
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
@@ -143,7 +144,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		preferences = &copied
 	}
 	now := time.Now()
-	options := runtime.SelectionOptions{
+	options := routing.Options{
 		Region:  s.Region,
 		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
 		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
@@ -151,7 +152,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		// A simulation reports what each target could cost and applies the
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
-		WorstCost: func(provider runtime.Provider, target runtime.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+		WorstCost: func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
 			if provider.Commitment != nil {
 				return usage.Cost{}, true
 			}
@@ -189,15 +190,15 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		options.Parameters = sync.OnceValue(func() []string { return protocols.ParameterNames(parsed) })
 	}
 	if len(route.Selectors) > 0 {
-		options.Features = runtime.DescribeRequest(input.Operation, parsed, counted.request())
+		options.Features = routing.DescribeRequest(input.Operation, parsed, counted.request())
 		options.Evaluate, options.Permitted = m.evaluate, m.permitted
 	}
 	if route.Shadowed() {
 		options.Mirror = []byte(input.Seed)
 	}
-	plan, err := runtime.PlanRequest(m.snapshot, slug, input.Operation, input.Surface, input.Mode, route.Affinity.Seed(input.Attribution, parsed, []byte(input.Seed)), options)
+	plan, err := routing.Select(m.snapshot, slug, input.Operation, input.Surface, input.Mode, route.Affinity.Seed(input.Attribution, parsed, []byte(input.Seed)), options)
 	if err != nil {
-		return simulatedLeg{}, runtime.Plan{}, false, err
+		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
 	leg := simulatedLeg{
@@ -205,7 +206,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		Decisions: inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted.estimates),
 	}
 	if leg.Selectors == nil {
-		leg.Selectors = []runtime.SelectorOutcome{}
+		leg.Selectors = []routing.SelectorOutcome{}
 	}
 	if via != "" {
 		leg.Via = &via
@@ -229,11 +230,11 @@ func (s *Server) explain(m *simulation, slug string) (explanation, error) {
 	}
 	route := m.snapshot.Routes[slug]
 	w := &walk{s: s, m: m, route: &route, visited: []string{slug}}
-	w.out = explanation{Legs: []simulatedLeg{first}, Fallbacks: []runtime.FallbackStep{}}
+	w.out = explanation{Legs: []simulatedLeg{first}, Fallbacks: []routing.FallbackStep{}}
 	if !permitted {
 		return w.out, nil
 	}
-	if w.settle(plan) == runtime.FallbackPlanned || w.fallBack() {
+	if w.settle(plan) == routing.FallbackPlanned || w.fallBack() {
 		w.standby()
 	}
 	return w.out, nil
@@ -243,8 +244,8 @@ func (s *Server) explain(m *simulation, slug string) (explanation, error) {
 type walk struct {
 	s          *Server
 	m          *simulation
-	route      *runtime.Route
-	delegators []*runtime.Route
+	route      *routing.Route
+	delegators []*routing.Route
 	visited    []string
 	conditions []string
 	frames     []walkFrame
@@ -252,39 +253,39 @@ type walk struct {
 }
 
 type walkFrame struct {
-	route      *runtime.Route
+	route      *routing.Route
 	conditions []string
 	next       int
 }
 
 // settle follows a plan's selector delegation and records the conditions an
 // unserved plan names.
-func (w *walk) settle(plan runtime.Plan) string {
+func (w *walk) settle(plan routing.Plan) string {
 	w.conditions = nil
 	if plan.Delegate != "" {
-		if w.adopt(plan.Delegate, usage.ViaSelector) != runtime.FallbackPlanned {
-			return runtime.NoEligibleTargets
+		if w.adopt(plan.Delegate, usage.ViaSelector) != routing.FallbackPlanned {
+			return routing.NoEligibleTargets
 		}
-		return runtime.FallbackPlanned
+		return routing.FallbackPlanned
 	}
 	if len(plan.Attempts) == 0 {
 		w.conditions = plan.Conditions()
-		return runtime.NoEligibleTargets
+		return routing.NoEligibleTargets
 	}
-	return runtime.FallbackPlanned
+	return routing.FallbackPlanned
 }
 
 // adopt moves the request to another route, as the gateway does.
 func (w *walk) adopt(slug, via string) string {
 	if slices.Contains(w.visited, slug) {
-		return runtime.FallbackRepeated
+		return routing.FallbackRepeated
 	}
 	route, ok := w.m.snapshot.Routes[slug]
 	if !ok {
-		return runtime.FallbackUnavailable
+		return routing.FallbackUnavailable
 	}
 	if !w.m.permitted(route) {
-		return runtime.FallbackForbidden
+		return routing.FallbackForbidden
 	}
 	if via == usage.ViaSelector {
 		w.delegators = append(w.delegators, w.route)
@@ -295,11 +296,11 @@ func (w *walk) adopt(slug, via string) string {
 	leg, plan, _, err := w.s.leg(w.m, slug, via)
 	if err != nil {
 		w.conditions = nil
-		var refusal *runtime.SelectionError
+		var refusal *routing.SelectionError
 		if errors.As(err, &refusal) {
 			return refusal.Code
 		}
-		return runtime.NoEligibleTargets
+		return routing.NoEligibleTargets
 	}
 	w.out.Legs = append(w.out.Legs, leg)
 	return w.settle(plan)
@@ -335,10 +336,10 @@ func (w *walk) fallBack() bool {
 		if len(met) == 0 {
 			continue
 		}
-		step := runtime.FallbackStep{From: from, Route: fallback.Route, Conditions: met}
+		step := routing.FallbackStep{From: from, Route: fallback.Route, Conditions: met}
 		step.Outcome = w.adopt(fallback.Route, usage.ViaFallback)
 		w.out.Fallbacks = append(w.out.Fallbacks, step)
-		if step.Outcome == runtime.FallbackPlanned {
+		if step.Outcome == routing.FallbackPlanned {
 			return true
 		}
 		if len(w.conditions) > 0 {
@@ -356,15 +357,15 @@ func (w *walk) standby() {
 	for i := len(w.frames) - 1; i >= 0; i-- {
 		frame := w.frames[i]
 		for _, fallback := range frame.route.Fallbacks[frame.next:] {
-			step := runtime.FallbackStep{From: frame.route.Slug, Route: fallback.Route, Conditions: fallback.On, Outcome: fallbackStandby}
+			step := routing.FallbackStep{From: frame.route.Slug, Route: fallback.Route, Conditions: fallback.On, Outcome: fallbackStandby}
 			target, ok := w.m.snapshot.Routes[fallback.Route]
 			switch {
 			case slices.Contains(w.visited, fallback.Route):
-				step.Outcome = runtime.FallbackRepeated
+				step.Outcome = routing.FallbackRepeated
 			case !ok:
-				step.Outcome = runtime.FallbackUnavailable
+				step.Outcome = routing.FallbackUnavailable
 			case !w.m.permitted(target):
-				step.Outcome = runtime.FallbackForbidden
+				step.Outcome = routing.FallbackForbidden
 			}
 			w.out.Fallbacks = append(w.out.Fallbacks, step)
 		}

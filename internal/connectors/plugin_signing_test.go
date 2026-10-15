@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -83,7 +84,7 @@ func TestPluginSigningHookReceivesTheProvidersOptions(t *testing.T) {
 	c := pluginConfig(t, manifest)
 	c.PluginOptions = map[string]string{"account": "acme", "region": "eu", "team": "search"}
 	c.Endpoint = c.Plugin.Address(c.PluginOptions)
-	endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+	endpoint, err := c.URL(wire.Chat, "acme-large", false)
 	if err != nil {
 		t.Fatal(err)
 	}

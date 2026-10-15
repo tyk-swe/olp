@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestIntegrationMixedCompleteAndPartialUsageChargesBeyondReservationFloor(t *testing.T) {
@@ -36,11 +37,11 @@ func TestIntegrationMixedCompleteAndPartialUsageChargesBeyondReservationFloor(t 
 		}
 	}
 	complete, partial := AttemptFact{}, AttemptFact{}
-	complete.observeUsage(&openai.Usage{InputTokens: 200, OutputTokens: 15}, true)
+	complete.observeUsage(&wire.Usage{InputTokens: 200, OutputTokens: 15}, true)
 	complete.recordEvidence(false)
-	partial.observeUsage(&openai.Usage{InputTokens: 14, OutputTokens: 1}, false)
+	partial.observeUsage(&wire.Usage{InputTokens: 14, OutputTokens: 1}, false)
 	partial.recordEvidence(true)
-	x := execution{estimate: 150, facts: []AttemptFact{complete, partial}}
+	x := call{estimate: 150, facts: []AttemptFact{complete, partial}}
 	if err = lease.Reconcile(t.Context(), *x.settledTokens()); err != nil {
 		t.Fatal(err)
 	}

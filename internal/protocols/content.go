@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 type TextSlot func(text string) (next string, stop bool)
@@ -23,13 +24,13 @@ const inspectMaxDepth = 64
 // InputInspectable reports whether InspectInputText walks the prompt text of a
 // family. Callers enforcing input content policy must not dispatch a body whose
 // family it cannot inspect.
-func InputInspectable(family openai.Family) bool {
+func InputInspectable(family wire.Format) bool {
 	return (&inspector{}).inputFields(family, nil)
 }
 
 // InspectInputText inspects declared input text and structured tool data. An
 // unsafe rewrite fails closed; callers must not dispatch a request on error.
-func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
+func InspectInputText(r *wire.Request, fn TextSlot) (*wire.Request, error) {
 	fields := r.Document()
 	w := &inspector{fn: fn}
 	w.inputFields(r.Family, fields)
@@ -41,31 +42,27 @@ func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
 	if w.err != nil {
 		return nil, w.err
 	}
-	out := r.WithFields(fields, oif.ExplicitTransform)
-	if !out.OIF().Document().Valid() {
-		return nil, errors.New("input content policy rewrite produced an invalid document")
-	}
-	return out, nil
+	return r.WithFields(fields, oif.ExplicitTransform)
 }
 
 // inputFields walks the declared prompt text of a family's body and reports
 // whether it knows the family. InputInspectable calls it with no fields, so the
 // gate and the walk cannot drift apart.
-func (w *inspector) inputFields(family openai.Family, fields map[string]json.RawMessage) bool {
+func (w *inspector) inputFields(family wire.Format, fields map[string]json.RawMessage) bool {
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
 			return w.messageList(raw, inspectOpenAIMessage)
 		})
-	case openai.FamilyResponses, openai.FamilyInputTokens:
+	case wire.Responses, wire.InputTokens:
 		w.field(fields, "instructions", w.text)
 		w.field(fields, "input", w.responsesInput)
-	case openai.FamilyEmbeddings, openai.FamilyModeration:
+	case wire.Embeddings, wire.Moderation:
 		w.field(fields, "input", w.stringOrList)
-	case openai.FamilyRerank:
+	case wire.Rerank:
 		w.field(fields, "query", w.text)
 		w.field(fields, "documents", w.stringOrList)
-	case openai.FamilyBedrockRerank:
+	case wire.BedrockRerank:
 		w.field(fields, "queries", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
 				*item = w.object(*item, func(query map[string]json.RawMessage) {
@@ -80,14 +77,14 @@ func (w *inspector) inputFields(family openai.Family, fields map[string]json.Raw
 				})
 			})
 		})
-	case openai.FamilyAnthropic, openai.FamilyAnthropicCount:
+	case wire.Anthropic, wire.AnthropicCount:
 		w.field(fields, "system", w.textOrParts)
 		w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
 			return w.messageList(raw, inspectAnthropicMessage)
 		})
-	case openai.FamilyGemini, openai.FamilyGeminiStream:
+	case wire.Gemini, wire.GeminiStream:
 		w.geminiFields(fields)
-	case openai.FamilyGeminiCount:
+	case wire.GeminiCount:
 		if _, ok := fields["generateContentRequest"]; ok {
 			w.field(fields, "generateContentRequest", func(raw json.RawMessage) json.RawMessage {
 				return w.object(raw, w.geminiFields)
@@ -95,7 +92,7 @@ func (w *inspector) inputFields(family openai.Family, fields map[string]json.Raw
 		} else {
 			w.geminiFields(fields)
 		}
-	case openai.FamilyBedrock:
+	case wire.Bedrock:
 		w.bedrockFields(fields)
 	case "bedrock_count":
 		w.field(fields, "input", func(raw json.RawMessage) json.RawMessage {
@@ -105,12 +102,12 @@ func (w *inspector) inputFields(family openai.Family, fields map[string]json.Raw
 				})
 			})
 		})
-	case openai.FamilyGeminiEmbeddings:
+	case wire.GeminiEmbeddings:
 		w.field(fields, "title", w.text)
 		w.field(fields, "content", func(raw json.RawMessage) json.RawMessage {
 			return w.object(raw, w.geminiParts)
 		})
-	case openai.FamilyGeminiEmbeddingsBatch:
+	case wire.GeminiEmbeddingsBatch:
 		w.field(fields, "requests", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
 				*item = w.object(*item, func(req map[string]json.RawMessage) {
@@ -121,7 +118,7 @@ func (w *inspector) inputFields(family openai.Family, fields map[string]json.Raw
 				})
 			})
 		})
-	case openai.FamilyVertexEmbeddings:
+	case wire.VertexEmbeddings:
 		w.field(fields, "instances", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
 				*item = w.object(*item, func(instance map[string]json.RawMessage) {
@@ -130,7 +127,7 @@ func (w *inspector) inputFields(family openai.Family, fields map[string]json.Raw
 				})
 			})
 		})
-	case openai.FamilyBedrockEmbeddings:
+	case wire.BedrockEmbeddings:
 		w.field(fields, "inputText", w.text)
 	default:
 		return false
@@ -239,14 +236,14 @@ func (w *inspector) structuredValue(value oif.Value) json.RawMessage {
 	return raw
 }
 
-func InspectOutputText(family openai.Family, body []byte, fn TextSlot) ([]byte, error) {
+func InspectOutputText(family wire.Format, body []byte, fn TextSlot) ([]byte, error) {
 	fields := map[string]json.RawMessage{}
 	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
 		return body, errors.New("response body is not a JSON object")
 	}
 	w := &inspector{fn: fn}
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		w.field(fields, "choices", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(choice *json.RawMessage) {
 				*choice = w.object(*choice, func(c map[string]json.RawMessage) {
@@ -256,7 +253,7 @@ func InspectOutputText(family openai.Family, body []byte, fn TextSlot) ([]byte, 
 				})
 			})
 		})
-	case openai.FamilyResponses:
+	case wire.Responses:
 		w.field(fields, "output", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
 				*item = w.object(*item, func(o map[string]json.RawMessage) {
@@ -270,9 +267,9 @@ func InspectOutputText(family openai.Family, body []byte, fn TextSlot) ([]byte, 
 				})
 			})
 		})
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		w.field(fields, "content", w.textOrParts)
-	case openai.FamilyGemini, openai.FamilyGeminiStream:
+	case wire.Gemini, wire.GeminiStream:
 		w.field(fields, "candidates", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
 				*item = w.object(*item, func(c map[string]json.RawMessage) {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // responsesEvents renders Responses events as an upstream streams them.
@@ -39,7 +41,7 @@ func TestAggregatedResponsesStreamIsTheTerminalResponse(t *testing.T) {
 		`{"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"Hello there"}`,
 		itemDone(0, messageItem),
 		terminalEvent("response.completed", "completed", "["+messageItem+"]"))
-	c, err := Aggregate(FamilyResponses, strings.NewReader(stream), 4096, 4096)
+	c, err := Aggregate(wire.Responses, strings.NewReader(stream), 4096, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestAggregatedResponsesStreamFillsAnEmptyOutputWithTheCompletedItems(t *tes
 		itemDone(1, callItem),
 		itemDone(0, messageItem),
 		terminalEvent("response.incomplete", "incomplete", "[]"))
-	c, err := Aggregate(FamilyResponses, strings.NewReader(stream), 4096, 4096)
+	c, err := Aggregate(wire.Responses, strings.NewReader(stream), 4096, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +75,7 @@ func TestAggregatedResponsesStreamFillsAnEmptyOutputWithTheCompletedItems(t *tes
 func TestAggregationFailsWithTheStream(t *testing.T) {
 	failed := `{"type":"response.failed","sequence_number":9,"response":{"id":"resp_1","object":"response","status":"failed","model":"acme-large","output":[],"error":{"code":"server_error","message":"The model failed."},"usage":` + streamUsage + `}}`
 	protocolError := func(err error) bool {
-		_, ok := errors.AsType[*ProtocolError](err)
+		_, ok := errors.AsType[*wire.ProtocolError](err)
 		return ok
 	}
 	for name, tc := range map[string]struct {
@@ -82,18 +84,18 @@ func TestAggregationFailsWithTheStream(t *testing.T) {
 		usage  bool
 	}{
 		"ends early": {responsesEvents(createdEvent, itemDone(0, messageItem)), func(err error) bool {
-			protocol, ok := errors.AsType[*ProtocolError](err)
+			protocol, ok := errors.AsType[*wire.ProtocolError](err)
 			return ok && protocol.Truncated
 		}, false},
 		"fails in band": {responsesEvents(createdEvent, itemDone(0, messageItem), failed), func(err error) bool {
-			stated, ok := errors.AsType[*UpstreamError](err)
+			stated, ok := errors.AsType[*wire.UpstreamError](err)
 			return ok && stated.Code == "server_error"
 		}, true},
 		"completes an item twice": {responsesEvents(createdEvent, itemDone(0, messageItem), itemDone(0, messageItem), terminalEvent("response.completed", "completed", "[]")), protocolError, false},
 		"item without its index":  {responsesEvents(createdEvent, `{"type":"response.output_item.done","sequence_number":1,"item":`+messageItem+`}`, terminalEvent("response.completed", "completed", "[]")), protocolError, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, err := Aggregate(FamilyResponses, strings.NewReader(tc.stream), 4096, 4096)
+			c, err := Aggregate(wire.Responses, strings.NewReader(tc.stream), 4096, 4096)
 			if !tc.check(err) || c != nil && c.Body != nil || tc.usage != (c != nil && c.Usage != nil && c.Usage.TotalTokens == 12) {
 				t.Fatalf("aggregated %+v: %v", c, err)
 			}
@@ -106,31 +108,31 @@ func TestAggregationIsBounded(t *testing.T) {
 	complete := responsesEvents(createdEvent, terminalEvent("response.completed", "completed", "["+messageItem+","+callItem+"]"))
 	for name, stream := range map[string]string{"completed items": filled, "terminal response": complete} {
 		t.Run(name, func(t *testing.T) {
-			c, err := Aggregate(FamilyResponses, strings.NewReader(stream), 4096, 4096)
+			c, err := Aggregate(wire.Responses, strings.NewReader(stream), 4096, 4096)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = Aggregate(FamilyResponses, strings.NewReader(stream), 4096, len(c.Body)); err != nil {
+			if _, err = Aggregate(wire.Responses, strings.NewReader(stream), 4096, len(c.Body)); err != nil {
 				t.Fatalf("a result at the bound: %v", err)
 			}
-			short, err := Aggregate(FamilyResponses, strings.NewReader(stream), 4096, len(c.Body)-1)
-			if !errors.Is(err, ErrAggregateTooLarge) || short != nil && short.Body != nil {
+			short, err := Aggregate(wire.Responses, strings.NewReader(stream), 4096, len(c.Body)-1)
+			if !errors.Is(err, wire.ErrAggregateTooLarge) || short != nil && short.Body != nil {
 				t.Fatalf("a result beyond the bound: %+v %v", short, err)
 			}
 		})
 	}
 	// Completed items count toward the bound as they arrive.
 	items := responsesEvents(createdEvent, itemDone(0, messageItem), itemDone(1, callItem))
-	if _, err := Aggregate(FamilyResponses, strings.NewReader(items), 4096, len(messageItem)+len(callItem)-1); !errors.Is(err, ErrAggregateTooLarge) {
+	if _, err := Aggregate(wire.Responses, strings.NewReader(items), 4096, len(messageItem)+len(callItem)-1); !errors.Is(err, wire.ErrAggregateTooLarge) {
 		t.Fatalf("retained items beyond the bound: %v", err)
 	}
 }
 
 func TestOnlyResponsesStreamsAggregate(t *testing.T) {
-	if !Aggregates(FamilyResponses) {
+	if !Aggregates(wire.Responses) {
 		t.Fatal("Responses streams do not aggregate")
 	}
-	for _, family := range []Family{FamilyChat, FamilyAnthropic, FamilyGemini, FamilyBedrock} {
+	for _, family := range []wire.Format{wire.Chat, wire.Anthropic, wire.Gemini, wire.Bedrock} {
 		if Aggregates(family) {
 			t.Errorf("%s streams aggregate", family)
 		}
@@ -146,8 +148,8 @@ func TestAggregatedResponsesBoundsTinyItems(t *testing.T) {
 	for i := 0; i <= maxAggregateItems; i++ {
 		stream.WriteString(responsesEvents(itemDone(i, `{}`)))
 	}
-	c, err := Aggregate(FamilyResponses, strings.NewReader(stream.String()), 4096, 256<<20)
-	if !errors.Is(err, ErrAggregateTooLarge) || c != nil && len(c.Body) != 0 {
+	c, err := Aggregate(wire.Responses, strings.NewReader(stream.String()), 4096, 256<<20)
+	if !errors.Is(err, wire.ErrAggregateTooLarge) || c != nil && len(c.Body) != 0 {
 		t.Fatalf("tiny item flood: completion=%+v error=%v", c, err)
 	}
 }
@@ -159,7 +161,7 @@ func TestAggregatedResponsesAcceptsTheItemBoundary(t *testing.T) {
 		stream.WriteString(responsesEvents(itemDone(i*7, `{}`)))
 	}
 	stream.WriteString(responsesEvents(terminalEvent("response.completed", "completed", "[]")))
-	c, err := Aggregate(FamilyResponses, strings.NewReader(stream.String()), 4096, 1<<20)
+	c, err := Aggregate(wire.Responses, strings.NewReader(stream.String()), 4096, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}

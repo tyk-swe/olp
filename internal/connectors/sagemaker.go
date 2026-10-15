@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // SageMaker AI real-time endpoints serve the model their container hosts at an
@@ -70,8 +71,8 @@ func awsEndpoint(host, service, region string) (string, error) {
 	return "https://" + host + "." + region + "." + domain, nil
 }
 
-func sagemakerURL(base string, wire openai.Family, model string) (string, error) {
-	if wire != openai.FamilyChat {
+func sagemakerURL(base string, encodedWire wire.Format, model string) (string, error) {
+	if encodedWire != wire.Chat {
 		return "", errors.New("SageMaker endpoints serve the Chat Completions schema only")
 	}
 	endpoint, component, shared := strings.Cut(model, "/")

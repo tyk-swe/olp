@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // The codecs are measured on what an agent sends and receives: a system prompt
@@ -46,10 +46,10 @@ const benchChunks = 64
 
 // benchStream is an answer of benchChunks frames in the dialect, which ends as the
 // dialect ends a stream, with the usage it reports.
-func benchStream(family openai.Family) []byte {
+func benchStream(family wire.Format) []byte {
 	var out bytes.Buffer
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		for i := range benchChunks {
 			delta := `{"content":"word %d "}`
 			if i == 0 {
@@ -59,7 +59,7 @@ func benchStream(family openai.Family) []byte {
 		}
 		out.WriteString("data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1800000000,\"model\":\"gpt-bench\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":24,\"completion_tokens\":64,\"total_tokens\":88}}\n\n")
 		out.WriteString("data: [DONE]\n\n")
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		out.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_bench\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-bench\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":24,\"output_tokens\":1}}}\n\n")
 		out.WriteString("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
 		for i := range benchChunks {
@@ -68,7 +68,7 @@ func benchStream(family openai.Family) []byte {
 		out.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 		out.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":64}}\n\n")
 		out.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		for i := range benchChunks {
 			fmt.Fprintf(&out, "data: {\"responseId\":\"resp-bench\",\"modelVersion\":\"gemini-bench\",\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"word %d \"}]}}]}\n\n", i)
 		}
@@ -87,7 +87,7 @@ func benchStream(family openai.Family) []byte {
 //
 //	go test ./internal/protocols -run '^$' -bench BenchmarkTranslateRequest -benchmem
 func BenchmarkTranslateRequest(b *testing.B) {
-	parsed, err := Parse(openai.FamilyChat, []byte(benchChatRequest), "")
+	parsed, err := Parse(wire.Chat, []byte(benchChatRequest), "")
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -101,24 +101,24 @@ func BenchmarkTranslateRequest(b *testing.B) {
 	}
 	for _, tc := range []struct {
 		name          string
-		family        openai.Family
+		family        wire.Format
 		body          []byte
 		kind, vendor  string
 		model         string
-		targetFamily  openai.Family
+		targetFamily  wire.Format
 		targetContain string
 	}{
-		{"chat-to-chat", openai.FamilyChat, []byte(benchChatRequest), "openai", "openai", "gpt-bench", openai.FamilyChat, `"gpt-bench"`},
-		{"chat-to-anthropic", openai.FamilyChat, []byte(benchChatRequest), "anthropic", "anthropic", "claude-bench", openai.FamilyAnthropic, `"tool_use"`},
-		{"anthropic-to-chat", openai.FamilyAnthropic, anthropic, "openai", "openai", "gpt-bench", openai.FamilyChat, `"tool_calls"`},
-		{"chat-to-gemini", openai.FamilyChat, []byte(benchChatRequest), "gemini", "gemini", "gemini-bench", openai.FamilyGemini, `"functionCall"`},
-		{"gemini-to-chat", openai.FamilyGemini, gemini, "openai", "openai", "gpt-bench", openai.FamilyChat, `"tool_calls"`},
+		{"chat-to-chat", wire.Chat, []byte(benchChatRequest), "openai", "openai", "gpt-bench", wire.Chat, `"gpt-bench"`},
+		{"chat-to-anthropic", wire.Chat, []byte(benchChatRequest), "anthropic", "anthropic", "claude-bench", wire.Anthropic, `"tool_use"`},
+		{"anthropic-to-chat", wire.Anthropic, anthropic, "openai", "openai", "gpt-bench", wire.Chat, `"tool_calls"`},
+		{"chat-to-gemini", wire.Chat, []byte(benchChatRequest), "gemini", "gemini", "gemini-bench", wire.Gemini, `"functionCall"`},
+		{"gemini-to-chat", wire.Gemini, gemini, "openai", "openai", "gpt-bench", wire.Chat, `"tool_calls"`},
 		// The target's model is not the one the body names, and a native Anthropic
 		// request is given it, which is what tells the case from a body that was
 		// passed along. A Gemini request names its model in the path, so it has none
 		// to rewrite.
-		{"anthropic-to-anthropic", openai.FamilyAnthropic, anthropic, "anthropic", "anthropic", "claude-routed", openai.FamilyAnthropic, `"model":"claude-routed"`},
-		{"gemini-to-gemini", openai.FamilyGemini, gemini, "gemini", "gemini", "gemini-bench", openai.FamilyGemini, `"functionCall"`},
+		{"anthropic-to-anthropic", wire.Anthropic, anthropic, "anthropic", "anthropic", "claude-routed", wire.Anthropic, `"model":"claude-routed"`},
+		{"gemini-to-gemini", wire.Gemini, gemini, "gemini", "gemini", "gemini-bench", wire.Gemini, `"functionCall"`},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			// The encoded body is checked once, outside the measurement, to be the
@@ -127,9 +127,9 @@ func BenchmarkTranslateRequest(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			encoded, wire, err := Encode(request, tc.kind, tc.vendor, tc.model, nil)
-			if err != nil || wire != tc.targetFamily || !json.Valid(encoded) || !bytes.Contains(encoded, []byte(tc.targetContain)) {
-				b.Fatalf("encoded %s as %s, %v: %.200s", tc.family, wire, err, encoded)
+			encoded, encodedWire, err := Encode(request, tc.kind, tc.vendor, tc.model, nil)
+			if err != nil || encodedWire != tc.targetFamily || !json.Valid(encoded) || !bytes.Contains(encoded, []byte(tc.targetContain)) {
+				b.Fatalf("encoded %s as %s, %v: %.200s", tc.family, encodedWire, err, encoded)
 			}
 			b.SetBytes(int64(len(tc.body)))
 			b.ReportAllocs()
@@ -153,17 +153,17 @@ func BenchmarkTranslateRequest(b *testing.B) {
 func BenchmarkTranslateResponse(b *testing.B) {
 	for _, tc := range []struct {
 		name         string
-		wire, target openai.Family
+		wire, target wire.Format
 		body         string
 		contains     string
 	}{
-		{"chat-to-chat", openai.FamilyChat, openai.FamilyChat, benchChatResponse, `"team-chat"`},
-		{"anthropic-to-chat", openai.FamilyAnthropic, openai.FamilyChat, benchAnthropicResponse, `"tool_calls"`},
-		{"chat-to-anthropic", openai.FamilyChat, openai.FamilyAnthropic, benchChatResponse, `"tool_use"`},
-		{"gemini-to-chat", openai.FamilyGemini, openai.FamilyChat, benchGeminiResponse, `"tool_calls"`},
-		{"chat-to-gemini", openai.FamilyChat, openai.FamilyGemini, benchChatResponse, `"functionCall"`},
-		{"anthropic-to-anthropic", openai.FamilyAnthropic, openai.FamilyAnthropic, benchAnthropicResponse, `"model":"team-chat"`},
-		{"gemini-to-gemini", openai.FamilyGemini, openai.FamilyGemini, benchGeminiResponse, `"modelVersion":"team-chat"`},
+		{"chat-to-chat", wire.Chat, wire.Chat, benchChatResponse, `"team-chat"`},
+		{"anthropic-to-chat", wire.Anthropic, wire.Chat, benchAnthropicResponse, `"tool_calls"`},
+		{"chat-to-anthropic", wire.Chat, wire.Anthropic, benchChatResponse, `"tool_use"`},
+		{"gemini-to-chat", wire.Gemini, wire.Chat, benchGeminiResponse, `"tool_calls"`},
+		{"chat-to-gemini", wire.Chat, wire.Gemini, benchChatResponse, `"functionCall"`},
+		{"anthropic-to-anthropic", wire.Anthropic, wire.Anthropic, benchAnthropicResponse, `"model":"team-chat"`},
+		{"gemini-to-gemini", wire.Gemini, wire.Gemini, benchGeminiResponse, `"modelVersion":"team-chat"`},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			completion, err := Decode(tc.wire, tc.target, []byte(tc.body), "team-chat", "")
@@ -191,16 +191,16 @@ func BenchmarkTranslateResponse(b *testing.B) {
 func BenchmarkTranslateStream(b *testing.B) {
 	for _, tc := range []struct {
 		name         string
-		wire, target openai.Family
+		wire, target wire.Format
 		contains     string
 	}{
-		{"chat-to-chat", openai.FamilyChat, openai.FamilyChat, "[DONE]"},
-		{"anthropic-to-anthropic", openai.FamilyAnthropic, openai.FamilyAnthropic, "message_stop"},
-		{"anthropic-to-chat", openai.FamilyAnthropic, openai.FamilyChat, "[DONE]"},
-		{"chat-to-anthropic", openai.FamilyChat, openai.FamilyAnthropic, "message_stop"},
-		{"gemini-to-chat", openai.FamilyGemini, openai.FamilyChat, "[DONE]"},
-		{"chat-to-gemini", openai.FamilyChat, openai.FamilyGeminiStream, "finishReason"},
-		{"gemini-to-gemini", openai.FamilyGemini, openai.FamilyGeminiStream, "finishReason"},
+		{"chat-to-chat", wire.Chat, wire.Chat, "[DONE]"},
+		{"anthropic-to-anthropic", wire.Anthropic, wire.Anthropic, "message_stop"},
+		{"anthropic-to-chat", wire.Anthropic, wire.Chat, "[DONE]"},
+		{"chat-to-anthropic", wire.Chat, wire.Anthropic, "message_stop"},
+		{"gemini-to-chat", wire.Gemini, wire.Chat, "[DONE]"},
+		{"chat-to-gemini", wire.Chat, wire.GeminiStream, "finishReason"},
+		{"gemini-to-gemini", wire.Gemini, wire.GeminiStream, "finishReason"},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			stream := benchStream(tc.wire)

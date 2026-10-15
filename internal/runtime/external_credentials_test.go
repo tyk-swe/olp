@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
@@ -23,7 +24,7 @@ func externalReference(version string) secretstore.Reference {
 
 func TestExternalCredentialFailuresBecomePlanIneligibilityWithoutStaleFallback(t *testing.T) {
 	reference := externalReference("1")
-	m := &Manager{authority: authorityState{loaded: true, readAt: time.Now(), ineligible: map[string]Eligibility{}}, release: &Release{references: map[string]secretstore.Reference{"credential": reference}}}
+	m := &Manager{authority: authorityState{loaded: true, readAt: time.Now(), ineligible: map[string]routing.Eligibility{}}, release: &Release{references: map[string]secretstore.Reference{"credential": reference}}}
 	var fail atomic.Bool
 	m.ExternalSecrets = externalResolveFunc(func(context.Context, secretstore.Reference) ([]byte, error) {
 		if fail.Load() {
@@ -35,7 +36,7 @@ func TestExternalCredentialFailuresBecomePlanIneligibilityWithoutStaleFallback(t
 		t.Fatal(err)
 	}
 	secret, generation, err := m.Secret(t.Context(), m.release, "credential")
-	if err != nil || string(secret) != "pinned-version-one" || generation != 0 || m.Eligibility("credential") != Eligible {
+	if err != nil || string(secret) != "pinned-version-one" || generation != 0 || m.Eligibility("credential") != routing.Eligible {
 		t.Fatal("pinned credential not served")
 	}
 	fail.Store(true)
@@ -45,18 +46,18 @@ func TestExternalCredentialFailuresBecomePlanIneligibilityWithoutStaleFallback(t
 	if err = m.refreshExternalCredentials(t.Context()); !errors.Is(err, ErrCredentialUnavailable) {
 		t.Fatal("resolution failure ignored")
 	}
-	if m.Eligibility("credential") != ExternalUnavailable {
+	if m.Eligibility("credential") != routing.ExternalUnavailable {
 		t.Fatal("plan did not name external-store failure")
 	}
 	if secret, _, err = m.Secret(t.Context(), m.release, "credential"); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
 		t.Fatal("expired bytes silently reused")
 	}
-	m.authority.ineligible["credential"] = Revoked
-	if m.Eligibility("credential") != Revoked {
+	m.authority.ineligible["credential"] = routing.Revoked
+	if m.Eligibility("credential") != routing.Revoked {
 		t.Fatal("external failure hid revocation")
 	}
 	m.authority.readAt = time.Now().Add(-AuthorityStaleAfter - time.Second)
-	if m.Eligibility("credential") != StaleAuthority {
+	if m.Eligibility("credential") != routing.StaleAuthority {
 		t.Fatal("external cache bypassed stale authority")
 	}
 }

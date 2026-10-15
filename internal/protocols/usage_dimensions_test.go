@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 var openaiEmit = func([]byte) error { return nil }
-var _ = openai.FamilyChat
+var _ = wire.Chat
 
 func TestAnthropicUsageCountsServerToolRequests(t *testing.T) {
 	body := `{"type":"message","role":"assistant","model":"claude","stop_reason":"end_turn",

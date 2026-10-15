@@ -8,12 +8,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -96,10 +97,10 @@ type TargetEntry struct {
 	Weight        int64           `json:"weight"`
 	TimeoutMS     int             `json:"timeout_ms"`
 	Tags          []string        `json:"tags,omitempty"`
-	Shadow        *runtime.Shadow `json:"shadow,omitempty"`
+	Shadow        *routing.Shadow `json:"shadow,omitempty"`
 }
 
-func targetEntry(t runtime.PublishedTarget) TargetEntry {
+func targetEntry(t routing.PublishedTarget) TargetEntry {
 	return TargetEntry{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow}
 }
 
@@ -113,14 +114,14 @@ type RouteEntry struct {
 	OverallTimeoutMS     int                 `json:"overall_timeout_ms"`
 	MaxAttempts          int                 `json:"max_attempts"`
 	Targets              []TargetEntry       `json:"targets"`
-	RoutingPolicy        *runtime.Policy     `json:"routing_policy"`
+	RoutingPolicy        *routing.Policy     `json:"routing_policy"`
 	ContentPolicy        json.RawMessage     `json:"content_policy"`
 	Fidelity             json.RawMessage     `json:"fidelity"`
-	Fallbacks            []runtime.Fallback  `json:"fallbacks,omitempty"`
-	Selectors            []runtime.Selector  `json:"selectors,omitempty"`
-	Retry                runtime.Retry       `json:"retry,omitempty"`
-	Affinity             *runtime.Affinity   `json:"affinity,omitempty"`
-	Budget               *runtime.CostLimits `json:"budget,omitempty"`
+	Fallbacks            []routing.Fallback  `json:"fallbacks,omitempty"`
+	Selectors            []routing.Selector  `json:"selectors,omitempty"`
+	Retry                routing.Retry       `json:"retry,omitempty"`
+	Affinity             *routing.Affinity   `json:"affinity,omitempty"`
+	Budget               *routing.CostLimits `json:"budget,omitempty"`
 	Retired              bool                `json:"retired"`
 }
 
@@ -135,7 +136,7 @@ type TemplateEntry struct {
 	OverallTimeoutMS int             `json:"overall_timeout_ms"`
 	MaxAttempts      int             `json:"max_attempts"`
 	Fidelity         json.RawMessage `json:"fidelity"`
-	RoutingPolicy    *runtime.Policy `json:"routing_policy"`
+	RoutingPolicy    *routing.Policy `json:"routing_policy"`
 	AutoPublish      bool            `json:"auto_publish"`
 }
 
@@ -158,12 +159,12 @@ func (t *TemplateEntry) normalize() error {
 	return nil
 }
 
-func (r *RouteEntry) behavior() runtime.Behavior {
-	return runtime.Behavior{CallerCostExempt: r.CallerCostExempt, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget}
+func (r *RouteEntry) behavior() routing.Behavior {
+	return routing.Behavior{CallerCostExempt: r.CallerCostExempt, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget}
 }
 
 func (r *RouteEntry) setBehavior(raw []byte) error {
-	behavior, err := runtime.DecodeBehavior(raw)
+	behavior, err := routing.DecodeBehavior(raw)
 	if err != nil {
 		return err
 	}
@@ -307,7 +308,7 @@ func canonicalProvider(p *ProviderEntry) {
 
 func canonicalRoute(r *RouteEntry) {
 	// An omitted fidelity is strict, so a document states every route's mode.
-	if fidelity, err := runtime.DecodeFidelity(r.Fidelity); err == nil {
+	if fidelity, err := routing.DecodeFidelity(r.Fidelity); err == nil {
 		r.Fidelity, _ = json.Marshal(fidelity)
 	}
 	if r.Operations == nil {

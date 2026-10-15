@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -93,7 +95,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 				return nil, err
 			}
 		}
-		var config runtime.Configuration
+		var config routing.Configuration
 		data, _ := json.Marshal(entry.Configuration)
 		if err = json.Unmarshal(data, &config); err != nil {
 			return nil, err

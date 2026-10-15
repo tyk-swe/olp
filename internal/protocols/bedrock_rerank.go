@@ -5,7 +5,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Bedrock reranks through the Agent Runtime's Rerank API: one text query
@@ -41,7 +41,7 @@ func encodeBedrockRerank(f Object, modelARN string) ([]byte, error) {
 
 // decodeBedrockRerank reads Bedrock's ranked sources as the OpenAI rerank
 // result, with the documents the request sent where it asks for them.
-func decodeBedrockRerank(body []byte, route string, request *openai.Request) (*openai.Completion, error) {
+func decodeBedrockRerank(body []byte, route string, request *wire.Request) (*wire.Completion, error) {
 	f, err := object(body)
 	if err != nil {
 		return nil, protocolError("invalid rerank result")
@@ -80,6 +80,6 @@ func decodeBedrockRerank(body []byte, route string, request *openai.Request) (*o
 		results = append(results, entry)
 	}
 	queries := strconv.Itoa((max(documents, 1) + bedrockRerankSourcesPerQuery - 1) / bedrockRerankSourcesPerQuery)
-	return &openai.Completion{FinishReason: "stop", Usage: &openai.Usage{MediaUnits: &queries},
+	return &wire.Completion{FinishReason: "stop", Usage: &wire.Usage{MediaUnits: &queries},
 		Body: raw(Object{"object": raw("list"), "model": raw(route), "results": raw(results)})}, nil
 }

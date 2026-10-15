@@ -30,13 +30,6 @@ func builtins() *operations.Registry {
 	return r
 }
 
-// Lookup preserves already published profile dialect labels while resolving
-// their codec identity. A hosting label never substitutes a generation codec.
-func Lookup(id string) (operations.Dialect, bool) {
-	switch id {
-	case "direct-openai/moderation", "direct-compatible/moderation", "azure-deployment/moderation", "azure-v1/moderation", "azure-responses-legacy/moderation":
-		id = "openai-moderation"
-	}
-	return Default.Lookup(id, operations.Revision)
-}
-func Identity(id string) oif.Identity { return oif.Identity{ID: id, Revision: operations.Revision} }
+// Lookup resolves the canonical dialect declared by a provider profile.
+func Lookup(id string) (operations.Dialect, bool) { return Default.Lookup(id, operations.Revision) }
+func Identity(id string) oif.Identity             { return oif.Identity{ID: id, Revision: operations.Revision} }

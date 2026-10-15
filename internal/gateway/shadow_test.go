@@ -9,15 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestShadowDrainWaitsForAccountingAndStopsNewMirrors(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
-		s.Routes[routeSlug].Targets[1].Shadow = &runtime.Shadow{SampleRate: 1}
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		s.Routes[routeSlug].Targets[1].Shadow = &routing.Shadow{SampleRate: 1}
 	})
 	started, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(release) })
@@ -61,8 +62,8 @@ func TestShadowDrainWaitsForAccountingAndStopsNewMirrors(t *testing.T) {
 
 func TestShadowDrainCancelsAtTheShutdownDeadline(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
-		s.Routes[routeSlug].Targets[1].Shadow = &runtime.Shadow{SampleRate: 1}
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		s.Routes[routeSlug].Targets[1].Shadow = &routing.Shadow{SampleRate: 1}
 	})
 	started, cancelled := make(chan struct{}), make(chan struct{})
 	h.mock.set("a", completion(modelA, answerText))
@@ -96,8 +97,8 @@ func TestShadowDrainCancelsAtTheShutdownDeadline(t *testing.T) {
 
 func TestShadowCarriesTheCallersAttribution(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.republish(func(s *runtime.Snapshot, _, _ runtime.Provider) {
-		s.Routes[routeSlug].Targets[1].Shadow = &runtime.Shadow{SampleRate: 1}
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		s.Routes[routeSlug].Targets[1].Shadow = &routing.Shadow{SampleRate: 1}
 	})
 	authority := h.rt.keys[fullKey]
 	authority.Policy.AllowedAttributionKeys = []string{"team"}

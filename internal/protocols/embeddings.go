@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func textInputs(raw json.RawMessage) ([]string, error) {
@@ -36,20 +36,20 @@ func contentPart(text string) json.RawMessage {
 	return raw(map[string]any{"parts": []any{map[string]any{"text": text}}})
 }
 
-func encodeNativeEmbeddings(wire openai.Family, f Object, model string) ([]byte, openai.Family, error) {
+func encodeNativeEmbeddings(encodedWire wire.Format, f Object, model string) ([]byte, wire.Format, error) {
 	inputs, err := textInputs(f["input"])
 	if err != nil {
-		return nil, wire, err
+		return nil, encodedWire, err
 	}
 	dimensions := f["dimensions"]
 	model = strings.TrimPrefix(model, "models/")
-	switch wire {
-	case openai.FamilyGeminiEmbeddings:
+	switch encodedWire {
+	case wire.GeminiEmbeddings:
 		if err := embeddingFields(f); err != nil {
-			return nil, wire, err
+			return nil, encodedWire, err
 		}
 		if len(inputs) > 100 {
-			return nil, wire, requestError("input", "Gemini embeddings accept at most 100 inputs")
+			return nil, encodedWire, requestError("input", "Gemini embeddings accept at most 100 inputs")
 		}
 		if len(inputs) == 1 {
 			body := Object{"content": contentPart(inputs[0])}
@@ -57,7 +57,7 @@ func encodeNativeEmbeddings(wire openai.Family, f Object, model string) ([]byte,
 				body["outputDimensionality"] = dimensions
 			}
 			encoded, err := json.Marshal(body)
-			return encoded, wire, err
+			return encoded, encodedWire, err
 		}
 		requests := make([]Object, len(inputs))
 		for i, text := range inputs {
@@ -68,13 +68,13 @@ func encodeNativeEmbeddings(wire openai.Family, f Object, model string) ([]byte,
 			requests[i] = entry
 		}
 		encoded, err := json.Marshal(Object{"requests": raw(requests)})
-		return encoded, openai.FamilyGeminiEmbeddingsBatch, err
-	case openai.FamilyVertexEmbeddings:
+		return encoded, wire.GeminiEmbeddingsBatch, err
+	case wire.VertexEmbeddings:
 		if err := embeddingFields(f, "truncation"); err != nil {
-			return nil, wire, err
+			return nil, encodedWire, err
 		}
 		if len(inputs) > 5 {
-			return nil, wire, requestError("input", "Vertex embeddings accept at most 5 inputs")
+			return nil, encodedWire, requestError("input", "Vertex embeddings accept at most 5 inputs")
 		}
 		instances := make([]Object, len(inputs))
 		for i, text := range inputs {
@@ -92,16 +92,16 @@ func encodeNativeEmbeddings(wire openai.Family, f Object, model string) ([]byte,
 			body["parameters"] = raw(parameters)
 		}
 		encoded, err := json.Marshal(body)
-		return encoded, wire, err
-	case openai.FamilyBedrockEmbeddings:
+		return encoded, encodedWire, err
+	case wire.BedrockEmbeddings:
 		if err := embeddingFields(f, "normalize"); err != nil {
-			return nil, wire, err
+			return nil, encodedWire, err
 		}
 		if !strings.HasPrefix(model, "amazon.titan-embed-text-") {
-			return nil, wire, requestError("model", "Bedrock embeddings are qualified for Titan Embed Text models only")
+			return nil, encodedWire, requestError("model", "Bedrock embeddings are qualified for Titan Embed Text models only")
 		}
 		if len(inputs) != 1 {
-			return nil, wire, requestError("input", "Bedrock embeddings accept exactly one text input")
+			return nil, encodedWire, requestError("input", "Bedrock embeddings accept exactly one text input")
 		}
 		body := Object{"inputText": raw(inputs[0])}
 		if present(dimensions) {
@@ -111,7 +111,7 @@ func encodeNativeEmbeddings(wire openai.Family, f Object, model string) ([]byte,
 			body["normalize"] = f["normalize"]
 		}
 		encoded, err := json.Marshal(body)
-		return encoded, wire, err
+		return encoded, encodedWire, err
 	}
-	return nil, wire, requestError("operation", "The selected provider does not support embeddings")
+	return nil, encodedWire, requestError("operation", "The selected provider does not support embeddings")
 }

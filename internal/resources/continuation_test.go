@@ -2,10 +2,11 @@ package resources
 
 import (
 	"errors"
-	"github.com/google/uuid"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestSubmissionIdentityHasBoundedReplayWindow(t *testing.T) {

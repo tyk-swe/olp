@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func bedrockEvent(t *testing.T, kind string, payload any) *eventstream.Message {
@@ -28,9 +29,9 @@ func bedrockChunk(t *testing.T, inner string) *eventstream.Message {
 	return bedrockEvent(t, "chunk", map[string]string{"bytes": base64.StdEncoding.EncodeToString([]byte(inner))})
 }
 
-func foldBedrockUsage(t *testing.T, messages ...*eventstream.Message) *openai.Usage {
+func foldBedrockUsage(t *testing.T, messages ...*eventstream.Message) *wire.Usage {
 	t.Helper()
-	var usage *openai.Usage
+	var usage *wire.Usage
 	for _, message := range messages {
 		observation, err := protocols.ObserveBedrockEvent(message, 1<<20)
 		if err != nil {
@@ -91,7 +92,7 @@ func TestBedrockTitanImageSettlesEstimate(t *testing.T) {
 		"unmarked success": {Class: classSuccess, Committed: true},
 		"recorded success": recorded,
 	} {
-		x := &execution{estimate: 900, dispatched: true, facts: []AttemptFact{fact}}
+		x := &call{estimate: 900, dispatched: true, facts: []AttemptFact{fact}}
 		if e := (&Server{}).validateBedrockInvoke(x, "amazon.titan-image-generator-v2:0", image); e != nil {
 			t.Fatalf("%s: validate: %+v", name, e)
 		}
@@ -103,7 +104,7 @@ func TestBedrockTitanImageSettlesEstimate(t *testing.T) {
 
 // bedrockTestUsage exercises the operation-owned projection, not a second
 // gateway parser.
-func bedrockTestUsage(message *eventstream.Message) (*openai.Usage, bool) {
+func bedrockTestUsage(message *eventstream.Message) (*wire.Usage, bool) {
 	observation, err := protocols.ObserveBedrockEvent(message, 1<<20)
 	if err != nil {
 		return nil, false

@@ -14,10 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -98,6 +99,7 @@ func init() {
 		}
 		switch p.Kind {
 		case "openai", "openai_compatible", "azure_openai":
+			p.OperationDialects = map[string]string{"moderation": "openai-moderation"}
 			p.Operations = []string{"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_list", "video_get", "video_content", "video_delete"}
 			p.SemanticHeaders = []string{"Openai-Beta"}
 			p.Documentation = "https://developers.openai.com/api/docs/guides/migrate-to-responses"
@@ -377,13 +379,13 @@ func (c Config) ValidateProfile() error {
 
 // TargetFamily is explicit for generation and operation-owned for other calls.
 // The raw model-specific Invoke profile deliberately cannot enter a chat codec.
-func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
+func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 	p, err := c.profile()
 	if err != nil {
 		return "", err
 	}
 	operation := source.Operation()
-	if source == openai.Family("bedrock_count") {
+	if source == wire.Format("bedrock_count") {
 		operation = "token_count"
 	}
 	if !slices.Contains(p.Operations, operation) {
@@ -397,52 +399,52 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	case "token_count":
 		switch p.Dialect {
 		case "anthropic-messages":
-			return openai.FamilyAnthropicCount, nil
+			return wire.AnthropicCount, nil
 		case "gemini-generate-content":
-			return openai.FamilyGeminiCount, nil
+			return wire.GeminiCount, nil
 		case "bedrock-converse":
-			return openai.Family("bedrock_count"), nil
+			return wire.Format("bedrock_count"), nil
 		default:
-			return openai.FamilyInputTokens, nil
+			return wire.InputTokens, nil
 		}
 	case "embeddings":
 		switch p.Hosting {
 		case "direct-gemini":
-			return openai.FamilyGeminiEmbeddings, nil
+			return wire.GeminiEmbeddings, nil
 		case "vertex-google":
-			return openai.FamilyVertexEmbeddings, nil
+			return wire.VertexEmbeddings, nil
 		case "bedrock-converse":
-			return openai.FamilyBedrockEmbeddings, nil
+			return wire.BedrockEmbeddings, nil
 		default:
-			return openai.FamilyEmbeddings, nil
+			return wire.Embeddings, nil
 		}
 	case "moderation":
-		return openai.FamilyModeration, nil
+		return wire.Moderation, nil
 	case "rerank":
-		return openai.FamilyRerank, nil
+		return wire.Rerank, nil
 	case "bedrock_invoke":
-		return openai.FamilyBedrockInvoke, nil
+		return wire.BedrockInvoke, nil
 	}
 	return "", errors.New("operation has no codec in the selected profile")
 }
 
 // generationFamily is the codec family of a dialect's generation requests.
-func generationFamily(dialect string) (openai.Family, bool) {
+func generationFamily(dialect string) (wire.Format, bool) {
 	switch dialect {
 	case "openai-chat":
-		return openai.FamilyChat, true
+		return wire.Chat, true
 	case "openai-responses":
-		return openai.FamilyResponses, true
+		return wire.Responses, true
 	case "anthropic-messages":
-		return openai.FamilyAnthropic, true
+		return wire.Anthropic, true
 	case "gemini-generate-content":
-		return openai.FamilyGemini, true
+		return wire.Gemini, true
 	case "bedrock-converse":
-		return openai.FamilyBedrock, true
+		return wire.Bedrock, true
 	case "mistral-fim":
-		return openai.FamilyMistralFIM, true
+		return wire.MistralFIM, true
 	case "cohere-chat-v2":
-		return openai.FamilyCohereChat, true
+		return wire.CohereChat, true
 	}
 	return "", false
 }
@@ -599,12 +601,12 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 
 // WrapBody handles only documented hosting wrappers after semantic lowering.
 // Model and cloud revision construction precede authentication/signing.
-func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
+func (c Config) WrapBody(body []byte, encodedWire wire.Format) ([]byte, error) {
 	hosting := c.Hosting()
 	if hosting != "vertex-anthropic" && hosting != "bedrock-anthropic-invoke" {
 		return body, nil
 	}
-	if wire != openai.FamilyAnthropic {
+	if encodedWire != wire.Anthropic {
 		return nil, errors.New("Anthropic cloud profile requires the Messages dialect")
 	}
 	var fields map[string]json.RawMessage

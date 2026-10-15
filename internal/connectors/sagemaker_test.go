@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -32,12 +34,12 @@ func TestSageMakerAddressesEndpointsAndComponents(t *testing.T) {
 		"shared-ep/qwen-ic-1": "https://runtime.sagemaker.us-west-2.amazonaws.com/endpoints/shared-ep/inference-components/qwen-ic-1/openai/v1/chat/completions",
 	} {
 		for _, stream := range []bool{false, true} {
-			if got, err := c.URL(openai.FamilyChat, model, stream); err != nil || got != want {
+			if got, err := c.URL(wire.Chat, model, stream); err != nil || got != want {
 				t.Fatalf("URL(%s, stream %v) = %s, %v", model, stream, got, err)
 			}
 		}
 	}
-	if _, err := c.URL(openai.FamilyEmbeddings, "qwen3-4b", false); err == nil {
+	if _, err := c.URL(wire.Embeddings, "qwen3-4b", false); err == nil {
 		t.Fatal("SageMaker addressed an embeddings call")
 	}
 	for model, valid := range map[string]bool{

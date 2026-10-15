@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -38,12 +40,12 @@ func TestResponseUsageCountsCompletedToolItems(t *testing.T) {
 			{"type":"function_call","status":"completed","call_id":"c1","name":"f","arguments":"{}"}
 		],
 		"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`
-	for _, decode := range []func([]byte) (*Usage, error){
-		func(body []byte) (*Usage, error) {
+	for _, decode := range []func([]byte) (*wire.Usage, error){
+		func(body []byte) (*wire.Usage, error) {
 			observed, err := ObserveResponseUsage(body)
 			return observed.Usage, err
 		},
-		func(body []byte) (*Usage, error) {
+		func(body []byte) (*wire.Usage, error) {
 			c, err := DecodeResponse(body, "gpt")
 			if err != nil {
 				return nil, err
@@ -69,8 +71,8 @@ func TestResponseToolCallsThroughTerminalStreamEvent(t *testing.T) {
 		`{"type":"web_search_call","status":"completed"},{"type":"web_search_call","status":"cancelled"}],` +
 		`"usage":{"input_tokens":3,"output_tokens":4}}}` + "\n\n")
 	terminal := false
-	var usage *Usage
-	_, err := stream(FamilyResponses, &frame, 1<<20, "gpt", false, true, func([]byte) error { return nil }, func(e oif.Event) error {
+	var usage *wire.Usage
+	_, err := stream(wire.Responses, &frame, 1<<20, "gpt", false, true, func([]byte) error { return nil }, func(e oif.Event) error {
 		observed, lifecycle, err := ObserveResponseEventUsage(e)
 		if err != nil {
 			return err

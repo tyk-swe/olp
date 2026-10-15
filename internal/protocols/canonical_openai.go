@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func decodeOpenAIGeneration(r *reader, family openai.Family) error {
+func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 	c := r.c
 	for _, k := range []string{"temperature", "top_p", "stop", "seed", "n", "tool_choice", "parallel_tool_calls", "response_format"} {
 		r.parameter(k, k)
@@ -15,7 +15,7 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 	r.parameter("max_tokens", "max_output_tokens")
 	r.parameter("max_completion_tokens", "max_output_tokens")
 	r.parameter("max_output_tokens", "max_output_tokens")
-	if family == openai.FamilyChat {
+	if family == wire.Chat {
 		for i, v := range arr(r.take("messages")) {
 			m, e := decodeChatMessage(v, fmt.Sprintf("/messages/%d", i), c)
 			if e != nil {
@@ -53,8 +53,8 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 				case "function_call":
 					item.take("id")
 					item.take("status")
-					tc := openai.ToolCall{ID: str(item.take("call_id")), Name: str(item.take("name")), Arguments: str(item.take("arguments"))}
-					c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []openai.ToolCall{tc}})
+					tc := wire.ToolCall{ID: str(item.take("call_id")), Name: str(item.take("name")), Arguments: str(item.take("arguments"))}
+					c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []wire.ToolCall{tc}})
 				case "function_call_output":
 					item.take("id")
 					item.ignoreDefault("status", `"completed"`)
@@ -98,7 +98,7 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 		if str(t.take("type")) != "function" {
 			c.Extensions = append(c.Extensions, p+"/type")
 		}
-		if family == openai.FamilyChat {
+		if family == wire.Chat {
 			nested, e := read(t.take("function"), p+"/function", c)
 			if e != nil {
 				return e
@@ -282,7 +282,7 @@ func decodeChatMessage(v json.RawMessage, path string, c *Generation) (Message, 
 		if e != nil {
 			return m, e
 		}
-		m.Calls = append(m.Calls, openai.ToolCall{ID: id, Name: str(f.take("name")), Arguments: str(f.take("arguments"))})
+		m.Calls = append(m.Calls, wire.ToolCall{ID: id, Name: str(f.take("name")), Arguments: str(f.take("arguments"))})
 		f.finish()
 		t.finish()
 	}

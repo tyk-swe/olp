@@ -7,8 +7,9 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestInferenceChecksCurrentEndpointPolicy(t *testing.T) {
@@ -28,7 +29,7 @@ func TestInferenceChecksCurrentEndpointPolicy(t *testing.T) {
 }
 
 func TestInferenceNormalizesEndpointAndForwardsZeroTopLogprobs(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		for _, suffix := range []string{"/", "//", "///"} {
 			t.Run(string(family)+suffix, func(t *testing.T) {
 				h := newHarness(t, Config{})
@@ -49,7 +50,7 @@ func TestInferenceNormalizesEndpointAndForwardsZeroTopLogprobs(t *testing.T) {
 					if string(fields["top_logprobs"]) != "0" {
 						t.Errorf("top_logprobs not forwarded: %s", fields["top_logprobs"])
 					}
-					if family == openai.FamilyChat {
+					if family == wire.Chat {
 						completion(modelA, answerText)(w, r)
 						return
 					}
@@ -57,7 +58,7 @@ func TestInferenceNormalizesEndpointAndForwardsZeroTopLogprobs(t *testing.T) {
 					io.WriteString(w, `{"id":"resp-1","object":"response","model":"model-a","status":"completed","output":[]}`)
 				})
 				input := `"messages":[{"role":"user","content":"hi"}],"logprobs":true`
-				if family == openai.FamilyResponses {
+				if family == wire.Responses {
 					input = `"input":"hi"`
 				}
 				resp := h.do(t.Context(), http.MethodPost, "/v1"+endpointPath(family), fullKey, []byte(`{"model":"`+routeSlug+`",`+input+`,"top_logprobs":0}`), nil)

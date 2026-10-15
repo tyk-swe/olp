@@ -6,13 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func TestConfiguredPreparationKeepsCallerPresenceAndActualDefaultOrigins(t *testing.T) {
-	request, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"temperature":null,"top_p":0,"parallel_tool_calls":false,"tools":[]}`))
+	request, err := openai.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"temperature":null,"top_p":0,"parallel_tool_calls":false,"tools":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +43,7 @@ func TestConfiguredPreparationKeepsCallerPresenceAndActualDefaultOrigins(t *test
 func TestEmbeddingDefaultsReachEachActualNativeRequest(t *testing.T) {
 	cfg := connectors.Config{Kind: "gemini", AuthMode: "api_key", ProfileID: "gemini-generation", ProfileRevision: "1", OperationDefaults: map[string]connectors.DefaultSet{"embeddings": {Dialect: "gemini-embeddings", Values: map[string]json.RawMessage{"taskType": json.RawMessage(`"RETRIEVAL_DOCUMENT"`), "outputDimensionality": json.RawMessage(`8`)}}}}
 	for _, explicit := range []string{"", `,"dimensions":3`} {
-		request, err := openai.Parse(openai.FamilyEmbeddings, []byte(`{"model":"route","input":["first","second"]`+explicit+`}`))
+		request, err := openai.Parse(wire.Embeddings, []byte(`{"model":"route","input":["first","second"]`+explicit+`}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +51,7 @@ func TestEmbeddingDefaultsReachEachActualNativeRequest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Wire != openai.FamilyGeminiEmbeddingsBatch || result.Prepared.Descriptor().Dialect.ID != "gemini-embeddings-batch" {
+		if result.Wire != wire.GeminiEmbeddingsBatch || result.Prepared.Descriptor().Dialect.ID != "gemini-embeddings-batch" {
 			t.Fatal("actual batch dialect was lost")
 		}
 		var body struct {
@@ -76,7 +78,7 @@ func TestEmbeddingDefaultsReachEachActualNativeRequest(t *testing.T) {
 			}
 		}
 	}
-	request, err := openai.Parse(openai.FamilyEmbeddings, []byte(`{"model":"route","input":"first","dimensions":null}`))
+	request, err := openai.Parse(wire.Embeddings, []byte(`{"model":"route","input":"first","dimensions":null}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +107,7 @@ func TestPluginProfileRewritesThePreparedRequestOutsideItsEnvelope(t *testing.T)
 		t.Fatal(err)
 	}
 	cfg := connectors.Config{Plugin: plugin, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-gemini", ProfileRevision: digest, Endpoint: plugin.Address(nil)}
-	request, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"seed":7,"n":2,"max_tokens":16}`))
+	request, err := openai.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"seed":7,"n":2,"max_tokens":16}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +121,7 @@ func TestPluginProfileRewritesThePreparedRequestOutsideItsEnvelope(t *testing.T)
 		Request          json.RawMessage            `json:"request"`
 	}
 	prepared := result.Prepared.Document().Bytes()
-	if json.Unmarshal(prepared, &body) != nil || result.Wire != openai.FamilyGemini || len(body.Contents) != 1 || body.Request != nil {
+	if json.Unmarshal(prepared, &body) != nil || result.Wire != wire.Gemini || len(body.Contents) != 1 || body.Request != nil {
 		t.Fatalf("prepared %s for %s", prepared, result.Wire)
 	}
 	if string(body.GenerationConfig["candidateCount"]) != "1" || string(body.GenerationConfig["maxOutputTokens"]) != "16" || body.GenerationConfig["seed"] != nil {
@@ -182,7 +184,7 @@ func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) 
 				t.Fatal(err)
 			}
 			cfg := connectors.Config{Plugin: plugin, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-responses", ProfileRevision: digest, Endpoint: plugin.Address(nil)}
-			request, err := openai.Parse(openai.FamilyResponses, []byte(`{"model":"route","input":"hi"`+tc.fields+`}`))
+			request, err := openai.Parse(wire.Responses, []byte(`{"model":"route","input":"hi"`+tc.fields+`}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -191,7 +193,7 @@ func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) 
 				t.Fatalf("prepared %s: %v", prepared.Prepared.Document().Raw(), err)
 			}
 			if tc.refused {
-				var rejected *openai.RequestError
+				var rejected *wire.RequestError
 				if !errors.As(err, &rejected) || rejected.Code != "unsupported_parameter" || rejected.Param != "provider_profile" {
 					t.Fatalf("expected a provider profile refusal, got %v", err)
 				}
@@ -203,13 +205,13 @@ func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) 
 // TestBedrockRerankNamesItsModelByARN covers the transformed rerank path of an
 // automatic Bedrock provider: the model reaches the body as its regional ARN.
 func TestBedrockRerankNamesItsModelByARN(t *testing.T) {
-	request, err := openai.Parse(openai.FamilyRerank, []byte(`{"model":"route","query":"q","documents":["a","b"]}`))
+	request, err := openai.Parse(wire.Rerank, []byte(`{"model":"route","query":"q","documents":["a","b"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := connectors.Config{Kind: "bedrock", AuthMode: "default_chain", CloudRegion: "eu-central-1", VendorID: "amazon-bedrock"}
 	result, err := Prepare(request, cfg, "cohere.rerank-v3-5:0", nil)
-	if err != nil || result.Wire != openai.FamilyBedrockRerank {
+	if err != nil || result.Wire != wire.BedrockRerank {
 		t.Fatal(result.Wire, err)
 	}
 	if body := string(result.Prepared.Document().Bytes()); !strings.Contains(body, `"modelArn":"arn:aws:bedrock:eu-central-1::foundation-model/cohere.rerank-v3-5:0"`) || strings.Contains(body, `"model"`) {

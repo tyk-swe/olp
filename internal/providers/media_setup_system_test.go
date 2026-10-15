@@ -13,12 +13,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -173,7 +174,7 @@ func TestIntegrationMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), "SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&encoded); err != nil {
 		t.Fatal(err)
 	}
-	var snapshot runtime.Snapshot
+	var snapshot routing.Snapshot
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestIntegrationMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 				if tuple.Operation != op {
 					continue
 				}
-				plan, err := runtime.PlanRequest(&snapshot, slug, op, "openai", tuple.Mode, []byte("media-setup"), runtime.SelectionOptions{CheckSlots: true})
+				plan, err := routing.Select(&snapshot, slug, op, "openai", tuple.Mode, []byte("media-setup"), routing.Options{CheckSlots: true})
 				if err != nil || len(plan.Attempts) != 1 {
 					t.Fatalf("published %s/%s/%s unusable: %+v %v", slug, op, tuple.Mode, plan, err)
 				}

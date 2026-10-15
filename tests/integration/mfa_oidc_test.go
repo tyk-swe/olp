@@ -3,9 +3,10 @@
 package integration_test
 
 import (
-	"github.com/pquerna/otp/totp"
 	"testing"
 	"time"
+
+	"github.com/pquerna/otp/totp"
 )
 
 func TestLinkedOIDCDoesNotReplaceEnrolledMFAForFactorManagement(t *testing.T) {

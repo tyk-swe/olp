@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -25,8 +26,8 @@ func TestAReleaseWithoutGrantProvidersPollsNoGrants(t *testing.T) {
 	// With no database pool, any query would panic.
 	m := NewManager(nil, uuid.NewString(), nil, ring, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	credential := uuid.NewString()
-	m.release = &Release{Snapshot: &Snapshot{Providers: map[string]Provider{
-		"static": {ID: "static", Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, Slots: []Slot{{ID: "slot", CredentialID: &credential}}},
+	m.release = &Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{
+		"static": {ID: "static", Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, Slots: []routing.Slot{{ID: "slot", CredentialID: &credential}}},
 	}}}
 	if err = m.refreshGrants(t.Context()); err != nil {
 		t.Fatal(err)

@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // anthropicTransformedHarness serves provider "a" as an automatic Anthropic
@@ -22,13 +23,13 @@ func anthropicTransformedHarness(t *testing.T) *harness {
 	snapshot := h.rt.release.Snapshot
 	provider := providerByName(h, "a")
 	provider.Kind, provider.VendorID = "anthropic", "anthropic"
-	provider.Capabilities = []runtime.Capability{}
+	provider.Capabilities = []routing.Capability{}
 	for _, surface := range []string{"openai", "anthropic"} {
 		provider.Capabilities = append(provider.Capabilities,
-			runtime.Capability{Model: modelA, Operation: "generation", Surface: surface, Mode: "unary"},
-			runtime.Capability{Model: modelA, Operation: "generation", Surface: surface, Mode: "streaming"})
+			routing.Capability{Model: modelA, Operation: "generation", Surface: surface, Mode: "unary"},
+			routing.Capability{Model: modelA, Operation: "generation", Surface: surface, Mode: "streaming"})
 	}
-	provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: modelA, Operation: "token_count", Surface: "anthropic", Mode: "unary"})
+	provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: modelA, Operation: "token_count", Surface: "anthropic", Mode: "unary"})
 	snapshot.Providers[provider.ID] = provider
 	route := snapshot.Routes[routeSlug]
 	route.Operations = append(route.Operations, "token_count")
@@ -148,8 +149,8 @@ func vendorTransformedHarness(t *testing.T, kind string) *harness {
 	provider := providerByName(h, "a")
 	provider.Kind = kind
 	provider.Capabilities = append(provider.Capabilities,
-		runtime.Capability{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "unary"},
-		runtime.Capability{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "streaming"})
+		routing.Capability{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "unary"},
+		routing.Capability{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "streaming"})
 	h.rt.release.Snapshot.Providers[provider.ID] = provider
 	route := h.rt.release.Snapshot.Routes[routeSlug]
 	route.Targets = route.Targets[:1]
@@ -217,7 +218,7 @@ func TestAnthropicBetaIsNotValidatedWhereItIsNeverForwarded(t *testing.T) {
 	for _, name := range []string{"a", "b"} {
 		provider := providerByName(h, name)
 		provider.Kind = "openai"
-		provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "anthropic", Mode: "unary"})
+		provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "anthropic", Mode: "unary"})
 		h.rt.release.Snapshot.Providers[provider.ID] = provider
 	}
 	body := `{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
@@ -263,7 +264,7 @@ func TestAnthropicBetaIsTakenByProvidersThatDeclareIt(t *testing.T) {
 			h.rt.release.Snapshot.Providers[provider.ID] = provider
 			route := h.rt.release.Snapshot.Routes[routeSlug]
 			route.Targets = route.Targets[:1]
-			x := &execution{request: request{release: h.rt.release}, route: &route}
+			x := &call{request: request{release: h.rt.release}, routeLeg: routeLeg{route: &route}}
 			if got := x.servesAnthropicBeta(); got != tc.want {
 				t.Fatalf("servesAnthropicBeta=%v, want %v", got, tc.want)
 			}
@@ -315,43 +316,43 @@ func TestForwardAnthropicBetaNeedsTheCallersOwnAnthropicRequestAndAProviderThatT
 	vertex := profiledConnector("vertex_ai", "vertex-anthropic")
 	for _, tc := range []struct {
 		name         string
-		source, wire openai.Family
+		source, wire wire.Format
 		cfg          connectors.Config
 		beta         []string
 		want         string
 	}{
-		{"the callers Messages request to an Anthropic provider", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{"a-2025-01-01"}, "a-2025-01-01"},
-		{"the callers count_tokens request", openai.FamilyAnthropicCount, openai.FamilyAnthropicCount, anthropicProvider, []string{"a-2025-01-01"}, "a-2025-01-01"},
-		{"a beta per line", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{"a-2025-01-01", "b-2025-02-02"}, "a-2025-01-01,b-2025-02-02"},
-		{"the Anthropic Messages profile", openai.FamilyAnthropic, openai.FamilyAnthropic, messages, []string{"a-2025-01-01"}, "a-2025-01-01"},
-		{"Claude on Vertex AI", openai.FamilyAnthropic, openai.FamilyAnthropic, vertex, []string{"a-2025-01-01"}, "a-2025-01-01"},
-		{"Claude on Bedrock InvokeModel", openai.FamilyAnthropic, openai.FamilyAnthropic, profiledConnector("bedrock", "bedrock-anthropic-invoke"), []string{"a-2025-01-01"}, ""},
-		{"a Messages request sent to OpenAI", openai.FamilyAnthropic, openai.FamilyChat, connectors.Config{Kind: "openai"}, []string{"a-2025-01-01"}, ""},
-		{"a Messages request sent to Gemini", openai.FamilyAnthropic, openai.FamilyGemini, connectors.Config{Kind: "gemini"}, []string{"a-2025-01-01"}, ""},
-		{"a Messages request sent in another dialect to an Anthropic provider", openai.FamilyAnthropic, openai.FamilyChat, anthropicProvider, []string{"a-2025-01-01"}, ""},
-		{"a Chat Completions request translated to Anthropic", openai.FamilyChat, openai.FamilyAnthropic, anthropicProvider, []string{"a-2025-01-01"}, ""},
-		{"a Responses request translated to Anthropic", openai.FamilyResponses, openai.FamilyAnthropic, anthropicProvider, []string{"a-2025-01-01"}, ""},
-		{"a Chat Completions request that no dialect change touches", openai.FamilyChat, openai.FamilyChat, anthropicProvider, []string{"a-2025-01-01"}, ""},
-		{"a header too long to forward", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{strings.Repeat("a", maxAnthropicBeta+1)}, ""},
-		{"a header that is not a valid value", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{"a\r\nInjected: 1"}, ""},
-		{"no header", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, nil, ""},
-		{"an empty header", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{""}, ""},
+		{"the callers Messages request to an Anthropic provider", wire.Anthropic, wire.Anthropic, anthropicProvider, []string{"a-2025-01-01"}, "a-2025-01-01"},
+		{"the callers count_tokens request", wire.AnthropicCount, wire.AnthropicCount, anthropicProvider, []string{"a-2025-01-01"}, "a-2025-01-01"},
+		{"a beta per line", wire.Anthropic, wire.Anthropic, anthropicProvider, []string{"a-2025-01-01", "b-2025-02-02"}, "a-2025-01-01,b-2025-02-02"},
+		{"the Anthropic Messages profile", wire.Anthropic, wire.Anthropic, messages, []string{"a-2025-01-01"}, "a-2025-01-01"},
+		{"Claude on Vertex AI", wire.Anthropic, wire.Anthropic, vertex, []string{"a-2025-01-01"}, "a-2025-01-01"},
+		{"Claude on Bedrock InvokeModel", wire.Anthropic, wire.Anthropic, profiledConnector("bedrock", "bedrock-anthropic-invoke"), []string{"a-2025-01-01"}, ""},
+		{"a Messages request sent to OpenAI", wire.Anthropic, wire.Chat, connectors.Config{Kind: "openai"}, []string{"a-2025-01-01"}, ""},
+		{"a Messages request sent to Gemini", wire.Anthropic, wire.Gemini, connectors.Config{Kind: "gemini"}, []string{"a-2025-01-01"}, ""},
+		{"a Messages request sent in another dialect to an Anthropic provider", wire.Anthropic, wire.Chat, anthropicProvider, []string{"a-2025-01-01"}, ""},
+		{"a Chat Completions request translated to Anthropic", wire.Chat, wire.Anthropic, anthropicProvider, []string{"a-2025-01-01"}, ""},
+		{"a Responses request translated to Anthropic", wire.Responses, wire.Anthropic, anthropicProvider, []string{"a-2025-01-01"}, ""},
+		{"a Chat Completions request that no dialect change touches", wire.Chat, wire.Chat, anthropicProvider, []string{"a-2025-01-01"}, ""},
+		{"a header too long to forward", wire.Anthropic, wire.Anthropic, anthropicProvider, []string{strings.Repeat("a", maxAnthropicBeta+1)}, ""},
+		{"a header that is not a valid value", wire.Anthropic, wire.Anthropic, anthropicProvider, []string{"a\r\nInjected: 1"}, ""},
+		{"no header", wire.Anthropic, wire.Anthropic, anthropicProvider, nil, ""},
+		{"an empty header", wire.Anthropic, wire.Anthropic, anthropicProvider, []string{""}, ""},
 		// A provider that publishes betas sends them with the caller's.
-		{"no header to a provider that publishes betas", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "operator-1"), nil, "operator-1"},
-		{"a header to a provider that publishes betas", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "operator-1"), []string{"caller-2"}, "operator-1,caller-2"},
-		{"a beta per line to a provider that publishes betas", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(vertex, "operator-1"), []string{"caller-2", "caller-3"}, "operator-1,caller-2,caller-3"},
-		{"betas the provider publishes too", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "a-1, b-2"), []string{"b-2,c-3,a-1"}, "a-1,b-2,c-3"},
-		{"a published name in another spelling", openai.FamilyAnthropic, openai.FamilyAnthropic, func() connectors.Config {
+		{"no header to a provider that publishes betas", wire.Anthropic, wire.Anthropic, publishing(messages, "operator-1"), nil, "operator-1"},
+		{"a header to a provider that publishes betas", wire.Anthropic, wire.Anthropic, publishing(messages, "operator-1"), []string{"caller-2"}, "operator-1,caller-2"},
+		{"a beta per line to a provider that publishes betas", wire.Anthropic, wire.Anthropic, publishing(vertex, "operator-1"), []string{"caller-2", "caller-3"}, "operator-1,caller-2,caller-3"},
+		{"betas the provider publishes too", wire.Anthropic, wire.Anthropic, publishing(messages, "a-1, b-2"), []string{"b-2,c-3,a-1"}, "a-1,b-2,c-3"},
+		{"a published name in another spelling", wire.Anthropic, wire.Anthropic, func() connectors.Config {
 			cfg := messages
 			cfg.SemanticHeaders = map[string]string{"anthropic-beta": "operator-1"}
 			return cfg
 		}(), []string{"caller-2"}, "operator-1,caller-2"},
-		{"a header to a provider that publishes an empty list", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, ""), []string{"caller-2"}, "caller-2"},
-		{"a header that is not forwarded to a provider that publishes betas", openai.FamilyChat, openai.FamilyChat, publishing(messages, "operator-1"), []string{"caller-2"}, "operator-1"},
-		{"a list too long once the provider's betas join it", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "operator-1"), []string{strings.Repeat("a", maxAnthropicBeta-5)}, "operator-1"},
+		{"a header to a provider that publishes an empty list", wire.Anthropic, wire.Anthropic, publishing(messages, ""), []string{"caller-2"}, "caller-2"},
+		{"a header that is not forwarded to a provider that publishes betas", wire.Chat, wire.Chat, publishing(messages, "operator-1"), []string{"caller-2"}, "operator-1"},
+		{"a list too long once the provider's betas join it", wire.Anthropic, wire.Anthropic, publishing(messages, "operator-1"), []string{strings.Repeat("a", maxAnthropicBeta-5)}, "operator-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			x := &execution{parsed: &openai.Request{Family: tc.source}, semanticHeaders: semanticHeaders(http.Header{"Anthropic-Beta": tc.beta})}
+			x := &call{semanticHeaders: semanticHeaders(http.Header{"Anthropic-Beta": tc.beta}), generation: generationCall{parsed: &wire.Request{Family: tc.source}}}
 			published := maps.Clone(tc.cfg.SemanticHeaders)
 			req := httptest.NewRequest(http.MethodPost, "https://upstream.example/v1/messages", nil)
 			cfg := forwardAnthropicBeta(req.Header, x, tc.wire, tc.cfg)

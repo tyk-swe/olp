@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestCodeAuthorizationUsesCurrentTokenAndObservedAccountOnly(t *testing.T) {
@@ -44,7 +45,7 @@ func TestCodeAuthorizationUsesCurrentTokenAndObservedAccountOnly(t *testing.T) {
 
 func TestCodeAuthorizerRefusesOrdinaryAndTransformingConfigurations(t *testing.T) {
 	codex, _ := codeadapter.Lookup(codemode.AdapterCodex)
-	cfg := runtime.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, ProfileRevision: "digest"}
+	cfg := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, ProfileRevision: "digest"}
 	if !codeConfiguration(cfg, codex) {
 		t.Fatal("Codex grant profile refused")
 	}
@@ -67,7 +68,7 @@ func TestCodeAuthorizerRefusesOrdinaryAndTransformingConfigurations(t *testing.T
 func TestCodeAuthorizerPinsEachCodingPlanProfileToItsOwnUpstream(t *testing.T) {
 	zai, _ := codeadapter.Lookup(codemode.AdapterZAICoding)
 	for profile, endpoint := range map[string]string{codeplans.ZAIProfile: codeplans.ZAIUpstream, codeplans.BigModelProfile: codeplans.BigModelUpstream} {
-		cfg := runtime.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, ProfileRevision: "digest", Endpoint: endpoint}
+		cfg := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, ProfileRevision: "digest", Endpoint: endpoint}
 		if !codeConfiguration(cfg, zai) {
 			t.Fatalf("%s refused at its own upstream", profile)
 		}
@@ -77,7 +78,7 @@ func TestCodeAuthorizerPinsEachCodingPlanProfileToItsOwnUpstream(t *testing.T) {
 		}
 	}
 	codex, _ := codeadapter.Lookup(codemode.AdapterCodex)
-	if codeConfiguration(runtime.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, ProfileRevision: "digest"}, codex) {
+	if codeConfiguration(routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, ProfileRevision: "digest"}, codex) {
 		t.Fatal("a coding-plan profile passed as Codex")
 	}
 }

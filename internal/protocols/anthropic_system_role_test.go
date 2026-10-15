@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Claude Code appends role "system" messages to the conversation under the
@@ -18,7 +18,7 @@ const midConversationSystem = `{"model":"route","max_tokens":16,"messages":[` +
 	`{"role":"user","content":"second"}]}`
 
 func TestAnthropicRequestsAdmitMidConversationSystemMessages(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyAnthropic, openai.FamilyAnthropicCount} {
+	for _, family := range []wire.Format{wire.Anthropic, wire.AnthropicCount} {
 		r, err := Parse(family, []byte(midConversationSystem), "")
 		if err != nil {
 			t.Fatalf("%s: %v", family, err)
@@ -50,8 +50,8 @@ func TestAnthropicRequestsAdmitMidConversationSystemMessages(t *testing.T) {
 func TestAnthropicRequestsStillRefuseOtherRoles(t *testing.T) {
 	for _, role := range []string{"tool", "developer", "function", ""} {
 		body := `{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"hi"},{"role":"` + role + `","content":"x"}]}`
-		_, err := Parse(openai.FamilyAnthropic, []byte(body), "")
-		var refusal *openai.RequestError
+		_, err := Parse(wire.Anthropic, []byte(body), "")
+		var refusal *wire.RequestError
 		if !errors.As(err, &refusal) || refusal.Param != "messages.role" {
 			t.Fatalf("role %q: err = %v", role, err)
 		}
@@ -61,7 +61,7 @@ func TestAnthropicRequestsStillRefuseOtherRoles(t *testing.T) {
 // A translating route keeps the position of the system message instead of
 // hoisting it to the front or dropping it.
 func TestMidConversationSystemMessageTranslatesInPlace(t *testing.T) {
-	r, err := Parse(openai.FamilyAnthropic, []byte(midConversationSystem), "")
+	r, err := Parse(wire.Anthropic, []byte(midConversationSystem), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestMidConversationSystemMessageTranslatesInPlace(t *testing.T) {
 	if _, _, err := Encode(r, "openai", "openai", "wire-model", nil); err == nil {
 		t.Fatal("cache marker silently dropped by translation")
 	}
-	r, err = Parse(openai.FamilyAnthropic, []byte(`{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"system","content":"reminder"},{"role":"user","content":"second"}]}`), "")
+	r, err = Parse(wire.Anthropic, []byte(`{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"system","content":"reminder"},{"role":"user","content":"second"}]}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,11 +98,11 @@ func TestMidConversationSystemMessageTranslatesInPlace(t *testing.T) {
 	}
 	// A translated Anthropic target cannot place a late system message and
 	// refuses it cleanly.
-	chat, err := Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"first"},{"role":"system","content":"reminder"}],"max_tokens":8}`), "")
+	chat, err := Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"first"},{"role":"system","content":"reminder"}],"max_tokens":8}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var refusal *openai.RequestError
+	var refusal *wire.RequestError
 	if _, _, err := Encode(chat, "anthropic", "anthropic", "wire-model", nil); !errors.As(err, &refusal) {
 		t.Fatalf("late system message to a translated Anthropic target: err = %v", err)
 	}
@@ -112,7 +112,7 @@ func TestMidConversationSystemMessageTranslatesInPlace(t *testing.T) {
 // between turns is refused instead of silently moving to the front.
 func TestBedrockRefusesSystemMessagesBetweenTurns(t *testing.T) {
 	leading := `{"model":"route","max_tokens":16,"system":"be brief","messages":[{"role":"user","content":"first"}]}`
-	r, err := Parse(openai.FamilyAnthropic, []byte(leading), "")
+	r, err := Parse(wire.Anthropic, []byte(leading), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +124,11 @@ func TestBedrockRefusesSystemMessagesBetweenTurns(t *testing.T) {
 		t.Fatalf("the leading system prompt did not reach the system field: %s", body)
 	}
 	between := `{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"system","content":"reminder"},{"role":"user","content":"second"}]}`
-	r, err = Parse(openai.FamilyAnthropic, []byte(between), "")
+	r, err = Parse(wire.Anthropic, []byte(between), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var refusal *openai.RequestError
+	var refusal *wire.RequestError
 	if _, _, err := Encode(r, "bedrock", "bedrock", "wire-model", nil); !errors.As(err, &refusal) {
 		t.Fatalf("a system message between turns: err = %v", err)
 	}

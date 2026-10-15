@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestNonObjectRequestsDoNotAllocateASourceIndex(t *testing.T) {
 	body := []byte("[" + strings.Repeat("0,", 1<<18) + "0]")
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyBedrock} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock} {
 		t.Run(string(family), func(t *testing.T) {
 			var failure error
 			allocations := testing.AllocsPerRun(2, func() {

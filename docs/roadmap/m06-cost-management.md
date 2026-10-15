@@ -107,7 +107,7 @@ is not yet released.
 | Change | Start here |
 | --- | --- |
 | Price components, discounts, rate cards | `internal/usage/pricing.go`, `internal/usage/pricing_select.go` |
-| Estimation | `internal/runtime/plan.go`, `internal/routes/simulate.go` |
+| Estimation | `internal/routing/plan.go`, `internal/routes/simulate.go` |
 | FOCUS, CloudEvents, Stripe | `internal/export/` from [M5](m05-observability.md) |
 | Reconciliation | `internal/usage/`, `internal/process/workers.go` |
 | Console | `console/src/lib/features/usage/` |

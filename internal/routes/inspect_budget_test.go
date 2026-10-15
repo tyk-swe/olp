@@ -6,11 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestInspectionPolicyBudgetBoundsCumulativeTargetScans(t *testing.T) {
@@ -39,14 +41,14 @@ func TestInspectionRejectsRepeatedEffectivePolicyWork(t *testing.T) {
 	for i := range 64 {
 		policy.Rules = append(policy.Rules, contentpolicy.Rule{ID: fmt.Sprintf("r%d", i), Phase: contentpolicy.PhaseInput, Pattern: "never-matches", Action: contentpolicy.ActionBlock})
 	}
-	route := runtime.Route{Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityStrict}, ContentPolicy: policy}
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"`+strings.Repeat("a", 96<<10)+`"}]}`))
+	route := routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}, ContentPolicy: policy}
+	parsed, err := openai.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"`+strings.Repeat("a", 96<<10)+`"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	accept, _, _ := inspectionAccept(route, parsed, interaction.Context{}, nil, new(inspectionBudget))
-	provider := runtime.Provider{ID: "p", Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1"}
-	target := runtime.Target{ID: "t", ProviderID: "p", ProviderModel: "gpt-4o"}
+	provider := routing.Provider{ID: "p", Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1"}
+	target := routing.Target{ID: "t", ProviderID: "p", ProviderModel: "gpt-4o"}
 	if err := accept(provider, target); err != nil {
 		t.Fatalf("first bounded inspection: %v", err)
 	}
@@ -62,9 +64,9 @@ func TestInspectionBudgetCoversUnaryAndMediaTargets(t *testing.T) {
 	for i := range 64 {
 		policy.Rules = append(policy.Rules, contentpolicy.Rule{ID: fmt.Sprintf("r%d", i), Phase: contentpolicy.PhaseInput, Pattern: "never-matches", Action: contentpolicy.ActionBlock})
 	}
-	route := runtime.Route{Slug: "route", Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityStrict}, ContentPolicy: policy}
-	provider := runtime.Provider{ID: "p", Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1"}
-	target := runtime.Target{ID: "t", ProviderID: "p", ProviderModel: "upstream"}
+	route := routing.Route{Slug: "route", Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}, ContentPolicy: policy}
+	provider := routing.Provider{ID: "p", Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1"}
+	target := routing.Target{ID: "t", ProviderID: "p", ProviderModel: "upstream"}
 	for _, tc := range []struct{ operation, fields string }{
 		{"embeddings", `"input":"%s"`},
 		{"image_generation", `"prompt":"%s"`},
@@ -78,7 +80,7 @@ func TestInspectionBudgetCoversUnaryAndMediaTargets(t *testing.T) {
 			}
 			budget := new(inspectionBudget)
 			for pass := range 2 {
-				var accept func(runtime.Provider, runtime.Target) error
+				var accept func(routing.Provider, routing.Target) error
 				if unary != nil {
 					accept, _, _ = inspectionUnaryAccept(route, *unary, interaction.Context{}, "", nil, budget)
 				} else {
@@ -102,7 +104,7 @@ func TestInspectionBudgetCoversUnaryAndMediaTargets(t *testing.T) {
 func TestSimulationSharesPolicyBudgetAcrossRouteLegs(t *testing.T) {
 	snapshot := explainSnapshot(map[string]int{"first": 1000000, "second": 1000000})
 	for slug, route := range snapshot.Routes {
-		route.Fidelity.Mode = runtime.FidelityStrict
+		route.Fidelity.Mode = routing.FidelityStrict
 		route.ContentPolicy = &contentpolicy.Policy{}
 		for i := range 64 {
 			route.ContentPolicy.Rules = append(route.ContentPolicy.Rules, contentpolicy.Rule{ID: fmt.Sprintf("r%d", i), Phase: contentpolicy.PhaseInput, Pattern: "never-matches", Action: contentpolicy.ActionBlock})

@@ -5,6 +5,8 @@ import (
 	"io"
 	"math"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -14,23 +16,23 @@ import (
 // they are, at /native/{dialect}/models/{route}. OLP validates their envelope,
 // binds the route's model, meters the result and forwards it unchanged; it
 // never translates them to or from another dialect.
-var nativeGenerationFamilies = map[string]openai.Family{
+var nativeGenerationFamilies = map[string]wire.Format{
 	// https://docs.mistral.ai/api/endpoint/fim
-	"mistral-fim": openai.FamilyMistralFIM,
+	"mistral-fim": wire.MistralFIM,
 	// https://docs.cohere.com/reference/chat
-	"cohere-chat-v2": openai.FamilyCohereChat,
+	"cohere-chat-v2": wire.CohereChat,
 }
 
 // NativeGenerationFamily is the generation family of a native dialect.
-func NativeGenerationFamily(dialect string) (openai.Family, bool) {
+func NativeGenerationFamily(dialect string) (wire.Format, bool) {
 	family, ok := nativeGenerationFamilies[dialect]
 	return family, ok
 }
 
 // NativeGenerationProbe is the smallest request of a native dialect that
 // proves a model generates: a few tokens of output.
-func NativeGenerationProbe(family openai.Family) map[string]any {
-	if family == openai.FamilyMistralFIM {
+func NativeGenerationProbe(family wire.Format) map[string]any {
+	if family == wire.MistralFIM {
 		return map[string]any{"model": "certification", "prompt": "def add(a, b):\n    return ", "suffix": "\n", "max_tokens": 16}
 	}
 	return map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16}
@@ -40,7 +42,7 @@ func NativeGenerationProbe(family openai.Family) map[string]any {
 // for route: its model, if it names one, is the route, and its delivery and
 // conversation are well formed. The rest belongs to the vendor, who refuses
 // what it does not accept.
-func parseNativeGeneration(family openai.Family, doc oif.Document, route string) (*openai.Request, error) {
+func parseNativeGeneration(family wire.Format, doc oif.Document, route string) (*wire.Request, error) {
 	f := doc.FieldsWithout("messages")
 	if f == nil {
 		return nil, requestError("", "expected a JSON object")
@@ -58,7 +60,7 @@ func parseNativeGeneration(family openai.Family, doc oif.Document, route string)
 		}
 	}
 	switch family {
-	case openai.FamilyMistralFIM:
+	case wire.MistralFIM:
 		if prompt, ok := f["prompt"]; !ok || json.Unmarshal(prompt, new(string)) != nil {
 			return nil, requestError("prompt", "prompt must be a string")
 		}
@@ -72,7 +74,7 @@ func parseNativeGeneration(family openai.Family, doc oif.Document, route string)
 				}
 			}
 		}
-	case openai.FamilyCohereChat:
+	case wire.CohereChat:
 		messages := member(doc.Root(), "messages").Elements()
 		if len(messages) == 0 {
 			return nil, requestError("messages", "messages must be a non-empty array")
@@ -90,12 +92,12 @@ func parseNativeGeneration(family openai.Family, doc oif.Document, route string)
 	default:
 		return nil, requestError("", "unknown native generation dialect")
 	}
-	return openai.NewSourceEnvelope(family, route, stream, doc), nil
+	return wire.NewRequest(family, route, stream, doc)
 }
 
 // decodeCohereChat meters a Cohere Chat v2 result. Cohere bills the
 // billed_units it reports, which leave out the tokens of its own preamble.
-func decodeCohereChat(body []byte) (*openai.Completion, error) {
+func decodeCohereChat(body []byte) (*wire.Completion, error) {
 	f, err := object(body)
 	if err != nil {
 		return nil, protocolError("chat result is not a JSON object")
@@ -104,7 +106,7 @@ func decodeCohereChat(body []byte) (*openai.Completion, error) {
 	if err != nil {
 		return nil, protocolError("chat result has no message")
 	}
-	c := &openai.Completion{Body: body, UpstreamID: str(f["id"]), FinishReason: cohereFinish(str(f["finish_reason"]))}
+	c := &wire.Completion{Body: body, UpstreamID: str(f["id"]), FinishReason: cohereFinish(str(f["finish_reason"]))}
 	if c.FinishReason == "" {
 		return nil, protocolError("chat result has no finish reason")
 	}
@@ -119,7 +121,7 @@ func decodeCohereChat(body []byte) (*openai.Completion, error) {
 			return nil, protocolError("invalid tool call")
 		}
 		function, _ := object(tool["function"])
-		c.ToolCalls = append(c.ToolCalls, openai.ToolCall{ID: str(tool["id"]), Name: str(function["name"]), Arguments: str(function["arguments"])})
+		c.ToolCalls = append(c.ToolCalls, wire.ToolCall{ID: str(tool["id"]), Name: str(function["name"]), Arguments: str(function["arguments"])})
 	}
 	if c.Usage, err = cohereUsage(f["usage"]); err != nil {
 		return nil, err
@@ -142,7 +144,7 @@ func cohereFinish(reason string) string {
 	return ""
 }
 
-func cohereUsage(raw json.RawMessage) (*openai.Usage, error) {
+func cohereUsage(raw json.RawMessage) (*wire.Usage, error) {
 	if !present(raw) {
 		return nil, nil
 	}
@@ -161,21 +163,21 @@ func cohereUsage(raw json.RawMessage) (*openai.Usage, error) {
 	if !inputOK || !outputOK || output > math.MaxInt64-input {
 		return nil, protocolError("invalid billed units")
 	}
-	return &openai.Usage{InputTokens: input, OutputTokens: output, TotalTokens: input + output}, nil
+	return &wire.Usage{InputTokens: input, OutputTokens: output, TotalTokens: input + output}, nil
 }
 
 // streamCohereEvents forwards a Cohere Chat v2 stream's events unchanged and
 // meters it. message-end is its terminal event, carrying the finish reason and
 // usage; a stream that ends before it is truncated.
-func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
-	c := &openai.Completion{}
+func streamCohereEvents(r io.Reader, limit int, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+	c := &wire.Completion{}
 	done := false
 	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
 		if done {
 			return protocolError("event after message-end")
 		}
-		event, err := openai.LiftSSE(openai.FamilyCohereChat, frame, sequence, limit)
+		event, err := openai.LiftSSE(wire.CohereChat, frame, sequence, limit)
 		if err != nil {
 			return err
 		}
@@ -196,7 +198,7 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 			c.UpstreamID = str(f["id"])
 		case "message-end":
 			if present(delta["error"]) {
-				return &openai.UpstreamError{Type: "stream_error", Message: "Cohere ended the stream with an error"}
+				return &wire.UpstreamError{Type: "stream_error", Message: "Cohere ended the stream with an error"}
 			}
 			if c.FinishReason = cohereFinish(str(delta["finish_reason"])); c.FinishReason == "" {
 				return protocolError("message-end has no finish reason")
@@ -217,7 +219,7 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 		return c, streamError(err)
 	}
 	if !done {
-		return c, &openai.ProtocolError{Detail: "stream ended before message-end", Truncated: true}
+		return c, &wire.ProtocolError{Detail: "stream ended before message-end", Truncated: true}
 	}
 	return c, nil
 }

@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // PollGateSeconds is the interval a client poll holds the reconciler off a
@@ -487,7 +488,7 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 	if err = tx.QueryRow(ctx, "SELECT snapshot FROM olp.runtime_releases WHERE id=$1", input.RuntimeGenerationID).Scan(&snapshot); err != nil {
 		return JobRecord{}, dbError(err)
 	}
-	pin, pinErr := runtime.DecodeReleasePin(snapshot, runtime.ReleasePinIdentity{ProviderID: input.ProviderID, ProviderRevisionID: input.ProviderRevisionID, RouteSlug: input.RouteSlug, Model: input.UpstreamModel, SlotID: input.SlotID, CredentialID: input.CredentialVersionID})
+	pin, pinErr := routing.DecodeReleasePin(snapshot, routing.ReleasePinIdentity{ProviderID: input.ProviderID, ProviderRevisionID: input.ProviderRevisionID, RouteSlug: input.RouteSlug, Model: input.UpstreamModel, SlotID: input.SlotID, CredentialID: input.CredentialVersionID})
 	if pinErr != nil {
 		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "the selected historical serving identity is unavailable"}
 	}

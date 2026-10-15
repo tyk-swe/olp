@@ -5,8 +5,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 type InlineMediaLimits struct {
@@ -18,17 +19,17 @@ type InlineMediaLimits struct {
 // request. Native extensions remain valid; prompt text and tool JSON do not count.
 // It reads the request's parsed document, so the prompt text it passes over is
 // not scanned again, and the media it decodes is read where it lies.
-func ValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) error {
-	if request.Family.Operation() != openai.OperationGeneration && request.Family.Operation() != "token_count" {
+func ValidateInlineMedia(request *wire.Request, limits InlineMediaLimits) error {
+	if request.Family.Operation() != wire.OperationGeneration && request.Family.Operation() != "token_count" {
 		return nil
 	}
 	doc := request.OIF().Document().Root()
 	messages, partKey := member(doc, "messages").Elements(), "content"
-	if request.Family == openai.FamilyResponses || request.Family == openai.FamilyInputTokens {
+	if request.Family == wire.Responses || request.Family == wire.InputTokens {
 		messages = member(doc, "input").Elements()
 	}
 	switch request.Family {
-	case openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount:
+	case wire.Gemini, wire.GeminiStream, wire.GeminiCount:
 		content := doc
 		if nested := member(doc, "generateContentRequest"); nested.Kind() == oif.Object {
 			content = nested

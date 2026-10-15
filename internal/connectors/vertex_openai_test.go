@@ -3,8 +3,9 @@ package connectors
 import (
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func vertexOpenAI() Config {
@@ -21,7 +22,7 @@ func TestVertexOpenAIAddressesPublisherModels(t *testing.T) {
 	if err := c.Validate(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := c.URL(openai.FamilyChat, "meta/llama-4-maverick-17b-128e-instruct-maas", true)
+	got, err := c.URL(wire.Chat, "meta/llama-4-maverick-17b-128e-instruct-maas", true)
 	if want := "https://us-central1-aiplatform.googleapis.com/v1/projects/acme-prod/locations/us-central1/endpoints/openapi/chat/completions"; err != nil || got != want {
 		t.Fatalf("URL = %s, %v", got, err)
 	}
@@ -84,7 +85,7 @@ func TestVertexOpenAIBindingsSeparateAliasesFromModels(t *testing.T) {
 				if got := c.Model(tc.alias); got != tc.model {
 					t.Fatalf("Model(%q) = %q, want %q", tc.alias, got, tc.model)
 				}
-				if _, err := c.URL(openai.FamilyChat, tc.alias, false); err != nil {
+				if _, err := c.URL(wire.Chat, tc.alias, false); err != nil {
 					t.Fatalf("bound model URL: %v", err)
 				}
 			}

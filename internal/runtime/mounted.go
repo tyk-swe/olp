@@ -7,19 +7,20 @@ import (
 	"reflect"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // MountedProvider supplies a transport when a gateway has no database decryption
 // key. Published capabilities, restrictions, quotas, and credential identities
 // remain authoritative; a mounted file cannot create a route or credential pool.
 type MountedProvider struct {
-	Configuration     Configuration
+	Configuration     routing.Configuration
 	Credential        []byte `json:"-"`
 	NetworkCredential []byte `json:"-"`
 }
 
 func (m MountedProvider) String() string { return "MountedProvider([REDACTED])" }
-func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map[string][]byte, error) {
+func installMounted(snapshot *routing.Snapshot, entries map[string]MountedProvider) (map[string][]byte, error) {
 	credentials := map[string][]byte{}
 	for id, p := range snapshot.Providers {
 		if !p.Enabled {
@@ -71,7 +72,7 @@ func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map
 				return nil, errors.New("mounted explicit profile configuration must match the published revision")
 			}
 			for model, raw := range cfg.Options.Models {
-				var override, current ModelMetadata
+				var override, current routing.ModelMetadata
 				_ = json.Unmarshal(raw, &override)
 				_ = json.Unmarshal(p.Models[model], &current)
 				if override.Deployment != nil && (current.Deployment == nil || *override.Deployment != *current.Deployment) {
@@ -97,7 +98,7 @@ func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map
 		// may supply model deployment mappings but cannot assert new privacy facts.
 		p.Models = maps.Clone(p.Models)
 		for model, value := range cfg.Options.Models {
-			var override, current ModelMetadata
+			var override, current routing.ModelMetadata
 			_ = json.Unmarshal(value, &override)
 			if override.Deployment == nil {
 				continue

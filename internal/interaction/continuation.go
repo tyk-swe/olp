@@ -7,8 +7,9 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 const ContinuationV1 = "chat-anthropic-tools-v1"
@@ -28,8 +29,8 @@ type Continuation struct {
 func continuationFailure(field, requirement string) error {
 	return incompatible("state_carrier", field, requirement, "The selected client continuation contract cannot preserve this interaction.")
 }
-func (t *Template) prepareTools(request *openai.Request, context Context, receipt *Receipt) (oif.Prepared, error) {
-	if context.ContinuationVersion != ContinuationV1 || request.Family != openai.FamilyChat || t.wire != openai.FamilyAnthropic || t.profile.Hosting != "direct-anthropic" {
+func (t *Template) prepareTools(request *wire.Request, context Context, receipt *oif.Receipt) (oif.Prepared, error) {
+	if context.ContinuationVersion != ContinuationV1 || request.Family != wire.Chat || t.wire != wire.Anthropic || t.profile.Hosting != "direct-anthropic" {
 		return oif.Prepared{}, continuationFailure("/client_contract", "qualified_continuation_version")
 	}
 	if !context.DurableContinuation {
@@ -75,7 +76,7 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 			switch name {
 			case "max_tokens", "thinking", "temperature", "top_p", "top_k", "stop_sequences", "tools", "tool_choice":
 				fields[name] = bytes.Clone(t.defaults[name])
-				receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: safeField(name), Disposition: "introduced", Rule: "declared_native_tool_default", Evidence: evidenceTools})
+				receipt.Dispositions = append(receipt.Dispositions, oif.Disposition{Field: safeField(name), Disposition: "introduced", Rule: "declared_native_tool_default", Evidence: evidenceTools})
 			default:
 				return oif.Prepared{}, incompatible("target_capability", safeField(name), "qualified_default_control", "A target default is outside the negotiated native tool contract.")
 			}
@@ -105,7 +106,7 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 	if err != nil {
 		return oif.Prepared{}, continuationFailure("/request", "bounded_continuation_history")
 	}
-	prepared, err := oif.PrepareDestination(request.OIF(), openai.Descriptor(t.wire, request.Stream), document, oif.QualifiedMapping, "versioned ordered tool history and encrypted native continuation")
+	prepared, err := oif.PrepareDestination(request.OIF(), wire.Descriptor(t.wire, request.Stream), document, oif.QualifiedMapping, "versioned ordered tool history and encrypted native continuation")
 	receipt.Evidence = []string{evidenceTools}
 	receipt.Obligations.Continuation = ContinuationV1
 	receipt.Obligations.Lifetime = "durable"
@@ -114,9 +115,9 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 	receipt.Obligations.Submission = "client_submission_identity"
 	receipt.Obligations.Retry = "recover_same_delivery_never_replay_unknown_work"
 	receipt.Dispositions = append(receipt.Dispositions,
-		Disposition{Field: "/messages", Disposition: "mapped", Rule: "ordered_native_dependency_reconstruction", Evidence: evidenceTools},
-		Disposition{Field: "/tools", Disposition: "mapped", Rule: "exact_function_schema", Evidence: evidenceTools},
-		Disposition{Field: "/result", Disposition: "guarded", Rule: "ordered_observations_and_durable_actionability", Evidence: evidenceTools})
+		oif.Disposition{Field: "/messages", Disposition: "mapped", Rule: "ordered_native_dependency_reconstruction", Evidence: evidenceTools},
+		oif.Disposition{Field: "/tools", Disposition: "mapped", Rule: "exact_function_schema", Evidence: evidenceTools},
+		oif.Disposition{Field: "/result", Disposition: "guarded", Rule: "ordered_observations_and_durable_actionability", Evidence: evidenceTools})
 	return prepared, err
 }
 
@@ -166,7 +167,7 @@ func chatTools(value oif.Value) ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
-func reconstructTools(request *openai.Request, prior *Continuation) (map[string]json.RawMessage, error) {
+func reconstructTools(request *wire.Request, prior *Continuation) (map[string]json.RawMessage, error) {
 	if prior.Version != ContinuationV1 {
 		return nil, continuationFailure("/continuation", "historical_contract_version")
 	}

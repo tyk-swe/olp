@@ -202,7 +202,7 @@ func appendResetDuration(b []byte, d time.Duration) []byte {
 // made, the route revision that served, the vendor that answered, and for a
 // response that is not a stream, its cost. A request that made no attempt, as
 // one answered from the gateway's own records is, has none of these to tell.
-func (l *headerList) metadata(text []byte, x *execution, streamed bool) []byte {
+func (l *headerList) metadata(text []byte, x *call, streamed bool) []byte {
 	if x.attemptCount == 0 {
 		return text
 	}
@@ -233,7 +233,7 @@ func (l *headerList) metadata(text []byte, x *execution, streamed bool) []byte {
 // time: the reset is counted down to now, but the counts are not read again.
 // A key that limits nothing, a request that was admitted without a reservation,
 // and a surface with no rate-limit headers add none.
-func (x *execution) responseHeaders(h http.Header, streamed bool) {
+func (x *call) responseHeaders(h http.Header, streamed bool) {
 	surface, state := x.clientSurface(), x.lease.RateState()
 	if !x.responseMetadata && (rateHeadersOf(surface) == nil || !state.Limited()) {
 		return

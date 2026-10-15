@@ -1,9 +1,10 @@
 package classification
 
 import (
+	"strconv"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
-	"strconv"
 )
 
 func moderationRequest(source oif.Request) (oif.View, error) {

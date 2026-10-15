@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -32,26 +33,27 @@ func costPrice() *usage.RoutingPrice {
 // costExecution is a request routed to the given attempts, each served by a
 // provider with one usable slot, so the walk of dispatchable attempts has
 // something to walk.
-func costExecution(t *testing.T, body string, family openai.Family, budget int, attempts ...runtime.Attempt) *execution {
+func costExecution(t *testing.T, body string, family wire.Format, budget int, attempts ...routing.Attempt) *call {
 	t.Helper()
 	request, err := protocols.Parse(family, []byte(body), "team-chat")
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}}
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}}
 	for index := range attempts {
 		id := uuid.NewString()
 		attempts[index].ProviderID, attempts[index].TargetID = id, uuid.NewString()
 		if attempts[index].UpstreamModel == "" {
 			attempts[index].UpstreamModel = "model-a"
 		}
-		snapshot.Providers[id] = runtime.Provider{
-			ID: id, AuthMode: "none", Slots: []runtime.Slot{{ID: uuid.NewString(), Enabled: true}},
+		snapshot.Providers[id] = routing.Provider{
+			ID: id, AuthMode: "none", Slots: []routing.Slot{{ID: uuid.NewString(), Enabled: true}},
 		}
 	}
-	return &execution{
-		parsed: request, family: family, route: &runtime.Route{Slug: "team-chat", Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}},
-		attempts: attempts, budget: budget, historicalSnapshot: snapshot,
+	return &call{
+		family:             family,
+		historicalSnapshot: snapshot, routeLeg: routeLeg{route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
+			attempts: attempts, budget: budget}, generation: generationCall{parsed: request},
 	}
 }
 
@@ -64,8 +66,8 @@ func TestVideoCostBoundUsesRequestedDurationAndProviderDefault(t *testing.T) {
 		seconds *string
 		want    string
 	}{{nil, "0.4"}, {costText("8"), "0.8"}, {costText("12"), "1.2"}} {
-		x := &execution{media: &media.Request{Op: media.OpVideoCreate, Seconds: tc.seconds}}
-		attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
+		x := &call{media: &media.Request{Op: media.OpVideoCreate, Seconds: tc.seconds}}
+		attempt := routing.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
 		if got := x.attemptCostBound(attempt).String(); got != tc.want {
 			t.Fatalf("duration %v reserves %s, want %s", tc.seconds, got, tc.want)
 		}
@@ -74,9 +76,9 @@ func TestVideoCostBoundUsesRequestedDurationAndProviderDefault(t *testing.T) {
 
 func TestUnitPricedVideoUsageSettlesWithoutTokenRates(t *testing.T) {
 	owner := uuid.NewString()
-	x := &execution{media: &media.Request{Op: media.OpVideoCreate}, facts: []AttemptFact{{
+	x := &call{media: &media.Request{Op: media.OpVideoCreate}, facts: []AttemptFact{{
 		Budgets: []string{owner}, UsageObserved: true, UsageComplete: true,
-		Usage: &openai.Usage{MediaUnits: costText("8")}, Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}},
+		Usage: &wire.Usage{MediaUnits: costText("8")}, Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}},
 	}}}
 	if got := x.costOf(owner).String(); got != "0.8" {
 		t.Fatalf("unit-only video settled %s, want 0.8", got)
@@ -92,73 +94,73 @@ func TestCostReservationIsTheMostTheRequestCouldCost(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		body     string
-		family   openai.Family
-		attempts []runtime.Attempt
+		family   wire.Format
+		attempts []routing.Attempt
 		budget   int
 		want     string
 	}{
 		{
 			// Two input tokens at 1 per million and the default 4096 reply tokens at
 			// 10 per million, each division rounded up.
-			name: "no max_tokens reserves the default reply", family: openai.FamilyChat, budget: 1,
+			name: "no max_tokens reserves the default reply", family: wire.Chat, budget: 1,
 			body:     `{"model":"team-chat","messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{{Price: costPrice()}},
+			attempts: []routing.Attempt{{Price: costPrice()}},
 			want:     "0.040962",
 		},
 		{
-			name: "max_tokens bounds the reply", family: openai.FamilyChat, budget: 1,
+			name: "max_tokens bounds the reply", family: wire.Chat, budget: 1,
 			body:     `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{{Price: costPrice()}},
+			attempts: []routing.Attempt{{Price: costPrice()}},
 			want:     "0.000162",
 		},
 		{
-			name: "every candidate is priced", family: openai.FamilyChat, budget: 1,
+			name: "every candidate is priced", family: wire.Chat, budget: 1,
 			body:     `{"model":"team-chat","max_tokens":16,"n":2,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{{Price: costPrice()}},
+			attempts: []routing.Attempt{{Price: costPrice()}},
 			want:     "0.000322",
 		},
 		{
-			name: "an embedding has no reply to price", family: openai.FamilyEmbeddings, budget: 1,
+			name: "an embedding has no reply to price", family: wire.Embeddings, budget: 1,
 			body:     `{"model":"team-chat","input":"hello"}`,
-			attempts: []runtime.Attempt{{Price: costPrice()}},
+			attempts: []routing.Attempt{{Price: costPrice()}},
 			want:     "0.000002",
 		},
 		{
 			// Settlement bills every attempt that reports usage, so a failover
 			// adds each attempt's bound rather than taking the dearest.
-			name: "failing over reserves the sum of the attempts", family: openai.FamilyChat, budget: 2,
+			name: "failing over reserves the sum of the attempts", family: wire.Chat, budget: 2,
 			body: `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{
+			attempts: []routing.Attempt{
 				{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.5"), OutputPerMillion: costText("5")}}},
 				{Price: costPrice()},
 			},
 			want: "0.000243",
 		},
 		{
-			name: "an attempt past the budget cannot be dispatched", family: openai.FamilyChat, budget: 1,
+			name: "an attempt past the budget cannot be dispatched", family: wire.Chat, budget: 1,
 			body: `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{
+			attempts: []routing.Attempt{
 				{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.5"), OutputPerMillion: costText("5")}}},
 				{Price: costPrice()},
 			},
 			want: "0.000081",
 		},
 		{
-			name: "an attempt nobody can price reserves nothing of its own", family: openai.FamilyChat, budget: 2,
+			name: "an attempt nobody can price reserves nothing of its own", family: wire.Chat, budget: 2,
 			body:     `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{{}, {Price: costPrice()}},
+			attempts: []routing.Attempt{{}, {Price: costPrice()}},
 			want:     "0.000162",
 		},
 		{
-			name: "a price without an output rate prices no generation", family: openai.FamilyChat, budget: 1,
+			name: "a price without an output rate prices no generation", family: wire.Chat, budget: 1,
 			body:     `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1")}}}},
+			attempts: []routing.Attempt{{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1")}}}},
 			want:     "",
 		},
 		{
-			name: "no attempt is priced", family: openai.FamilyChat, budget: 1,
+			name: "no attempt is priced", family: wire.Chat, budget: 1,
 			body:     `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
-			attempts: []runtime.Attempt{{}},
+			attempts: []routing.Attempt{{}},
 			want:     "",
 		},
 	} {
@@ -184,11 +186,11 @@ func TestCostReservationIsTheMostTheRequestCouldCost(t *testing.T) {
 // bill: a first attempt billed without settling does not refund what a retry
 // will cost, so the bound is the sum over the slots the walk visits.
 func TestCredentialSlotRetriesAreEachReserved(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2,
+		routing.Attempt{Price: costPrice()})
 	x.request.id, x.request.minted = uuid.NewString(), true
 	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
-	provider.Slots = append(provider.Slots, runtime.Slot{ID: uuid.NewString(), Enabled: true})
+	provider.Slots = append(provider.Slots, routing.Slot{ID: uuid.NewString(), Enabled: true})
 	x.snapshot().Providers[provider.ID] = provider
 	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000324" {
 		t.Fatalf("two billable dispatches reserve %q, want 0.000324", hold.amount)
@@ -201,10 +203,10 @@ func TestCredentialSlotRetriesAreEachReserved(t *testing.T) {
 }
 
 func TestSameSlotRetriesReserveTokensAndCostWithinTheAttemptBudget(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 3,
+		routing.Attempt{Price: costPrice()})
 	x.request.id, x.request.minted = uuid.NewString(), true
-	x.route.Retry = runtime.Retry{
+	x.route.Retry = routing.Retry{
 		classRateLimit:      {MaxRetries: 2},
 		classUpstreamServer: {MaxRetries: 1},
 	}
@@ -227,11 +229,11 @@ func TestSameSlotRetriesReserveTokensAndCostWithinTheAttemptBudget(t *testing.T)
 }
 
 func TestRetryCostReservationCoversSkippingCheapRetries(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
-		runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.1"), OutputPerMillion: costText("1")}}},
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 3,
+		routing.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.1"), OutputPerMillion: costText("1")}}},
+		routing.Attempt{Price: costPrice()})
 	x.request.id, x.request.minted = uuid.NewString(), true
-	x.route.Retry = runtime.Retry{classRateLimit: {MaxRetries: 2}}
+	x.route.Retry = routing.Retry{classRateLimit: {MaxRetries: 2}}
 	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000486" {
 		t.Fatalf("reserves %q, want enough for three expensive dispatches", hold.amount)
 	}
@@ -242,27 +244,27 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 	const gemini = `"contents":[{"role":"user","parts":[{"text":"hello"}]}]`
 	for _, tc := range []struct {
 		name       string
-		family     openai.Family
+		family     wire.Format
 		body       string
 		output     int64
 		candidates int64
 		reply      int64
 		cost       string
 	}{
-		{"translated defaults", openai.FamilyChat, `{` + chat + `}`, 32768, 4, 131072, "1.310722"},
-		{"translated sampling", openai.FamilyChat, `{` + chat + `,"temperature":0.2}`, 32768, 4, 131072, "1.310722"},
-		{"native sampling", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"temperature":0.2}}`, 32768, 4, 131072, "1.310722"},
-		{"translated output override", openai.FamilyChat, `{` + chat + `,"max_tokens":16}`, 16, 4, 64, "0.000642"},
-		{"translated candidate override", openai.FamilyChat, `{` + chat + `,"n":2}`, 32768, 2, 65536, "0.655362"},
-		{"translated both overrides", openai.FamilyChat, `{` + chat + `,"max_tokens":16,"n":2}`, 16, 2, 32, "0.000322"},
-		{"native output override", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"maxOutputTokens":16}}`, 16, 4, 64, "0.000642"},
-		{"native candidate override", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"candidateCount":2}}`, 32768, 2, 65536, "0.655362"},
-		{"native null output", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"maxOutputTokens":null}}`, 0, 4, 16384, "0.163842"},
-		{"native null config", openai.FamilyGemini, `{` + gemini + `,"generationConfig":null}`, 0, 0, 4096, "0.040962"},
+		{"translated defaults", wire.Chat, `{` + chat + `}`, 32768, 4, 131072, "1.310722"},
+		{"translated sampling", wire.Chat, `{` + chat + `,"temperature":0.2}`, 32768, 4, 131072, "1.310722"},
+		{"native sampling", wire.Gemini, `{` + gemini + `,"generationConfig":{"temperature":0.2}}`, 32768, 4, 131072, "1.310722"},
+		{"translated output override", wire.Chat, `{` + chat + `,"max_tokens":16}`, 16, 4, 64, "0.000642"},
+		{"translated candidate override", wire.Chat, `{` + chat + `,"n":2}`, 32768, 2, 65536, "0.655362"},
+		{"translated both overrides", wire.Chat, `{` + chat + `,"max_tokens":16,"n":2}`, 16, 2, 32, "0.000322"},
+		{"native output override", wire.Gemini, `{` + gemini + `,"generationConfig":{"maxOutputTokens":16}}`, 16, 4, 64, "0.000642"},
+		{"native candidate override", wire.Gemini, `{` + gemini + `,"generationConfig":{"candidateCount":2}}`, 32768, 2, 65536, "0.655362"},
+		{"native null output", wire.Gemini, `{` + gemini + `,"generationConfig":{"maxOutputTokens":null}}`, 0, 4, 16384, "0.163842"},
+		{"native null config", wire.Gemini, `{` + gemini + `,"generationConfig":null}`, 0, 0, 4096, "0.040962"},
 	} {
 		for _, preparation := range []string{"unplanned", "planned", "body not kept"} {
 			t.Run(tc.name+"/"+preparation, func(t *testing.T) {
-				x := costExecution(t, tc.body, tc.family, 1, runtime.Attempt{UpstreamModel: "gemini-2.5-flash", Price: costPrice()})
+				x := costExecution(t, tc.body, tc.family, 1, routing.Attempt{UpstreamModel: "gemini-2.5-flash", Price: costPrice()})
 				x.request.id, x.request.minted = uuid.NewString(), true
 				attempt := x.attempts[0]
 				provider := x.snapshot().Providers[attempt.ProviderID]
@@ -273,22 +275,22 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 					for range keptEncodings {
 						other := provider
 						other.ID = uuid.NewString()
-						if err := x.encodes(&other, other.Connector(), attempt.UpstreamModel); err != nil {
+						if err := x.encodes(&other, other.Connector(), attempt.TargetID, attempt.UpstreamModel); err != nil {
 							t.Fatal(err)
 						}
 					}
 				}
 				if preparation != "unplanned" {
-					if err := x.encodes(&provider, provider.Connector(), attempt.UpstreamModel); err != nil {
+					if err := x.encodes(&provider, provider.Connector(), attempt.TargetID, attempt.UpstreamModel); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != tc.cost {
 					t.Fatalf("cost reservation = %q, want %q", hold.amount, tc.cost)
 				}
-				body, wire, _, err := x.encoding(x.takeEncoded(), &provider, provider.Connector(), attempt.UpstreamModel)
-				if err != nil || wire != openai.FamilyGemini {
-					t.Fatalf("encoding wire = %s, error = %v", wire, err)
+				body, encodedWire, _, err := x.encoding(&provider, provider.Connector(), attempt.TargetID, attempt.UpstreamModel)
+				if err != nil || encodedWire != wire.Gemini {
+					t.Fatalf("encoding wire = %s, error = %v", encodedWire, err)
 				}
 				var encoded struct {
 					Config struct {
@@ -303,7 +305,7 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 					t.Fatalf("encoded controls = %+v, want output %d and candidates %d", encoded.Config, tc.output, tc.candidates)
 				}
 				// The bounds must remain usable after dispatch takes the kept bodies.
-				admitted, err := x.attemptEstimate(&provider, attempt.UpstreamModel)
+				admitted, err := x.attemptEstimate(&provider, attempt.TargetID, attempt.UpstreamModel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -320,8 +322,8 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 // estimate holds nothing. That such a key is not even priced is proven by
 // TestKeyWithoutCostBudgetEstimatesNothingEvenWhenPriced.
 func TestVideoCreateHoldsItsTargetsPriceAgainstACostBudget(t *testing.T) {
-	attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
-	x := &execution{media: &media.Request{Op: media.OpVideoCreate, Seconds: costText("8")}, request: request{id: "video-create", minted: true}}
+	attempt := routing.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
+	x := &call{media: &media.Request{Op: media.OpVideoCreate, Seconds: costText("8")}, request: request{id: "video-create", minted: true}}
 	if hold := x.attemptCostReservation(budgeted(), attempt); hold != (costReservation{amount: "0.8", charge: "0.8", requestID: "video-create"}) {
 		t.Fatalf("a budgeted video create holds %+v", hold)
 	}
@@ -342,7 +344,7 @@ func TestKeysWithoutACostBudgetEstimateNoCost(t *testing.T) {
 			return authority
 		}(),
 	} {
-		if hold := (&Server{}).costReservation(&execution{}, authority); hold != (costReservation{}) {
+		if hold := (&Server{}).costReservation(&call{}, authority); hold != (costReservation{}) {
 			t.Fatalf("estimated %+v for a key without a cost budget", hold)
 		}
 	}
@@ -350,7 +352,7 @@ func TestKeysWithoutACostBudgetEstimateNoCost(t *testing.T) {
 	monthly := "50"
 	inGroup := admissionAuthority(access.KeyPolicy{})
 	inGroup.BudgetGroupID, inGroup.BudgetGroupMonthlyCostLimit = &group, &monthly
-	if !(&execution{}).costBudgeted(inGroup) || !(&execution{}).costBudgeted(budgeted()) {
+	if !(&call{}).costBudgeted(inGroup) || !(&call{}).costBudgeted(budgeted()) {
 		t.Fatal("a cost budget on the key or its group was not noticed")
 	}
 }
@@ -359,8 +361,8 @@ func TestCostAccountingGrowthUsesOnlyTheNamedRoutesBudget(t *testing.T) {
 	for _, phase := range []string{"fallback", "session"} {
 		for _, budgetRoute := range []string{"other", "team-chat"} {
 			t.Run(phase+"/"+budgetRoute, func(t *testing.T) {
-				x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
-					runtime.Attempt{Price: costPrice()})
+				x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1,
+					routing.Attempt{Price: costPrice()})
 				x.request.id, x.request.minted = uuid.NewString(), true
 				x.authority = admissionAuthority(access.KeyPolicy{RequestsPerMinute: costCount(100), TokensPerMinute: costCount(1000)})
 				client := newAllowing(100, 1000, 18, false)
@@ -416,8 +418,8 @@ func TestCostAccountingGrowthUsesOnlyTheNamedRoutesBudget(t *testing.T) {
 // arithmetic, and nothing else observable tells it from an estimate that was made
 // and thrown away.
 func TestKeyWithoutCostBudgetEstimatesNothingEvenWhenPriced(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1,
+		routing.Attempt{Price: costPrice()})
 	x.request.id, x.request.minted = uuid.NewString(), true
 	rpm := int64(10)
 	group := uuid.NewString()
@@ -443,15 +445,15 @@ func TestKeyWithoutCostBudgetEstimatesNothingEvenWhenPriced(t *testing.T) {
 // input: it has no reply, and the price list of an embedding model carries no
 // output rate, so requiring one would leave every embeddings request unreserved.
 func TestEmbeddingPricedOnInputAloneIsReserved(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","input":"hello"}`, openai.FamilyEmbeddings, 1,
-		runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1")}}})
+	x := costExecution(t, `{"model":"team-chat","input":"hello"}`, wire.Embeddings, 1,
+		routing.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1")}}})
 	x.request.id, x.request.minted = uuid.NewString(), true
 	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000002" {
 		t.Fatalf("an embedding priced on input alone reserves %q, want 0.000002", hold.amount)
 	}
 	// A generation priced the same way has an output nobody can price.
-	chat := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
-		runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1")}}})
+	chat := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1,
+		routing.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("1")}}})
 	chat.request.id, chat.request.minted = uuid.NewString(), true
 	if hold := (&Server{}).costReservation(chat, budgeted()); hold.amount != "" {
 		t.Fatalf("a generation without an output rate reserves %q, want nothing", hold.amount)
@@ -464,7 +466,7 @@ func TestEmbeddingPricedOnInputAloneIsReserved(t *testing.T) {
 // unpriced rather than reserved for at a guess.
 func TestAttemptCostBoundReservesNothingItCannotDescribe(t *testing.T) {
 	const body = `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`
-	x := costExecution(t, body, openai.FamilyChat, 1, runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, body, wire.Chat, 1, routing.Attempt{Price: costPrice()})
 	if bound := x.attemptCostBound(x.attempts[0]); bound.String() != "0.000162" {
 		t.Fatalf("the base attempt bounds %q, want 0.000162", bound.String())
 	}
@@ -475,8 +477,8 @@ func TestAttemptCostBoundReservesNothingItCannotDescribe(t *testing.T) {
 	}
 	// A strict route sends a target what the caller sent, which needs a compiled
 	// interaction for the target; this route has none.
-	strict := costExecution(t, body, openai.FamilyChat, 1, runtime.Attempt{Price: costPrice()})
-	strict.route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	strict := costExecution(t, body, wire.Chat, 1, routing.Attempt{Price: costPrice()})
+	strict.route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 	if bound := strict.attemptCostBound(strict.attempts[0]); !bound.IsZero() {
 		t.Fatalf("an attempt whose request cannot be prepared bounds %q", bound.String())
 	}
@@ -489,7 +491,7 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 	observed := func(input, output int64) AttemptFact {
 		return AttemptFact{
 			Price: price, UsageObserved: true, UsageComplete: true,
-			Usage: &openai.Usage{InputTokens: input, OutputTokens: output},
+			Usage: &wire.Usage{InputTokens: input, OutputTokens: output},
 		}
 	}
 	cached := observed(1_000_000, 0)
@@ -511,16 +513,16 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 			{Price: price, GenerationUsageDeferred: true, UsageComplete: true},
 		}, "0"},
 		{"an attempt without a price list is not priced here", "generation", []AttemptFact{
-			{UsageObserved: true, UsageComplete: true, Usage: &openai.Usage{InputTokens: 5}},
+			{UsageObserved: true, UsageComplete: true, Usage: &wire.Usage{InputTokens: 5}},
 		}, "0"},
 		{"usage that is not complete is not priced", "generation", []AttemptFact{
-			{Price: price, UsageObserved: true, Usage: &openai.Usage{InputTokens: 1_000_000}},
+			{Price: price, UsageObserved: true, Usage: &wire.Usage{InputTokens: 1_000_000}},
 		}, "0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			x := &execution{facts: tc.facts, family: openai.FamilyChat}
+			x := &call{facts: tc.facts, family: wire.Chat}
 			if tc.operation == "embeddings" {
-				x.family = openai.FamilyEmbeddings
+				x.family = wire.Embeddings
 			}
 			if got := x.settledCost().String(); got != tc.want {
 				t.Fatalf("settledCost = %q, want %q", got, tc.want)
@@ -534,18 +536,18 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 // reserved nothing is never told a cost.
 func TestSettleAdmissionNeedsNoLeaseToFinish(t *testing.T) {
 	s := &Server{log: slog.New(slog.DiscardHandler)}
-	s.settleAdmission(context.Background(), &execution{dispatched: true})
-	s.settleAdmission(context.Background(), &execution{})
+	s.settleAdmission(context.Background(), &call{dispatched: true})
+	s.settleAdmission(context.Background(), &call{})
 }
 
 // A committed attempt reserves and settles nothing: the capacity is already
 // paid for, and the request still prices — so the response header can say zero.
 func TestCommittedAttemptCostsNothing(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2,
+		routing.Attempt{Price: costPrice()})
 	x.request.id, x.request.minted = uuid.NewString(), true
 	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
-	provider.Commitment = &runtime.Commitment{Amount: "300", Period: "day"}
+	provider.Commitment = &routing.Commitment{Amount: "300", Period: "day"}
 	x.snapshot().Providers[provider.ID] = provider
 	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "" {
 		t.Fatalf("committed dispatch reserves %q, want nothing", hold.amount)
@@ -554,7 +556,7 @@ func TestCommittedAttemptCostsNothing(t *testing.T) {
 		t.Fatalf("committed bound = %s", bound)
 	}
 
-	usage := &openai.Usage{InputTokens: 100, OutputTokens: 50}
+	usage := &wire.Usage{InputTokens: 100, OutputTokens: 50}
 	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true,
 		ProviderID: x.attempts[0].ProviderID, Usage: usage, Price: costPrice()}}
 	if !x.settledCost().IsZero() {
@@ -568,14 +570,14 @@ func TestCommittedAttemptCostsNothing(t *testing.T) {
 
 // A committed attempt whose usage cannot be priced still reports unpriced.
 func TestCommittedUnpricedAttemptReportsUnpriced(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2,
+		routing.Attempt{Price: costPrice()})
 	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
-	provider.Commitment = &runtime.Commitment{Amount: "300", Period: "day"}
+	provider.Commitment = &routing.Commitment{Amount: "300", Period: "day"}
 	x.snapshot().Providers[provider.ID] = provider
 	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true,
 		ProviderID: x.attempts[0].ProviderID, Status: 200,
-		Usage: &openai.Usage{InputTokens: 100, ToolCalls: map[string]int64{"web_search": 1}}, Price: costPrice()}}
+		Usage: &wire.Usage{InputTokens: 100, ToolCalls: map[string]int64{"web_search": 1}}, Price: costPrice()}}
 	if _, ok := x.responseCost(); ok {
 		t.Fatal("unpriced committed usage returned a cost")
 	}
@@ -586,12 +588,12 @@ func TestCommittedUnpricedAttemptReportsUnpriced(t *testing.T) {
 // zero — exactly what accounting records — while an explicit card rate still
 // prices the committed usage.
 func TestSettledChargeHonoursCommitment(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2,
+		routing.Attempt{Price: costPrice()})
 	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
-	provider.Commitment = &runtime.Commitment{Amount: "300", Period: "day"}
+	provider.Commitment = &routing.Commitment{Amount: "300", Period: "day"}
 	x.snapshot().Providers[provider.ID] = provider
-	u := &openai.Usage{InputTokens: 100, OutputTokens: 50}
+	u := &wire.Usage{InputTokens: 100, OutputTokens: 50}
 	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true,
 		ProviderID: provider.ID, UpstreamModel: "model-a", Usage: u, Price: costPrice()}}
 
@@ -617,8 +619,8 @@ func TestSettledChargeHonoursCommitment(t *testing.T) {
 // An attempt the provider price cannot bound — no price list at all — still
 // settles what an explicit card rate bills for it, as accounting records.
 func TestSettledChargeExplicitForProviderUnpriced(t *testing.T) {
-	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
-		runtime.Attempt{Price: costPrice()})
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2,
+		routing.Attempt{Price: costPrice()})
 	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
 	x.cardPinned = true
 	x.cardRev = &usage.RoutingCardRevision{Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
@@ -626,23 +628,23 @@ func TestSettledChargeExplicitForProviderUnpriced(t *testing.T) {
 		InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
 	}}}}
 	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true, cardRev: x.cardRev,
-		ProviderID: provider.ID, UpstreamModel: "model-a", Usage: &openai.Usage{InputTokens: 100}}}
+		ProviderID: provider.ID, UpstreamModel: "model-a", Usage: &wire.Usage{InputTokens: 100}}}
 	if got := (&Server{}).settledCharge(x); got.String() != "0.01" {
 		t.Fatalf("provider-unpriced explicit settled charge = %s, want 0.01", got)
 	}
 }
 
 func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
-	cheap := runtime.Attempt{UpstreamModel: "cheap", Price: &usage.RoutingPrice{Price: usage.Price{
+	cheap := routing.Attempt{UpstreamModel: "cheap", Price: &usage.RoutingPrice{Price: usage.Price{
 		Model: "cheap", Operation: "generation",
 		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
 	}}}
-	dear := runtime.Attempt{UpstreamModel: "dear", Price: &usage.RoutingPrice{Price: usage.Price{
+	dear := routing.Attempt{UpstreamModel: "dear", Price: &usage.RoutingPrice{Price: usage.Price{
 		Model: "dear", Operation: "generation",
 		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
 	}}}
-	x := costExecution(t, `{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2, cheap, dear)
-	x.route.Retry = runtime.Retry{classRateLimit: {MaxRetries: 1}}
+	x := costExecution(t, `{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2, cheap, dear)
+	x.route.Retry = routing.Retry{classRateLimit: {MaxRetries: 1}}
 	x.cardPinned = true
 	x.cardRev = &usage.RoutingCardRevision{Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
 		Model: "dear", Operation: "generation",
@@ -657,10 +659,10 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 	}
 
 	seconds := "5"
-	videoAttempt := runtime.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
+	videoAttempt := routing.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
 		Price: &usage.RoutingPrice{Price: usage.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.2")}}}
-	videoExec := &execution{
-		family:             openai.Family("video_create"),
+	videoExec := &call{
+		family:             wire.Format("video_create"),
 		media:              &media.Request{Op: media.OpVideoCreate, Seconds: &seconds},
 		request:            request{id: "video-charge", minted: true},
 		historicalSnapshot: x.historicalSnapshot,
@@ -676,8 +678,8 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 	for _, owner := range []string{"provider", "route", "installation", "authority"} {
 		t.Run(owner, func(t *testing.T) {
 			now := time.Now().UTC()
-			x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
-				runtime.Attempt{Price: costPrice()})
+			x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 3,
+				routing.Attempt{Price: costPrice()})
 			x.request.startedAt = now
 			project := uuid.NewString()
 			authority := access.Authority{}
@@ -702,7 +704,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			dispatch := func() {
 				fact := s.newFact(x, x.attempts[0], provider.Slots[0], len(x.facts)+1)
 				fact.Class, fact.UsageObserved, fact.UsageComplete = classSuccess, true, true
-				fact.Usage = &openai.Usage{InputTokens: 100, OutputTokens: 50}
+				fact.Usage = &wire.Usage{InputTokens: 100, OutputTokens: 50}
 				x.facts = append(x.facts, fact)
 			}
 			dispatch()
@@ -738,8 +740,8 @@ func TestSettledChargeRetainsAttemptWithoutCard(t *testing.T) {
 	for _, state := range []string{"absent", "stale", "pinned null"} {
 		t.Run(state, func(t *testing.T) {
 			now := time.Now().UTC()
-			x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
-				runtime.Attempt{Price: costPrice()})
+			x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1,
+				routing.Attempt{Price: costPrice()})
 			inputs := &usage.RoutingInputs{RefreshedAt: now}
 			authority := access.Authority{}
 			if state == "stale" {
@@ -751,9 +753,9 @@ func TestSettledChargeRetainsAttemptWithoutCard(t *testing.T) {
 			rt := &fakeRuntime{inputs: inputs}
 			s := &Server{Runtime: rt, now: func() time.Time { return now }, fleet: &fleetHealth{}}
 			s.bindAuthority(x, authority)
-			fact := s.newFact(x, x.attempts[0], runtime.Slot{}, 1)
+			fact := s.newFact(x, x.attempts[0], routing.Slot{}, 1)
 			fact.Class, fact.UsageObserved, fact.UsageComplete = classSuccess, true, true
-			fact.Usage = &openai.Usage{InputTokens: 100, OutputTokens: 50}
+			fact.Usage = &wire.Usage{InputTokens: 100, OutputTokens: 50}
 			x.facts = []AttemptFact{fact}
 			rt.inputs = &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{{
 				Revisions: []usage.RoutingCardRevision{{Markup: "2"}},

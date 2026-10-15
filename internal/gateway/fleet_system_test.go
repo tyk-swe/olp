@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -93,8 +94,8 @@ func TestIntegrationActiveProbesShareTheirVerdictWithTheFleet(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.gateway.Admission = NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
-	h.republish(func(s *runtime.Snapshot, a, _ runtime.Provider) {
-		a.HealthProbe = &runtime.HealthProbe{IntervalSeconds: 60}
+	h.republish(func(s *routing.Snapshot, a, _ routing.Provider) {
+		a.HealthProbe = &routing.HealthProbe{IntervalSeconds: 60}
 		s.Providers[a.ID] = a
 	})
 	provider := h.rt.Release().Snapshot.Routes[routeSlug].Targets[0].ProviderID

@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/coder/websocket"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // A peer can finish processing an already-read frame after cancellation. The
@@ -55,15 +56,15 @@ func TestDuplexCancellationJoinsProviderObservationBeforeReturning(t *testing.T)
 				frame = `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":9,"responseTokenCount":5}}`
 			}
 			provider.frames <- []byte(frame)
-			x := &execution{}
+			x := &call{}
 			s := &Server{}
 			type result struct {
-				usage *openai.Usage
+				usage *wire.Usage
 				err   error
 			}
 			returned := make(chan result, 1)
 			go func() {
-				var u *openai.Usage
+				var u *wire.Usage
 				var err error
 				if protocol == "realtime" {
 					u, _, err = s.relayRealtime(ctx, x, &pin{}, client, provider, "", "")

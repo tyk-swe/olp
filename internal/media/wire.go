@@ -368,7 +368,7 @@ func extraText(value any) string {
 
 // DecodeImageGeneration validates an image generation JSON body.
 func DecodeImageGeneration(body []byte) (*Request, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Model             string  `json:"model"`
 		Prompt            string  `json:"prompt"`
 		N                 *int64  `json:"n"`
@@ -384,19 +384,19 @@ func DecodeImageGeneration(body []byte) (*Request, *Error) {
 		OutputFormat      *string `json:"output_format"`
 		PartialImages     *int64  `json:"partial_images"`
 	}
-	extra, err := decodeJSON(body, &wire, "model", "prompt", "n", "size", "stream", "quality",
+	extra, err := decodeJSON(body, &encodedWire, "model", "prompt", "n", "size", "stream", "quality",
 		"response_format", "style", "user", "background", "moderation", "output_compression",
 		"output_format", "partial_images")
 	if err != nil {
 		return nil, invalidMedia("The request body is not valid JSON.")
 	}
-	if strings.TrimSpace(wire.Prompt) == "" {
+	if strings.TrimSpace(encodedWire.Prompt) == "" {
 		return nil, invalidMedia("The image prompt is required.")
 	}
-	if wire.N != nil && *wire.N == 0 {
+	if encodedWire.N != nil && *encodedWire.N == 0 {
 		return nil, invalidMedia("The image count must be at least 1.")
 	}
-	if !validRouteSlug(wire.Model) {
+	if !validRouteSlug(encodedWire.Model) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
 	document, source, sourceErr := sourceMediaFields(body)
@@ -405,18 +405,18 @@ func DecodeImageGeneration(body []byte) (*Request, *Error) {
 	}
 	return &Request{
 		SourceFields: source, sourceDocument: document,
-		Op: OpImageGeneration, Route: wire.Model, Stream: wire.Stream,
-		Prompt: wire.Prompt, Count: wire.N, Size: wire.Size, Quality: wire.Quality,
-		Format: wire.ResponseFormat, Style: wire.Style, User: wire.User,
-		Background: wire.Background, Moderation: wire.Moderation,
-		OutputCompression: wire.OutputCompression, OutputFormat: wire.OutputFormat,
-		PartialImages: wire.PartialImages, Extra: extra,
+		Op: OpImageGeneration, Route: encodedWire.Model, Stream: encodedWire.Stream,
+		Prompt: encodedWire.Prompt, Count: encodedWire.N, Size: encodedWire.Size, Quality: encodedWire.Quality,
+		Format: encodedWire.ResponseFormat, Style: encodedWire.Style, User: encodedWire.User,
+		Background: encodedWire.Background, Moderation: encodedWire.Moderation,
+		OutputCompression: encodedWire.OutputCompression, OutputFormat: encodedWire.OutputFormat,
+		PartialImages: encodedWire.PartialImages, Extra: extra,
 	}, nil
 }
 
 // DecodeSpeech validates a speech JSON body.
 func DecodeSpeech(body []byte) (*Request, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Model          string   `json:"model"`
 		Input          string   `json:"input"`
 		Voice          string   `json:"voice"`
@@ -425,21 +425,21 @@ func DecodeSpeech(body []byte) (*Request, *Error) {
 		Speed          *float64 `json:"speed"`
 		StreamFormat   *string  `json:"stream_format"`
 	}
-	extra, err := decodeJSON(body, &wire, "model", "input", "voice", "response_format",
+	extra, err := decodeJSON(body, &encodedWire, "model", "input", "voice", "response_format",
 		"instructions", "speed", "stream_format")
 	if err != nil {
 		return nil, invalidMedia("The request body is not valid JSON.")
 	}
-	if wire.Input == "" {
+	if encodedWire.Input == "" {
 		return nil, invalidMedia("The speech input is required.")
 	}
-	if wire.Voice == "" {
+	if encodedWire.Voice == "" {
 		return nil, invalidMedia("The speech voice is required.")
 	}
-	if wire.Speed != nil && (*wire.Speed < 0.25 || *wire.Speed > 4.0) {
+	if encodedWire.Speed != nil && (*encodedWire.Speed < 0.25 || *encodedWire.Speed > 4.0) {
 		return nil, invalidMedia("The speech speed must be between 0.25 and 4.0.")
 	}
-	if !validRouteSlug(wire.Model) {
+	if !validRouteSlug(encodedWire.Model) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
 	document, source, sourceErr := sourceMediaFields(body)
@@ -448,20 +448,20 @@ func DecodeSpeech(body []byte) (*Request, *Error) {
 	}
 	return &Request{
 		SourceFields: source, sourceDocument: document,
-		Op: OpSpeech, Route: wire.Model, Stream: wire.StreamFormat != nil && *wire.StreamFormat == "sse",
-		Input: wire.Input, Voice: wire.Voice, Format: wire.ResponseFormat,
-		Instructions: wire.Instructions, Speed: wire.Speed,
-		StreamFormat: wire.StreamFormat, Extra: extra,
+		Op: OpSpeech, Route: encodedWire.Model, Stream: encodedWire.StreamFormat != nil && *encodedWire.StreamFormat == "sse",
+		Input: encodedWire.Input, Voice: encodedWire.Voice, Format: encodedWire.ResponseFormat,
+		Instructions: encodedWire.Instructions, Speed: encodedWire.Speed,
+		StreamFormat: encodedWire.StreamFormat, Extra: extra,
 	}, nil
 }
 
 // decodeJSON unmarshals body into wire and returns the remaining top-level
 // fields as extension values. Duplicate or colliding keys are rejected by the
 // encoder at dispatch time.
-func decodeJSON(body []byte, wire any, known ...string) (map[string]any, error) {
+func decodeJSON(body []byte, encodedWire any, known ...string) (map[string]any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(wire); err != nil {
+	if err := decoder.Decode(encodedWire); err != nil {
 		return nil, err
 	}
 	var doc map[string]any
@@ -1191,7 +1191,7 @@ type ImageUsage struct {
 // DecodeImageResponse parses an upstream image document, staging each
 // base64 payload through stage before the result is returned.
 func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Created int64 `json:"created"`
 		Data    []struct {
 			URL           *string `json:"url"`
@@ -1216,11 +1216,11 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, protocolError("The provider image response is not valid JSON.")
 	}
 	extra := diffFields(doc, "created", "data", "usage")
-	result := &ImageResult{CreatedAt: wire.Created, Extra: extra}
+	result := &ImageResult{CreatedAt: encodedWire.Created, Extra: extra}
 	if data, ok := doc["data"].([]any); ok {
 		result.DataExtra = make([]map[string]any, len(data))
 		for i, item := range data {
@@ -1233,7 +1233,7 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 		result.UsageExtra = diffFields(usageDoc, "input_tokens", "output_tokens", "total_tokens",
 			"input_tokens_details", "output_tokens_details")
 	}
-	for i, image := range wire.Data {
+	for i, image := range encodedWire.Data {
 		artifact := ImageArtifact{RevisedPrompt: image.RevisedPrompt}
 		switch {
 		case image.URL != nil && image.B64 == nil:
@@ -1250,21 +1250,21 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 		}
 		result.Images = append(result.Images, artifact)
 	}
-	if wire.Usage != nil {
+	if encodedWire.Usage != nil {
 		result.Usage = &ImageUsage{
-			InputTokens:  wire.Usage.InputTokens,
-			OutputTokens: wire.Usage.OutputTokens,
-			TotalTokens:  wire.Usage.TotalTokens,
+			InputTokens:  encodedWire.Usage.InputTokens,
+			OutputTokens: encodedWire.Usage.OutputTokens,
+			TotalTokens:  encodedWire.Usage.TotalTokens,
 		}
-		if wire.Usage.InputDetail != nil {
-			result.Usage.ImageInputTokens = wire.Usage.InputDetail.ImageTokens
+		if encodedWire.Usage.InputDetail != nil {
+			result.Usage.ImageInputTokens = encodedWire.Usage.InputDetail.ImageTokens
 		}
-		if wire.Usage.OutputDetail != nil && wire.Usage.OutputDetail.ImageTokens != nil {
-			result.Usage.ImageOutputTokens = wire.Usage.OutputDetail.ImageTokens
+		if encodedWire.Usage.OutputDetail != nil && encodedWire.Usage.OutputDetail.ImageTokens != nil {
+			result.Usage.ImageOutputTokens = encodedWire.Usage.OutputDetail.ImageTokens
 		} else {
 			// Without an output breakdown every output token an image model
 			// reports is the image it produced.
-			output := wire.Usage.OutputTokens
+			output := encodedWire.Usage.OutputTokens
 			result.Usage.ImageOutputTokens = &output
 		}
 	}
@@ -1272,7 +1272,7 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 }
 
 func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Predictions []struct {
 			BytesBase64Encoded string `json:"bytesBase64Encoded"`
 			MIMEType           string `json:"mimeType"`
@@ -1285,26 +1285,26 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, protocolError("The provider image response is not valid JSON.")
 	}
-	if wire.Error != nil && *wire.Error != "" {
+	if encodedWire.Error != nil && *encodedWire.Error != "" {
 		return nil, protocolError("The provider returned an image error.")
 	}
 	var encoded []string
 	switch kind {
 	case "vertex_ai":
-		if wire.Predictions == nil {
+		if encodedWire.Predictions == nil {
 			return nil, protocolError("The provider image response has no predictions.")
 		}
-		for _, prediction := range wire.Predictions {
+		for _, prediction := range encodedWire.Predictions {
 			if prediction.MIMEType != "" && !strings.HasPrefix(prediction.MIMEType, "image/") {
 				return nil, protocolError("The provider image response carries an invalid MIME type.")
 			}
 			encoded = append(encoded, prediction.BytesBase64Encoded)
 		}
 	case "bedrock":
-		for _, reason := range wire.FinishReasons {
+		for _, reason := range encodedWire.FinishReasons {
 			switch {
 			case reason == nil:
 			case strings.HasPrefix(*reason, "Filter reason:"):
@@ -1313,10 +1313,10 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 				return nil, protocolError("The provider reported an image inference error.")
 			}
 		}
-		if wire.Images == nil {
+		if encodedWire.Images == nil {
 			return nil, protocolError("The provider image response has no images.")
 		}
-		encoded = wire.Images
+		encoded = encodedWire.Images
 	default:
 		return nil, protocolError("The native image response kind is not supported.")
 	}
@@ -1447,7 +1447,7 @@ type VideoDeleteResult struct {
 
 // DecodeVideoObject parses a provider video document.
 func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		ID        string   `json:"id"`
 		Object    string   `json:"object"`
 		Model     string   `json:"model"`
@@ -1471,28 +1471,28 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, protocolError("The provider video response is not valid JSON.")
 	}
-	if wire.Object != "video" {
+	if encodedWire.Object != "video" {
 		return nil, protocolError("The provider returned an unexpected video object type.")
 	}
-	switch wire.Status {
+	switch encodedWire.Status {
 	case "queued", "in_progress", "completed", "failed":
 	default:
 		// Unknown provider statuses stay observable through the object but do
 		// not map onto a client-visible lifecycle state.
 	}
 	result := &VideoJobResult{
-		ID: wire.ID, Status: wire.Status, Progress: wire.Progress,
-		CreatedAt: wire.CreatedAt, CompletedAt: wire.Completed, ExpiresAt: wire.Expires,
-		Prompt: wire.Prompt, Seconds: wire.Seconds, Size: wire.Size, RemixedFrom: wire.Remixed,
+		ID: encodedWire.ID, Status: encodedWire.Status, Progress: encodedWire.Progress,
+		CreatedAt: encodedWire.CreatedAt, CompletedAt: encodedWire.Completed, ExpiresAt: encodedWire.Expires,
+		Prompt: encodedWire.Prompt, Seconds: encodedWire.Seconds, Size: encodedWire.Size, RemixedFrom: encodedWire.Remixed,
 		Extra: diffFields(doc, "id", "object", "model", "status", "progress", "created_at",
 			"completed_at", "expires_at", "prompt", "seconds", "size", "remixed_from_video_id", "error"),
 	}
-	if wire.Error != nil {
-		result.ErrorCode = &wire.Error.Code
-		result.ErrorMessage = &wire.Error.Message
+	if encodedWire.Error != nil {
+		result.ErrorCode = &encodedWire.Error.Code
+		result.ErrorMessage = &encodedWire.Error.Message
 	}
 	return result, nil
 }
@@ -1594,7 +1594,7 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 
 // DecodeVideoListResponse parses a provider list document.
 func DecodeVideoListResponse(body []byte) (*VideoListResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Object  string            `json:"object"`
 		Data    []json.RawMessage `json:"data"`
 		FirstID *string           `json:"first_id"`
@@ -1607,17 +1607,17 @@ func DecodeVideoListResponse(body []byte) (*VideoListResult, *Error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, protocolError("The provider video list is not valid JSON.")
 	}
-	if wire.Object != "list" {
+	if encodedWire.Object != "list" {
 		return nil, protocolError("The provider returned an unexpected video list object type.")
 	}
 	result := &VideoListResult{
-		FirstID: wire.FirstID, LastID: wire.LastID, HasMore: wire.HasMore,
+		FirstID: encodedWire.FirstID, LastID: encodedWire.LastID, HasMore: encodedWire.HasMore,
 		Extra: diffFields(doc, "object", "data", "first_id", "last_id", "has_more"),
 	}
-	for _, raw := range wire.Data {
+	for _, raw := range encodedWire.Data {
 		job, failure := DecodeVideoObject(raw)
 		if failure != nil {
 			return nil, failure
@@ -1671,7 +1671,7 @@ func modelForList(job VideoJobResult, fallback string) string {
 
 // DecodeVideoDeleteResponse parses a provider deletion receipt.
 func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		ID      string  `json:"id"`
 		Object  *string `json:"object"`
 		Deleted bool    `json:"deleted"`
@@ -1682,11 +1682,11 @@ func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, protocolError("The provider video delete response is not valid JSON.")
 	}
 	return &VideoDeleteResult{
-		ID: wire.ID, Deleted: wire.Deleted, Object: wire.Object,
+		ID: encodedWire.ID, Deleted: encodedWire.Deleted, Object: encodedWire.Object,
 		Extra: diffFields(doc, "id", "object", "deleted"),
 	}, nil
 }
@@ -1744,7 +1744,7 @@ func TranscriptionFormatIsText(format string) bool {
 
 // DecodeTranscriptionJSON parses a JSON transcription document.
 func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
-	var wire struct {
+	var encodedWire struct {
 		Text     string   `json:"text"`
 		Language *string  `json:"language"`
 		Duration *float64 `json:"duration"`
@@ -1771,10 +1771,10 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, protocolError("The provider transcription is not valid JSON.")
 	}
-	for _, segment := range wire.Segments {
+	for _, segment := range encodedWire.Segments {
 		if len(segment.ID) == 0 || string(segment.ID) == "null" {
 			continue
 		}
@@ -1788,32 +1788,32 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 		}
 	}
 	result := &TranscriptionResult{
-		Text: wire.Text, Language: wire.Language, DurationSeconds: wire.Duration,
+		Text: encodedWire.Text, Language: encodedWire.Language, DurationSeconds: encodedWire.Duration,
 		Extra: diffFields(doc, "text", "language", "duration", "segments", "usage"),
 	}
-	if wire.Usage != nil && (wire.Usage.Type == "" || wire.Usage.Type == "tokens") {
+	if encodedWire.Usage != nil && (encodedWire.Usage.Type == "" || encodedWire.Usage.Type == "tokens") {
 		result.Tokens = &ImageUsage{
-			InputTokens: wire.Usage.InputTokens, OutputTokens: wire.Usage.OutputTokens,
-			TotalTokens: wire.Usage.TotalTokens,
+			InputTokens: encodedWire.Usage.InputTokens, OutputTokens: encodedWire.Usage.OutputTokens,
+			TotalTokens: encodedWire.Usage.TotalTokens,
 		}
-		if wire.Usage.InputDetail != nil {
-			result.Tokens.AudioInputTokens = wire.Usage.InputDetail.AudioTokens
+		if encodedWire.Usage.InputDetail != nil {
+			result.Tokens.AudioInputTokens = encodedWire.Usage.InputDetail.AudioTokens
 		}
 	}
-	if segments, ok := doc["segments"].([]any); ok && len(segments) == len(wire.Segments) {
+	if segments, ok := doc["segments"].([]any); ok && len(segments) == len(encodedWire.Segments) {
 		for i, item := range segments {
 			extra := map[string]any(nil)
 			if object, ok := item.(map[string]any); ok {
 				extra = diffFields(object, "id", "start", "end", "text", "speaker")
 			}
-			segment := wire.Segments[i]
+			segment := encodedWire.Segments[i]
 			result.Segments = append(result.Segments, TranscriptionSegment{
 				ID: segment.ID, Start: segment.Start, End: segment.End,
 				Text: segment.Text, Speaker: segment.Speaker, Extra: extra,
 			})
 		}
 	} else {
-		for _, segment := range wire.Segments {
+		for _, segment := range encodedWire.Segments {
 			result.Segments = append(result.Segments, TranscriptionSegment{
 				ID: segment.ID, Start: segment.Start, End: segment.End,
 				Text: segment.Text, Speaker: segment.Speaker,

@@ -14,13 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func strictEmbeddings(snapshot *runtime.Snapshot) {
+func strictEmbeddings(snapshot *routing.Snapshot) {
 	for id, provider := range snapshot.Providers {
-		provider.Capabilities = []runtime.Capability{{Model: provider.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+		provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
 		snapshot.Providers[id] = provider
 	}
 	route := snapshot.Routes[routeSlug]
@@ -31,16 +32,16 @@ func strictEmbeddings(snapshot *runtime.Snapshot) {
 func TestStrictUnaryReplanningPreservesCallerRoute(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		behavior runtime.Behavior
+		behavior routing.Behavior
 		via      string
 		cooldown bool
 	}{
-		{"delegation", runtime.Behavior{Selectors: []runtime.Selector{{ID: "delegate", Route: backupSlug}}}, usage.ViaSelector, false},
-		{"fallback", runtime.Behavior{Fallbacks: []runtime.Fallback{{Route: backupSlug, On: []string{runtime.FallbackExhausted}}}}, usage.ViaFallback, true},
+		{"delegation", routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}}, usage.ViaSelector, false},
+		{"fallback", routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}}, usage.ViaFallback, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := strictHarness(t, strictEmbeddings)
-			h.republish(func(snapshot *runtime.Snapshot, _, b runtime.Provider) {
+			h.republish(func(snapshot *routing.Snapshot, _, b routing.Provider) {
 				splitRoutes(snapshot, b, tc.behavior)
 			})
 			if tc.cooldown {
@@ -153,7 +154,7 @@ func TestGeminiEmbeddingErrorsUseGeminiEnvelope(t *testing.T) {
 }
 
 func TestStrictGeminiEmbeddingsAcceptQueryKey(t *testing.T) {
-	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		strictEmbeddings(snapshot)
 		for id, provider := range snapshot.Providers {
 			provider.Kind, provider.ProfileID = "gemini", "gemini-generation"

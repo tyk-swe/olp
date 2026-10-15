@@ -6,9 +6,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func registerUnaryProfiles() {
@@ -118,10 +119,10 @@ func (c Config) OperationURL(d operations.Dialect, model string) (string, error)
 		base.Path = strings.TrimRight(base.Path, "/") + "/" + path
 		return base.String(), nil
 	}
-	paths := map[string]openai.Family{"embeddings": openai.FamilyEmbeddings, "moderation": openai.FamilyModeration, "input_tokens": openai.FamilyInputTokens, "anthropic_count": openai.FamilyAnthropicCount, "gemini_count": openai.FamilyGeminiCount, "bedrock_count": openai.Family("bedrock_count"), "gemini_embeddings": openai.FamilyGeminiEmbeddings, "gemini_embeddings_batch": openai.FamilyGeminiEmbeddingsBatch, "vertex_embeddings": openai.FamilyVertexEmbeddings, "bedrock_embeddings": openai.FamilyBedrockEmbeddings, "rerank": openai.FamilyRerank}
-	wire, ok := paths[d.Address.FamilyPath]
+	paths := map[string]wire.Format{"embeddings": wire.Embeddings, "moderation": wire.Moderation, "input_tokens": wire.InputTokens, "anthropic_count": wire.AnthropicCount, "gemini_count": wire.GeminiCount, "bedrock_count": wire.Format("bedrock_count"), "gemini_embeddings": wire.GeminiEmbeddings, "gemini_embeddings_batch": wire.GeminiEmbeddingsBatch, "vertex_embeddings": wire.VertexEmbeddings, "bedrock_embeddings": wire.BedrockEmbeddings, "rerank": wire.Rerank}
+	encodedWire, ok := paths[d.Address.FamilyPath]
 	if !ok {
 		return "", errors.New("operation path adapter is not registered")
 	}
-	return c.URL(wire, model, false)
+	return c.URL(encodedWire, model, false)
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestResponsesRejectAccountScopedInputReferences(t *testing.T) {
@@ -23,8 +25,8 @@ func TestResponsesRejectAccountScopedInputReferences(t *testing.T) {
 		{"computer output", `[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"file_private"}}]`, "input[0].output.file_id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse(FamilyResponses, []byte(`{"model":"r","input":`+tc.input+`}`))
-			var rejected *RequestError
+			_, err := Parse(wire.Responses, []byte(`{"model":"r","input":`+tc.input+`}`))
+			var rejected *wire.RequestError
 			if !errors.As(err, &rejected) || rejected.Code != "unsupported_stateful_reference" || rejected.Param != tc.param {
 				t.Fatalf("reference was not rejected at %s: %v", tc.param, err)
 			}
@@ -43,11 +45,11 @@ func TestResponsesPreserveInlineInputsAndToolResults(t *testing.T) {
 		`[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","image_url":"https://example.com/screen.png"}}]`,
 		`[{"role":"user","content":"hi","vendor_extension":{"type":"input_file","file_id":"application-data"}}]`,
 	} {
-		request, err := Parse(FamilyResponses, []byte(`{"model":"r","input":`+input+`}`))
+		request, err := Parse(wire.Responses, []byte(`{"model":"r","input":`+input+`}`))
 		if err != nil {
 			t.Fatalf("inline input rejected: %s: %v", input, err)
 		}
-		encoded, err := request.Encode("upstream", nil)
+		encoded, err := Encode(request, "upstream", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

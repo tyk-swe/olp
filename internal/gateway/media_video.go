@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -14,8 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -39,7 +40,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, mediaError(failure))
 		return
 	}
-	x.family = openai.Family(request.Op)
+	x.family = wire.Format(request.Op)
 	x.media = request
 	x.estimate = mediaMultipartTokens
 	defer s.release(r.Context())
@@ -160,7 +161,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 // cooling credential, an unmeterable target, a quota refusal — advance to a
 // sibling, and the first admitted slot is the one the durable reservation
 // pins. It returns the error to report when no slot admits.
-func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slots []runtime.Slot, deadline time.Time) (*dispatchHold, runtime.Slot, *Error) {
+func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slots []routing.Slot, deadline time.Time) (*dispatchHold, routing.Slot, *Error) {
 	used := 0
 	unmeterable := false
 	var last *attemptFailure
@@ -171,32 +172,32 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runti
 		gate := s.gateAttempt(ctx, x, attempt, provider, &slot, x.estimate, deadline)
 		switch gate.verdict {
 		case gateExpired:
-			return nil, runtime.Slot{}, (&attemptFailure{class: classTimeout}).toError()
+			return nil, routing.Slot{}, (&attemptFailure{class: classTimeout}).toError()
 		case gateDenied:
 			// The circuit refused the probe; siblings share the endpoint.
-			return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+			return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 		case gateRejected:
 			used++
 			x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
 			last = gate.rejection
 			if gate.rejection.quota == quotaConnection || gate.rejection.quota == quotaRoute {
-				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+				return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 			}
 		case gateUnmeterable:
 			unmeterable = true
 			if gate.quota == quotaConnection || gate.quota == quotaRoute {
-				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+				return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 			}
 		case gateAdmitted:
 			return gate.hold, slot, nil
 		}
 	}
-	return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+	return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 }
 
 // videoAdmissionError renders the terminal error when no candidate slot could
 // be admitted, matching the precedence the media attempt loop uses.
-func (s *Server) videoAdmissionError(ctx context.Context, x *execution, last *attemptFailure, unmeterable bool) *Error {
+func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attemptFailure, unmeterable bool) *Error {
 	switch {
 	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 		return (&attemptFailure{class: classTimeout}).toError()
@@ -228,7 +229,7 @@ func (s *Server) retireFailedCreate(ctx context.Context, id string, failure *att
 }
 
 // attachCreated validates the provider reply and binds the upstream identity.
-func (s *Server) attachCreated(ctx context.Context, x *execution, reserved media.JobRecord, result *media.Result, localJobID string) *mediaOutcome {
+func (s *Server) attachCreated(ctx context.Context, x *call, reserved media.JobRecord, result *media.Result, localJobID string) *mediaOutcome {
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: localJobID}
 	protocol := func(message string) *mediaOutcome {
 		out.err = serverError(http.StatusBadGateway, "provider_protocol_error", message)
@@ -277,7 +278,7 @@ func (s *Server) attachCreated(ctx context.Context, x *execution, reserved media
 
 // handleFailedAttachment persists cleanup intent, runs the compensation
 // delete, and finalizes the tombstone when the provider confirms.
-func (s *Server) handleFailedAttachment(ctx context.Context, x *execution, reservedRecord media.JobRecord, upstreamID string, result *media.Result, attachErr error, out *mediaOutcome) *mediaOutcome {
+func (s *Server) handleFailedAttachment(ctx context.Context, x *call, reservedRecord media.JobRecord, upstreamID string, result *media.Result, attachErr error, out *mediaOutcome) *mediaOutcome {
 	conflict := false
 	var jobErr *media.JobError
 	if errors.As(attachErr, &jobErr) && jobErr.Kind == media.JobErrorUpstreamIdentityConflict {
@@ -317,7 +318,7 @@ func (s *Server) handleFailedAttachment(ctx context.Context, x *execution, reser
 
 // compensateCreate issues the upstream delete that retires an orphaned job.
 // A missing upstream object is a successful compensation.
-func (s *Server) compensateCreate(ctx context.Context, x *execution, reserved media.JobRecord, upstreamID string) bool {
+func (s *Server) compensateCreate(ctx context.Context, x *call, reserved media.JobRecord, upstreamID string) bool {
 	target, routeTimeout, _ := s.Media.Jobs.JobTarget(ctx, &reserved)
 	if target == nil {
 		return false
@@ -390,17 +391,17 @@ func (s *Server) ownedJob(ctx context.Context, authority access.Authority, video
 // jobRoute reads the project and current fidelity of a video job's route.
 // Retired routes can still own live jobs, so it reads the durable route rather
 // than requiring the route to remain in the active snapshot.
-func (s *Server) jobRoute(ctx context.Context, slug string) (*string, runtime.RouteFidelity, *Error) {
+func (s *Server) jobRoute(ctx context.Context, slug string) (*string, routing.RouteFidelity, *Error) {
 	var projectID *string
 	var fidelity []byte
 	err := s.Media.Jobs.Pool.QueryRow(ctx, `SELECT r.project_id::text,v.fidelity FROM olp.routes r
         JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.slug=$1`, slug).Scan(&projectID, &fidelity)
-	var current runtime.RouteFidelity
+	var current routing.RouteFidelity
 	if err == nil {
-		current, err = runtime.DecodeFidelity(fidelity)
+		current, err = routing.DecodeFidelity(fidelity)
 	}
 	if err != nil {
-		return nil, runtime.RouteFidelity{}, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
+		return nil, routing.RouteFidelity{}, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
 	}
 	return projectID, current, nil
 }
@@ -414,7 +415,7 @@ func (s *Server) jobTarget(ctx context.Context, record *media.JobRecord) (*media
 	return target, timeout, nil
 }
 
-func strictVideoResourceContext(x *execution, record *media.JobRecord, allowVariant bool) *Error {
+func strictVideoResourceContext(x *call, record *media.JobRecord, allowVariant bool) *Error {
 	if !record.StrictContract {
 		return nil
 	}
@@ -427,10 +428,10 @@ func strictVideoResourceContext(x *execution, record *media.JobRecord, allowVari
 	return nil
 }
 
-func videoJobRoute(record *media.JobRecord) *runtime.Route {
-	route := &runtime.Route{Slug: record.RouteSlug, Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}}
+func videoJobRoute(record *media.JobRecord) *routing.Route {
+	route := &routing.Route{Slug: record.RouteSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}}
 	if record.StrictContract {
-		route.Fidelity.Mode = runtime.FidelityStrict
+		route.Fidelity.Mode = routing.FidelityStrict
 	}
 	return route
 }
@@ -438,7 +439,7 @@ func videoJobRoute(record *media.JobRecord) *runtime.Route {
 // admitVideoRequest applies key budgets once, before any upstream call or
 // mutation. A call on a retained job admits once the job names its route, so
 // the route's limits and caller-paid policy apply.
-func (s *Server) admitVideoRequest(parent context.Context, x *execution, authority access.Authority) (context.Context, func(), *Error) {
+func (s *Server) admitVideoRequest(parent context.Context, x *call, authority access.Authority) (context.Context, func(), *Error) {
 	ttl := maxStreamDuration + media.ReconciliationLeaseSlack
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
@@ -460,7 +461,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 // returns the attempt fact for the caller to record.
 // videoJobCall makes one call on an existing job, encoded in the wire of the
 // vendor the job's pinned provider revision names.
-func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.JobRecord, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
+func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRecord, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
 	fact := AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
@@ -654,7 +655,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 
 // noteJobAttempt records the one call a job read, content download or delete
 // made, which is the attempt that serves the response.
-func (x *execution) noteJobAttempt(fact AttemptFact) {
+func (x *call) noteJobAttempt(fact AttemptFact) {
 	x.facts = append(x.facts, fact)
 	x.attemptCount, x.attemptVendor = len(x.facts), fact.VendorID
 }
@@ -663,7 +664,7 @@ func (x *execution) noteJobAttempt(fact AttemptFact) {
 // are its attempts, and it names a provider only when one served them all: a list
 // that reached several has no single vendor to name, and one that polled nothing
 // made no attempt.
-func (x *execution) notePolls() {
+func (x *call) notePolls() {
 	x.attemptCount, x.attemptVendor = len(x.facts), ""
 	if len(x.facts) == 0 {
 		return
@@ -684,7 +685,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	x.family = openai.FamilyVideoList
+	x.family = wire.VideoList
 	x.mode = "unary"
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
 	if admissionError != nil {
@@ -753,7 +754,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 
 // refreshListRecord polls a non-terminal job during a client list. The fact
 // and the dispatch flag are returned for the serial collector to record.
-func (s *Server) refreshListRecord(ctx context.Context, x *execution, record media.JobRecord) (media.JobRecord, *AttemptFact, bool, *Error) {
+func (s *Server) refreshListRecord(ctx context.Context, x *call, record media.JobRecord) (media.JobRecord, *AttemptFact, bool, *Error) {
 	if record.State != media.StateQueued && record.State != media.StateRunning {
 		return record, nil, false, nil
 	}
@@ -802,7 +803,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	x.family = openai.FamilyVideoGet
+	x.family = wire.VideoGet
 	x.mode = "unary"
 	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoGet)
 	if e != nil {
@@ -878,7 +879,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	x.family = openai.FamilyVideoContent
+	x.family = wire.VideoContent
 	x.mode = "unary"
 	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoContent)
 	if e != nil {
@@ -930,7 +931,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	x.family = openai.FamilyVideoDelete
+	x.family = wire.VideoDelete
 	x.mode = "unary"
 	loaded, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoDelete)
 	if e != nil {
@@ -1028,7 +1029,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // mediaFailOutcome records a post-dispatch media failure and writes it.
-func (s *Server) mediaFailOutcome(x *execution, w http.ResponseWriter, failure *attemptFailure) {
+func (s *Server) mediaFailOutcome(x *call, w http.ResponseWriter, failure *attemptFailure) {
 	e := failure.toError()
 	s.finishMedia(x, &mediaOutcome{err: e, committed: failure.committed}, e.Status)
 	writeSurfaceError(w, e, "openai")

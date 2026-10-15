@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -195,7 +197,7 @@ func (b *codeRequestBody) Close() error { return nil }
 type codeAttempt struct {
 	server        *Server
 	permit        resources.CodePermit
-	config        runtime.Configuration
+	config        routing.Configuration
 	auth          codemode.Authorization
 	lease         *limits.Lease
 	providerLease *limits.Lease
@@ -466,7 +468,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	}
 }
 
-func (s *Server) codeEndpoint(cfg runtime.Configuration, path, query string) (string, error) {
+func (s *Server) codeEndpoint(cfg routing.Configuration, path, query string) (string, error) {
 	u, err := url.Parse(cfg.Endpoint)
 	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return "", codemode.Refuse(502, "code_connection_invalid")
@@ -480,7 +482,7 @@ func (s *Server) codeEndpoint(cfg runtime.Configuration, path, query string) (st
 	return u.String(), nil
 }
 
-func (s *Server) codeClient(ctx context.Context, release *runtime.Release, cfg runtime.Configuration, providerID string) (*http.Client, error) {
+func (s *Server) codeClient(ctx context.Context, release *runtime.Release, cfg routing.Configuration, providerID string) (*http.Client, error) {
 	var secret []byte
 	if network := cfg.Options.Network; network != nil && network.CredentialID != "" {
 		var err error

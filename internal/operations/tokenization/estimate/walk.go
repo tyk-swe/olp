@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 const (
@@ -195,7 +195,7 @@ var responseSchemas = []string{"responseSchema", "responseJsonSchema"}
 
 // requestFields reads the top-level fields of a request, asking its document for
 // each one by name.
-func requestFields(request *openai.Request) func(string) node {
+func requestFields(request *wire.Request) func(string) node {
 	root := request.OIF().Document().Root()
 	return func(name string) node {
 		v, _ := root.Lookup(name)
@@ -205,14 +205,14 @@ func requestFields(request *openai.Request) func(string) node {
 
 // walkInput reads the prompt fields of a request of the given family, asking
 // field for each one by name.
-func walkInput(in *input, family openai.Family, field func(string) node) {
+func walkInput(in *input, family wire.Format, field func(string) node) {
 	w := walker{in}
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		w.items(field("messages"))
-	case openai.FamilyEmbeddings:
+	case wire.Embeddings:
 		w.embedding(field("input"))
-	case openai.FamilyResponses, openai.FamilyInputTokens, openai.FamilyModeration:
+	case wire.Responses, wire.InputTokens, wire.Moderation:
 		w.items(field("input"))
 		w.instructions(field("instructions"))
 	}
@@ -223,11 +223,11 @@ func walkInput(in *input, family openai.Family, field func(string) node) {
 		w.dialectSystem(field("systemInstruction"))
 		w.dialectRequest(field("generateContentRequest"))
 		switch family {
-		case openai.FamilyMistralFIM:
+		case wire.MistralFIM:
 			// The model reads the code on both sides of the gap.
 			w.text(field("prompt"))
 			w.text(field("suffix"))
-		case openai.FamilyCohereChat:
+		case wire.CohereChat:
 			// Grounding documents are prompt text, in a rendering Cohere
 			// does not document.
 			w.schema(field("documents"))
@@ -249,11 +249,11 @@ func walkInput(in *input, family openai.Family, field func(string) node) {
 // structured walks the schema a request asks the reply to follow: a model reads
 // it as prompt text, as it reads a tool's. Each dialect has its own place for
 // one, and a request without one costs nothing to look.
-func (w walker) structured(family openai.Family, field func(string) node) {
+func (w walker) structured(family wire.Format, field func(string) node) {
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		w.schema(field("response_format").object().get("json_schema").object().get("schema"))
-	case openai.FamilyResponses, openai.FamilyInputTokens:
+	case wire.Responses, wire.InputTokens:
 		w.schema(field("text").object().get("format").object().get("schema"))
 	}
 	switch family.Surface() {
@@ -589,11 +589,11 @@ func (w walker) document(block object) {
 // one candidate, and how many candidates it asked for. Defaults supply omitted
 // top-level fields. For an effective provider bound, pass the destination
 // request with its defaults already merged and nil defaults.
-func OutputBounds(request *openai.Request, defaults map[string]json.RawMessage) (output *int64, candidates int64) {
+func OutputBounds(request *wire.Request, defaults map[string]json.RawMessage) (output *int64, candidates int64) {
 	field := func(name string) json.RawMessage { return fieldOf(request, defaults, name) }
 	candidates = 1
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
-	if request != nil && request.Family == openai.FamilyResponses {
+	if request != nil && request.Family == wire.Responses {
 		outputFields = []string{"max_output_tokens"}
 	}
 	for _, name := range outputFields {
@@ -602,7 +602,7 @@ func OutputBounds(request *openai.Request, defaults map[string]json.RawMessage) 
 			break
 		}
 	}
-	if request != nil && request.Family == openai.FamilyBedrock {
+	if request != nil && request.Family == wire.Bedrock {
 		if value, ok := integerValue(jsonObject(field("inferenceConfig"))["maxTokens"]); ok {
 			output = &value
 		}
@@ -616,7 +616,7 @@ func OutputBounds(request *openai.Request, defaults map[string]json.RawMessage) 
 			candidates = v
 		}
 	}
-	if request == nil || request.Family == openai.FamilyChat {
+	if request == nil || request.Family == wire.Chat {
 		if value, ok := integerValue(field("n")); ok {
 			candidates = value
 		}
@@ -628,12 +628,12 @@ func OutputBounds(request *openai.Request, defaults map[string]json.RawMessage) 
 // then the provider's default. Match Encode's precedence, including an explicit
 // null opting out of a default and either chat token-bound alias overriding the
 // other.
-func fieldOf(request *openai.Request, defaults map[string]json.RawMessage, name string) json.RawMessage {
+func fieldOf(request *wire.Request, defaults map[string]json.RawMessage, name string) json.RawMessage {
 	if request != nil {
 		if raw := request.Field(name); len(raw) > 0 {
 			return raw
 		}
-		if request.Family == openai.FamilyChat &&
+		if request.Family == wire.Chat &&
 			((name == "max_tokens" && len(request.Field("max_completion_tokens")) > 0) ||
 				(name == "max_completion_tokens" && len(request.Field("max_tokens")) > 0)) {
 			return nil

@@ -11,14 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type codeGrantAuthorizer struct{ calls atomic.Int64 }
 
-func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
+func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	auth, err := (codeTestAuthorizer{principal: "principal"}).AuthorizeCode(ctx, cfg, account, dispatch)
 	// Admission on a socket sees a newer token than its handshake used.
 	auth.GrantGeneration = a.calls.Add(1)
@@ -27,7 +28,7 @@ func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Con
 }
 
 func TestCodeWebSocketRechecksHandshakeCredentialAfterRotation(t *testing.T) {
-	for _, eligibility := range []runtime.Eligibility{runtime.Revoked, runtime.Lapsed} {
+	for _, eligibility := range []routing.Eligibility{routing.Revoked, routing.Lapsed} {
 		for _, completed := range []int{0, 1} {
 			t.Run(fmt.Sprintf("%s/after-%d-generations", eligibility, completed), func(t *testing.T) {
 				h, ledger, server := newCodeForwardHarness(t)
@@ -71,7 +72,7 @@ func TestCodeWebSocketRechecksHandshakeCredentialAfterRotation(t *testing.T) {
 					ledger.wait(t)
 				}
 				h.rt.mu.Lock()
-				if eligibility == runtime.Revoked {
+				if eligibility == routing.Revoked {
 					h.rt.revoked["credential-1"] = true
 				} else {
 					h.rt.lapsed = map[string]bool{"credential-1": true}

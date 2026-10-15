@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestLiveProviderNativeGeneration(t *testing.T) {
@@ -30,7 +31,7 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		return v
 	}
 	c := Config{Kind: provider, AuthMode: "api_key"}
-	wire := openai.FamilyChat
+	encodedWire := wire.Chat
 	model := os.Getenv("OLP_LIVE_MODEL")
 	var secret string
 	body := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "Reply with the word hello."}}, "max_tokens": 16}
@@ -42,13 +43,13 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		}
 	case "anthropic":
 		secret = require("OLP_LIVE_ANTHROPIC_API_KEY")
-		wire = openai.FamilyAnthropic
+		encodedWire = wire.Anthropic
 		if model == "" {
 			model = "claude-sonnet-4-6"
 		}
 	case "gemini":
 		secret = require("OLP_LIVE_GEMINI_API_KEY")
-		wire = openai.FamilyGemini
+		encodedWire = wire.Gemini
 		if model == "" {
 			model = "gemini-2.5-flash"
 		}
@@ -64,12 +65,12 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		c.CloudProject = require("OLP_VERTEX_LIVE_PROJECT")
 		c.CloudRegion = require("OLP_VERTEX_LIVE_LOCATION")
 		model = require("OLP_VERTEX_LIVE_MODEL")
-		wire = openai.FamilyGemini
+		encodedWire = wire.Gemini
 	case "bedrock":
 		c.AuthMode = "default_chain"
 		c.CloudRegion = require("OLP_BEDROCK_LIVE_REGION")
 		model = require("OLP_BEDROCK_LIVE_MODEL")
-		wire = openai.Family("bedrock")
+		encodedWire = wire.Format("bedrock")
 	case "watsonx":
 		c.AuthMode = "ibm_iam"
 		secret = require("OLP_WATSONX_LIVE_API_KEY")
@@ -95,7 +96,7 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		c.Kind, c.ProfileID, c.ProfileRevision, c.VendorID = "openai_compatible", "mistral-fim", ProfileRevision, "mistral"
 		c.Endpoint = "https://api.mistral.ai/v1"
 		secret = require("OLP_LIVE_MISTRAL_API_KEY")
-		wire = openai.FamilyMistralFIM
+		encodedWire = wire.MistralFIM
 		if model == "" {
 			model = "codestral-latest"
 		}
@@ -103,14 +104,14 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		c.Kind, c.ProfileID, c.ProfileRevision, c.VendorID = "openai_compatible", "cohere-v2", ProfileRevision, "cohere-native-v2"
 		c.Endpoint = "https://api.cohere.ai/v2"
 		secret = require("OLP_LIVE_COHERE_API_KEY")
-		wire = openai.FamilyCohereChat
+		encodedWire = wire.CohereChat
 		if model == "" {
 			model = "command-a-03-2025"
 		}
 	case "bedrock-rerank":
 		c.Kind, c.AuthMode, c.VendorID = "bedrock", "default_chain", "amazon-bedrock"
 		c.CloudRegion = require("OLP_BEDROCK_LIVE_REGION")
-		wire = openai.FamilyBedrockRerank
+		encodedWire = wire.BedrockRerank
 		if model == "" {
 			model = "cohere.rerank-v3-5:0"
 		}
@@ -134,7 +135,7 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 	case "bedrock-image":
 		body = map[string]any{"prompt": "A small blue square."}
 	}
-	if wire == openai.FamilyGemini {
+	if encodedWire == wire.Gemini {
 		body = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": "Reply with the word hello."}}}}, "generationConfig": map[string]int{"maxOutputTokens": 32}}
 	}
 	if provider == "bedrock" {
@@ -147,7 +148,7 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 	if err := c.Validate(policy); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := c.URL(wire, model, false)
+	endpoint, err := c.URL(encodedWire, model, false)
 	if provider == "bedrock-image" {
 		endpoint, err = c.MediaURL("model/"+url.PathEscape(model)+"/invoke", model, nil)
 	}

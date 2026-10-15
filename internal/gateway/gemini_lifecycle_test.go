@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/coder/websocket"
 )
 
 func TestGeminiLifecycleAuthenticationRejectsAmbiguousSDKForms(t *testing.T) {
@@ -75,7 +75,7 @@ func TestGeminiLiveFrameWriteHasIndependentDeadline(t *testing.T) {
 }
 
 func TestGeminiLiveUsageRequiresDocumentedResponseCategoryAndConservativeSettlement(t *testing.T) {
-	x := &execution{estimate: 100, dispatched: true, facts: []AttemptFact{{Usage: &openai.Usage{InputTokens: 12, OutputTokens: 3}, BillingUncertain: true}}}
+	x := &call{estimate: 100, dispatched: true, facts: []AttemptFact{{Usage: &wire.Usage{InputTokens: 12, OutputTokens: 3}, BillingUncertain: true}}}
 	if amount := geminiLiveSettlement(x); amount == nil || *amount != 100 {
 		t.Fatalf("uncertain session under-reserved: %v", amount)
 	}

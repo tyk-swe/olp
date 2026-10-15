@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
@@ -29,7 +31,7 @@ func TestChatRequestFixture(t *testing.T) {
 		ExtensionPaths []string `json:"extension_paths"`
 		UpstreamModel  string   `json:"upstream_model"`
 	}](t, fixtures.Files, "protocols/openai-chat-request.expected.json")
-	request, err := Parse(FamilyChat, read(t, "protocols/openai-chat-request.json"))
+	request, err := Parse(wire.Chat, read(t, "protocols/openai-chat-request.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,12 +44,12 @@ func TestChatRequestFixture(t *testing.T) {
 	if len(messages) != expected.MessageCount || len(tools) != expected.ToolCount {
 		t.Fatalf("messages=%d tools=%d", len(messages), len(tools))
 	}
-	paths := request.Extensions()
+	paths := Extensions(request)
 	want := append([]string(nil), expected.ExtensionPaths...)
 	if !reflect.DeepEqual(sorted(paths), sorted(want)) {
 		t.Fatalf("extensions %v, want %v", paths, want)
 	}
-	encoded, err := request.Encode(expected.UpstreamModel, map[string]json.RawMessage{"temperature": json.RawMessage("0.2"), "model": json.RawMessage(`"ignored"`)})
+	encoded, err := Encode(request, expected.UpstreamModel, map[string]json.RawMessage{"temperature": json.RawMessage("0.2"), "model": json.RawMessage(`"ignored"`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,29 +84,29 @@ func sorted(items []string) []string {
 
 func TestRequestRejections(t *testing.T) {
 	cases := map[string]struct {
-		family Family
+		family wire.Format
 		body   string
 		code   string
 		param  string
 	}{
-		"both token limits":  {FamilyChat, `{"model":"r","messages":[{"role":"user","content":"x"}],"max_tokens":1,"max_completion_tokens":2}`, "invalid_value", "max_tokens"},
-		"provider qualified": {FamilyChat, `{"model":"provider/model","messages":[{"role":"user","content":"x"}]}`, "invalid_value", "model"},
-		"missing messages":   {FamilyChat, `{"model":"r"}`, "missing_required_parameter", "messages"},
-		"stream type":        {FamilyChat, `{"model":"r","messages":[{"role":"user","content":"x"}],"stream":"yes"}`, "invalid_value", "stream"},
-		"trailing document":  {FamilyChat, `{"model":"r","messages":[{"role":"user","content":"x"}]} {}`, "invalid_json", ""},
-		"stateful reference": {FamilyResponses, `{"model":"r","input":"hi","previous_response_id":1}`, "invalid_value", "previous_response_id"},
-		"conversation":       {FamilyResponses, `{"model":"r","input":"hi","conversation":"conv_1"}`, "unsupported_stateful_reference", "conversation"},
-		"background":         {FamilyResponses, `{"model":"r","input":"hi","background":"yes"}`, "invalid_value", "background"},
-		"empty input":        {FamilyResponses, `{"model":"r","input":[]}`, "invalid_value", "input"},
+		"both token limits":  {wire.Chat, `{"model":"r","messages":[{"role":"user","content":"x"}],"max_tokens":1,"max_completion_tokens":2}`, "invalid_value", "max_tokens"},
+		"provider qualified": {wire.Chat, `{"model":"provider/model","messages":[{"role":"user","content":"x"}]}`, "invalid_value", "model"},
+		"missing messages":   {wire.Chat, `{"model":"r"}`, "missing_required_parameter", "messages"},
+		"stream type":        {wire.Chat, `{"model":"r","messages":[{"role":"user","content":"x"}],"stream":"yes"}`, "invalid_value", "stream"},
+		"trailing document":  {wire.Chat, `{"model":"r","messages":[{"role":"user","content":"x"}]} {}`, "invalid_json", ""},
+		"stateful reference": {wire.Responses, `{"model":"r","input":"hi","previous_response_id":1}`, "invalid_value", "previous_response_id"},
+		"conversation":       {wire.Responses, `{"model":"r","input":"hi","conversation":"conv_1"}`, "unsupported_stateful_reference", "conversation"},
+		"background":         {wire.Responses, `{"model":"r","input":"hi","background":"yes"}`, "invalid_value", "background"},
+		"empty input":        {wire.Responses, `{"model":"r","input":[]}`, "invalid_value", "input"},
 	}
 	for name, c := range cases {
 		_, err := Parse(c.family, []byte(c.body))
-		var re *RequestError
+		var re *wire.RequestError
 		if !errors.As(err, &re) || re.Code != c.code || re.Param != c.param {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}
-	if _, err := Parse(FamilyResponses, []byte(`{"model":"r","input":"hi","store":true,"vendor":{"x":1}}`)); err != nil {
+	if _, err := Parse(wire.Responses, []byte(`{"model":"r","input":"hi","store":true,"vendor":{"x":1}}`)); err != nil {
 		t.Fatalf("extensions rejected: %v", err)
 	}
 }
@@ -117,12 +119,12 @@ func TestSelectedOperationFamilies(t *testing.T) {
 	}](t, fixtures.Files, "protocols/selected-operation-families.json")
 	seen := 0
 	for _, c := range cases {
-		var family Family
+		var family wire.Format
 		switch c.Codec {
 		case "openai_chat":
-			family = FamilyChat
+			family = wire.Chat
 		case "openai_responses":
-			family = FamilyResponses
+			family = wire.Responses
 		default:
 			continue
 		}
@@ -137,7 +139,7 @@ func TestSelectedOperationFamilies(t *testing.T) {
 	}
 }
 
-func collect(frames *[][]byte) Emit {
+func collect(frames *[][]byte) wire.Emit {
 	return func(frame []byte) error {
 		*frames = append(*frames, append([]byte(nil), frame...))
 		return nil
@@ -152,7 +154,7 @@ func TestChatStreamFixture(t *testing.T) {
 		TotalTokens   int64  `json:"total_tokens"`
 	}](t, fixtures.Files, "streams/openai-chat.expected.json")
 	var frames [][]byte
-	completion, err := Stream(FamilyChat, testutil.Fragmented(read(t, "streams/openai-chat.sse"), expected.FragmentBytes), 1<<20, "team-chat", true, collect(&frames))
+	completion, err := Stream(wire.Chat, testutil.Fragmented(read(t, "streams/openai-chat.sse"), expected.FragmentBytes), 1<<20, "team-chat", true, collect(&frames))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +204,7 @@ func TestChatStreamProtocolErrors(t *testing.T) {
 	}
 	for name, c := range cases {
 		var frames [][]byte
-		completion, err := Stream(FamilyChat, strings.NewReader(c.stream), 1<<20, "r", true, collect(&frames))
+		completion, err := Stream(wire.Chat, strings.NewReader(c.stream), 1<<20, "r", true, collect(&frames))
 		if c.ok {
 			if err != nil {
 				t.Errorf("%s: %v", name, err)
@@ -213,7 +215,7 @@ func TestChatStreamProtocolErrors(t *testing.T) {
 			}
 			continue
 		}
-		var pe *ProtocolError
+		var pe *wire.ProtocolError
 		if !errors.As(err, &pe) || pe.Truncated != c.truncated {
 			t.Errorf("%s: got %v", name, err)
 		}
@@ -222,12 +224,12 @@ func TestChatStreamProtocolErrors(t *testing.T) {
 		}
 	}
 	oversized := chunk(`{"object":"chat.completion.chunk","choices":[],"pad":"` + strings.Repeat("x", 300) + `"}`)
-	if _, err := Stream(FamilyChat, strings.NewReader(oversized), 256, "r", true, collect(new([][]byte))); !errors.Is(err, ErrEventTooLarge) {
+	if _, err := Stream(wire.Chat, strings.NewReader(oversized), 256, "r", true, collect(new([][]byte))); !errors.Is(err, wire.ErrEventTooLarge) {
 		t.Fatalf("oversized event: %v", err)
 	}
 	errorEvent := chunk(`{"error":{"message":"quota exhausted","type":"insufficient_quota","code":"insufficient_quota"}}`)
-	var ue *UpstreamError
-	if _, err := Stream(FamilyChat, strings.NewReader(start+errorEvent), 1<<20, "r", true, collect(new([][]byte))); !errors.As(err, &ue) || ue.Code != "insufficient_quota" {
+	var ue *wire.UpstreamError
+	if _, err := Stream(wire.Chat, strings.NewReader(start+errorEvent), 1<<20, "r", true, collect(new([][]byte))); !errors.As(err, &ue) || ue.Code != "insufficient_quota" {
 		t.Fatalf("error event: %v", err)
 	}
 }
@@ -238,7 +240,7 @@ func TestResponsesStream(t *testing.T) {
 	delta := event("response.output_text.delta", `{"type":"response.output_text.delta","sequence_number":1,"delta":"hi"}`)
 	completed := event("response.completed", `{"type":"response.completed","sequence_number":2,"response":{"id":"resp_1","object":"response","model":"gpt-x","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi there"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5,"output_tokens_details":{"reasoning_tokens":1}}}}`)
 	var frames [][]byte
-	completion, err := Stream(FamilyResponses, testutil.Fragmented([]byte(created+delta+completed), 3), 1<<20, "r", true, collect(&frames))
+	completion, err := Stream(wire.Responses, testutil.Fragmented([]byte(created+delta+completed), 3), 1<<20, "r", true, collect(&frames))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,23 +250,23 @@ func TestResponsesStream(t *testing.T) {
 	if len(frames) != 3 || !bytes.HasPrefix(frames[0], []byte("event: response.created\ndata: ")) || bytes.Contains(frames[2], []byte("gpt-x")) {
 		t.Fatalf("frames %q", frames)
 	}
-	var pe *ProtocolError
-	if _, err = Stream(FamilyResponses, strings.NewReader(created+delta), 1<<20, "r", true, collect(new([][]byte))); !errors.As(err, &pe) || !pe.Truncated {
+	var pe *wire.ProtocolError
+	if _, err = Stream(wire.Responses, strings.NewReader(created+delta), 1<<20, "r", true, collect(new([][]byte))); !errors.As(err, &pe) || !pe.Truncated {
 		t.Fatalf("truncated stream: %v", err)
 	}
 	frames = nil
-	if _, err = Stream(FamilyResponses, strings.NewReader(created+completed+delta), 1<<20, "r", true, collect(&frames)); err != nil || len(frames) != 2 {
+	if _, err = Stream(wire.Responses, strings.NewReader(created+completed+delta), 1<<20, "r", true, collect(&frames)); err != nil || len(frames) != 2 {
 		t.Fatalf("data after terminal was not ignored: frames=%q, err=%v", frames, err)
 	}
 	failed := event("response.failed", `{"type":"response.failed","sequence_number":2,"response":{"id":"resp_1","object":"response","status":"failed","output":[],"error":{"code":"server_error","message":"boom"}}}`)
-	var ue *UpstreamError
+	var ue *wire.UpstreamError
 	failedFrames := [][]byte{}
-	if _, err = Stream(FamilyResponses, strings.NewReader(created+failed), 1<<20, "r", true, collect(&failedFrames)); !errors.As(err, &ue) || ue.Code != "server_error" || len(failedFrames) != 2 || !bytes.Contains(failedFrames[1], []byte(`"type":"response.failed"`)) {
+	if _, err = Stream(wire.Responses, strings.NewReader(created+failed), 1<<20, "r", true, collect(&failedFrames)); !errors.As(err, &ue) || ue.Code != "server_error" || len(failedFrames) != 2 || !bytes.Contains(failedFrames[1], []byte(`"type":"response.failed"`)) {
 		t.Fatalf("failed response: %v", err)
 	}
 	errorFrame := event("error", `{"type":"error","error":{"code":"server_error","message":"provider stream interrupted"}}`)
 	failedFrames = nil
-	if _, err = Stream(FamilyResponses, strings.NewReader(created+errorFrame), 1<<20, "r", true, collect(&failedFrames)); !errors.As(err, &ue) || ue.Code != "server_error" || len(failedFrames) != 2 || !bytes.Contains(failedFrames[1], []byte(`"type":"error"`)) {
+	if _, err = Stream(wire.Responses, strings.NewReader(created+errorFrame), 1<<20, "r", true, collect(&failedFrames)); !errors.As(err, &ue) || ue.Code != "server_error" || len(failedFrames) != 2 || !bytes.Contains(failedFrames[1], []byte(`"type":"error"`)) {
 		t.Fatalf("native provider error event was not delivered before failure: frames=%q err=%v", failedFrames, err)
 	}
 }
@@ -283,11 +285,11 @@ func TestUnaryDecoding(t *testing.T) {
 	if body["model"] != "team-chat" || body["system_fingerprint"] != "fp" {
 		t.Fatalf("body %s", completion.Body)
 	}
-	var ue *UpstreamError
+	var ue *wire.UpstreamError
 	if _, err = DecodeChat([]byte(`{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`), "r"); !errors.As(err, &ue) || ue.Code != "invalid_api_key" {
 		t.Fatalf("error body: %v", err)
 	}
-	var pe *ProtocolError
+	var pe *wire.ProtocolError
 	if _, err = DecodeChat([]byte(`{"object":"chat.completion","choices":[]}`), "r"); !errors.As(err, &pe) {
 		t.Fatalf("empty choices: %v", err)
 	}
@@ -304,10 +306,10 @@ func TestUnaryDecoding(t *testing.T) {
 // canonical status in place of a type, optionally inside a one-element array,
 // and IBM's list of errors.
 func TestParseErrorBodyReadsGoogleEnvelopes(t *testing.T) {
-	want := UpstreamError{Type: "INVALID_ARGUMENT", Code: "400", Message: "Request contains an invalid argument."}
+	want := wire.UpstreamError{Type: "INVALID_ARGUMENT", Code: "400", Message: "wire.Request contains an invalid argument."}
 	for _, body := range []string{
-		`{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`,
-		`[{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}]`,
+		`{"error":{"code":400,"message":"wire.Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`,
+		`[{"error":{"code":400,"message":"wire.Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}]`,
 	} {
 		if got := ParseErrorBody([]byte(body)); got == nil || *got != want {
 			t.Fatalf("%s parsed as %+v", body, got)

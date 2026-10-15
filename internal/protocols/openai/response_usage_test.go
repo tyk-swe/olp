@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -16,20 +18,20 @@ func TestObserveResponseUsagePreservesPresenceAndNativeBytes(t *testing.T) {
 	zero, cached, reasoning := int64(0), int64(1), int64(2)
 	for _, tc := range []struct {
 		name, body, status string
-		usage              *Usage
+		usage              *wire.Usage
 		complete           bool
 	}{
 		{name: "missing usage", body: `{"status":"in_progress"}`, status: "in_progress"},
 		{name: "terminal unknown", body: `{"status":"completed","usage":null}`, status: "completed"},
-		{name: "missing status", body: `{"usage":{"input_tokens":2,"output_tokens":3}}`, usage: &Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
-		{name: "null status", body: `{"status":null,"usage":{"input_tokens":2,"output_tokens":3}}`, usage: &Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
+		{name: "missing status", body: `{"usage":{"input_tokens":2,"output_tokens":3}}`, usage: &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
+		{name: "null status", body: `{"status":null,"usage":{"input_tokens":2,"output_tokens":3}}`, usage: &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
 		{name: "null status unknown usage", body: `{"status":null}`},
-		{name: "partial", body: `{"status":"in_progress", "usage": {"input_tokens":2,"output_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens_details":{"reasoning_tokens":2}},"vendor_extension":[1, 2]}`, status: "in_progress", usage: &Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5, CachedInputTokens: &cached, ReasoningTokens: &reasoning}},
-		{name: "null total", body: `{"status":"queued","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":null}}`, status: "queued", usage: &Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
-		{name: "provided total", body: `{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":0}}`, status: "completed", usage: &Usage{InputTokens: 2, OutputTokens: 3}, complete: true},
-		{name: "explicit zero", body: `{"status":"completed","usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`, status: "completed", usage: &Usage{CachedInputTokens: &zero, ReasoningTokens: &zero}, complete: true},
-		{name: "null cache unknown", body: `{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"input_tokens_details":{"cached_tokens":null}}}`, status: "completed", usage: &Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}, complete: true},
-		{name: "maximum", body: `{"status":"completed","usage":{"input_tokens":9223372036854775807,"output_tokens":0}}`, status: "completed", usage: &Usage{InputTokens: 9223372036854775807, TotalTokens: 9223372036854775807}, complete: true},
+		{name: "partial", body: `{"status":"in_progress", "usage": {"input_tokens":2,"output_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens_details":{"reasoning_tokens":2}},"vendor_extension":[1, 2]}`, status: "in_progress", usage: &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5, CachedInputTokens: &cached, ReasoningTokens: &reasoning}},
+		{name: "null total", body: `{"status":"queued","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":null}}`, status: "queued", usage: &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}},
+		{name: "provided total", body: `{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":0}}`, status: "completed", usage: &wire.Usage{InputTokens: 2, OutputTokens: 3}, complete: true},
+		{name: "explicit zero", body: `{"status":"completed","usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`, status: "completed", usage: &wire.Usage{CachedInputTokens: &zero, ReasoningTokens: &zero}, complete: true},
+		{name: "null cache unknown", body: `{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"input_tokens_details":{"cached_tokens":null}}}`, status: "completed", usage: &wire.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}, complete: true},
+		{name: "maximum", body: `{"status":"completed","usage":{"input_tokens":9223372036854775807,"output_tokens":0}}`, status: "completed", usage: &wire.Usage{InputTokens: 9223372036854775807, TotalTokens: 9223372036854775807}, complete: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(tc.body)
@@ -156,7 +158,7 @@ func TestResponsesStreamRetainsPartialUsageBeforeFailure(t *testing.T) {
 			if tc.readErr != nil {
 				reader = io.MultiReader(reader, failedStreamReader{tc.readErr})
 			}
-			completion, err := StreamMetadataEvents(FamilyResponses, reader, 4096, "route", true, func([]byte) error { return tc.emitErr }, func(_ oif.Event) error { return tc.observeErr })
+			completion, err := StreamMetadataEvents(wire.Responses, reader, 4096, "route", true, func([]byte) error { return tc.emitErr }, func(_ oif.Event) error { return tc.observeErr })
 			if err == nil || completion == nil || completion.UsageComplete || completion.Usage == nil || completion.Usage.InputTokens != 8 || completion.Usage.OutputTokens != 3 || completion.Usage.TotalTokens != 11 || completion.Usage.CachedInputTokens == nil || *completion.Usage.CachedInputTokens != 2 || completion.Usage.ReasoningTokens == nil || *completion.Usage.ReasoningTokens != 1 {
 				t.Fatalf("partial evidence lost or marked complete: %+v, %v", completion, err)
 			}
@@ -173,19 +175,19 @@ func TestResponsesTerminalUsageOwnsCompletenessAndCorrections(t *testing.T) {
 	zero, one, two := int64(0), int64(1), int64(2)
 	for _, tc := range []struct {
 		name, usage string
-		want        *Usage
+		want        *wire.Usage
 		complete    bool
 	}{
-		{name: "missing", want: &Usage{InputTokens: 8, OutputTokens: 3, TotalTokens: 11, CachedInputTokens: &two, ReasoningTokens: &one}},
-		{name: "null", usage: `,"usage":null`, want: &Usage{InputTokens: 8, OutputTokens: 3, TotalTokens: 11, CachedInputTokens: &two, ReasoningTokens: &one}},
-		{name: "lower", usage: `,"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}`, want: &Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2, CachedInputTokens: &zero}, complete: true},
-		{name: "zero", usage: `,"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}`, want: &Usage{CachedInputTokens: &zero}, complete: true},
-		{name: "cache correction", usage: `,"usage":{"input_tokens":8,"output_tokens":3,"input_tokens_details":{"cached_tokens":1}}`, want: &Usage{InputTokens: 8, OutputTokens: 3, TotalTokens: 11, CachedInputTokens: &one}, complete: true},
+		{name: "missing", want: &wire.Usage{InputTokens: 8, OutputTokens: 3, TotalTokens: 11, CachedInputTokens: &two, ReasoningTokens: &one}},
+		{name: "null", usage: `,"usage":null`, want: &wire.Usage{InputTokens: 8, OutputTokens: 3, TotalTokens: 11, CachedInputTokens: &two, ReasoningTokens: &one}},
+		{name: "lower", usage: `,"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}`, want: &wire.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2, CachedInputTokens: &zero}, complete: true},
+		{name: "zero", usage: `,"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}`, want: &wire.Usage{CachedInputTokens: &zero}, complete: true},
+		{name: "cache correction", usage: `,"usage":{"input_tokens":8,"output_tokens":3,"input_tokens_details":{"cached_tokens":1}}`, want: &wire.Usage{InputTokens: 8, OutputTokens: 3, TotalTokens: 11, CachedInputTokens: &one}, complete: true},
 	} {
 		for _, terminal := range []string{"completed", "incomplete", "failed"} {
 			t.Run(tc.name+"/"+terminal, func(t *testing.T) {
-				wire := responsesEvents(partialResponseUsageEvent, `{"type":"response.`+terminal+`","response":{"id":"resp_1","status":"`+terminal+`","output":[]`+tc.usage+`}}`)
-				completion, err := StreamMetadata(FamilyResponses, strings.NewReader(wire), 4096, "route", true, func([]byte) error { return nil })
+				encodedWire := responsesEvents(partialResponseUsageEvent, `{"type":"response.`+terminal+`","response":{"id":"resp_1","status":"`+terminal+`","output":[]`+tc.usage+`}}`)
+				completion, err := StreamMetadata(wire.Responses, strings.NewReader(encodedWire), 4096, "route", true, func([]byte) error { return nil })
 				if (err != nil) != (terminal == "failed") || completion == nil || completion.UsageComplete != tc.complete || !reflect.DeepEqual(completion.Usage, tc.want) {
 					t.Fatalf("terminal evidence %+v, err=%v; want complete=%t usage=%+v", completion, err, tc.complete, tc.want)
 				}
@@ -197,11 +199,11 @@ func TestResponsesTerminalUsageOwnsCompletenessAndCorrections(t *testing.T) {
 func TestResponsesUsageObservationPreservesStreamBytesAndTerminalEvidenceBeforeDelivery(t *testing.T) {
 	partial := `{"type":"response.in_progress", "response":{"status":"in_progress","usage":{"input_tokens":8, "output_tokens":3,"vendor_count":4}}, "vendor_extension":[1, 2]}`
 	terminal := `{"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}}`
-	wire := responsesEvents(partial, terminal)
+	encodedWire := responsesEvents(partial, terminal)
 	for _, failure := range []string{"none", "delivery", "observer"} {
 		t.Run(failure, func(t *testing.T) {
 			var frames strings.Builder
-			completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(wire), 4096, "route", true, func(frame []byte) error {
+			completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(encodedWire), 4096, "route", true, func(frame []byte) error {
 				frames.Write(frame)
 				if failure == "delivery" && strings.Contains(string(frame), "response.completed") {
 					return io.ErrClosedPipe
@@ -216,7 +218,7 @@ func TestResponsesUsageObservationPreservesStreamBytesAndTerminalEvidenceBeforeD
 			if completion == nil || !completion.UsageComplete || completion.Usage == nil || completion.Usage.InputTokens != 0 || completion.Usage.OutputTokens != 0 || completion.Usage.CachedInputTokens == nil || *completion.Usage.CachedInputTokens != 0 {
 				t.Fatalf("terminal correction lost on %s: %+v", failure, completion)
 			}
-			if failure == "none" && (err != nil || frames.String() != wire) {
+			if failure == "none" && (err != nil || frames.String() != encodedWire) {
 				t.Fatalf("native usage bytes changed: err=%v\n%s", err, frames.String())
 			}
 			if failure != "none" && !errors.Is(err, io.ErrClosedPipe) {
@@ -230,7 +232,7 @@ func TestResponsesTerminalUsageCannotBeDowngradedByLaterFrames(t *testing.T) {
 	terminal := `{"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}}`
 	for _, suffix := range []string{responsesEvents(partialResponseUsageEvent), "data: invalid\n\n"} {
 		frames := 0
-		completion, err := StreamMetadata(FamilyResponses, strings.NewReader(responsesEvents(terminal)+suffix), 4096, "route", true, func([]byte) error { frames++; return nil })
+		completion, err := StreamMetadata(wire.Responses, strings.NewReader(responsesEvents(terminal)+suffix), 4096, "route", true, func([]byte) error { frames++; return nil })
 		if err != nil || frames != 1 || completion == nil || !completion.UsageComplete || completion.Usage == nil || completion.Usage.InputTokens != 0 || completion.Usage.OutputTokens != 0 || completion.Usage.CachedInputTokens == nil || *completion.Usage.CachedInputTokens != 0 {
 			t.Fatalf("later frame changed terminal evidence: %+v, frames=%d, err=%v", completion, frames, err)
 		}
@@ -250,7 +252,7 @@ func TestResponsesGrammarValidationPrecedesUsageObserver(t *testing.T) {
 	} {
 		t.Run(terminal, func(t *testing.T) {
 			observed, emitted := 0, 0
-			completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(responsesEvents(partialResponseUsageEvent, terminal)), 4096, "route", true, func([]byte) error {
+			completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(responsesEvents(partialResponseUsageEvent, terminal)), 4096, "route", true, func([]byte) error {
 				emitted++
 				return nil
 			}, func(oif.Event) error {
@@ -264,8 +266,8 @@ func TestResponsesGrammarValidationPrecedesUsageObserver(t *testing.T) {
 	}
 	terminal := `{"type":"response.failed","response":{"id":"resp_1","status":"failed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`
 	observed := 0
-	completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(responsesEvents(partialResponseUsageEvent, terminal)), 4096, "route", true, func([]byte) error { return nil }, func(oif.Event) error { observed++; return nil })
-	var failure *UpstreamError
+	completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(responsesEvents(partialResponseUsageEvent, terminal)), 4096, "route", true, func([]byte) error { return nil }, func(oif.Event) error { observed++; return nil })
+	var failure *wire.UpstreamError
 	if !errors.As(err, &failure) || observed != 2 || completion == nil || !completion.UsageComplete || completion.Usage == nil || completion.Usage.InputTokens != 1 || completion.Usage.OutputTokens != 1 {
 		t.Fatalf("valid failed terminal lost observed accounting: observed=%d completion=%+v err=%v", observed, completion, err)
 	}
@@ -296,7 +298,7 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 				status = `,"status":"` + tc.status + `"`
 			}
 			body := `{"type":"` + tc.kind + `","response":{"output":[],"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}` + status + `}}`
-			event, err := LiftEvent(FamilyResponses, body, tc.kind, 0, 4096)
+			event, err := LiftEvent(wire.Responses, body, tc.kind, 0, 4096)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -315,7 +317,7 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 		`{"type":"response.completed"}`,
 		`{"type":"response.completed","response":{"status":"completed","usage":{}}}`,
 	} {
-		event, err := LiftEvent(FamilyResponses, body, "", 0, 4096)
+		event, err := LiftEvent(wire.Responses, body, "", 0, 4096)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -324,7 +326,7 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 			t.Errorf("native contradiction became accounting proof: body=%s observed=%+v known=%t err=%v", body, observed, known, err)
 		}
 	}
-	event, err := LiftEvent(FamilyResponses, `{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":0,"output_tokens":0}}}`, "response.in_progress", 0, 4096)
+	event, err := LiftEvent(wire.Responses, `{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":0,"output_tokens":0}}}`, "response.in_progress", 0, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +335,7 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 	}
 	for _, kind := range []string{"response.created", "response.queued", "response.in_progress"} {
 		for _, response := range []string{"", `,"response":null`} {
-			event, err := LiftEvent(FamilyResponses, `{"type":"`+kind+`"`+response+`}`, kind, 0, 4096)
+			event, err := LiftEvent(wire.Responses, `{"type":"`+kind+`"`+response+`}`, kind, 0, 4096)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -365,9 +367,9 @@ func TestNonterminalResponseSnapshotsPreserveWireAndAccountingPhase(t *testing.T
 					}
 				}
 				for _, finish := range []bool{false, true} {
-					wire := responsesEvents(partial)
+					encodedWire := responsesEvents(partial)
 					if finish {
-						wire += responsesEvents(terminal)
+						encodedWire += responsesEvents(terminal)
 					}
 					wantObserved := 1
 					if finish {
@@ -375,7 +377,7 @@ func TestNonterminalResponseSnapshotsPreserveWireAndAccountingPhase(t *testing.T
 					}
 					observed := 0
 					var delivered strings.Builder
-					completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(wire), 4096, "route", true, func(frame []byte) error { delivered.Write(frame); return nil }, func(event oif.Event) error {
+					completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(encodedWire), 4096, "route", true, func(frame []byte) error { delivered.Write(frame); return nil }, func(event oif.Event) error {
 						proof, lifecycle, err := ObserveResponseEventUsage(event)
 						if err != nil || !lifecycle || proof.Usage == nil {
 							t.Fatalf("valid SDK snapshot refused: proof=%+v lifecycle=%t err=%v", proof, lifecycle, err)
@@ -389,7 +391,7 @@ func TestNonterminalResponseSnapshotsPreserveWireAndAccountingPhase(t *testing.T
 						observed++
 						return nil
 					})
-					if delivered.String() != wire || completion == nil || completion.Usage == nil || completion.UsageComplete != finish || observed != wantObserved {
+					if delivered.String() != encodedWire || completion == nil || completion.Usage == nil || completion.UsageComplete != finish || observed != wantObserved {
 						t.Fatalf("snapshot bytes/evidence changed: completion=%+v observed=%d err=%v", completion, observed, err)
 					}
 					if finish {
@@ -410,7 +412,7 @@ func TestOpaqueResponseExtensionsNeverBecomeAccounting(t *testing.T) {
 		for _, response := range []string{`"opaque"`, `{"status":"completed","model":"native","usage":{}}`, `{"status":"completed","model":"native","usage":{"input_tokens":99,"output_tokens":99}}`} {
 			t.Run(kind+"/"+response, func(t *testing.T) {
 				body := `{"type":"` + kind + `","response":` + response + `}`
-				event, err := LiftEvent(FamilyResponses, body, kind, 0, 4096)
+				event, err := LiftEvent(wire.Responses, body, kind, 0, 4096)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -419,7 +421,7 @@ func TestOpaqueResponseExtensionsNeverBecomeAccounting(t *testing.T) {
 					t.Fatalf("opaque extension became trusted accounting: observed=%+v known=%t err=%v", observed, known, err)
 				}
 				var frames strings.Builder
-				completion, _ := StreamMetadata(FamilyResponses, strings.NewReader(responsesEvents(partialResponseUsageEvent, body)), 4096, "route", true, func(frame []byte) error { frames.Write(frame); return nil })
+				completion, _ := StreamMetadata(wire.Responses, strings.NewReader(responsesEvents(partialResponseUsageEvent, body)), 4096, "route", true, func(frame []byte) error { frames.Write(frame); return nil })
 				if completion == nil || completion.UsageComplete || completion.Usage == nil || completion.Usage.InputTokens != 8 || completion.Usage.OutputTokens != 3 || !strings.Contains(frames.String(), "data: "+body+"\n\n") {
 					t.Fatalf("opaque extension altered accounting or native bytes: completion=%+v frames=%s", completion, frames.String())
 				}
@@ -434,7 +436,7 @@ func TestResponsesCompleteUsageSurvivesProjectionFailure(t *testing.T) {
 	terminal := strings.Replace(base, `"pad":""`, `"pad":"`+strings.Repeat("x", maxEvent-40-len(base))+`"`, 1)
 	for _, observerErr := range []error{nil, io.ErrClosedPipe} {
 		frames, observed := 0, 0
-		completion, err := StreamMetadataEvents(FamilyResponses, strings.NewReader(responsesEvents(terminal)), maxEvent, strings.Repeat("r", 64), true, func([]byte) error { frames++; return nil }, func(event oif.Event) error {
+		completion, err := StreamMetadataEvents(wire.Responses, strings.NewReader(responsesEvents(terminal)), maxEvent, strings.Repeat("r", 64), true, func([]byte) error { frames++; return nil }, func(event oif.Event) error {
 			observed++
 			usage, known, err := ObserveResponseEventUsage(event)
 			if err != nil || !known || !usage.Complete || usage.Status != "completed" || usage.Usage == nil || event.Source().Raw() != terminal {

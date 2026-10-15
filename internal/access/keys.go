@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/priority"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/attribution"
@@ -47,13 +49,6 @@ type KeyPolicy struct {
 	Priority    *string `json:"priority,omitempty"`
 	MaxPriority *string `json:"max_priority,omitempty"`
 }
-
-// Priorities are the admission classes, most urgent first.
-var Priorities = []string{"critical", "high", "normal", "low"}
-
-// PriorityRank orders admission classes from zero, the most urgent; it is
-// -1 for a name that is no class.
-func PriorityRank(name string) int { return slices.Index(Priorities, name) }
 
 // DefaultPriority is the class the key's requests take unless they ask for
 // another.
@@ -167,11 +162,11 @@ func validateKey(input keyInput, expirationChanged bool) error {
 		return err
 	}
 	for field, value := range map[string]*string{"priority": input.Priority, "max_priority": input.MaxPriority} {
-		if value != nil && PriorityRank(*value) < 0 {
+		if value != nil && priority.Rank(*value) < 0 {
 			return Invalid(field, "Use critical, high, normal or low.")
 		}
 	}
-	if PriorityRank(input.DefaultPriority()) < PriorityRank(input.PriorityCeiling()) {
+	if priority.Rank(input.DefaultPriority()) < priority.Rank(input.PriorityCeiling()) {
 		return Invalid("priority", "The default priority cannot exceed max_priority.")
 	}
 	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {

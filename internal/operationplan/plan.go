@@ -61,14 +61,9 @@ type Result struct {
 func fail(code, field, requirement, message string) error {
 	return operations.Error(code, field, requirement, message)
 }
-func cloneConfig(c connectors.Config) connectors.Config {
-	raw, _ := json.Marshal(c)
-	var out connectors.Config
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
 func Compile(config Config) (*Template, error) {
-	config.Provider = cloneConfig(config.Provider)
+	config.Provider = config.Provider.Clone()
+	config.Policy = config.Policy.Clone()
 	p, err := config.Provider.Profile()
 	if err != nil || config.Provider.ValidateProfile() != nil {
 		return nil, fail("target_capability", "/profile", "explicit_profile", "A registered versioned operation profile is required.")
@@ -104,11 +99,7 @@ func Compile(config Config) (*Template, error) {
 	if config.MaxBodyBytes < 1 || config.MaxBodyBytes > 64<<20 {
 		return nil, fail("target_capability", "/limits", "bounded_buffering", "The operation response limit is invalid.")
 	}
-	binding := config.Provider.Bindings[config.Model]
-	serving := oif.ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: config.Provider.Model(config.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: config.Provider.ServingPrincipal(config.Model), Snapshot: binding.Snapshot, Region: config.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
-	if binding.Region != "" {
-		serving.Region = binding.Region
-	}
+	serving := config.Provider.ServingIdentity(config.ProviderID, config.RevisionID, config.Model)
 	var schema struct {
 		Required []string `json:"required"`
 	}
@@ -270,7 +261,7 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 }
 func (p *Plan) Prepared() oif.Prepared       { return p.prepared }
 func (p *Plan) Body() []byte                 { return p.prepared.Document().Bytes() }
-func (p *Plan) Config() connectors.Config    { return cloneConfig(p.config) }
+func (p *Plan) Config() connectors.Config    { return p.config.Clone() }
 func (p *Plan) Serving() oif.ServingIdentity { return p.receipt.Serving }
 func (p *Plan) Estimate() int64              { return p.estimate }
 func (p *Plan) Parameters() []string {

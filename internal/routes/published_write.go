@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -56,7 +58,7 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	var targets []runtime.PublishedTarget
+	var targets []routing.PublishedTarget
 	if previous != nil {
 		if err = access.Match(r, previous.ETag); err != nil {
 			return access.Reply{}, err

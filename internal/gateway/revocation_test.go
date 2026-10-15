@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -41,7 +43,7 @@ func TestNetworkCredentialRevocationAfterPlanningPreservesAttemptBudget(t *testi
 				release := h.rt.release
 				snapshot := release.Snapshot
 				credentials := map[string][]byte{networkID: networkSecret, credentialC: []byte("secret-c")}
-				var providerC runtime.Provider
+				var providerC routing.Provider
 				for id, provider := range snapshot.Providers {
 					for _, slot := range provider.Slots {
 						credentials[*slot.CredentialID], _ = release.Credential(*slot.CredentialID)
@@ -58,11 +60,11 @@ func TestNetworkCredentialRevocationAfterPlanningPreservesAttemptBudget(t *testi
 				providerC.ID, providerC.Name, providerC.RevisionID = uuid.NewString(), "c", uuid.NewString()
 				providerC.Endpoint = h.upstream.URL + "/c/v1"
 				providerC.ActiveCredential = &credentialC
-				providerC.Slots = []runtime.Slot{{ID: uuid.NewString(), Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialC}}
-				providerC.Capabilities = []runtime.Capability{{Model: modelC, Operation: "generation", Surface: "openai", Mode: "unary"}}
+				providerC.Slots = []routing.Slot{{ID: uuid.NewString(), Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialC}}
+				providerC.Capabilities = []routing.Capability{{Model: modelC, Operation: "generation", Surface: "openai", Mode: "unary"}}
 				snapshot.Providers[providerC.ID] = providerC
 				route := snapshot.Routes[routeSlug]
-				route.Targets = append(route.Targets, runtime.Target{ID: uuid.NewString(), ProviderID: providerC.ID, ProviderModel: modelC, Priority: 2, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()})
+				route.Targets = append(route.Targets, routing.Target{ID: uuid.NewString(), ProviderID: providerC.ID, ProviderModel: modelC, Priority: 2, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()})
 				snapshot.Routes[routeSlug] = route
 				h.rt.release, err = runtime.NewRelease(release.ID, release.Sequence, snapshot, credentials)
 				if err != nil {
@@ -109,7 +111,7 @@ func TestRevocationDuringAnAttemptSkipsSiblingWithoutConsumingBudget(t *testing.
 					credentials[*slot.CredentialID], _ = release.Credential(*slot.CredentialID)
 				}
 				if provider.Name == "a" {
-					provider.Slots = append(provider.Slots, runtime.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
+					provider.Slots = append(provider.Slots, routing.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
 					snapshot.Providers[id] = provider
 				}
 			}

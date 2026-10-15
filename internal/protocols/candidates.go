@@ -6,26 +6,28 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-func candidateField(family openai.Family) string {
-	if family == openai.FamilyChat {
+func candidateField(family wire.Format) string {
+	if family == wire.Chat {
 		return "choices"
 	}
 	return "candidates"
 }
-func supportsCandidates(family openai.Family) bool {
-	return family == openai.FamilyChat || family == openai.FamilyGemini || family == openai.FamilyGeminiStream
+func supportsCandidates(family wire.Format) bool {
+	return family == wire.Chat || family == wire.Gemini || family == wire.GeminiStream
 }
 
-func translateCandidates(wire, target openai.Family, body []byte, route string) ([]byte, error) {
+func translateCandidates(encodedWire, target wire.Format, body []byte, route string) ([]byte, error) {
 	source, err := object(body)
 	if err != nil {
 		return nil, err
 	}
-	values := arr(source[candidateField(wire)])
+	values := arr(source[candidateField(encodedWire)])
 	if len(values) < 2 {
 		return nil, nil
 	}
@@ -41,9 +43,9 @@ func translateCandidates(wire, target openai.Family, body []byte, route string) 
 			index = int64(i)
 		}
 		item["index"] = raw(0)
-		source[candidateField(wire)] = raw([]Object{item})
-		var c *openai.Completion
-		if wire == openai.FamilyChat {
+		source[candidateField(encodedWire)] = raw([]Object{item})
+		var c *wire.Completion
+		if encodedWire == wire.Chat {
 			c, err = openai.DecodeChat(raw(source), route)
 		} else {
 			c, err = decodeGemini(raw(source), route, false)
@@ -65,11 +67,11 @@ func translateCandidates(wire, target openai.Family, body []byte, route string) 
 }
 
 type candidateStream struct {
-	source, target  openai.Family
+	source, target  wire.Format
 	route           string
 	limit, retained int
 	includeUsage    bool
-	emit            openai.Emit
+	emit            wire.Emit
 	children        map[int]*streamTranslator
 	finishes        map[int]string
 }
@@ -78,7 +80,7 @@ func (m *candidateStream) child(index int) *streamTranslator {
 	if t := m.children[index]; t != nil {
 		return t
 	}
-	t := &streamTranslator{source: m.source, target: m.target, route: m.route, limit: m.limit, retained: &m.retained, calls: map[int]*openai.ToolCall{}, blocks: map[int]int{}}
+	t := &streamTranslator{source: m.source, target: m.target, route: m.route, limit: m.limit, retained: &m.retained, calls: map[int]*wire.ToolCall{}, blocks: map[int]int{}}
 	t.emit = func(frame []byte) error {
 		if strings.TrimSpace(string(frame)) == "data: [DONE]" {
 			return nil
@@ -123,10 +125,10 @@ func (m *candidateStream) frame(frame []byte) error {
 			}
 			child := m.child(int(index))
 			if m.retained > m.limit {
-				return openai.ErrEventTooLarge
+				return wire.ErrEventTooLarge
 			}
 			reason := str(item["finish_reason"])
-			if m.source == openai.FamilyGemini {
+			if m.source == wire.Gemini {
 				if r := str(item["finishReason"]); r != "" {
 					reason = geminiFinish(r)
 				}
@@ -145,7 +147,7 @@ func (m *candidateStream) frame(frame []byte) error {
 		return nil
 	})
 }
-func (m *candidateStream) finish(c *openai.Completion) error {
+func (m *candidateStream) finish(c *wire.Completion) error {
 	if len(m.children) == 0 {
 		m.child(0)
 	}
@@ -160,14 +162,14 @@ func (m *candidateStream) finish(c *openai.Completion) error {
 		if reason := m.finishes[index]; reason != "" {
 			summary.FinishReason = reason
 		}
-		if m.target != openai.FamilyChat && i == len(indices)-1 {
+		if m.target != wire.Chat && i == len(indices)-1 {
 			summary.Usage = c.Usage
 		}
 		if err := m.children[index].finish(&summary); err != nil {
 			return err
 		}
 	}
-	if m.target == openai.FamilyChat {
+	if m.target == wire.Chat {
 		if m.includeUsage && c.Usage != nil {
 			if err := m.children[indices[0]].chat(nil, nil, c.Usage); err != nil {
 				return err

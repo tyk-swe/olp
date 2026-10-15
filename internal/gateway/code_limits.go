@@ -6,9 +6,10 @@ import (
 	"maps"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // ReserveCodeRate uses the shared request/token-rate/concurrency counters.
@@ -60,8 +61,8 @@ func codeEndUserPolicy(policy *access.EndUserPolicy) *access.EndUserPolicy {
 	return &copy
 }
 
-func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, configuration runtime.Configuration, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
-	request := connectionRequest(&runtime.Provider{ID: providerID, Limits: configuration.Options.Limits}, estimate, ttl, "")
+func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
+	request := connectionRequest(&routing.Provider{ID: providerID, Limits: configuration.Options.Limits}, estimate, ttl, "")
 	if !request.HasHardLimits() {
 		return nil, nil
 	}

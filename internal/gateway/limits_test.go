@@ -9,17 +9,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // reserved is what admission reserves for a request sent to a model.
-func reserved(parsed *openai.Request, model string, defaults map[string]json.RawMessage) int64 {
+func reserved(parsed *wire.Request, model string, defaults map[string]json.RawMessage) int64 {
 	return estimate.Walk(parsed).Estimate(estimate.ForModel(model), defaults).Tokens()
 }
 
@@ -33,52 +35,52 @@ func reserved(parsed *openai.Request, model string, defaults map[string]json.Raw
 func TestAdmissionEstimate(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		model  string
 		body   string
 		want   int64
 	}{
 		{
 			name:   "unbounded output is charged the default",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			// "hello" is five characters, so two tokens.
 			body: `{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`,
 			want: 2 + estimate.DefaultOutputTokens,
 		},
 		{
 			name:   "max_tokens bounds the reply",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			body:   `{"model":"model-a","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`,
 			want:   2 + 10,
 		},
 		{
 			name:   "every candidate is charged",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			body:   `{"model":"model-a","max_completion_tokens":7,"n":3,"messages":[{"role":"user","content":"hi"}]}`,
 			want:   1 + 7*3,
 		},
 		{
 			name:   "characters are counted, not bytes",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			// Four three-byte characters are one token, not three.
 			body: `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":"日本語で"}]}`,
 			want: 1 + 1,
 		},
 		{
 			name:   "an image part costs a flat charge",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			body:   `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAAAAAAAAAAAAAA"}}]}]}`,
 			want:   1 + estimate.ImageTokens + 1,
 		},
 		{
 			name:   "audio and files cost more than an image",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			body:   `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`,
 			want:   estimate.MediaTokens + 1,
 		},
 		{
 			name:   "tool calls and their results are prompt text",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			// The sender name "abcd" is one token, the call name "lookup" two,
 			// its arguments three, the call id "call_1" two, and the result
 			// "ok" one.
@@ -87,7 +89,7 @@ func TestAdmissionEstimate(t *testing.T) {
 		},
 		{
 			name:   "a tool catalogue is charged with its schema",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			// "lookup" is two tokens and "Look it up" three; the schema is
 			// charged as the seventeen characters it compacts to, so five.
 			body: `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":""}],"tools":[{"type":"function","function":{"name":"lookup","description":"Look it up","parameters": {"type": "object"}}}]}`,
@@ -95,25 +97,25 @@ func TestAdmissionEstimate(t *testing.T) {
 		},
 		{
 			name:   "responses carries its own bound",
-			family: openai.FamilyResponses,
+			family: wire.Responses,
 			body:   `{"model":"model-a","max_output_tokens":25,"input":"hello"}`,
 			want:   2 + 25,
 		},
 		{
 			name:   "responses input items are walked like messages",
-			family: openai.FamilyResponses,
+			family: wire.Responses,
 			body:   `{"model":"model-a","max_output_tokens":5,"input":[{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`,
 			want:   1 + estimate.ImageTokens + 5,
 		},
 		{
 			name:   "an absurd request saturates instead of overflowing",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			body:   `{"model":"model-a","max_completion_tokens":9007199254740991,"n":1024,"messages":[{"role":"user","content":"hi"}]}`,
 			want:   maxEstimate,
 		},
 		{
 			name:   "an OpenAI model counts the text exactly and frames the message",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			model:  "gpt-4o",
 			// "hello" and the role "user" are one token each, the message costs
 			// three and the reply is primed with three.
@@ -122,14 +124,14 @@ func TestAdmissionEstimate(t *testing.T) {
 		},
 		{
 			name:   "the same request on a model without a public tokenizer",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			model:  "claude-sonnet-4-5",
 			body:   `{"model":"model-a","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`,
 			want:   2 + 10,
 		},
 		{
 			name:   "a script the four-character rule undercharges is counted exactly",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			model:  "gpt-4",
 			// Five tokens in cl100k_base, against the one the heuristic charges.
 			body: `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":"日本語で"}]}`,
@@ -137,14 +139,14 @@ func TestAdmissionEstimate(t *testing.T) {
 		},
 		{
 			name:   "an image costs its flat charge next to exact text",
-			family: openai.FamilyChat,
+			family: wire.Chat,
 			model:  "gpt-4o",
 			body:   `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`,
 			want:   1 + estimate.ImageTokens + 1 + 3 + 3 + 1,
 		},
 		{
 			name:   "responses instructions and input are messages of their own",
-			family: openai.FamilyResponses,
+			family: wire.Responses,
 			model:  "gpt-4.1",
 			body:   `{"model":"model-a","max_output_tokens":10,"instructions":"Be concise and kind.","input":"What is 2+2?"}`,
 			// Seven and five tokens of text, "user" and "system", two messages
@@ -153,7 +155,7 @@ func TestAdmissionEstimate(t *testing.T) {
 		},
 		{
 			name:   "embeddings are counted by the model's own encoding",
-			family: openai.FamilyEmbeddings,
+			family: wire.Embeddings,
 			model:  "text-embedding-3-small",
 			body:   `{"model":"model-a","input":["hello","日本語で"]}`,
 			want:   1 + 5,
@@ -185,7 +187,7 @@ func TestAdmissionEstimate(t *testing.T) {
 func TestAdmissionEstimateIgnoresInlineMediaSize(t *testing.T) {
 	body := `{"model":"model-a","max_tokens":4096,"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,` +
 		strings.Repeat("A", 1_000_000) + `"}}]}]}`
-	parsed, err := openai.Parse(openai.FamilyChat, []byte(body))
+	parsed, err := openai.Parse(wire.Chat, []byte(body))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -254,11 +256,11 @@ func TestOnlyTheKeysRequestAsksForTheAllowance(t *testing.T) {
 	if !key.ReportRate {
 		t.Fatal("the key's request does not ask for its allowance")
 	}
-	provider := &runtime.Provider{ID: uuid.NewString(), Limits: &runtime.Limits{RequestsPerMinute: &rpm, TokensPerMinute: &tokens}}
+	provider := &routing.Provider{ID: uuid.NewString(), Limits: &routing.Limits{RequestsPerMinute: &rpm, TokensPerMinute: &tokens}}
 	if connectionRequest(provider, 5, time.Second, "").ReportRate {
 		t.Fatal("a provider connection's request asks for an allowance nothing reports")
 	}
-	slot := &runtime.Slot{ID: uuid.NewString(), RequestsPerMinute: &rpm, TokensPerMinute: &tokens}
+	slot := &routing.Slot{ID: uuid.NewString(), RequestsPerMinute: &rpm, TokensPerMinute: &tokens}
 	if slotRequest(slot, 5, time.Second, "").ReportRate {
 		t.Fatal("a credential slot's request asks for an allowance nothing reports")
 	}
@@ -326,11 +328,11 @@ func TestTotalTokens(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name  string
-		usage openai.Usage
+		usage wire.Usage
 		want  int64
 	}{
-		{"reported total wins", openai.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10}, 10},
-		{"halves are summed when no total is reported", openai.Usage{InputTokens: 4, OutputTokens: 6}, 10},
+		{"reported total wins", wire.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10}, 10},
+		{"halves are summed when no total is reported", wire.Usage{InputTokens: 4, OutputTokens: 6}, 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := totalTokens(&tc.usage)

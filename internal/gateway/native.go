@@ -5,9 +5,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/surface"
 )
 
@@ -29,12 +30,12 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		s.inferenceOperation("", r.PathValue("dialect"))(w, r)
 	})
 	mux.HandleFunc("OPTIONS /native/", s.preflight)
-	mux.HandleFunc("POST /v1/responses/input_tokens", s.inference(openai.FamilyInputTokens))
-	mux.HandleFunc("POST /v1/embeddings", s.inference(openai.FamilyEmbeddings))
-	mux.HandleFunc("POST /v1/rerank", s.inference(openai.FamilyRerank))
-	mux.HandleFunc("POST /v1/moderations", s.inference(openai.FamilyModeration))
-	mux.HandleFunc("POST /anthropic/v1/messages", s.inference(openai.FamilyAnthropic))
-	mux.HandleFunc("POST /anthropic/v1/messages/count_tokens", s.inference(openai.FamilyAnthropicCount))
+	mux.HandleFunc("POST /v1/responses/input_tokens", s.inference(wire.InputTokens))
+	mux.HandleFunc("POST /v1/embeddings", s.inference(wire.Embeddings))
+	mux.HandleFunc("POST /v1/rerank", s.inference(wire.Rerank))
+	mux.HandleFunc("POST /v1/moderations", s.inference(wire.Moderation))
+	mux.HandleFunc("POST /anthropic/v1/messages", s.inference(wire.Anthropic))
+	mux.HandleFunc("POST /anthropic/v1/messages/count_tokens", s.inference(wire.AnthropicCount))
 	for _, prefix := range []string{"/anthropic/v1", "/gemini/v1", "/gemini/v1beta"} {
 		mux.HandleFunc("GET "+prefix+"/models", s.nativeModels)
 		mux.HandleFunc("GET "+prefix+"/models/{model}", s.nativeModels)
@@ -51,18 +52,18 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 					writeSurfaceError(w, notFoundError("not_found", "Unknown Gemini operation."), "gemini")
 					return
 				}
-				var family openai.Family
+				var family wire.Format
 				switch action {
 				case "generateContent":
-					family = openai.FamilyGemini
+					family = wire.Gemini
 				case "streamGenerateContent":
-					family = openai.FamilyGeminiStream
+					family = wire.GeminiStream
 				case "countTokens":
-					family = openai.FamilyGeminiCount
+					family = wire.GeminiCount
 				case "embedContent":
-					family = openai.FamilyGeminiEmbeddings
+					family = wire.GeminiEmbeddings
 				case "batchEmbedContents":
-					family = openai.FamilyGeminiEmbeddingsBatch
+					family = wire.GeminiEmbeddingsBatch
 				default:
 					s.begin(w, r)
 					writeSurfaceError(w, notFoundError("not_found", "Unknown Gemini operation."), "gemini")
@@ -74,8 +75,8 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 	}
 }
-func nativeModel(snapshot *runtime.Snapshot, route runtime.Route, surface string) map[string]any {
-	capabilities := runtime.EffectiveCapabilities(snapshot, route)
+func nativeModel(snapshot *routing.Snapshot, route routing.Route, surface string) map[string]any {
+	capabilities := routing.EffectiveCapabilities(snapshot, route)
 	if surface == "anthropic" {
 		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"), "capabilities": capabilities}
 	}

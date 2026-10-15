@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -15,19 +17,19 @@ import (
 
 const policyETag = "00000000-0000-0000-0000-000000000000"
 
-func policyOrDefault(p *runtime.Policy) *runtime.Policy {
+func policyOrDefault(p *routing.Policy) *routing.Policy {
 	if p == nil {
-		return &runtime.Policy{}
+		return &routing.Policy{}
 	}
 	return p
 }
-func normalizedPolicy(p *runtime.Policy) map[string]any {
+func normalizedPolicy(p *routing.Policy) map[string]any {
 	body, _ := json.Marshal(policyOrDefault(p))
 	var result map[string]any
 	_ = json.Unmarshal(body, &result)
 	return result
 }
-func samePolicy(a, b *runtime.Policy) bool {
+func samePolicy(a, b *routing.Policy) bool {
 	return reflect.DeepEqual(normalizedPolicy(a), normalizedPolicy(b))
 }
 
@@ -67,7 +69,7 @@ func policyProject(ctx context.Context, q access.Queryer, scope, id string) (*st
 	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp."+table+" WHERE id=$1", id).Scan(&project)
 	return project, err
 }
-func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bool) (*runtime.Policy, string, error) {
+func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bool) (*routing.Policy, string, error) {
 	etag := policyETag
 	if scope != "installation" {
 		table := "route_drafts"
@@ -90,7 +92,7 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	}
 	err := q.QueryRow(ctx, query, scope, id).Scan(&data, &storedETag)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return &runtime.Policy{}, etag, nil
+		return &routing.Policy{}, etag, nil
 	}
 	if err != nil {
 		return nil, "", err
@@ -98,7 +100,7 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	if scope == "installation" {
 		etag = storedETag
 	}
-	var p runtime.Policy
+	var p routing.Policy
 	err = json.Unmarshal(data, &p)
 	return &p, etag, err
 }
@@ -137,7 +139,7 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var policy runtime.Policy
+	var policy routing.Policy
 	if !remove {
 		if err = access.Decode(r, &policy); err != nil {
 			return access.Reply{}, err

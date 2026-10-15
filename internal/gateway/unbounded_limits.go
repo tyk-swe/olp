@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // callerCostBudgeted checks the boundaries this request actually spends against.
@@ -20,7 +20,7 @@ func callerCostBudgeted(authority *access.Authority, route string) bool {
 // Batch jobs and Live sessions cannot bound their future consumption before
 // dispatch. Their lifecycle allowance cannot enforce a token or cost budget.
 // Request-rate and concurrency limits remain supported by normal admission.
-func unboundedWorkLimits(authority access.Authority, provider *runtime.Provider, slot *runtime.Slot, route *runtime.Route) *Error {
+func unboundedWorkLimits(authority access.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route) *Error {
 	var slug string
 	if route != nil {
 		slug = route.Slug
@@ -40,7 +40,7 @@ func unboundedWorkLimits(authority access.Authority, provider *runtime.Provider,
 
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
-func (s *Server) unboundedPinLimits(authority access.Authority, p *pin, route *runtime.Route) *Error {
+func (s *Server) unboundedPinLimits(authority access.Authority, p *pin, route *routing.Route) *Error {
 	if e := unboundedWorkLimits(authority, &p.provider, &p.slot, route); e != nil {
 		return e
 	}

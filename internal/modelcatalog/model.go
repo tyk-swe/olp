@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/shopspring/decimal"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -48,7 +49,7 @@ type Sample struct {
 
 type Model struct {
 	ID             string                    `json:"id"`
-	Capabilities   runtime.RouteCapabilities `json:"capabilities"`
+	Capabilities   routing.RouteCapabilities `json:"capabilities"`
 	Privacy        Privacy                   `json:"privacy"`
 	Prices         []Price                   `json:"prices,omitempty"`
 	UpstreamModels []string                  `json:"upstream_models,omitempty"`
@@ -57,15 +58,15 @@ type Model struct {
 
 // Describe exposes only the route identity by default. Prices are consumer
 // ranges, rather than provider records; upstream names require a separate opt-in.
-func Describe(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.RoutingInputs, origin string, prices, upstream bool, now time.Time) Model {
-	model := Model{ID: route.Slug, Capabilities: runtime.EffectiveCapabilities(snapshot, route), Samples: certifiedSamples(snapshot, route, origin)}
-	metadata := []runtime.ModelMetadata{}
+func Describe(snapshot *routing.Snapshot, route routing.Route, inputs *usage.RoutingInputs, origin string, prices, upstream bool, now time.Time) Model {
+	model := Model{ID: route.Slug, Capabilities: routing.EffectiveCapabilities(snapshot, route), Samples: certifiedSamples(snapshot, route, origin)}
+	metadata := []routing.ModelMetadata{}
 	for _, target := range route.Targets {
 		provider, ok := snapshot.Providers[target.ProviderID]
 		if !ok || !provider.Enabled {
 			continue
 		}
-		var facts runtime.ModelMetadata
+		var facts routing.ModelMetadata
 		_ = json.Unmarshal(provider.Models[target.ProviderModel], &facts)
 		metadata = append(metadata, facts)
 		if upstream {
@@ -83,7 +84,7 @@ func Describe(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.Rou
 	return model
 }
 
-func privacy(metadata []runtime.ModelMetadata) Privacy {
+func privacy(metadata []routing.ModelMetadata) Privacy {
 	result := Privacy{Regions: []string{}, Unknown: []string{}}
 	collectionKnown, retentionKnown, regionsKnown := len(metadata) > 0, len(metadata) > 0, len(metadata) > 0
 	collection, zeroRetention := false, true
@@ -144,7 +145,7 @@ func extend(bounds **Range, value *string) {
 	}
 }
 
-func priceRanges(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.RoutingInputs, now time.Time) []Price {
+func priceRanges(snapshot *routing.Snapshot, route routing.Route, inputs *usage.RoutingInputs, now time.Time) []Price {
 	result := []Price{}
 	if inputs == nil {
 		return result
@@ -198,7 +199,7 @@ func priceRanges(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.
 
 // Samples use a certified unary tuple. A strict generation example must also
 // speak its target's pinned native dialect, rather than imply translation.
-func certifiedSamples(snapshot *runtime.Snapshot, route runtime.Route, origin string) []Sample {
+func certifiedSamples(snapshot *routing.Snapshot, route routing.Route, origin string) []Sample {
 	result := []Sample{}
 	for _, candidate := range samples(route, origin) {
 		surface := candidate.SDK
@@ -243,7 +244,7 @@ func certifiedSamples(snapshot *runtime.Snapshot, route runtime.Route, origin st
 	return result
 }
 
-func samples(route runtime.Route, origin string) []Sample {
+func samples(route routing.Route, origin string) []Sample {
 	result := []Sample{}
 	base, model := strings.TrimSuffix(origin, "/"), strconv.Quote(route.Slug)
 	openai := fmt.Sprintf("import os\nfrom openai import OpenAI\n\nclient = OpenAI(api_key=os.environ[\"OLP_API_KEY\"], base_url=%s)\n", strconv.Quote(base+"/v1"))

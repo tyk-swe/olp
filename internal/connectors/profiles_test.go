@@ -15,10 +15,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func profileConfig(t *testing.T, id string) Config {
@@ -49,22 +50,22 @@ func profileConfig(t *testing.T, id string) Config {
 func TestVersionedProfilesSelectIndependentCloudAddresses(t *testing.T) {
 	for _, tc := range []struct {
 		id     string
-		wire   openai.Family
+		wire   wire.Format
 		stream bool
 		want   string
 	}{
-		{"openai-chat", openai.FamilyChat, false, "https://provider.example/v1/chat/completions"},
-		{"openai-responses", openai.FamilyResponses, false, "https://provider.example/v1/responses"},
-		{"anthropic-messages", openai.FamilyAnthropic, false, "https://provider.example/v1/messages"},
-		{"gemini-generation", openai.FamilyGemini, true, "https://provider.example/v1/models/model-a:streamGenerateContent?alt=sse"},
-		{"azure-legacy-chat", openai.FamilyChat, false, "https://resource.example/openai/deployments/model-a/chat/completions?api-version=2025-04-01-preview"},
-		{"azure-legacy-responses", openai.FamilyResponses, false, "https://resource.example/openai/responses?api-version=2025-04-01-preview"},
-		{"azure-v1-chat", openai.FamilyChat, false, "https://resource.example/openai/v1/chat/completions"},
-		{"azure-v1-responses", openai.FamilyResponses, false, "https://resource.example/openai/v1/responses"},
-		{"vertex-gemini", openai.FamilyGemini, false, "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/model-a:generateContent"},
-		{"vertex-anthropic", openai.FamilyAnthropic, true, "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/anthropic/models/model-a:streamRawPredict"},
-		{"bedrock-converse", openai.FamilyBedrock, false, "https://bedrock.example/model/model-a/converse"},
-		{"bedrock-anthropic-invoke", openai.FamilyAnthropic, true, "https://bedrock.example/model/model-a/invoke-with-response-stream"},
+		{"openai-chat", wire.Chat, false, "https://provider.example/v1/chat/completions"},
+		{"openai-responses", wire.Responses, false, "https://provider.example/v1/responses"},
+		{"anthropic-messages", wire.Anthropic, false, "https://provider.example/v1/messages"},
+		{"gemini-generation", wire.Gemini, true, "https://provider.example/v1/models/model-a:streamGenerateContent?alt=sse"},
+		{"azure-legacy-chat", wire.Chat, false, "https://resource.example/openai/deployments/model-a/chat/completions?api-version=2025-04-01-preview"},
+		{"azure-legacy-responses", wire.Responses, false, "https://resource.example/openai/responses?api-version=2025-04-01-preview"},
+		{"azure-v1-chat", wire.Chat, false, "https://resource.example/openai/v1/chat/completions"},
+		{"azure-v1-responses", wire.Responses, false, "https://resource.example/openai/v1/responses"},
+		{"vertex-gemini", wire.Gemini, false, "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/model-a:generateContent"},
+		{"vertex-anthropic", wire.Anthropic, true, "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/anthropic/models/model-a:streamRawPredict"},
+		{"bedrock-converse", wire.Bedrock, false, "https://bedrock.example/model/model-a/converse"},
+		{"bedrock-anthropic-invoke", wire.Anthropic, true, "https://bedrock.example/model/model-a/invoke-with-response-stream"},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			c := profileConfig(t, tc.id)
@@ -78,14 +79,14 @@ func TestVersionedProfilesSelectIndependentCloudAddresses(t *testing.T) {
 		})
 	}
 	responses := profileConfig(t, "azure-v1-responses")
-	if _, err := responses.URL(openai.FamilyChat, "model-a", false); err == nil {
+	if _, err := responses.URL(wire.Chat, "model-a", false); err == nil {
 		t.Fatal("Responses profile fell through Chat")
 	}
-	if _, err := responses.URL(openai.Family("unknown"), "model-a", false); err == nil {
+	if _, err := responses.URL(wire.Format("unknown"), "model-a", false); err == nil {
 		t.Fatal("unknown dialect fell through Chat")
 	}
 	invoke := profileConfig(t, "bedrock-invoke")
-	if _, err := invoke.TargetFamily(openai.FamilyChat); err == nil {
+	if _, err := invoke.TargetFamily(wire.Chat); err == nil {
 		t.Fatal("model-specific Invoke acquired a Chat fallback")
 	}
 }
@@ -96,7 +97,7 @@ func TestProfileWrappersKeepNativeStateAndVersionBeforeSigning(t *testing.T) {
 		stream      bool
 	}{{"vertex-anthropic", "vertex-2023-10-16", true}, {"bedrock-anthropic-invoke", "bedrock-2023-05-31", false}} {
 		c := profileConfig(t, tc.id)
-		body, err := c.WrapBody([]byte(`{"model":"bound-model","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"opaque","signature":"exact-native-state"}]}],"max_tokens":64,"stream":true,"unknown_native":{"ordered":[false,null,0]}}`), openai.FamilyAnthropic)
+		body, err := c.WrapBody([]byte(`{"model":"bound-model","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"opaque","signature":"exact-native-state"}]}],"max_tokens":64,"stream":true,"unknown_native":{"ordered":[false,null,0]}}`), wire.Anthropic)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,11 +114,11 @@ func TestProfileWrappersKeepNativeStateAndVersionBeforeSigning(t *testing.T) {
 		if _, present := fields["stream"]; present != tc.stream {
 			t.Fatalf("wrong cloud stream control: %s", body)
 		}
-		if _, err := c.WrapBody([]byte(`{"anthropic_version":"foreign"}`), openai.FamilyAnthropic); err == nil {
+		if _, err := c.WrapBody([]byte(`{"anthropic_version":"foreign"}`), wire.Anthropic); err == nil {
 			t.Fatal("accepted version collision")
 		}
 		if tc.id == "bedrock-anthropic-invoke" {
-			u, _ := c.URL(openai.FamilyAnthropic, "model-a", false)
+			u, _ := c.URL(wire.Anthropic, "model-a", false)
 			r, _ := http.NewRequest("POST", u, bytes.NewReader(body))
 			r.Header.Set("Content-Type", "application/json")
 			a := NewAuth(&egress.Policy{})
@@ -236,11 +237,11 @@ func TestExistingDialectProviderExtensionNeedsOnlyRegistrationAndBinding(t *test
 	if err := c.Validate(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
-	wire, err := c.TargetFamily(openai.FamilyChat)
+	encodedWire, err := c.TargetFamily(wire.Chat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := c.URL(wire, "alias", false)
+	endpoint, err := c.URL(encodedWire, "alias", false)
 	if err != nil || endpoint != "https://fixture.example/v1/chat/completions" || c.Model("alias") != "native-model" {
 		t.Fatal("registered profile did not reuse components")
 	}
@@ -287,8 +288,8 @@ func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {
 	if err := config.ValidateProfile(); err != nil {
 		t.Fatalf("registered profile changed after caller mutation: %v", err)
 	}
-	if wire, err := config.TargetFamily(openai.FamilyChat); err != nil || wire != openai.FamilyChat {
-		t.Fatalf("registered profile dialect changed: wire=%s err=%v", wire, err)
+	if encodedWire, err := config.TargetFamily(wire.Chat); err != nil || encodedWire != wire.Chat {
+		t.Fatalf("registered profile dialect changed: wire=%s err=%v", encodedWire, err)
 	}
 	fresh, err := config.Profile()
 	if err != nil || fresh.OperationDialects["generation"] != "openai-chat" || !bytes.Equal(fresh.DefaultSchemas["generation"], originalSchema) || fresh.Authentication[0] != "api_key" || fresh.Operations[0] != "generation" || fresh.SemanticHeaders[0] != "Openai-Beta" {

@@ -124,7 +124,7 @@ func projectBudgetSubject(project *string) string {
 }
 
 // System work has no key/group/end-user spend but shares aggregate invoice caps.
-func (s *Server) reserveSystemBudgets(ctx context.Context, x *execution) *Error {
+func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *Error {
 	source, ok := s.Runtime.(interface {
 		BudgetAuthority(*string) (access.Authority, error)
 	})
@@ -157,7 +157,7 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *execution) *Error 
 	return failure
 }
 
-func (x *execution) admissionAuthority(authority access.Authority) access.Authority {
+func (x *call) admissionAuthority(authority access.Authority) access.Authority {
 	if x != nil {
 		authority.Attribution = x.attribution
 		if x.actor == "api_key_resource" || x.callerCostExempt() {

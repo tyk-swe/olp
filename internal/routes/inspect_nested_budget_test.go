@@ -6,10 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestInspectionPolicyBudgetMetersNestedArguments(t *testing.T) {
@@ -17,9 +19,9 @@ func TestInspectionPolicyBudgetMetersNestedArguments(t *testing.T) {
 	for i := range 64 {
 		policy.Rules = append(policy.Rules, contentpolicy.Rule{ID: fmt.Sprintf("r%d", i), Phase: contentpolicy.PhaseInput, Pattern: "never-matches", Action: contentpolicy.ActionBlock})
 	}
-	route := runtime.Route{Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityStrict}, ContentPolicy: policy}
-	provider := runtime.Provider{ID: "p", Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1"}
-	target := runtime.Target{ID: "t", ProviderID: "p", ProviderModel: "gpt-4o"}
+	route := routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}, ContentPolicy: policy}
+	provider := routing.Provider{ID: "p", Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1"}
+	target := routing.Target{ID: "t", ProviderID: "p", ProviderModel: "gpt-4o"}
 	for _, depth := range []int{0, 6} {
 		t.Run(fmt.Sprintf("depth_%d", depth), func(t *testing.T) {
 			arguments, _ := json.Marshal(map[string]any{"text": strings.Repeat("a", 32<<10)})
@@ -36,7 +38,7 @@ func TestInspectionPolicyBudgetMetersNestedArguments(t *testing.T) {
 					}},
 				}},
 			})
-			parsed, err := openai.Parse(openai.FamilyChat, body)
+			parsed, err := openai.Parse(wire.Chat, body)
 			if err != nil {
 				t.Fatal(err)
 			}

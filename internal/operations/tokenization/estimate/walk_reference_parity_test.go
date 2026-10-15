@@ -7,8 +7,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // The walker reads a request from its parsed document, and the walker it
@@ -51,7 +52,7 @@ func (g requestGen) extraBlock(depth int) any {
 }
 
 // richFields is what fields makes, with the members the legacy walker never read.
-func (g requestGen) richFields(family openai.Family) map[string]json.RawMessage {
+func (g requestGen) richFields(family wire.Format) map[string]json.RawMessage {
 	fields := g.fields(family)
 	put := func(name string, v any) { fields[name], _ = json.Marshal(v) }
 	if g.intn(2) == 0 {
@@ -151,7 +152,7 @@ func sameInput(t testing.TB, got, want *input, what string, body any) {
 
 // referenceReading walks the fields of a request with the reference walker, as
 // the walker it replaced was asked for them: by name, from the document.
-func referenceReading(request *openai.Request, retain int) *input {
+func referenceReading(request *wire.Request, retain int) *input {
 	in := &input{retain: retain}
 	refWalkInput(in, request.Family, func(name string) json.RawMessage {
 		if raw := request.Field(name); len(raw) > 0 {
@@ -181,7 +182,10 @@ func TestWalkerReadsWhatTheReferenceReads(t *testing.T) {
 			g := requestGen{rand.New(rand.NewPCG(31, uint64(len(family))))}
 			for i := range cases {
 				fields := g.richFields(family)
-				request := openai.NewEnvelope(family, "route", false, fields)
+				request, err := wire.FromFields(family, "route", false, fields)
+				if err != nil {
+					t.Fatal(err)
+				}
 				for _, retain := range []int{0, 1 << 40, 5, 64} {
 					got := &input{retain: retain}
 					walkInput(got, family, requestFields(request))
@@ -219,7 +223,10 @@ func TestWalkerReadsTheDefaultsTheReferenceReads(t *testing.T) {
 		t.Run(string(family), func(t *testing.T) {
 			g := requestGen{rand.New(rand.NewPCG(37, uint64(len(family))))}
 			for i := range cases {
-				request := openai.NewEnvelope(family, "route", false, g.richFields(family))
+				request, err := wire.FromFields(family, "route", false, g.richFields(family))
+				if err != nil {
+					t.Fatal(err)
+				}
 				prompt := Walk(request)
 				for range 3 {
 					defaults := g.richDefaults()
@@ -269,10 +276,13 @@ func FuzzWalkerReadsWhatTheReferenceReads(f *testing.F) {
 
 // sameReadings holds the walker to the reference for one body read as a request
 // of one family, and for the body read as every field of a provider's defaults.
-func sameReadings(t testing.TB, family openai.Family, data []byte) {
+func sameReadings(t testing.TB, family wire.Format, data []byte) {
 	t.Helper()
 	if doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: 16 << 20, MaxNodes: 1 << 20, MaxDepth: 32}); err == nil && doc.Root().Kind() == oif.Object {
-		request := openai.NewSourceEnvelope(family, "route", false, doc)
+		request, err := wire.NewRequest(family, "route", false, doc)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, retain := range []int{0, 1 << 40, 7} {
 			got := &input{retain: retain}
 			walkInput(got, family, requestFields(request))

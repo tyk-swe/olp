@@ -3,19 +3,19 @@ package connectors
 import (
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestBedrockRerankAddressesTheAgentRuntime(t *testing.T) {
 	c := Config{Kind: "bedrock", AuthMode: "default_chain", CloudRegion: "us-west-2", VendorID: "amazon-bedrock", Endpoint: DefaultEndpoint("bedrock", "us-west-2", "")}
-	if got, err := c.URL(openai.FamilyBedrockRerank, "cohere.rerank-v3-5:0", false); err != nil || got != "https://bedrock-agent-runtime.us-west-2.amazonaws.com/rerank" {
+	if got, err := c.URL(wire.BedrockRerank, "cohere.rerank-v3-5:0", false); err != nil || got != "https://bedrock-agent-runtime.us-west-2.amazonaws.com/rerank" {
 		t.Fatalf("URL = %s, %v", got, err)
 	}
 	if !c.Supports("rerank", "openai", "unary") || c.awsService() != "bedrock" {
 		t.Fatal("Bedrock rerank is not served or not signed for bedrock")
 	}
 	c.Endpoint = "https://vpce-0abc.bedrock-runtime.us-west-2.vpce.amazonaws.com"
-	if _, err := c.URL(openai.FamilyBedrockRerank, "cohere.rerank-v3-5:0", false); err == nil {
+	if _, err := c.URL(wire.BedrockRerank, "cohere.rerank-v3-5:0", false); err == nil {
 		t.Fatal("a VPC endpoint addressed the public Agent Runtime")
 	}
 	for region, want := range map[string]string{

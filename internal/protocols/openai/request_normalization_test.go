@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestResponsesTextUsesMessageEnvelopeWithoutLosingNativeExtensions(t *testing.T) {
-	for _, family := range []Family{FamilyResponses, FamilyInputTokens} {
+	for _, family := range []wire.Format{wire.Responses, wire.InputTokens} {
 		r, err := Parse(family, []byte(`{"model":"route","input":"item_reference file_id file_private","vendor":{"opaque":"preserve"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		body, err := r.Encode("upstream", nil)
+		body, err := Encode(r, "upstream", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

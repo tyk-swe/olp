@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -23,13 +25,13 @@ func BenchmarkResponsesMetadataStream(b *testing.B) {
 		fmt.Fprintf(&answer, "word %d ", i)
 	}
 	fmt.Fprintf(&source, "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":%d,\"response\":{\"id\":\"resp-bench\",\"object\":\"response\",\"created_at\":1800000000,\"model\":\"provider-model\",\"status\":\"completed\",\"output\":[{\"id\":\"msg-bench\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"%s\",\"annotations\":[]}]}],\"usage\":{\"input_tokens\":17,\"output_tokens\":9,\"total_tokens\":26,\"input_tokens_details\":{\"cached_tokens\":3}}}}\n\n", chunks+1, answer.String())
-	wire := []byte(source.String())
+	encodedWire := []byte(source.String())
 	for _, tc := range []struct {
 		name    string
 		observe bool
 	}{{"relay", false}, {"native-observer", true}} {
 		b.Run(tc.name, func(b *testing.B) {
-			reader := bytes.NewReader(wire)
+			reader := bytes.NewReader(encodedWire)
 			var frames, emittedBytes, terminals int
 			var observedFrames, nativeModels int
 			observe := func(event oif.Event) error {
@@ -43,13 +45,13 @@ func BenchmarkResponsesMetadataStream(b *testing.B) {
 				}
 				return nil
 			}
-			relay := func(emit Emit) (*Completion, error) {
-				reader.Reset(wire)
+			relay := func(emit wire.Emit) (*wire.Completion, error) {
+				reader.Reset(encodedWire)
 				frames, emittedBytes, observedFrames, nativeModels = 0, 0, 0, 0
 				if tc.observe {
-					return StreamMetadataEvents(FamilyResponses, reader, 8192, "bench-route", true, emit, observe)
+					return StreamMetadataEvents(wire.Responses, reader, 8192, "bench-route", true, emit, observe)
 				}
-				return StreamMetadata(FamilyResponses, reader, 8192, "bench-route", true, emit)
+				return StreamMetadata(wire.Responses, reader, 8192, "bench-route", true, emit)
 			}
 			var projected bytes.Buffer
 			completion, err := relay(func(frame []byte) error {
@@ -83,7 +85,7 @@ func BenchmarkResponsesMetadataStream(b *testing.B) {
 				emittedBytes += len(frame)
 				return nil
 			}
-			b.SetBytes(int64(len(wire)))
+			b.SetBytes(int64(len(encodedWire)))
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := relay(count); err != nil {

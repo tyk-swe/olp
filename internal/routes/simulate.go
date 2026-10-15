@@ -8,6 +8,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -15,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -27,7 +29,7 @@ type simulationInput struct {
 	Surface              string               `json:"surface"`
 	Mode                 string               `json:"mode"`
 	Seed                 string               `json:"seed"`
-	Preferences          *runtime.Preferences `json:"preferences"`
+	Preferences          *routing.Preferences `json:"preferences"`
 	EstimatedInputTokens *int64               `json:"estimated_input_tokens"`
 	MaxOutputTokens      *int64               `json:"max_output_tokens"`
 	Request              json.RawMessage      `json:"request"`
@@ -40,7 +42,7 @@ type simulationInput struct {
 	ClassifierLabels     map[string]string    `json:"classifier_labels"`
 }
 
-func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
+func tokenDemand(estimated, output *int64) (*routing.TokenDemand, error) {
 	if estimated != nil && *estimated < 0 {
 		return nil, access.Invalid("estimated_input_tokens", "Use a non-negative token estimate.")
 	}
@@ -50,7 +52,7 @@ func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
 	if estimated == nil && output == nil {
 		return nil, nil
 	}
-	demand := &runtime.TokenDemand{MaxOutputTokens: output}
+	demand := &routing.TokenDemand{MaxOutputTokens: output}
 	if estimated != nil {
 		demand.EstimatedInputTokens = *estimated
 	}
@@ -65,13 +67,13 @@ func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
 // reply bound the caller names replaces the one the request names, whatever
 // supplies the input.
 type simulatedDemand struct {
-	fixed     *runtime.TokenDemand
+	fixed     *routing.TokenDemand
 	prompt    *estimate.Prompt
 	output    *int64
 	estimates map[string]estimate.Estimate
 }
 
-func newSimulatedDemand(parsed *openai.Request, input simulationInput, fixed *runtime.TokenDemand) *simulatedDemand {
+func newSimulatedDemand(parsed *wire.Request, input simulationInput, fixed *routing.TokenDemand) *simulatedDemand {
 	d := &simulatedDemand{fixed: fixed, output: input.MaxOutputTokens}
 	if parsed != nil && input.EstimatedInputTokens == nil {
 		d.prompt, d.estimates = estimate.Walk(parsed), map[string]estimate.Estimate{}
@@ -81,21 +83,21 @@ func newSimulatedDemand(parsed *openai.Request, input simulationInput, fixed *ru
 
 // outputBound is the reply bound a target's own request is weighed by: the one
 // the caller named for the simulation, or else the one the request carries.
-func (d *simulatedDemand) outputBound(request *openai.Request) *int64 {
+func (d *simulatedDemand) outputBound(request *wire.Request) *int64 {
 	if d.output != nil {
 		return d.output
 	}
-	return runtime.EffectiveOutputLimit(request)
+	return routing.EffectiveOutputLimit(request)
 }
 
 // request is the demand selectors weigh: the caller's number, or else the
 // request counted without a model of its own, as the gateway counts it.
-func (d *simulatedDemand) request() *runtime.TokenDemand {
+func (d *simulatedDemand) request() *routing.TokenDemand {
 	if d.prompt == nil {
 		return d.fixed
 	}
 	e := d.prompt.Estimate(estimate.ForModel(""), nil)
-	demand := &runtime.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	demand := &routing.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
 	if d.output != nil {
 		demand.MaxOutputTokens = d.output
 	}
@@ -104,15 +106,15 @@ func (d *simulatedDemand) request() *runtime.TokenDemand {
 
 // sourceDemand is the planner's per-target demand, or nil when the caller's
 // number stands for every target.
-func (d *simulatedDemand) sourceDemand() func(runtime.Provider, runtime.Target) *runtime.TokenDemand {
+func (d *simulatedDemand) sourceDemand() func(routing.Provider, routing.Target) *routing.TokenDemand {
 	if d.prompt == nil {
 		return nil
 	}
-	return func(_ runtime.Provider, target runtime.Target) *runtime.TokenDemand { return d.source(target) }
+	return func(_ routing.Provider, target routing.Target) *routing.TokenDemand { return d.source(target) }
 }
 
 // source is the demand of the caller's request on a target's model.
-func (d *simulatedDemand) source(target runtime.Target) *runtime.TokenDemand {
+func (d *simulatedDemand) source(target routing.Target) *routing.TokenDemand {
 	if d.prompt == nil {
 		return d.fixed
 	}
@@ -121,7 +123,7 @@ func (d *simulatedDemand) source(target runtime.Target) *runtime.TokenDemand {
 
 // prepared is the demand once the target has its own request, as a strict
 // contract prepares it: that request's input, counted for the target's model.
-func (d *simulatedDemand) prepared(target runtime.Target, request *openai.Request) *runtime.TokenDemand {
+func (d *simulatedDemand) prepared(target routing.Target, request *wire.Request) *routing.TokenDemand {
 	if d.prompt == nil {
 		return d.fixed
 	}
@@ -130,10 +132,10 @@ func (d *simulatedDemand) prepared(target runtime.Target, request *openai.Reques
 	return d.measure(target, prompt)
 }
 
-func (d *simulatedDemand) measure(target runtime.Target, prompt *estimate.Prompt) *runtime.TokenDemand {
+func (d *simulatedDemand) measure(target routing.Target, prompt *estimate.Prompt) *routing.TokenDemand {
 	e := prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
 	d.estimates[target.ID] = e
-	demand := &runtime.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	demand := &routing.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
 	if d.output != nil {
 		demand.MaxOutputTokens = d.output
 	}
@@ -200,17 +202,17 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	snapshot, err := runtime.Compile(r.Context(), tx)
+	snapshot, err := runtime.ReadSnapshot(r.Context(), tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	fidelity, err := runtime.DecodeFidelity(d.Fidelity)
+	fidelity, err := routing.DecodeFidelity(d.Fidelity)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
-	if route.Behavior, err = runtime.DecodeBehavior(d.Behavior); err != nil {
+	if route.Behavior, err = routing.DecodeBehavior(d.Behavior); err != nil {
 		return access.Reply{}, err
 	}
 	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
@@ -233,10 +235,10 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	m := s.newSimulation(r.Context(), snapshot, input, inputs, demand)
-	m.key = func(route runtime.Route) (inspectionKeyContext, error) {
+	m.key = func(route routing.Route) (inspectionKeyContext, error) {
 		return s.inspectionKey(r, tx, p, input.APIKeyID, route)
 	}
-	m.eligibility = func(route runtime.Route) (func(string) runtime.Eligibility, error) {
+	m.eligibility = func(route routing.Route) (func(string) routing.Eligibility, error) {
 		return routeCredentialEligibility(r.Context(), tx, snapshot, route)
 	}
 	explained, err := s.explain(m, d.Slug)
@@ -271,7 +273,7 @@ type simulationRequest struct {
 	Operation            map[string]json.RawMessage `json:"operation"`
 	Surface              string                     `json:"surface"`
 	Mode                 string                     `json:"mode"`
-	Preferences          *runtime.Preferences       `json:"preferences"`
+	Preferences          *routing.Preferences       `json:"preferences"`
 	APIKeyID             *string                    `json:"api_key_id"`
 	ClientContract       string                     `json:"client_contract"`
 	Seed                 string                     `json:"seed"`
@@ -335,7 +337,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	snapshot, err := runtime.Compile(r.Context(), tx)
+	snapshot, err := runtime.ReadSnapshot(r.Context(), tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -368,10 +370,10 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 		return access.Reply{}, err
 	}
 	m := s.newSimulation(r.Context(), snapshot, inspection, inputs, demand)
-	m.key = func(route runtime.Route) (inspectionKeyContext, error) {
+	m.key = func(route routing.Route) (inspectionKeyContext, error) {
 		return s.inspectionKey(r, tx, p, input.APIKeyID, route)
 	}
-	m.eligibility = func(route runtime.Route) (func(string) runtime.Eligibility, error) {
+	m.eligibility = func(route routing.Route) (func(string) routing.Eligibility, error) {
 		return routeCredentialEligibility(r.Context(), tx, snapshot, route)
 	}
 	leg, _, _, err := s.leg(m, slug, "")
@@ -429,10 +431,10 @@ func validSimulationLabels(input simulationInput) error {
 	return nil
 }
 
-func simulationRoute(id, slug string, fidelity runtime.RouteFidelity, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
-	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Fidelity: fidelity, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
+func simulationRoute(id, slug string, fidelity routing.RouteFidelity, operations []string, timeout, budget int, targets []routing.PublishedTarget) routing.Route {
+	r := routing.Route{ID: id, RoutingID: id, Slug: slug, Fidelity: fidelity, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
 	for _, t := range targets {
-		r.Targets = append(r.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID, Tags: t.Tags, Shadow: t.Shadow})
+		r.Targets = append(r.Targets, routing.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID, Tags: t.Tags, Shadow: t.Shadow})
 	}
 	return r
 }
@@ -446,7 +448,7 @@ func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*usage.Routin
 // Credential revocation and grant lapse are authoritative without publishing a
 // new route or provider revision. Apply them to previews just as the executor
 // does at dispatch.
-func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot *runtime.Snapshot, route runtime.Route) (func(string) runtime.Eligibility, error) {
+func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot *routing.Snapshot, route routing.Route) (func(string) routing.Eligibility, error) {
 	ids := []string{}
 	for _, target := range route.Targets {
 		provider := snapshot.Providers[target.ProviderID]
@@ -463,5 +465,5 @@ func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot 
 	if err != nil {
 		return nil, err
 	}
-	return func(id string) runtime.Eligibility { return ineligible[id] }, nil
+	return func(id string) routing.Eligibility { return ineligible[id] }, nil
 }

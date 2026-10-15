@@ -4,14 +4,15 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // BedrockUsageObservation preserves count presence. Zero is an observation;
 // omission does not prove that a generation consumed no tokens.
 type BedrockUsageObservation struct {
-	Value                                     *openai.Usage
+	Value                                     *wire.Usage
 	InputPresent, OutputPresent, TotalPresent bool
 	Authoritative                             bool
 }
@@ -70,7 +71,7 @@ func observedBedrockUsage(value oif.Value, names bedrockUsageNames, anthropic bo
 	if err != nil {
 		return result, err
 	}
-	u := &openai.Usage{OutputTokens: output}
+	u := &wire.Usage{OutputTokens: output}
 	if hasRead {
 		u.CachedInputTokens = &read
 	}
@@ -95,7 +96,7 @@ func observedBedrockUsage(value oif.Value, names bedrockUsageNames, anthropic bo
 	return result, nil
 }
 
-func observedBedrockCacheDetails(value oif.Value, usage *openai.Usage, anthropic bool) error {
+func observedBedrockCacheDetails(value oif.Value, usage *wire.Usage, anthropic bool) error {
 	if anthropic {
 		creation, present := value.Lookup("cache_creation")
 		if present && creation.Kind() != oif.Null {
@@ -170,7 +171,7 @@ func bedrockOptionalCount(count *int64) int64 {
 // Merge keeps unnamed categories and adopts explicit zero counts. Authoritative
 // metrics replace earlier partials. Native totalTokens is retained verbatim;
 // canonical input includes cache categories that Bedrock reports separately.
-func (observed BedrockUsageObservation) Merge(previous *openai.Usage) (*openai.Usage, error) {
+func (observed BedrockUsageObservation) Merge(previous *wire.Usage) (*wire.Usage, error) {
 	if observed.Value == nil {
 		return previous, nil
 	}

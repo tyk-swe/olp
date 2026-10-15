@@ -4,24 +4,26 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestEncodeValidatesMergedDefaults(t *testing.T) {
 	for _, tc := range []struct {
-		family   Family
+		family   wire.Format
 		defaults string
 	}{
-		{FamilyResponses, `{"previous_response_id":"resp_other_account"}`},
-		{FamilyResponses, `{"conversation":"conv_other_account"}`},
-		{FamilyResponses, `{"background":true}`},
-		{FamilyResponses, `{"max_output_tokens":"10"}`},
-		{FamilyChat, `{"max_tokens":1,"max_completion_tokens":2}`},
-		{FamilyChat, `{"stream_options":{"include_usage":"true"}}`},
-		{FamilyChat, `{"tools":[null]}`},
+		{wire.Responses, `{"previous_response_id":"resp_other_account"}`},
+		{wire.Responses, `{"conversation":"conv_other_account"}`},
+		{wire.Responses, `{"background":true}`},
+		{wire.Responses, `{"max_output_tokens":"10"}`},
+		{wire.Chat, `{"max_tokens":1,"max_completion_tokens":2}`},
+		{wire.Chat, `{"stream_options":{"include_usage":"true"}}`},
+		{wire.Chat, `{"tools":[null]}`},
 	} {
 		t.Run(string(tc.family)+tc.defaults, func(t *testing.T) {
 			input := `"messages":[{"role":"user","content":"hi"}],"stream":true`
-			if tc.family == FamilyResponses {
+			if tc.family == wire.Responses {
 				input = `"input":"hi"`
 			}
 			r, err := Parse(tc.family, []byte(`{"model":"r",`+input+`}`))
@@ -32,16 +34,16 @@ func TestEncodeValidatesMergedDefaults(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.defaults), &defaults); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.Encode("org/upstream:model", defaults); err == nil {
+			if _, err := Encode(r, "org/upstream:model", defaults); err == nil {
 				t.Fatal("invalid merged request reached the upstream encoder")
 			}
 		})
 	}
-	r, err := Parse(FamilyResponses, []byte(`{"model":"r","input":"hi","temperature":0.7}`))
+	r, err := Parse(wire.Responses, []byte(`{"model":"r","input":"hi","temperature":0.7}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := r.Encode("org/upstream:model", map[string]json.RawMessage{
+	body, err := Encode(r, "org/upstream:model", map[string]json.RawMessage{
 		"temperature": json.RawMessage(`0.1`), "vendor_extension": json.RawMessage(`{"keep":true}`),
 	})
 	if err != nil {
@@ -84,7 +86,7 @@ func TestResponsesStreamRejectsInvalidEventsBeforeCommit(t *testing.T) {
 		`{"type":"response.completed","response":{"output":[],"error":{}}}`,
 	} {
 		emitted := 0
-		_, err := Stream(FamilyResponses, strings.NewReader("data: "+event+"\n\n"), 4096, "r", true, func([]byte) error { emitted++; return nil })
+		_, err := Stream(wire.Responses, strings.NewReader("data: "+event+"\n\n"), 4096, "r", true, func([]byte) error { emitted++; return nil })
 		if err == nil || emitted != 0 {
 			t.Errorf("invalid event committed: %s: frames=%d err=%v", event, emitted, err)
 		}

@@ -6,8 +6,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type inspectionKeyContext struct {
@@ -15,7 +16,7 @@ type inspectionKeyContext struct {
 	allowProviderState bool
 }
 
-func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal access.Principal, selected *string, route runtime.Route) (inspectionKeyContext, error) {
+func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal access.Principal, selected *string, route routing.Route) (inspectionKeyContext, error) {
 	key := inspectionKeyContext{}
 	if selected == nil {
 		return key, nil
@@ -53,7 +54,7 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	return key, nil
 }
 
-func applyInspectionKeyReason(decisions []runtime.Decision, reason string) {
+func applyInspectionKeyReason(decisions []routing.Decision, reason string) {
 	if reason == "" {
 		return
 	}

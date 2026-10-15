@@ -3,11 +3,12 @@
 package usage
 
 import (
-	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/limits"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 func TestIntegrationWeeklyReconstructionCrossesMonthAndYear(t *testing.T) {

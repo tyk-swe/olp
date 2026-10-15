@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestNativeTerminalUsageSurvivesProjectionAndDeliveryFailure(t *testing.T) {
@@ -27,16 +28,16 @@ func TestNativeTerminalUsageSurvivesProjectionAndDeliveryFailure(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
-		family openai.Family
+		family wire.Format
 		wire   string
 		marker string
 	}{
-		{openai.FamilyChat, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n", `"usage"`},
-		{openai.FamilyResponses, "data: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n", "response.completed"},
-		{openai.FamilyAnthropic, anthropic, "message_stop"},
-		{openai.FamilyGemini, "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1,\"totalTokenCount\":3}}\n\n", "usageMetadata"},
-		{openai.FamilyCohereChat, cohereStream(`{"type":"message-start","id":"c"}`, `{"type":"message-end","delta":{"finish_reason":"COMPLETE","usage":{"billed_units":{"input_tokens":2,"output_tokens":1}}}}`), "message-end"},
-		{openai.FamilyBedrock, bedrock.String(), "inputTokens"},
+		{wire.Chat, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n", `"usage"`},
+		{wire.Responses, "data: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n", "response.completed"},
+		{wire.Anthropic, anthropic, "message_stop"},
+		{wire.Gemini, "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1,\"totalTokenCount\":3}}\n\n", "usageMetadata"},
+		{wire.CohereChat, cohereStream(`{"type":"message-start","id":"c"}`, `{"type":"message-end","delta":{"finish_reason":"COMPLETE","usage":{"billed_units":{"input_tokens":2,"output_tokens":1}}}}`), "message-end"},
+		{wire.Bedrock, bedrock.String(), "inputTokens"},
 	} {
 		for _, refusal := range []string{"projection", "delivery"} {
 			t.Run(string(tc.family)+"/"+refusal, func(t *testing.T) {
@@ -76,14 +77,14 @@ func TestNativeTerminalUsageSurvivesProjectionAndDeliveryFailure(t *testing.T) {
 func TestIntermediateNativeUsageRemainsIncomplete(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		family openai.Family
+		family wire.Format
 		wire   string
 		expect int64
 	}{
-		{"anthropic-start", openai.FamilyAnthropic, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"a\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"native\",\"content\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}\n\n", 1},
-		{"anthropic-delta", openai.FamilyAnthropic, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"a\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n", 1},
-		{"gemini-unfinished-candidate", openai.FamilyGemini, "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n", 1},
-		{"gemini-other-candidate", openai.FamilyGemini, "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[]}},{\"index\":1,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n", 2},
+		{"anthropic-start", wire.Anthropic, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"a\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"native\",\"content\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}\n\n", 1},
+		{"anthropic-delta", wire.Anthropic, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"a\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n", 1},
+		{"gemini-unfinished-candidate", wire.Gemini, "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n", 1},
+		{"gemini-other-candidate", wire.Gemini, "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[]}},{\"index\":1,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := StreamWithEvents(tc.family, tc.family, strings.NewReader(tc.wire), 65536, "route", true, func([]byte) error { return nil }, nil, tc.expect)
@@ -95,7 +96,7 @@ func TestIntermediateNativeUsageRemainsIncomplete(t *testing.T) {
 }
 
 func TestGeminiTerminalAccountingRequiresDispatchedCandidateProofOrEOF(t *testing.T) {
-	wire := "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n"
+	encodedWire := "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n"
 	for _, tc := range []struct {
 		name     string
 		expected []int64
@@ -108,7 +109,7 @@ func TestGeminiTerminalAccountingRequiresDispatchedCandidateProofOrEOF(t *testin
 		{"another dispatched candidate", []int64{2}, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := StreamWithEvents(openai.FamilyGemini, openai.FamilyGemini, strings.NewReader(wire), 65536, "route", true, func([]byte) error {
+			c, err := StreamWithEvents(wire.Gemini, wire.Gemini, strings.NewReader(encodedWire), 65536, "route", true, func([]byte) error {
 				if tc.fail {
 					return io.ErrClosedPipe
 				}
@@ -122,8 +123,8 @@ func TestGeminiTerminalAccountingRequiresDispatchedCandidateProofOrEOF(t *testin
 }
 
 func TestTranslatedTerminalUsageSurvivesDeliveryFailure(t *testing.T) {
-	wire := "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n"
-	c, err := StreamWithEvents(openai.FamilyGemini, openai.FamilyChat, strings.NewReader(wire), 65536, "route", true, func(frame []byte) error {
+	encodedWire := "data: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1}}\n\n"
+	c, err := StreamWithEvents(wire.Gemini, wire.Chat, strings.NewReader(encodedWire), 65536, "route", true, func(frame []byte) error {
 		if strings.Contains(string(frame), `"usage"`) {
 			return io.ErrClosedPipe
 		}

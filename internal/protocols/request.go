@@ -7,11 +7,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"maps"
 	"regexp"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/vendors"
@@ -57,22 +59,22 @@ func present(v json.RawMessage) bool {
 // presentValue is present for a value of a parsed document.
 func presentValue(v oif.Value) bool { return v.Kind() != oif.Absent && v.Kind() != oif.Null }
 func requestError(field, message string) error {
-	return &openai.RequestError{Code: "unsupported_parameter", Param: field, Message: message}
+	return &wire.RequestError{Code: "unsupported_parameter", Param: field, Message: message}
 }
-func protocolError(message string) error { return &openai.ProtocolError{Detail: message} }
+func protocolError(message string) error { return &wire.ProtocolError{Detail: message} }
 
 // Parse validates a client envelope. Gemini's model and transport are path
 // parameters, so body fields can never replace them.
-func Parse(family openai.Family, data []byte, model string) (*openai.Request, error) {
+func Parse(family wire.Format, data []byte, model string) (*wire.Request, error) {
 	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	if family.Surface() == "openai" {
 		return openai.Parse(family, data)
 	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
+		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
 	}
 	if family.Surface() == "native" {
 		return parseNativeGeneration(family, doc, model)
@@ -84,7 +86,7 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 		return nil, requestError("", "expected a JSON object")
 	}
 	root := doc.Root()
-	stream := family == openai.FamilyGeminiStream
+	stream := family == wire.GeminiStream
 	if family.Surface() == "anthropic" {
 		model = str(f["model"])
 		if present(f["stream"]) {
@@ -126,7 +128,7 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 		}
 		content := root
 		if wrapped := member(root, "generateContentRequest"); presentValue(wrapped) {
-			if family != openai.FamilyGeminiCount || presentValue(member(root, "contents")) {
+			if family != wire.GeminiCount || presentValue(member(root, "contents")) {
 				return nil, requestError("generateContentRequest", "countTokens accepts either contents or generateContentRequest")
 			}
 			if wrapped.Kind() != oif.Object {
@@ -162,71 +164,71 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 	if family.Operation() != "generation" && stream {
 		return nil, requestError("stream", "token counting supports unary requests only")
 	}
-	return openai.NewSourceEnvelope(family, model, stream, doc), nil
+	return wire.NewRequest(family, model, stream, doc)
 }
 
 // WireFamily selects the provider protocol while retaining the OpenAI endpoint
 // hint where that connector promises native Responses support.
-func WireFamily(kind, vendor string, source openai.Family) openai.Family {
+func WireFamily(kind, vendor string, source wire.Format) wire.Format {
 	count := source.Operation() == "token_count"
 	switch kind {
 	case "anthropic":
 		if count {
-			return openai.FamilyAnthropicCount
+			return wire.AnthropicCount
 		}
-		return openai.FamilyAnthropic
+		return wire.Anthropic
 	case "gemini", "vertex_ai":
 		if count {
-			return openai.FamilyGeminiCount
+			return wire.GeminiCount
 		}
 		if source.Operation() == "embeddings" {
 			if kind == "vertex_ai" {
-				return openai.FamilyVertexEmbeddings
+				return wire.VertexEmbeddings
 			}
-			return openai.FamilyGeminiEmbeddings
+			return wire.GeminiEmbeddings
 		}
-		return openai.FamilyGemini
+		return wire.Gemini
 	case "bedrock":
 		if count {
 			return "bedrock_count"
 		}
 		if source.Operation() == "embeddings" {
-			return openai.FamilyBedrockEmbeddings
+			return wire.BedrockEmbeddings
 		}
-		if source == openai.FamilyRerank {
-			return openai.FamilyBedrockRerank
+		if source == wire.Rerank {
+			return wire.BedrockRerank
 		}
 		return "bedrock"
 	}
 	if count {
-		return openai.FamilyInputTokens
+		return wire.InputTokens
 	}
 	if source.Operation() == "embeddings" {
-		return openai.FamilyEmbeddings
+		return wire.Embeddings
 	}
-	if source == openai.FamilyRerank {
-		return openai.FamilyRerank
+	if source == wire.Rerank {
+		return wire.Rerank
 	}
 	if source.Operation() == "moderation" {
-		return openai.FamilyModeration
+		return wire.Moderation
 	}
-	if source == openai.FamilyResponses && vendors.Speaks(vendor, "openai-responses") {
+	if source == wire.Responses && vendors.Speaks(vendor, "openai-responses") {
 		return source
 	}
-	return openai.FamilyChat
+	return wire.Chat
 }
 
 // Encode applies connector defaults before translation, and keeps native
 // extensions byte-for-byte as JSON values. The caller always owns model and mode.
-func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]byte, openai.Family, error) {
-	wire := WireFamily(kind, vendor, r.Family)
-	return EncodeTarget(r, wire, kind, vendor, model, defaults)
+func Encode(r *wire.Request, kind, vendor, model string, defaults Object) ([]byte, wire.Format, error) {
+	encodedWire := WireFamily(kind, vendor, r.Family)
+	return EncodeTarget(r, encodedWire, kind, vendor, model, defaults)
 }
 
 // EncodeTarget honors an explicitly linked destination dialect. Unlike the
 // kind-based family selector it cannot silently fall back from Responses to Chat.
-func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object) ([]byte, openai.Family, error) {
-	prepared, family, err := PrepareTarget(r, wire, kind, vendor, model, defaults)
+func EncodeTarget(r *wire.Request, encodedWire wire.Format, kind, vendor, model string, defaults Object) ([]byte, wire.Format, error) {
+	prepared, family, err := PrepareTarget(r, encodedWire, kind, vendor, model, defaults)
 	if err != nil {
 		return nil, family, err
 	}
@@ -242,11 +244,11 @@ var generationOnlyDefaults = []string{"max_tokens", "max_completion_tokens", "ma
 // body. Gemini countTokens and Bedrock CountTokens accept only their input
 // envelope (contents/generateContentRequest, input) at the top level, so no
 // provider default may be merged beside it.
-func countDefaults(wire openai.Family, defaults Object) Object {
+func countDefaults(encodedWire wire.Format, defaults Object) Object {
 	if len(defaults) == 0 {
 		return defaults
 	}
-	if wire == openai.FamilyGeminiCount || wire == "bedrock_count" {
+	if encodedWire == wire.GeminiCount || encodedWire == "bedrock_count" {
 		return nil
 	}
 	out := maps.Clone(defaults)
@@ -256,37 +258,37 @@ func countDefaults(wire openai.Family, defaults Object) Object {
 	return out
 }
 
-func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
+func encodeTransformed(r *wire.Request, encodedWire wire.Format, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, wire.Format, error) {
 	if r.Family.Operation() == "token_count" {
-		defaults = countDefaults(wire, defaults)
+		defaults = countDefaults(encodedWire, defaults)
 	}
 	var f Object
 	if r.Family.Surface() != "openai" {
 		f = r.Document()
 	}
-	native := wire == r.Family || (wire == openai.FamilyGemini && r.Family == openai.FamilyGeminiStream)
+	native := encodedWire == r.Family || (encodedWire == wire.Gemini && r.Family == wire.GeminiStream)
 	sourceDefaults := defaults
 	if !native {
 		sourceDefaults = nil
 	}
 	_, shape, _ := vendors.Shape(vendor, r.Family.Operation())
 	if err := refuseRewriteConflicts(shape, r); err != nil {
-		return nil, wire, err
+		return nil, encodedWire, err
 	}
 	sourceDefaults = yieldDefaults(shape, r, sourceDefaults)
 	if r.Family.Surface() != "openai" {
 		mergeDefaultsTracked(f, sourceDefaults, applied)
 	}
 	if r.Family.Surface() == "openai" {
-		fields, provenance, err := r.EncodeFieldsWithProvenance(model, sourceDefaults)
+		fields, provenance, err := openai.EncodeFieldsWithProvenance(r, model, sourceDefaults)
 		*applied = append(*applied, provenance...)
 		if err != nil {
-			return nil, wire, err
+			return nil, encodedWire, err
 		}
 		f = fields
 	}
 	if err := validateProfile(vendor, r.Family, f); err != nil {
-		return nil, wire, err
+		return nil, encodedWire, err
 	}
 	if native {
 		if r.Family.Surface() != "gemini" {
@@ -296,30 +298,30 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 			nested["model"] = raw("models/" + strings.TrimPrefix(model, "models/"))
 			f["generateContentRequest"] = raw(nested)
 		}
-		if r.Family == openai.FamilyRerank {
+		if r.Family == wire.Rerank {
 			encoded, err := encodeRerank(vendor, f)
-			return encoded, wire, err
+			return encoded, encodedWire, err
 		}
 		conform(shape, f)
 		encoded, err := json.Marshal(f)
-		return encoded, wire, err
+		return encoded, encodedWire, err
 	}
-	if r.Family == openai.FamilyEmbeddings {
-		return encodeNativeEmbeddings(wire, f, model)
+	if r.Family == wire.Embeddings {
+		return encodeNativeEmbeddings(encodedWire, f, model)
 	}
-	if r.Family == openai.FamilyRerank && wire == openai.FamilyBedrockRerank {
+	if r.Family == wire.Rerank && encodedWire == wire.BedrockRerank {
 		encoded, err := encodeBedrockRerank(f, model)
-		return encoded, wire, err
+		return encoded, encodedWire, err
 	}
 	c, err := decodeCanonical(r.Family, f)
 	if err != nil {
-		return nil, wire, err
+		return nil, encodedWire, err
 	}
 	if len(c.Extensions) > 0 {
-		return nil, wire, requestError(c.Extensions[0], "The selected provider cannot preserve request semantics at "+strings.Join(c.Extensions, ", "))
+		return nil, encodedWire, requestError(c.Extensions[0], "The selected provider cannot preserve request semantics at "+strings.Join(c.Extensions, ", "))
 	}
 	c.Stream = r.Stream
-	if wire == openai.FamilyAnthropic && !present(c.Parameters["max_output_tokens"]) {
+	if encodedWire == wire.Anthropic && !present(c.Parameters["max_output_tokens"]) {
 		if _, explicit := f["max_tokens"]; !explicit {
 			c.Parameters["max_output_tokens"] = defaults["max_tokens"]
 			if present(defaults["max_tokens"]) {
@@ -327,9 +329,9 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 			}
 		}
 	}
-	out, err := encodeCanonical(c, wire, model, r.Family.Operation())
+	out, err := encodeCanonical(c, encodedWire, model, r.Family.Operation())
 	if err != nil {
-		return nil, wire, err
+		return nil, encodedWire, err
 	}
 	targetDefaults := Object{}
 	maps.Copy(targetDefaults, defaults)
@@ -350,11 +352,11 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 	}
 	mergeDefaultsTracked(out, targetDefaults, applied)
 	conform(shape, out)
-	if err := validateProfile(vendor, wire, out); err != nil {
-		return nil, wire, err
+	if err := validateProfile(vendor, encodedWire, out); err != nil {
+		return nil, encodedWire, err
 	}
 	encoded, err := json.Marshal(out)
-	return encoded, wire, err
+	return encoded, encodedWire, err
 }
 func textInput(v json.RawMessage) ([]string, bool) {
 	var s string
@@ -368,7 +370,7 @@ func textInput(v json.RawMessage) ([]string, bool) {
 
 // ParameterNames is used by strict routing policies. Delivery fields never
 // become model requirements; nested native extensions remain affirmative facts.
-func ParameterNames(r *openai.Request) []string {
+func ParameterNames(r *wire.Request) []string {
 	c, err := decodeCanonical(r.Family, r.Document())
 	if err != nil {
 		return []string{"unsupported_semantics"}
@@ -426,7 +428,7 @@ func jsonSchemaFormat(v json.RawMessage) (Object, error) {
 	}
 }
 
-func StructuredOutputRequested(r *openai.Request) bool {
+func StructuredOutputRequested(r *wire.Request) bool {
 	if r == nil {
 		return false
 	}
@@ -463,7 +465,7 @@ func mergeDefaultsTracked(fields, defaults Object, applied *[]oif.Provenance) {
 	}
 }
 
-func EmbeddingEncoding(r *openai.Request, defaults Object) string {
+func EmbeddingEncoding(r *wire.Request, defaults Object) string {
 	value := r.Field("encoding_format")
 	if len(value) == 0 {
 		value = defaults["encoding_format"]

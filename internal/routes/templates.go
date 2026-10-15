@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -40,7 +42,7 @@ type TemplateInput struct {
 	OverallTimeoutMS int             `json:"overall_timeout_ms"`
 	MaxAttempts      int             `json:"max_attempts"`
 	Fidelity         json.RawMessage `json:"fidelity,omitempty"`
-	RoutingPolicy    *runtime.Policy `json:"routing_policy,omitempty"`
+	RoutingPolicy    *routing.Policy `json:"routing_policy,omitempty"`
 	AutoPublish      bool            `json:"auto_publish"`
 	ProjectID        *string         `json:"project_id,omitempty"`
 }
@@ -51,7 +53,7 @@ func ValidateTemplateInput(in *TemplateInput) error {
 	if !templateName.MatchString(in.Name) {
 		return access.Invalid("name", "Use 1–63 lowercase letters, digits or hyphens, starting with a letter or digit.")
 	}
-	if !runtime.ValidSelector(in.ProviderSelector) {
+	if !routing.ValidSelector(in.ProviderSelector) {
 		return access.Invalid("provider_selector", "Use vendor:<catalog-id> or provider:<uuid>.")
 	}
 	if in.ModelFilter == "" || len(in.ModelFilter) > 200 || strings.ContainsFunc(in.ModelFilter, func(r rune) bool { return r < ' ' }) {
@@ -88,13 +90,13 @@ func validSlugPattern(pattern string) bool {
 	if !strings.Contains(pattern, "{model}") || len(pattern) > 100 {
 		return false
 	}
-	return runtime.RouteSlug.MatchString(slugPlaceholders.Replace(pattern))
+	return routing.RouteSlug.MatchString(slugPlaceholders.Replace(pattern))
 }
 
 // expandSlug fills a slug pattern from a canonical model identity and vendor.
 func expandSlug(pattern, identity, vendor string) (string, bool) {
 	slug := strings.NewReplacer("{model}", slugPart(identity), "{vendor}", slugPart(vendor)).Replace(pattern)
-	return slug, runtime.RouteSlug.MatchString(slug)
+	return slug, routing.RouteSlug.MatchString(slug)
 }
 
 // slugPart lowercases s and turns every character a slug cannot carry into a
@@ -146,7 +148,7 @@ func scanTemplate(row pgx.Row) (*template, error) {
 		return nil, err
 	}
 	if len(policy) > 0 {
-		t.RoutingPolicy = &runtime.Policy{}
+		t.RoutingPolicy = &routing.Policy{}
 		err = json.Unmarshal(policy, t.RoutingPolicy)
 	}
 	return t, err
@@ -233,7 +235,7 @@ func certifiedModels(ctx context.Context, q access.Queryer, providerID string) (
 		if err = rows.Scan(&id, &project, &published, &metadata, &vendor, &kind); err != nil {
 			return nil, err
 		}
-		var models []runtime.RevisionModel
+		var models []routing.RevisionModel
 		var facts map[string]struct {
 			CanonicalModel string `json:"canonical_model"`
 		}
@@ -246,7 +248,7 @@ func certifiedModels(ctx context.Context, q access.Queryer, providerID string) (
 		if vendor == "" {
 			vendor = vendors.DefaultFor(kind)
 		}
-		slices.SortFunc(models, func(a, b runtime.RevisionModel) int { return strings.Compare(a.UpstreamModel, b.UpstreamModel) })
+		slices.SortFunc(models, func(a, b routing.RevisionModel) int { return strings.Compare(a.UpstreamModel, b.UpstreamModel) })
 		for _, m := range models {
 			operations := certifiedOperations(m)
 			if operations == nil {
@@ -263,7 +265,7 @@ func certifiedModels(ctx context.Context, q access.Queryer, providerID string) (
 
 // certifiedOperations lists the operations of m in route order, or nil when
 // any capability is uncertified.
-func certifiedOperations(m runtime.RevisionModel) []string {
+func certifiedOperations(m routing.RevisionModel) []string {
 	if len(m.Capabilities) == 0 {
 		return nil
 	}
@@ -309,7 +311,7 @@ func (s *Server) instantiate(ctx context.Context, tx pgx.Tx, templates []*templa
 	for _, t := range templates {
 		match := modelGlob(t.ModelFilter)
 		for _, m := range models {
-			if !runtime.SelectorMatches(t.ProviderSelector, m.providerID, m.vendor) || !match.MatchString(m.identity) || !sameProject(m.project, t.ProjectID) {
+			if !routing.SelectorMatches(t.ProviderSelector, m.providerID, m.vendor) || !match.MatchString(m.identity) || !sameProject(m.project, t.ProjectID) {
 				continue
 			}
 			var placed bool
@@ -414,7 +416,7 @@ func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifie
 		// to drafts with pending edits, even after an operator validates them.
 		// Without a published baseline, an existing draft needs activation too.
 		var unchanged bool
-		defaultPolicy, _ := json.Marshal(runtime.Policy{})
+		defaultPolicy, _ := json.Marshal(routing.Policy{})
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM olp.route_drafts d
 			JOIN olp.route_revisions v ON v.id=d.based_on_revision_id

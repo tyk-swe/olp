@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func anthropicBody(usage string) []byte {
@@ -15,7 +16,7 @@ func anthropicBody(usage string) []byte {
 
 func TestAnthropicCacheWriteUsage(t *testing.T) {
 	usage := `{"input_tokens":3,"output_tokens":2,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":5}}`
-	c, err := Decode(openai.FamilyAnthropic, openai.FamilyChat, anthropicBody(usage), "team-model", "")
+	c, err := Decode(wire.Anthropic, wire.Chat, anthropicBody(usage), "team-model", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func TestAnthropicCacheWriteUsage(t *testing.T) {
 		*u.CacheWrite5MInputTokens != 10 || *u.CacheWrite1HInputTokens != 5 {
 		t.Fatalf("cache categories: %+v", u)
 	}
-	native, err := Decode(openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicBody(usage), "team-model", "")
+	native, err := Decode(wire.Anthropic, wire.Anthropic, anthropicBody(usage), "team-model", "")
 	if err != nil || !bytes.Contains(native.Body, []byte("ephemeral_5m_input_tokens")) {
 		t.Fatalf("native cache detail lost: %s %v", native.Body, err)
 	}
@@ -43,7 +44,7 @@ func TestAnthropicCacheWriteValidation(t *testing.T) {
 		{"detail sum overflow", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":9223372036854775807,"ephemeral_1h_input_tokens":9223372036854775807}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Decode(openai.FamilyAnthropic, openai.FamilyChat, anthropicBody(tc.usage), "team-model", ""); err == nil {
+			if _, err := Decode(wire.Anthropic, wire.Chat, anthropicBody(tc.usage), "team-model", ""); err == nil {
 				t.Fatalf("accepted %s", tc.name)
 			}
 		})
@@ -65,7 +66,7 @@ func TestAnthropicCacheWriteStreaming(t *testing.T) {
 	frame("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
 	frame("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}, "usage": map[string]any{"output_tokens": 2}})
 	frame("message_stop", map[string]any{"type": "message_stop"})
-	c, err := Stream(openai.FamilyAnthropic, openai.FamilyChat, strings.NewReader(source.String()), 8192, "team-model", true, func([]byte) error { return nil })
+	c, err := Stream(wire.Anthropic, wire.Chat, strings.NewReader(source.String()), 8192, "team-model", true, func([]byte) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestAnthropicCacheWriteStreaming(t *testing.T) {
 	}
 }
 
-func bedrockUsageValue(t *testing.T, usage string) *openai.Usage {
+func bedrockUsageValue(t *testing.T, usage string) *wire.Usage {
 	t.Helper()
 	u, err := bedrockUsage([]byte(usage))
 	if err != nil {
@@ -151,7 +152,7 @@ func TestBedrockCacheUsageStreaming(t *testing.T) {
 		"inputTokens": 100, "outputTokens": 2, "cacheReadInputTokens": 20,
 		"cacheWriteInputTokens": 30,
 		"cacheDetails":          []any{map[string]any{"ttl": "5m", "inputTokens": 10}}}})
-	c, err := Stream("bedrock", openai.FamilyChat, bytes.NewReader(encoded.Bytes()), 8192, "team-model", true, func([]byte) error { return nil })
+	c, err := Stream("bedrock", wire.Chat, bytes.NewReader(encoded.Bytes()), 8192, "team-model", true, func([]byte) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func TestBedrockCacheUsageStreaming(t *testing.T) {
 	addBad("metadata", map[string]any{"usage": map[string]any{
 		"inputTokens": 100, "outputTokens": 2, "cacheWriteInputTokens": 30,
 		"cacheDetails": []any{map[string]any{"ttl": "10m", "inputTokens": 10}}}})
-	if _, err = Stream("bedrock", openai.FamilyChat, bytes.NewReader(bad.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err == nil {
+	if _, err = Stream("bedrock", wire.Chat, bytes.NewReader(bad.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err == nil {
 		t.Fatal("accepted an unknown cache TTL on a stream")
 	}
 }

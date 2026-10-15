@@ -6,38 +6,39 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // estimateSnapshot publishes a route with one target for each model, every one
 // with a context window of two hundred tokens.
-func estimateSnapshot(models ...string) (*runtime.Snapshot, []string) {
+func estimateSnapshot(models ...string) (*routing.Snapshot, []string) {
 	credential := uuid.NewString()
-	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}, Routes: map[string]runtime.Route{}}
-	var targets []runtime.PublishedTarget
+	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
+	var targets []routing.PublishedTarget
 	var ids []string
 	for i, model := range models {
 		id, modelID := uuid.NewString(), uuid.NewString()
-		targets = append(targets, runtime.PublishedTarget{ID: uuid.NewString(), ProviderID: id, ProviderModelID: modelID, ProviderModel: model, Priority: i, Weight: 1})
+		targets = append(targets, routing.PublishedTarget{ID: uuid.NewString(), ProviderID: id, ProviderModelID: modelID, ProviderModel: model, Priority: i, Weight: 1})
 		ids = append(ids, targets[i].ID)
-		snapshot.Providers[id] = runtime.Provider{
+		snapshot.Providers[id] = routing.Provider{
 			ID: id, Kind: "openai", Enabled: true, AuthMode: "api_key",
-			Capabilities: []runtime.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}},
+			Capabilities: []routing.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}},
 			Models:       map[string]json.RawMessage{model: json.RawMessage(`{"context_length":200}`)},
-			Slots:        []runtime.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}},
+			Slots:        []routing.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}},
 		}
 	}
-	snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, []string{"generation"}, 3000, 4, targets)
+	snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", routing.RouteFidelity{Mode: routing.FidelityTransformed}, []string{"generation"}, 3000, 4, targets)
 	return snapshot, ids
 }
 
-func simulate(t *testing.T, snapshot *runtime.Snapshot, input simulationInput) []inspectedDecision {
+func simulate(t *testing.T, snapshot *routing.Snapshot, input simulationInput) []inspectedDecision {
 	t.Helper()
 	input.Operation, input.Surface, input.Mode = "generation", "openai", "unary"
 	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
@@ -153,12 +154,12 @@ func TestSimulationWithoutARequestEstimatesNothing(t *testing.T) {
 func TestSimulationParsesRequestsAsTheGatewayDoes(t *testing.T) {
 	for _, tc := range []struct {
 		name, surface string
-		family        openai.Family
+		family        wire.Format
 		body          string
 	}{
-		{"chat", "openai", openai.FamilyChat, `{"model":"route","max_tokens":9,"n":2,"messages":[{"role":"system","content":"Be brief."},{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}`},
-		{"anthropic", "anthropic", openai.FamilyAnthropic, `{"model":"route","max_tokens":9,"system":"Be brief.","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"tools":[{"name":"f","input_schema":{"type":"object"}}]}`},
-		{"gemini", "gemini", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"systemInstruction":{"parts":[{"text":"Be brief."}]},"generationConfig":{"maxOutputTokens":9,"candidateCount":2}}`},
+		{"chat", "openai", wire.Chat, `{"model":"route","max_tokens":9,"n":2,"messages":[{"role":"system","content":"Be brief."},{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}`},
+		{"anthropic", "anthropic", wire.Anthropic, `{"model":"route","max_tokens":9,"system":"Be brief.","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"tools":[{"name":"f","input_schema":{"type":"object"}}]}`},
+		{"gemini", "gemini", wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"systemInstruction":{"parts":[{"text":"Be brief."}]},"generationConfig":{"maxOutputTokens":9,"candidateCount":2}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gateway, err := protocols.Parse(tc.family, []byte(tc.body), "route")
@@ -183,11 +184,11 @@ func TestSimulationParsesRequestsAsTheGatewayDoes(t *testing.T) {
 func TestSimulationParsesNativeGenerationDialects(t *testing.T) {
 	for _, test := range []struct {
 		dialect string
-		family  openai.Family
+		family  wire.Format
 		body    string
 	}{
-		{"mistral-fim", openai.FamilyMistralFIM, `{"prompt":"def f():","suffix":"\n"}`},
-		{"cohere-chat-v2", openai.FamilyCohereChat, `{"messages":[{"role":"user","content":"hi"}]}`},
+		{"mistral-fim", wire.MistralFIM, `{"prompt":"def f():","suffix":"\n"}`},
+		{"cohere-chat-v2", wire.CohereChat, `{"messages":[{"role":"user","content":"hi"}]}`},
 	} {
 		for _, strict := range []bool{false, true} {
 			parsed, err := inspectorRequest(json.RawMessage(test.body), "generation", "native", "unary", test.dialect, "route", strict)
@@ -201,19 +202,19 @@ func TestSimulationParsesNativeGenerationDialects(t *testing.T) {
 // strictEstimateSnapshot is estimateSnapshot with a strict route: every target
 // is a provider on the compatible chat profile, which prepares the request the
 // target is sent from the caller's.
-func strictEstimateSnapshot(models ...string) *runtime.Snapshot {
+func strictEstimateSnapshot(models ...string) *routing.Snapshot {
 	snapshot, _ := estimateSnapshot(models...)
 	for id, provider := range snapshot.Providers {
 		provider.Kind, provider.ProfileID, provider.ProfileRevision = "openai_compatible", "compatible-chat", "1"
 		snapshot.Providers[id] = provider
 	}
 	route := snapshot.Routes["route"]
-	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 	snapshot.Routes["route"] = route
 	return snapshot
 }
 
-func simulateStrict(t *testing.T, snapshot *runtime.Snapshot, input simulationInput) []inspectedDecision {
+func simulateStrict(t *testing.T, snapshot *routing.Snapshot, input simulationInput) []inspectedDecision {
 	t.Helper()
 	input.Dialect = "openai-chat"
 	return simulate(t, snapshot, input)
@@ -304,11 +305,11 @@ func TestStrictSimulationHonorsTheReplyBoundTheCallerSupplies(t *testing.T) {
 
 // fixedSimulation simulates without a selected key and with every credential
 // eligible.
-func fixedSimulation(snapshot *runtime.Snapshot, input simulationInput, demand *runtime.TokenDemand) *simulation {
+func fixedSimulation(snapshot *routing.Snapshot, input simulationInput, demand *routing.TokenDemand) *simulation {
 	m := (&Server{}).newSimulation(context.Background(), snapshot, input, nil, demand)
-	m.key = func(runtime.Route) (inspectionKeyContext, error) { return inspectionKeyContext{}, nil }
-	m.eligibility = func(runtime.Route) (func(string) runtime.Eligibility, error) {
-		return func(string) runtime.Eligibility { return runtime.Eligible }, nil
+	m.key = func(routing.Route) (inspectionKeyContext, error) { return inspectionKeyContext{}, nil }
+	m.eligibility = func(routing.Route) (func(string) routing.Eligibility, error) {
+		return func(string) routing.Eligibility { return routing.Eligible }, nil
 	}
 	return m
 }

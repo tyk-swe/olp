@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 const rerankARN = "arn:aws:bedrock:us-west-2::foundation-model/cohere.rerank-v3-5:0"
 
-func bedrockRerankRequest(t *testing.T, body string) *openai.Request {
+func bedrockRerankRequest(t *testing.T, body string) *wire.Request {
 	t.Helper()
-	r, err := Parse(openai.FamilyRerank, []byte(body), "team-rerank")
+	r, err := Parse(wire.Rerank, []byte(body), "team-rerank")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,13 +24,13 @@ func bedrockRerankRequest(t *testing.T, body string) *openai.Request {
 // TestBedrockRerankEncodesTheAgentRuntimeRequest checks the request against
 // the documented Rerank example.
 func TestBedrockRerankEncodesTheAgentRuntimeRequest(t *testing.T) {
-	if wire := WireFamily("bedrock", "amazon-bedrock", openai.FamilyRerank); wire != openai.FamilyBedrockRerank {
-		t.Fatalf("wire = %s", wire)
+	if encodedWire := WireFamily("bedrock", "amazon-bedrock", wire.Rerank); encodedWire != wire.BedrockRerank {
+		t.Fatalf("wire = %s", encodedWire)
 	}
 	r := bedrockRerankRequest(t, `{"model":"team-rerank","query":"What is Amazon Bedrock?","documents":["Amazon Bedrock is a fully managed service for foundation models.","Paris is in France."],"top_n":2}`)
-	body, wire, err := EncodeTarget(r, openai.FamilyBedrockRerank, "bedrock", "amazon-bedrock", rerankARN, nil)
-	if err != nil || wire != openai.FamilyBedrockRerank {
-		t.Fatal(wire, err)
+	body, encodedWire, err := EncodeTarget(r, wire.BedrockRerank, "bedrock", "amazon-bedrock", rerankARN, nil)
+	if err != nil || encodedWire != wire.BedrockRerank {
+		t.Fatal(encodedWire, err)
 	}
 	want := `{"queries":[{"type":"TEXT","textQuery":{"text":"What is Amazon Bedrock?"}}],
 		"sources":[{"type":"INLINE","inlineDocumentSource":{"type":"TEXT","textDocument":{"text":"Amazon Bedrock is a fully managed service for foundation models."}}},
@@ -40,9 +40,9 @@ func TestBedrockRerankEncodesTheAgentRuntimeRequest(t *testing.T) {
 		t.Fatalf("body = %s", body)
 	}
 	truncating := bedrockRerankRequest(t, `{"model":"team-rerank","query":"q","documents":["a"],"truncation":true}`)
-	if _, _, err := EncodeTarget(truncating, openai.FamilyBedrockRerank, "bedrock", "amazon-bedrock", rerankARN, nil); err == nil {
+	if _, _, err := EncodeTarget(truncating, wire.BedrockRerank, "bedrock", "amazon-bedrock", rerankARN, nil); err == nil {
 		t.Fatal("Bedrock accepted truncation, which its Rerank API has no control for")
-	} else if refused, ok := errors.AsType[*openai.RequestError](err); !ok || refused.Param != "truncation" {
+	} else if refused, ok := errors.AsType[*wire.RequestError](err); !ok || refused.Param != "truncation" {
 		t.Fatalf("truncation refusal = %v", err)
 	}
 }
@@ -57,7 +57,7 @@ func TestBedrockRerankDecodesRankedSources(t *testing.T) {
 	encoded, _ := json.Marshal(map[string]any{"model": "team-rerank", "query": "q", "documents": documents, "top_n": 2, "return_documents": true})
 	r := bedrockRerankRequest(t, string(encoded))
 	body := `{"results":[{"document":{"type":"TEXT","textDocument":{"text":"document 7"}},"index":7,"relevanceScore":0.91},{"index":3,"relevanceScore":0.25}]}`
-	completion, err := DecodeRequest(openai.FamilyBedrockRerank, openai.FamilyRerank, []byte(body), "team-rerank", "", r)
+	completion, err := DecodeRequest(wire.BedrockRerank, wire.Rerank, []byte(body), "team-rerank", "", r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestBedrockRerankDecodesRankedSources(t *testing.T) {
 		`{"results":[{"index":1,"relevanceScore":1.5}]}`,
 		`{"results":[{"index":1,"relevanceScore":0.5}],"nextToken":"more"}`,
 	} {
-		if _, err := DecodeRequest(openai.FamilyBedrockRerank, openai.FamilyRerank, []byte(invalid), "team-rerank", "", r); err == nil {
+		if _, err := DecodeRequest(wire.BedrockRerank, wire.Rerank, []byte(invalid), "team-rerank", "", r); err == nil {
 			t.Fatalf("accepted %s", invalid)
 		}
 	}
@@ -98,12 +98,12 @@ func sameJSON(t *testing.T, got []byte, want string) string {
 // TestJinaEmbeddingsNameTheirEncodingType covers Jina's spelling of the
 // OpenAI encoding format, which the official SDK sends by default.
 func TestJinaEmbeddingsNameTheirEncodingType(t *testing.T) {
-	r, err := Parse(openai.FamilyEmbeddings, []byte(`{"model":"route","input":["a"],"encoding_format":"base64","dimensions":256}`), "route")
+	r, err := Parse(wire.Embeddings, []byte(`{"model":"route","input":["a"],"encoding_format":"base64","dimensions":256}`), "route")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, wire, err := Encode(r, "openai_compatible", "jina", "jina-embeddings-v3", nil)
-	if err != nil || wire != openai.FamilyEmbeddings || sameJSON(t, body, `{"model":"jina-embeddings-v3","input":["a"],"embedding_type":"base64","dimensions":256}`) != "" {
+	body, encodedWire, err := Encode(r, "openai_compatible", "jina", "jina-embeddings-v3", nil)
+	if err != nil || encodedWire != wire.Embeddings || sameJSON(t, body, `{"model":"jina-embeddings-v3","input":["a"],"embedding_type":"base64","dimensions":256}`) != "" {
 		t.Fatalf("Jina body = %s, %v", body, err)
 	}
 }

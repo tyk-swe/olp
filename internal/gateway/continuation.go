@@ -12,10 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 const continuationHeader = "X-OLP-Continuation"
@@ -35,7 +37,7 @@ type continuationExecution struct {
 type storedContinuation struct {
 	Version         string                    `json:"version"`
 	Source          json.RawMessage           `json:"source"`
-	Receipt         interaction.Receipt       `json:"receipt"`
+	Receipt         oif.Receipt               `json:"receipt"`
 	Binding         string                    `json:"binding"`
 	Interaction     *interaction.Continuation `json:"interaction,omitempty"`
 	Delivery        interaction.Delivery      `json:"delivery"`
@@ -43,7 +45,7 @@ type storedContinuation struct {
 	Query           url.Values                `json:"query"`
 }
 
-func (x *execution) snapshot() *runtime.Snapshot {
+func (x *call) snapshot() *routing.Snapshot {
 	if x.historicalSnapshot != nil {
 		return x.historicalSnapshot
 	}
@@ -66,17 +68,17 @@ func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
 	}
 	return &state, nil
 }
-func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
+func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 	values := x.semanticHeaders.Values(continuationHeader)
 	submission := x.semanticHeaders.Values(submissionHeader)
 	handles := x.semanticHeaders.Values(handleHeader)
 	if len(values) == 0 && len(submission) == 0 && len(handles) == 0 {
 		return nil
 	}
-	if len(values) != 1 || values[0] != interaction.ContinuationV1 || len(submission) != 1 || len(handles) > 1 || x.family != openai.FamilyChat {
+	if len(values) != 1 || values[0] != interaction.ContinuationV1 || len(submission) != 1 || len(handles) > 1 || x.family != wire.Chat {
 		return invalidRequest("state_carrier", "Provide the tested chat-anthropic-tools-v1 continuation contract and one submission identity.", nil)
 	}
-	route, ok := x.request.release.Snapshot.Routes[x.parsed.Route]
+	route, ok := x.request.release.Snapshot.Routes[x.generation.parsed.Route]
 	if !ok || !route.Fidelity.Strict() {
 		return invalidRequest("state_carrier", "Negotiated continuation requires a strict route.", nil)
 	}
@@ -90,7 +92,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Encrypted continuation authority is not configured.")
 	}
 	c := &continuationExecution{version: values[0], submission: submission[0]}
-	x.continuation = c
+	x.generation.continuation = c
 	// Existing ready delivery is recoverable for the resource lifetime even after
 	// the shorter window for claiming a fresh submission has closed.
 	res, payload, err := s.Resources.FindSubmission(ctx, x.keyID, c.submission)
@@ -100,7 +102,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 			return continuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
 		}
 		parentMatches := res.ParentID == nil && len(handles) == 0 || res.ParentID != nil && len(handles) == 1 && handles[0] == resources.LocalID(resources.KindContinuation, *res.ParentID)
-		if !parentMatches || !reflect.DeepEqual(state.SemanticHeaders, continuationSemanticHeaders(x.semanticHeaders)) || !reflect.DeepEqual(state.Query, x.semanticQuery) || !interaction.SameSource(state.Source, x.parsed.OIF().Document().Bytes()) || res.RouteSlug != x.parsed.Route {
+		if !parentMatches || !reflect.DeepEqual(state.SemanticHeaders, continuationSemanticHeaders(x.semanticHeaders)) || !reflect.DeepEqual(state.Query, x.semanticQuery) || !interaction.SameSource(state.Source, x.generation.parsed.OIF().Document().Bytes()) || res.RouteSlug != x.generation.parsed.Route {
 			return continuationError("continuation_mismatch", "This submission identity belongs to a different request.")
 		}
 		if e := s.authorizeContinuation(ctx, x, res, state); e != nil {
@@ -126,7 +128,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 		return continuationError("continuation_unavailable", "The continuation handle is expired, incomplete, or unavailable to this key.")
 	}
 	state, err := decodeStoredContinuation(payload)
-	if err != nil || state.Interaction == nil || res.RouteSlug != x.parsed.Route {
+	if err != nil || state.Interaction == nil || res.RouteSlug != x.generation.parsed.Route {
 		return continuationError("continuation_mismatch", "The continuation handle does not belong to this route and contract.")
 	}
 	// The pinned planning boundary resolves and authorizes this historical
@@ -139,14 +141,14 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	x.servingBinding = state.Binding
 	return nil
 }
-func (s *Server) authorizeContinuation(ctx context.Context, x *execution, res *resources.Resource, state *storedContinuation) *Error {
+func (s *Server) authorizeContinuation(ctx context.Context, x *call, res *resources.Resource, state *storedContinuation) *Error {
 	p, _, e := s.resolveResource(ctx, x, x.authority, res, operationGeneration, retainedRetrieval)
 	if e != nil {
 		return e
 	}
 	return s.authorizeContinuationPin(ctx, x, res, state, p)
 }
-func (s *Server) authorizeContinuationPin(ctx context.Context, x *execution, res *resources.Resource, state *storedContinuation, p *pin) *Error {
+func (s *Server) authorizeContinuationPin(ctx context.Context, x *call, res *resources.Resource, state *storedContinuation, p *pin) *Error {
 	if !p.provider.Enabled || !p.slot.Allows(p.model, res.RouteSlug, x.keyID) {
 		return pinUnavailable()
 	}
@@ -163,8 +165,8 @@ func (s *Server) authorizeContinuationPin(ctx context.Context, x *execution, res
 
 // claimToolWork runs inside the single Attempt immediately before provider Do.
 // Authentication and transport preparation may fail earlier without a claim.
-func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interaction.Plan, a runtime.Attempt, slot runtime.Slot) error {
-	c := x.continuation
+func (s *Server) claimToolWork(ctx context.Context, x *call, plan *interaction.Plan, a routing.Attempt, slot routing.Slot) error {
+	c := x.generation.continuation
 	if c == nil || !plan.ToolContinuation() {
 		return resources.ErrContract
 	}
@@ -178,7 +180,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 	if c.parent != nil {
 		r.ParentID = &c.parent.UUID
 	}
-	state := &storedContinuation{Version: version, Source: x.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
+	state := &storedContinuation{Version: version, Source: x.generation.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -193,8 +195,8 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 	c.resource, c.stored = res, state
 	return nil
 }
-func (s *Server) commitToolDelivery(ctx context.Context, x *execution, state *interaction.Continuation, delivery interaction.Delivery) error {
-	c := x.continuation
+func (s *Server) commitToolDelivery(ctx context.Context, x *call, state *interaction.Continuation, delivery interaction.Delivery) error {
+	c := x.generation.continuation
 	if c == nil || c.resource == nil || c.stored == nil {
 		return resources.ErrContract
 	}
@@ -212,8 +214,8 @@ func (s *Server) commitToolDelivery(ctx context.Context, x *execution, state *in
 // replayContinuation answers a request from the delivery already committed for
 // it. That is before admission: the replay makes no attempt and holds no
 // reservation, so it has no allowance or metadata to state.
-func (s *Server) replayContinuation(w http.ResponseWriter, x *execution) (int, error) {
-	delivery := x.continuation.replay
+func (s *Server) replayContinuation(w http.ResponseWriter, x *call) (int, error) {
+	delivery := x.generation.continuation.replay
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-OLP-Delivery-Replay", "true")
 	w.Header().Set("X-Should-Retry", "false")
@@ -234,7 +236,7 @@ func (s *Server) replayContinuation(w http.ResponseWriter, x *execution) (int, e
 
 // Cached correspondence has the same bounded delivery obligation as its
 // original response. It never enters provider dispatch or owns new usage.
-func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *execution, data []byte) error {
+func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *call, data []byte) error {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	n, err := w.Write(data)
@@ -265,7 +267,7 @@ func continuationDeliveryOutcome(err error) *outcome {
 func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 	for _, frame := range delivery.Frames {
 		if int64(len(frame)+8) > s.cfg.MaxEventBytes {
-			return openai.ErrEventTooLarge
+			return wire.ErrEventTooLarge
 		}
 	}
 	if int64(len(delivery.Body)) > s.cfg.MaxResponseBytes {
@@ -278,7 +280,7 @@ func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 // current authority checks and never enters admission, provider dispatch or a
 // second inference retry engine, so like a replay it adds no response headers.
 func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, openai.FamilyChat)
+	x, authority, done := s.stateBegin(w, r, wire.Chat)
 	if done {
 		return
 	}

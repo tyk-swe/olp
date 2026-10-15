@@ -4,8 +4,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -62,7 +63,7 @@ type Envelope struct {
 	// RuntimeGenerationID is the generation of the release this request was
 	// pinned to; it is empty before the first release installs.
 	RuntimeGenerationID string
-	Usage               *openai.Usage // nil when the upstream reported no usage
+	Usage               *wire.Usage // nil when the upstream reported no usage
 	Attempts            []AttemptFact
 	PayloadCaptured     bool
 }
@@ -117,7 +118,7 @@ type AttemptFact struct {
 	FirstByte *time.Duration
 	// RetryAfter is the delay the upstream asked for; nil unless it sent one.
 	RetryAfter    *time.Duration
-	Usage         *openai.Usage
+	Usage         *wire.Usage
 	ResponseModel string
 	FinishReasons []string
 	// GenerationUsageDeferred delegates accounting to the durable background
@@ -147,7 +148,7 @@ type AttemptFact struct {
 
 // observeUsage retains counters without promoting intermediate stream evidence
 // to proof that no further work was billed.
-func (a *AttemptFact) observeUsage(observed *openai.Usage, complete bool) {
+func (a *AttemptFact) observeUsage(observed *wire.Usage, complete bool) {
 	a.Usage = observed
 	a.usageIncomplete = observed != nil && !complete
 }

@@ -11,10 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"log/slog"
 	"net/http"
+
+	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestOverlappingRotationSharesCurrentPolicyAndCounters(t *testing.T) {

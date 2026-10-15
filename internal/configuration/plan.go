@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
@@ -22,7 +24,6 @@ import (
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -631,7 +632,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	}
 	for i, rt := range doc.Routes {
 		prefix := "routes." + strconv.Itoa(i)
-		if _, err := runtime.DecodeFidelity(rt.Fidelity); err != nil {
+		if _, err := routing.DecodeFidelity(rt.Fidelity); err != nil {
 			return nil, access.Invalid(prefix+".fidelity", err.Error())
 		}
 		if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
@@ -1258,7 +1259,7 @@ func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftI
 	if err := json.Unmarshal(operations, &entry.Operations); err != nil {
 		return nil, err
 	}
-	var published []runtime.PublishedTarget
+	var published []routing.PublishedTarget
 	if err := json.Unmarshal(targets, &published); err != nil {
 		return nil, err
 	}
@@ -1269,7 +1270,7 @@ func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftI
 	err := q.QueryRow(ctx, "SELECT policy FROM olp.routing_policies WHERE scope='route-draft' AND scope_id=$1", draftID).Scan(&policy)
 	switch {
 	case err == nil:
-		var p runtime.Policy
+		var p routing.Policy
 		if err = json.Unmarshal(policy, &p); err != nil {
 			return nil, err
 		}

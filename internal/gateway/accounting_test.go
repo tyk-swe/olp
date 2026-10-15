@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -117,7 +118,7 @@ func accountingEnvelope(t *testing.T) Envelope {
 		Route:               "team-chat",
 		RouteRevisionID:     accountingID(t),
 		ReleaseSequence:     7,
-		Family:              string(openai.FamilyChat),
+		Family:              string(wire.Chat),
 		Mode:                "streaming",
 		Operation:           operationGeneration,
 		Surface:             surfaceOpenAI,
@@ -129,7 +130,7 @@ func accountingEnvelope(t *testing.T) Envelope {
 		Duration:            400 * time.Millisecond,
 		FirstByte:           &firstByte,
 		RuntimeGenerationID: accountingID(t),
-		Usage:               &openai.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10},
+		Usage:               &wire.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10},
 		Attempts: []AttemptFact{
 			{
 				Ordinal: 1, TargetID: accountingID(t), ProviderID: provider,
@@ -146,7 +147,7 @@ func accountingEnvelope(t *testing.T) Envelope {
 				Mode: "streaming", Status: 200, Class: classSuccess, Committed: true,
 				StartedAt: start.Add(20 * time.Millisecond), Duration: 380 * time.Millisecond,
 				FirstByte:     &attemptByte,
-				Usage:         &openai.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10, ReasoningTokens: &reasoning},
+				Usage:         &wire.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10, ReasoningTokens: &reasoning},
 				UsageObserved: true, UsageComplete: true,
 			},
 		},
@@ -540,7 +541,7 @@ func TestDeferredResponseNativeConsumptionSettlesRateWithoutDuplicateMoney(t *te
 			env := accountingEnvelope(t)
 			fact := &env.Attempts[len(env.Attempts)-1]
 			fact.GenerationUsageDeferred = true
-			fact.observeUsage(&openai.Usage{InputTokens: tc.input, OutputTokens: tc.output, TotalTokens: tc.input + tc.output}, tc.complete)
+			fact.observeUsage(&wire.Usage{InputTokens: tc.input, OutputTokens: tc.output, TotalTokens: tc.input + tc.output}, tc.complete)
 			fact.recordEvidence(true)
 			actual := settledAttemptTokens(fact, 100)
 			if actual == nil || *actual != tc.settled || !fact.UsageObserved || fact.UsageComplete != tc.complete || fact.BillingUncertain == tc.complete {

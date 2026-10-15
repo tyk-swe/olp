@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"unicode/utf8"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 const (
@@ -31,12 +31,12 @@ const (
 // deliberately generous — a reservation is reconciled against the real usage
 // as soon as the attempt ends, and admitting work that cannot fit in the
 // window is worse than deferring work that would have.
-func legacyEstimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessage) int64 {
+func legacyEstimateTokens(parsed *wire.Request, defaults ...map[string]json.RawMessage) int64 {
 	input, output, candidates := legacyEstimateParts(parsed, defaults...)
 	return legacyEstimateTokensFromParts(parsed, input, output, candidates)
 }
 
-func legacyEstimateTokensFromParts(parsed *openai.Request, input int64, output *int64, candidates int64) int64 {
+func legacyEstimateTokensFromParts(parsed *wire.Request, input int64, output *int64, candidates int64) int64 {
 	if parsed != nil && parsed.Family.Operation() != "generation" {
 		return max(input, 1)
 	}
@@ -47,7 +47,7 @@ func legacyEstimateTokensFromParts(parsed *openai.Request, input int64, output *
 	return max(legacyAddBounded(input, legacyMultiplyBounded(max(bound, 1), max(candidates, 1))), 1)
 }
 
-func legacyEstimateParts(parsed *openai.Request, defaults ...map[string]json.RawMessage) (input int64, output *int64, candidates int64) {
+func legacyEstimateParts(parsed *wire.Request, defaults ...map[string]json.RawMessage) (input int64, output *int64, candidates int64) {
 	// Match Encode's precedence, including explicit null opting out of a
 	// default and either chat token-bound alias overriding the other.
 	field := func(name string) json.RawMessage {
@@ -55,7 +55,7 @@ func legacyEstimateParts(parsed *openai.Request, defaults ...map[string]json.Raw
 			if raw := parsed.Field(name); len(raw) > 0 {
 				return raw
 			}
-			if parsed.Family == openai.FamilyChat &&
+			if parsed.Family == wire.Chat &&
 				((name == "max_tokens" && len(parsed.Field("max_completion_tokens")) > 0) ||
 					(name == "max_completion_tokens" && len(parsed.Field("max_tokens")) > 0)) {
 				return nil
@@ -69,11 +69,11 @@ func legacyEstimateParts(parsed *openai.Request, defaults ...map[string]json.Raw
 	candidates = 1
 	if parsed != nil {
 		switch parsed.Family {
-		case openai.FamilyChat:
+		case wire.Chat:
 			input = legacyEstimateItems(field("messages"))
-		case openai.FamilyEmbeddings:
+		case wire.Embeddings:
 			input = legacyEstimateEmbeddingInput(field("input"))
-		case openai.FamilyResponses, openai.FamilyInputTokens, openai.FamilyModeration:
+		case wire.Responses, wire.InputTokens, wire.Moderation:
 			input = legacyAddBounded(legacyEstimateItems(field("input")), legacyEstimateText(field("instructions")))
 		}
 		if parsed.Family.Surface() != "openai" {
@@ -92,7 +92,7 @@ func legacyEstimateParts(parsed *openai.Request, defaults ...map[string]json.Raw
 		}
 	}
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
-	if parsed != nil && parsed.Family == openai.FamilyResponses {
+	if parsed != nil && parsed.Family == wire.Responses {
 		outputFields = []string{"max_output_tokens"}
 	}
 	for _, name := range outputFields {
@@ -101,7 +101,7 @@ func legacyEstimateParts(parsed *openai.Request, defaults ...map[string]json.Raw
 			break
 		}
 	}
-	if parsed != nil && parsed.Family == openai.FamilyBedrock {
+	if parsed != nil && parsed.Family == wire.Bedrock {
 		if value, ok := legacyIntegerValue(legacyJsonObject(field("inferenceConfig"))["maxTokens"]); ok {
 			output = &value
 		}
@@ -116,7 +116,7 @@ func legacyEstimateParts(parsed *openai.Request, defaults ...map[string]json.Raw
 		}
 	}
 
-	if parsed == nil || parsed.Family == openai.FamilyChat {
+	if parsed == nil || parsed.Family == wire.Chat {
 		if value, ok := legacyIntegerValue(field("n")); ok {
 			candidates = value
 		}

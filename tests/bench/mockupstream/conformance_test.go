@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // The gateway is the mock's first client, so the mock is held to the
@@ -18,17 +19,17 @@ import (
 
 var wires = []struct {
 	name   string
-	family openai.Family
+	family wire.Format
 	unary  request
 	stream request
 }{
-	{"openai", openai.FamilyChat, request{path: "/v1/chat/completions", body: openAIBody("route-model", false, "hello")}, request{path: "/v1/chat/completions", body: openAIBody("route-model", true, "hello")}},
-	{"responses", openai.FamilyResponses, request{path: "/v1/responses", body: responsesBody("route-model", false, "hello")}, request{path: "/v1/responses", body: responsesBody("route-model", true, "hello")}},
-	{"anthropic", openai.FamilyAnthropic, request{path: "/v1/messages", body: anthropicBody("route-model", false, "hello")}, request{path: "/v1/messages", body: anthropicBody("route-model", true, "hello")}},
-	{"gemini", openai.FamilyGemini, request{path: "/v1beta/models/route-model:generateContent", body: geminiBody}, request{path: "/v1beta/models/route-model:streamGenerateContent?alt=sse", body: geminiBody}},
+	{"openai", wire.Chat, request{path: "/v1/chat/completions", body: openAIBody("route-model", false, "hello")}, request{path: "/v1/chat/completions", body: openAIBody("route-model", true, "hello")}},
+	{"responses", wire.Responses, request{path: "/v1/responses", body: responsesBody("route-model", false, "hello")}, request{path: "/v1/responses", body: responsesBody("route-model", true, "hello")}},
+	{"anthropic", wire.Anthropic, request{path: "/v1/messages", body: anthropicBody("route-model", false, "hello")}, request{path: "/v1/messages", body: anthropicBody("route-model", true, "hello")}},
+	{"gemini", wire.Gemini, request{path: "/v1beta/models/route-model:generateContent", body: geminiBody}, request{path: "/v1beta/models/route-model:streamGenerateContent?alt=sse", body: geminiBody}},
 }
 
-var targets = []openai.Family{openai.FamilyChat, openai.FamilyAnthropic, openai.FamilyGemini}
+var targets = []wire.Format{wire.Chat, wire.Anthropic, wire.Gemini}
 
 func TestUnaryResponsesDecodeWithTheGatewayCodecs(t *testing.T) {
 	s := defaultMock(t)

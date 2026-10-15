@@ -3,7 +3,7 @@ package gateway
 import (
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -13,13 +13,13 @@ func ptr[T any](v T) *T { return &v }
 func TestAttemptUsageDropsInconsistentModalityDetail(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		usage *openai.Usage
+		usage *wire.Usage
 	}{
-		{name: "audio beyond input", usage: &openai.Usage{InputTokens: 10, OutputTokens: 5, AudioInputTokens: ptr(int64(11))}},
-		{name: "cached audio beyond audio", usage: &openai.Usage{InputTokens: 10, OutputTokens: 5, AudioInputTokens: ptr(int64(2)), CachedAudioInputTokens: ptr(int64(3))}},
-		{name: "cached shares beyond cached", usage: &openai.Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: ptr(int64(2)), CachedAudioInputTokens: ptr(int64(2)), CachedImageInputTokens: ptr(int64(2))}},
-		{name: "output shares beyond output", usage: &openai.Usage{InputTokens: 10, OutputTokens: 5, AudioOutputTokens: ptr(int64(4)), ImageOutputTokens: ptr(int64(2))}},
-		{name: "bad tool name", usage: &openai.Usage{InputTokens: 10, OutputTokens: 5, ToolCalls: map[string]int64{"UPPER": 1}}},
+		{name: "audio beyond input", usage: &wire.Usage{InputTokens: 10, OutputTokens: 5, AudioInputTokens: ptr(int64(11))}},
+		{name: "cached audio beyond audio", usage: &wire.Usage{InputTokens: 10, OutputTokens: 5, AudioInputTokens: ptr(int64(2)), CachedAudioInputTokens: ptr(int64(3))}},
+		{name: "cached shares beyond cached", usage: &wire.Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: ptr(int64(2)), CachedAudioInputTokens: ptr(int64(2)), CachedImageInputTokens: ptr(int64(2))}},
+		{name: "output shares beyond output", usage: &wire.Usage{InputTokens: 10, OutputTokens: 5, AudioOutputTokens: ptr(int64(4)), ImageOutputTokens: ptr(int64(2))}},
+		{name: "bad tool name", usage: &wire.Usage{InputTokens: 10, OutputTokens: 5, ToolCalls: map[string]int64{"UPPER": 1}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fact := &AttemptFact{UsageObserved: true, UsageComplete: true, Usage: tc.usage}
@@ -37,7 +37,7 @@ func TestAttemptUsageDropsInconsistentModalityDetail(t *testing.T) {
 }
 
 func TestAttemptUsageKeepsConsistentModalityDetail(t *testing.T) {
-	fact := &AttemptFact{UsageObserved: true, UsageComplete: true, Usage: &openai.Usage{
+	fact := &AttemptFact{UsageObserved: true, UsageComplete: true, Usage: &wire.Usage{
 		InputTokens: 20, OutputTokens: 10, CachedInputTokens: ptr(int64(5)),
 		AudioInputTokens: ptr(int64(7)), CachedAudioInputTokens: ptr(int64(3)),
 		ImageInputTokens: ptr(int64(2)), CachedImageInputTokens: ptr(int64(1)),

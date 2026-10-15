@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -69,12 +70,12 @@ func BenchmarkAuthenticate(b *testing.B) {
 // before each attempt, and the read of its secret from the installed release.
 func BenchmarkEligibility(b *testing.B) {
 	credential := uuid.NewString()
-	m := authorityManager(time.Now().Add(24*time.Hour), map[string]Eligibility{uuid.NewString(): Revoked})
+	m := authorityManager(time.Now().Add(24*time.Hour), map[string]routing.Eligibility{uuid.NewString(): routing.Revoked})
 	release := &Release{credentials: map[string][]byte{credential: []byte("sk-bench")}}
 	b.Run("eligible", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			if m.Eligibility(credential) != Eligible {
+			if m.Eligibility(credential) != routing.Eligible {
 				b.Fatal("the credential cannot serve")
 			}
 		}
@@ -93,30 +94,30 @@ func BenchmarkEligibility(b *testing.B) {
 // benchRoute is a route of the given number of targets, each on a provider of
 // its own with the given number of credential slots and the metadata that
 // catalogued models carry.
-func benchRoute(targets, slots int) *Snapshot {
-	metadata, _ := json.Marshal(ModelMetadata{
+func benchRoute(targets, slots int) *routing.Snapshot {
+	metadata, _ := json.Marshal(routing.ModelMetadata{
 		ContextLength: ptr(int64(128_000)), MaxOutputTokens: ptr(int64(16_384)),
 		SupportedParameters: &[]string{"temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"},
 		Region:              ptr("us"), Source: ptr("reference"),
 	})
-	s := &Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}
-	route := Route{Slug: "team-model", RoutingID: uuid.NewString(), OverallTimeout: 30_000, MaxAttempts: targets, Operations: []string{"generation"}}
+	s := &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
+	route := routing.Route{Slug: "team-model", RoutingID: uuid.NewString(), OverallTimeout: 30_000, MaxAttempts: targets, Operations: []string{"generation"}}
 	for i := range targets {
 		credential, version := uuid.NewString(), 1
-		provider := Provider{
+		provider := routing.Provider{
 			ID: uuid.NewString(), Kind: "openai", VendorID: "openai", Enabled: true, RevisionID: uuid.NewString(), AuthMode: "api_key",
-			Capabilities: []Capability{
+			Capabilities: []routing.Capability{
 				{Model: "wire-model", Operation: "generation", Surface: "openai", Mode: "unary"},
 				{Model: "wire-model", Operation: "generation", Surface: "openai", Mode: "streaming"},
 			},
 			Models: map[string]json.RawMessage{"wire-model": metadata},
 		}
 		for range slots {
-			provider.Slots = append(provider.Slots, Slot{ID: uuid.NewString(), Name: "slot", Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version})
+			provider.Slots = append(provider.Slots, routing.Slot{ID: uuid.NewString(), Name: "slot", Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version})
 		}
 		s.Providers[provider.ID] = provider
 		target := uuid.NewString()
-		route.Targets = append(route.Targets, Target{ID: target, RoutingID: target, ProviderID: provider.ID, ProviderModel: "wire-model", Priority: i / 2, Weight: int64(i%3 + 1), Timeout: 30_000})
+		route.Targets = append(route.Targets, routing.Target{ID: target, RoutingID: target, ProviderID: provider.ID, ProviderModel: "wire-model", Priority: i / 2, Weight: int64(i%3 + 1), Timeout: 30_000})
 	}
 	s.Routes[route.Slug] = route
 	return s
@@ -171,17 +172,17 @@ func BenchmarkPlanRequest(b *testing.B) {
 				}
 			}
 			now := time.Now()
-			options := SelectionOptions{
+			options := routing.Options{
 				KeyID: uuid.NewString(), Now: now, CheckSlots: true, CredentialEligibility: manager.Eligibility,
-				Parameters:  Listed([]string{"temperature", "max_tokens"}),
-				TokenDemand: &TokenDemand{EstimatedInputTokens: 4_200, MaxOutputTokens: ptr(int64(512))},
+				Parameters:  routing.Listed([]string{"temperature", "max_tokens"}),
+				TokenDemand: &routing.TokenDemand{EstimatedInputTokens: 4_200, MaxOutputTokens: ptr(int64(512))},
 			}
 			if tc.prices > 0 {
 				options.Inputs = benchPrices(tc.prices, now)
 			}
 			// A plan that found no attempt is the error path, which is not what a
 			// request pays.
-			plan, err := PlanRequest(snapshot, "team-model", "generation", "openai", "unary", affinity, options)
+			plan, err := routing.Select(snapshot, "team-model", "generation", "openai", "unary", affinity, options)
 			if err != nil || len(plan.Attempts) != tc.wantAttempts || len(plan.Decisions) != tc.wantDecisionLen {
 				b.Fatalf("planned %d attempts and %d decisions, %v; want %d and %d", len(plan.Attempts), len(plan.Decisions), err, tc.wantAttempts, tc.wantDecisionLen)
 			}
@@ -201,7 +202,7 @@ func BenchmarkPlanRequest(b *testing.B) {
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := PlanRequest(snapshot, "team-model", "generation", "openai", "unary", affinity, options); err != nil {
+				if _, err := routing.Select(snapshot, "team-model", "generation", "openai", "unary", affinity, options); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -219,13 +220,15 @@ func BenchmarkSelectSlots(b *testing.B) {
 			snapshot := benchRoute(1, slots)
 			route := snapshot.Routes["team-model"]
 			provider := snapshot.Providers[route.Targets[0].ProviderID]
-			if got := SelectSlots(provider, "wire-model", route, "key", "generation", "openai", "unary", affinity); len(got) != slots {
+			if got := routing.SelectSlots(provider, "wire-model", route, "key", "generation", "openai", "unary", affinity); len(got) != slots {
 				b.Fatalf("selected %d slots, want %d", len(got), slots)
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				SelectSlots(provider, "wire-model", route, "key", "generation", "openai", "unary", affinity)
+				routing.SelectSlots(provider, "wire-model", route, "key", "generation", "openai", "unary", affinity)
 			}
 		})
 	}
 }
+
+func ptr[T any](value T) *T { return &value }

@@ -1,6 +1,6 @@
 package protocols
 
-import "github.com/tyk-swe/olp/internal/protocols/openai"
+import "github.com/tyk-swe/olp/internal/protocols/wire"
 
 func (t *streamTranslator) refusalDelta(text string) error {
 	if text == "" {
@@ -10,10 +10,10 @@ func (t *streamTranslator) refusalDelta(text string) error {
 		return err
 	}
 	t.refused = true
-	if t.target == openai.FamilyChat {
+	if t.target == wire.Chat {
 		return t.chat(Object{"refusal": raw(text)}, nil, nil)
 	}
-	if t.target != openai.FamilyResponses {
+	if t.target != wire.Responses {
 		return t.textDelta(text)
 	}
 	if err := t.reserve(len(text)); err != nil {

@@ -72,18 +72,18 @@ func TestErrorAndAllowanceEventsAreMetadataOnly(t *testing.T) {
 }
 
 func TestEncodedObservationIsBoundedAndLeavesWireBytes(t *testing.T) {
-	var wire bytes.Buffer
-	encoder := gzip.NewWriter(&wire)
+	var encodedWire bytes.Buffer
+	encoder := gzip.NewWriter(&encodedWire)
 	_, _ = encoder.Write([]byte(strings.Repeat("a", 4096)))
 	if err := encoder.Close(); err != nil {
 		t.Fatal(err)
 	}
-	original := bytes.Clone(wire.Bytes())
-	if _, err := Decode(wire.Bytes(), "gzip", 1024); err == nil {
+	original := bytes.Clone(encodedWire.Bytes())
+	if _, err := Decode(encodedWire.Bytes(), "gzip", 1024); err == nil {
 		t.Fatal("decompression bound ignored")
 	}
-	decoded, err := Decode(wire.Bytes(), "gzip", 8192)
-	if err != nil || len(decoded) != 4096 || !bytes.Equal(wire.Bytes(), original) {
+	decoded, err := Decode(encodedWire.Bytes(), "gzip", 8192)
+	if err != nil || len(decoded) != 4096 || !bytes.Equal(encodedWire.Bytes(), original) {
 		t.Fatal("encoded observer altered wire body", err)
 	}
 }

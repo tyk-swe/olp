@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -31,7 +33,7 @@ type codeForwardRuntime struct {
 }
 
 func (r *codeForwardRuntime) Release() *runtime.Release              { return r.pinned }
-func (r *codeForwardRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
+func (r *codeForwardRuntime) Eligibility(string) routing.Eligibility { return routing.Eligible }
 func (r *codeForwardRuntime) Authenticate(key string) (*access.Authority, error) {
 	if key != "olp-code-fixture" {
 		return nil, runtime.ErrInvalidKey
@@ -41,7 +43,7 @@ func (r *codeForwardRuntime) Authenticate(key string) (*access.Authority, error)
 
 type codeForwardAuthorizer struct{}
 
-func (codeForwardAuthorizer) AuthorizeCode(_ context.Context, _ runtime.Configuration, account codemode.Account, _ codemode.Dispatch) (codemode.Authorization, error) {
+func (codeForwardAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configuration, account codemode.Account, _ codemode.Dispatch) (codemode.Authorization, error) {
 	return codemode.Authorization{Principal: account.Principal, CredentialID: account.CredentialID, Headers: http.Header{"Authorization": {"Bearer fixture-subscription"}}}, nil
 }
 
@@ -60,9 +62,9 @@ func codeForwardServer(t *testing.T, f *codeFixture, upstream string) (*httptest
 		t.Fatal(err)
 	}
 	f.exec(t, `UPDATE olp.api_keys SET lookup_id=$2,policy=$3 WHERE id=$1`, f.key, lookup, document)
-	configuration := runtime.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: "codex-subscription", Endpoint: upstream}
+	configuration := routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: "codex-subscription", Endpoint: upstream}
 	// The fixture supplies the publication image; runtime selection uses only it.
-	pinned, err := runtime.NewRelease(access.NewID(), 1, &runtime.Snapshot{Generation: runtime.Generation{ID: access.NewID(), Ordinal: 1, ActivatedAt: time.Now()}, CodeRoutes: map[string]codemode.Route{"coding": f.route}, CodeConnections: map[string]runtime.Configuration{f.route.RevisionID + ":" + f.provider: configuration}}, nil)
+	pinned, err := runtime.NewRelease(access.NewID(), 1, &routing.Snapshot{Generation: routing.Generation{ID: access.NewID(), Ordinal: 1, ActivatedAt: time.Now()}, CodeRoutes: map[string]codemode.Route{"coding": f.route}, CodeConnections: map[string]routing.Configuration{f.route.RevisionID + ":" + f.provider: configuration}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

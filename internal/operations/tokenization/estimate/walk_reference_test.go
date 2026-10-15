@@ -3,7 +3,7 @@ package estimate
 import (
 	"encoding/json"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // This file is the walker as it read a request when every field of it was
@@ -20,14 +20,14 @@ type refWalker struct {
 
 // refWalkInput reads the prompt fields of a request of the given family, asking
 // field for each one by name.
-func refWalkInput(in *input, family openai.Family, field func(string) json.RawMessage) {
+func refWalkInput(in *input, family wire.Format, field func(string) json.RawMessage) {
 	w := refWalker{in}
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		w.items(field("messages"))
-	case openai.FamilyEmbeddings:
+	case wire.Embeddings:
 		w.embedding(field("input"))
-	case openai.FamilyResponses, openai.FamilyInputTokens, openai.FamilyModeration:
+	case wire.Responses, wire.InputTokens, wire.Moderation:
 		w.items(field("input"))
 		w.instructions(field("instructions"))
 	}
@@ -54,11 +54,11 @@ func refWalkInput(in *input, family openai.Family, field func(string) json.RawMe
 // structured walks the schema a request asks the reply to follow: a model reads
 // it as prompt text, as it reads a tool's. Each dialect has its own place for
 // one, and a request without one costs nothing to look.
-func (w refWalker) structured(family openai.Family, field func(string) json.RawMessage) {
+func (w refWalker) structured(family wire.Format, field func(string) json.RawMessage) {
 	switch family {
-	case openai.FamilyChat:
+	case wire.Chat:
 		w.schema(jsonObject(jsonObject(field("response_format"))["json_schema"])["schema"])
-	case openai.FamilyResponses, openai.FamilyInputTokens:
+	case wire.Responses, wire.InputTokens:
 		w.schema(jsonObject(jsonObject(field("text"))["format"])["schema"])
 	}
 	switch family.Surface() {

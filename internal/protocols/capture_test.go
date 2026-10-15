@@ -6,19 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 )
 
-func captureFromFrame(t *testing.T, family openai.Family, frame []byte) (texts []string, tools []string) {
+func captureFromFrame(t *testing.T, family wire.Format, frame []byte) (texts []string, tools []string) {
 	t.Helper()
 	CaptureStreamFrame(family, frame, func(text string) { texts = append(texts, text) }, func(raw json.RawMessage) { tools = append(tools, string(raw)) })
 	return texts, tools
 }
 
 func TestCaptureStreamFrameChat(t *testing.T) {
-	texts, tools := captureFromFrame(t, openai.FamilyChat, []byte(
+	texts, tools := captureFromFrame(t, wire.Chat, []byte(
 		"data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"+
 			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"}}]}\n\n"+
 			"data: {\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"no\"}}]}\n\n"+
@@ -38,7 +38,7 @@ func TestCaptureStreamFrameChat(t *testing.T) {
 }
 
 func TestCaptureStreamFrameResponses(t *testing.T) {
-	texts, tools := captureFromFrame(t, openai.FamilyResponses, []byte(
+	texts, tools := captureFromFrame(t, wire.Responses, []byte(
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"+
 			"event: response.refusal.delta\ndata: {\"type\":\"response.refusal.delta\",\"delta\":\"nope\"}\n\n"+
 			"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"name\":\"tool\",\"call_id\":\"c1\"}}\n\n"+
@@ -60,7 +60,7 @@ func TestCaptureStreamFrameResponses(t *testing.T) {
 }
 
 func TestCaptureStreamFrameAnthropic(t *testing.T) {
-	texts, tools := captureFromFrame(t, openai.FamilyAnthropic, []byte(
+	texts, tools := captureFromFrame(t, wire.Anthropic, []byte(
 		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"+
 			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"+
 			"data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tu_1\",\"name\":\"search\"}}\n\n"+
@@ -80,7 +80,7 @@ func TestCaptureStreamFrameAnthropic(t *testing.T) {
 }
 
 func TestCaptureStreamFrameGeminiExcludesThought(t *testing.T) {
-	texts, tools := captureFromFrame(t, openai.FamilyGemini, []byte(
+	texts, tools := captureFromFrame(t, wire.Gemini, []byte(
 		"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"thought\":true,\"text\":\"secret chain\"},{\"text\":\"visible\"},{\"functionCall\":{\"name\":\"lookup\",\"args\":{\"x\":1}}}]}}]}\n\n"))
 	if len(texts) != 1 || texts[0] != "visible" {
 		t.Fatalf("thought content captured: %v", texts)
@@ -91,12 +91,12 @@ func TestCaptureStreamFrameGeminiExcludesThought(t *testing.T) {
 }
 
 func TestCaptureStreamFrameMistralAndCohere(t *testing.T) {
-	texts, _ := captureFromFrame(t, openai.FamilyMistralFIM, []byte(
+	texts, _ := captureFromFrame(t, wire.MistralFIM, []byte(
 		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"fim\"}}]}\n\n"))
 	if len(texts) != 1 || texts[0] != "fim" {
 		t.Fatalf("mistral texts %v", texts)
 	}
-	texts, tools := captureFromFrame(t, openai.FamilyCohereChat, []byte(
+	texts, tools := captureFromFrame(t, wire.CohereChat, []byte(
 		"event: content-delta\ndata: {\"type\":\"content-delta\",\"delta\":{\"message\":{\"content\":{\"text\":\"coh\"}}}}\n\n"+
 			"event: tool-call-start\ndata: {\"type\":\"tool-call-start\",\"delta\":{\"message\":{\"tool_calls\":{\"id\":\"tc1\",\"type\":\"function\",\"function\":{\"name\":\"g\"}}}}}\n\n"+
 			"event: tool-call-delta\ndata: {\"type\":\"tool-call-delta\",\"delta\":{\"message\":{\"tool_calls\":{\"function\":{\"arguments\":\"{\\\"k\\\"\"}}}}}\n\n"))
@@ -121,7 +121,7 @@ func TestCaptureStreamFrameBedrockNative(t *testing.T) {
 	if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
 		t.Fatal(err)
 	}
-	texts, tools := captureFromFrame(t, openai.FamilyBedrock, frame.Bytes())
+	texts, tools := captureFromFrame(t, wire.Bedrock, frame.Bytes())
 	if len(texts) != 1 || texts[0] != "bed" || len(tools) != 0 {
 		t.Fatalf("bedrock text %v tools %v", texts, tools)
 	}
@@ -130,7 +130,7 @@ func TestCaptureStreamFrameBedrockNative(t *testing.T) {
 	if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
 		t.Fatal(err)
 	}
-	texts, tools = captureFromFrame(t, openai.FamilyBedrock, frame.Bytes())
+	texts, tools = captureFromFrame(t, wire.Bedrock, frame.Bytes())
 	if len(tools) != 1 || len(texts) != 0 || tools[0] != `{"toolUse":{"input":"{\"q\""}}` {
 		t.Fatalf("bedrock toolUse delta texts %v tools %v", texts, tools)
 	}
@@ -140,7 +140,7 @@ func TestCaptureStreamFrameBedrockNative(t *testing.T) {
 	if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
 		t.Fatal(err)
 	}
-	_, tools = captureFromFrame(t, openai.FamilyBedrock, frame.Bytes())
+	_, tools = captureFromFrame(t, wire.Bedrock, frame.Bytes())
 	if len(tools) != 1 || tools[0] != `{"toolUseId":"tu1","name":"lookup"}` {
 		t.Fatalf("bedrock toolUse start %v", tools)
 	}
@@ -148,7 +148,7 @@ func TestCaptureStreamFrameBedrockNative(t *testing.T) {
 
 func TestCaptureDocumentToolCallsMistral(t *testing.T) {
 	body := []byte(`{"choices":[{"message":{"role":"assistant","content":"ok","tool_calls":[{"id":"m1","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}`)
-	calls := CaptureDocumentToolCalls(openai.FamilyMistralFIM, body)
+	calls := CaptureDocumentToolCalls(wire.MistralFIM, body)
 	if len(calls) != 1 || string(calls[0]) != `{"id":"m1","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}` {
 		t.Fatalf("mistral tool calls %v", calls)
 	}
@@ -156,16 +156,16 @@ func TestCaptureDocumentToolCallsMistral(t *testing.T) {
 
 func TestCaptureDocumentToolCallsFamilies(t *testing.T) {
 	for _, tc := range []struct {
-		family openai.Family
+		family wire.Format
 		body   string
 		want   int
 	}{
-		{openai.FamilyChat, `{"choices":[{"message":{"role":"assistant","content":"hi","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}`, 1},
-		{openai.FamilyResponses, `{"output":[{"type":"message"},{"type":"function_call","id":"fc1","name":"g","arguments":"{}"}]}`, 1},
-		{openai.FamilyAnthropic, `{"content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"t1","name":"s","input":{}}]}`, 1},
-		{openai.FamilyGemini, `{"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"hidden"},{"text":"out"},{"functionCall":{"name":"l","args":{}}}]}}]}`, 1},
-		{openai.FamilyBedrock, `{"output":{"message":{"content":[{"toolUse":{"toolUseId":"t","name":"n","input":{}}}]}}}`, 1},
-		{openai.FamilyCohereChat, `{"message":{"tool_calls":[{"id":"t","type":"function","function":{"name":"g","arguments":"{}"}}]}}`, 1},
+		{wire.Chat, `{"choices":[{"message":{"role":"assistant","content":"hi","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}`, 1},
+		{wire.Responses, `{"output":[{"type":"message"},{"type":"function_call","id":"fc1","name":"g","arguments":"{}"}]}`, 1},
+		{wire.Anthropic, `{"content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"t1","name":"s","input":{}}]}`, 1},
+		{wire.Gemini, `{"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"hidden"},{"text":"out"},{"functionCall":{"name":"l","args":{}}}]}}]}`, 1},
+		{wire.Bedrock, `{"output":{"message":{"content":[{"toolUse":{"toolUseId":"t","name":"n","input":{}}}]}}}`, 1},
+		{wire.CohereChat, `{"message":{"tool_calls":[{"id":"t","type":"function","function":{"name":"g","arguments":"{}"}}]}}`, 1},
 	} {
 		calls := CaptureDocumentToolCalls(tc.family, []byte(tc.body))
 		if len(calls) != tc.want {

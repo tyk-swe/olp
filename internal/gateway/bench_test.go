@@ -17,13 +17,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -180,8 +182,8 @@ func BenchmarkAdmission(b *testing.B) {
 	b.Run("provider-quota", func(b *testing.B) {
 		client := newAllowing(0, 0, 0, true)
 		admission := newAdmission(b, client)
-		provider := &runtime.Provider{ID: benchOwner, Limits: &runtime.Limits{MaxConcurrency: int64ptr(32)}}
-		slot := &runtime.Slot{ID: uuid.NewString(), MaxConcurrency: int64ptr(8)}
+		provider := &routing.Provider{ID: benchOwner, Limits: &routing.Limits{MaxConcurrency: int64ptr(32)}}
+		slot := &routing.Slot{ID: uuid.NewString(), MaxConcurrency: int64ptr(8)}
 		ctx := context.Background()
 		var operations int64
 		b.ReportAllocs()
@@ -213,15 +215,15 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 	client := newAllowing(600, 1_000_000, benchEstimate, true)
 	admission := newAdmission(t, client)
 	free := access.Authority{ID: benchOwner, LookupID: "lookup_bench", Policy: access.KeyPolicy{Scopes: []string{"inference"}}}
-	provider := &runtime.Provider{ID: benchOwner}
-	slot := &runtime.Slot{ID: uuid.NewString()}
+	provider := &routing.Provider{ID: benchOwner}
+	slot := &routing.Slot{ID: uuid.NewString()}
 	ctx := context.Background()
 	server := &Server{Admission: admission, log: quiet}
 	// A request that has a price list to be priced by, so that the guard is the only
 	// reason a key without a cost budget has nothing estimated for it: an execution
 	// with no attempts would spare the estimate whether the guard held or not.
-	priced := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
-		runtime.Attempt{Price: costPrice()})
+	priced := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1,
+		routing.Attempt{Price: costPrice()})
 	priced.request.id, priced.request.minted = uuid.NewString(), true
 
 	headers := http.Header{"Content-Type": []string{"application/json"}}
@@ -260,7 +262,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 			}
 		},
 		"settlement of a request that reserved nothing": func() {
-			server.settleAdmission(ctx, &execution{dispatched: true})
+			server.settleAdmission(ctx, &call{dispatched: true})
 		},
 		"target admission": func() {
 			reservation, rejection, skip := admission.reserveTarget(ctx, provider, slot, benchEstimate, time.Minute, "")
@@ -282,17 +284,17 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 		{"the Anthropic Messages profile", "anthropic", "anthropic-messages"},
 		{"Claude on Vertex AI", "vertex_ai", "vertex-anthropic"},
 	} {
-		provider := runtime.Provider{ID: uuid.NewString(), Kind: target.kind, ProfileID: target.profile}
+		provider := routing.Provider{ID: uuid.NewString(), Kind: target.kind, ProfileID: target.profile}
 		if target.profile != "" {
 			provider.ProfileRevision = connectors.ProfileRevision
 		}
 		cfg := provider.Connector()
-		sending := func(header http.Header) *execution {
+		sending := func(header http.Header) *call {
 			header.Set("Anthropic-Version", "2023-06-01")
-			return &execution{
-				parsed: &openai.Request{Family: openai.FamilyAnthropic}, semanticHeaders: semanticHeaders(header),
-				route:              &runtime.Route{Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, Targets: []runtime.Target{{ProviderID: provider.ID}}},
-				historicalSnapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: provider}},
+			return &call{
+				semanticHeaders: semanticHeaders(header),
+
+				historicalSnapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}, routeLeg: routeLeg{route: &routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Targets: []routing.Target{{ProviderID: provider.ID}}}}, generation: generationCall{parsed: &wire.Request{Family: wire.Anthropic}},
 			}
 		}
 		x, header := sending(http.Header{}), http.Header{}
@@ -302,7 +304,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 			}
 		}
 		runs["anthropic-beta forwarding, "+target.name] = func() {
-			if forwardAnthropicBeta(header, x, openai.FamilyAnthropic, cfg).SemanticHeaders != nil || len(header) != 0 {
+			if forwardAnthropicBeta(header, x, wire.Anthropic, cfg).SemanticHeaders != nil || len(header) != 0 {
 				t.Fatalf("a request with no Anthropic-Beta was sent one: %v", header)
 			}
 		}
@@ -365,7 +367,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 
 	// A target with a quota is named for it, which the limiter refuses to do
 	// without: one that was left unnamed would be skipped as unenforceable.
-	capped := &runtime.Provider{ID: benchOwner, Limits: &runtime.Limits{MaxConcurrency: int64ptr(32)}}
+	capped := &routing.Provider{ID: benchOwner, Limits: &routing.Limits{MaxConcurrency: int64ptr(32)}}
 	client = newAllowing(0, 0, 0, true)
 	admission = newAdmission(t, client)
 	reservation, rejection, skip := admission.reserveTarget(ctx, capped, slot, benchEstimate, time.Minute, "")
@@ -452,24 +454,24 @@ type benchLimits struct {
 func benchGateway(tb testing.TB, upstream *benchTransport, model string, limit benchLimits) http.Handler {
 	tb.Helper()
 	credential, version, slot := uuid.NewString(), 1, uuid.NewString()
-	provider := runtime.Provider{
+	provider := routing.Provider{
 		ID: uuid.NewString(), Name: "bench", Kind: "openai", Enabled: true, ActiveCredential: &credential, RevisionID: uuid.NewString(),
 		Endpoint: "http://127.0.0.1/bench/v1", AuthMode: "api_key",
-		Slots: []runtime.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version}},
+		Slots: []routing.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version}},
 	}
 	for _, surface := range []string{"openai", "anthropic"} {
 		for _, mode := range []string{"unary", "streaming"} {
-			provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: model, Operation: "generation", Surface: surface, Mode: mode})
+			provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: model, Operation: "generation", Surface: surface, Mode: mode})
 		}
 	}
 	routeID := uuid.NewString()
-	snapshot := &runtime.Snapshot{
-		Generation: runtime.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
-		Providers:  map[string]runtime.Provider{provider.ID: provider},
-		Routes: map[string]runtime.Route{routeSlug: {
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
+		Providers:  map[string]routing.Provider{provider.ID: provider},
+		Routes: map[string]routing.Route{routeSlug: {
 			ID: routeID, Slug: routeSlug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 3, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
-			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
-			Targets:  []runtime.Target{{ID: uuid.NewString(), ProviderID: provider.ID, ProviderModel: model, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: provider.ID, ProviderModel: model, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
 		}},
 	}
 	release, err := runtime.NewRelease(uuid.NewString(), 7, snapshot, map[string][]byte{credential: []byte(secretA)})
@@ -508,7 +510,7 @@ func benchGateway(tb testing.TB, upstream *benchTransport, model string, limit b
 func BenchmarkStreamWriter(b *testing.B) {
 	frame := []byte("data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1800000000,\"model\":\"team-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"word 17 \"},\"finish_reason\":null}]}\n\n")
 	writer := &benchWriter{header: make(http.Header, 4)}
-	sw := &streamWriter{w: writer, family: openai.FamilyChat}
+	sw := &streamWriter{w: writer, family: wire.Chat}
 	if err := sw.emit(frame); err != nil || writer.status != http.StatusOK || writer.flushed != 1 {
 		b.Fatalf("emit: %v, status %d, flushed %d", err, writer.status, writer.flushed)
 	}

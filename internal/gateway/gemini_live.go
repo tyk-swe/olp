@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -19,7 +22,6 @@ import (
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -89,7 +91,7 @@ func geminiClientKey(r *http.Request, allowedQuery ...string) (string, *Error) {
 }
 
 func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
-	x := &execution{request: s.begin(w, r), family: openai.FamilyGeminiLive, actor: "api_key", mode: "realtime"}
+	x := &call{request: s.begin(w, r), family: wire.GeminiLive, actor: "api_key", mode: "realtime"}
 	status := http.StatusInternalServerError
 	var out *outcome
 	defer func() { s.finish(x, out, status) }()
@@ -199,7 +201,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
-	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *runtime.Provider, model string) bool {
+	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == "gemini-live" && provider.Connector().Supports("realtime", "gemini", "realtime") && provider.Supports(model, "realtime", "gemini", "realtime")
 	})
 	if e != nil {
@@ -376,12 +378,12 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, client, upstream duplexPeer, token string, maxBytes int) (*openai.Usage, bool, error) {
+func (s *Server) relayGeminiLive(ctx context.Context, x *call, p *pin, client, upstream duplexPeer, token string, maxBytes int) (*wire.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var mu sync.Mutex
-	var observed *openai.Usage
-	var turn *openai.Usage
+	var observed *wire.Usage
+	var turn *wire.Usage
 	var turnGrounding int64
 	var inFlight bool
 	type relayEnd struct {
@@ -413,7 +415,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 					return end(fmt.Errorf("%w: repeated setup completion", errGeminiLiveProtocol))
 				}
 				doc := frame.Source
-				var usageValue *openai.Usage
+				var usageValue *wire.Usage
 				if u := frame.Usage; u != nil {
 					usageValue = geminiExtendedUsage(*u.Input, *u.Output, u.Cached, u.Thoughts, u.ToolUse, u.Total)
 					geminiLiveModality(usageValue, u)
@@ -539,7 +541,7 @@ loop:
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
-			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != runtime.Eligible {
+			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != routing.Eligible {
 				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop
@@ -635,7 +637,7 @@ func geminiUsageDetails(detail []geminilifecycle.LiveUsageDetail) (audio, image 
 }
 
 // geminiLiveModality applies a Live frame's detail arrays to its usage.
-func geminiLiveModality(u *openai.Usage, native *geminilifecycle.LiveUsage) {
+func geminiLiveModality(u *wire.Usage, native *geminilifecycle.LiveUsage) {
 	if u == nil {
 		return
 	}
@@ -666,13 +668,13 @@ func geminiLiveModality(u *openai.Usage, native *geminilifecycle.LiveUsage) {
 // apart from its prompt and response counts into output and input usage, as
 // the generateContent codec does, so every billed token reaches settlement.
 // It returns nil when any reported count is negative.
-func geminiExtendedUsage(input, output int64, cached, thoughts, toolUse, total *int64) *openai.Usage {
+func geminiExtendedUsage(input, output int64, cached, thoughts, toolUse, total *int64) *wire.Usage {
 	for _, v := range []*int64{thoughts, toolUse, total} {
 		if v != nil && *v < 0 {
 			return nil
 		}
 	}
-	usageValue := &openai.Usage{CachedInputTokens: cached}
+	usageValue := &wire.Usage{CachedInputTokens: cached}
 	if toolUse != nil {
 		input = addBounded(input, *toolUse)
 	}
@@ -703,7 +705,7 @@ func writeGeminiLiveFrameWithin(ctx context.Context, conn geminiLiveFrameWriter,
 	return conn.Write(frameCtx, kind, payload)
 }
 
-func geminiLiveSettlement(x *execution) *int64 {
+func geminiLiveSettlement(x *call) *int64 {
 	if !x.dispatched {
 		zero := int64(0)
 		return &zero

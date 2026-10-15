@@ -9,11 +9,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // Admission enforces the budgets every replica shares through Valkey: the API
@@ -470,7 +471,7 @@ func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual 
 
 // connectionRequest describes the quota shared by every attempt that flows
 // through one provider connection.
-func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Duration, priority string) limits.Request {
+func connectionRequest(provider *routing.Provider, estimate int64, ttl time.Duration, priority string) limits.Request {
 	request := limits.Request{
 		CostOwnerID:     provider.ID,
 		RequestedTokens: estimate,
@@ -490,7 +491,7 @@ func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Dura
 }
 
 // slotRequest describes the quota of one credential slot.
-func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration, priority string) limits.Request {
+func slotRequest(slot *routing.Slot, estimate int64, ttl time.Duration, priority string) limits.Request {
 	request := limits.Request{
 		CostOwnerID:       slot.ID,
 		RequestsPerMinute: slot.RequestsPerMinute,
@@ -511,7 +512,7 @@ func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration, priority
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
-func (a *Admission) reserveTarget(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, ttl time.Duration, priority string) (reservation *targetReservation, rejection *attemptFailure, skip bool) {
+func (a *Admission) reserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) (reservation *targetReservation, rejection *attemptFailure, skip bool) {
 	connection := connectionRequest(provider, estimate, ttl, priority)
 	credential := slotRequest(slot, estimate, ttl, priority)
 	if !connection.HasHardLimits() && !credential.HasHardLimits() {
@@ -558,7 +559,7 @@ func settleTargetRefund(ctx context.Context, reservation *targetReservation) {
 // cooldown records a shared cooldown for the credential and for the slot, so
 // every replica avoids a target the upstream just rejected instead of each
 // learning it alone.
-func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, d time.Duration, credential bool) {
+func (a *Admission) cooldown(ctx context.Context, providerID string, slot *routing.Slot, generation int64, d time.Duration, credential bool) {
 	if !a.ready() || d <= 0 {
 		return
 	}
@@ -591,7 +592,7 @@ func (a *Admission) endCredentialCooldown(ctx context.Context, providerID, crede
 // cooling reports whether another replica put this credential or slot in a
 // cooldown. A store that cannot answer must not take every slot out of
 // service, so an unreadable cooldown is treated as absent and logged.
-func (a *Admission) cooling(ctx context.Context, providerID string, slot *runtime.Slot, generation int64) bool {
+func (a *Admission) cooling(ctx context.Context, providerID string, slot *routing.Slot, generation int64) bool {
 	if !a.ready() {
 		return false
 	}
@@ -612,7 +613,7 @@ const maxEstimate = estimate.MaxTokens
 // defaults affect what is actually sent, even when the client omitted a bound.
 // Each attempt is priced once, for its own provider and model, so the cost
 // grows with the targets of a route and not with their square.
-func requestEstimate(x *execution) int64 {
+func requestEstimate(x *call) int64 {
 	var reserved int64
 	for _, attempt := range x.attempts {
 		provider := x.snapshot().Providers[attempt.ProviderID]
@@ -631,7 +632,7 @@ func keyReservationEstimate(perAttempt int64, attempts int) int64 {
 
 // settledTokens accounts for every attempted provider, not just the last one.
 // Uncertain attempts retain an estimate rather than refunding unknown work.
-func (x *execution) settledTokens() *int64 {
+func (x *call) settledTokens() *int64 {
 	var total int64
 	for index := range x.facts {
 		fact := &x.facts[index]
@@ -679,7 +680,7 @@ func addBounded(a, b int64) int64 {
 // totalTokens is the usage an attempt disclosed, as one number to reconcile a
 // token reservation against. Providers that report only the two halves are
 // summed; a provider that reported nothing leaves the estimate standing.
-func totalTokens(usage *openai.Usage) *int64 {
+func totalTokens(usage *wire.Usage) *int64 {
 	if usage == nil {
 		return nil
 	}
@@ -696,10 +697,10 @@ func totalTokens(usage *openai.Usage) *int64 {
 // share is the part of a divided quota the request's admission class may
 // hold, or the zero Share for an undivided one. A request without a class is
 // a normal one.
-func share(supply runtime.Supply, priority string) limits.Share {
+func share(supply routing.Supply, priority string) limits.Share {
 	if !supply.Shared() {
 		return limits.Share{}
 	}
-	priority = cmp.Or(priority, runtime.PriorityNormal)
+	priority = cmp.Or(priority, routing.PriorityNormal)
 	return limits.Share{Class: priority, Percent: supply.PriorityShares.Of(priority), SaturationPercent: *supply.SaturationPercent}
 }

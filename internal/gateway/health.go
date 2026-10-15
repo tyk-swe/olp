@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/observability"
 )
 
 const (
@@ -204,15 +204,15 @@ func (h *healthTracker) publish(providerID string, until time.Time) {
 	}
 }
 
-// ProviderHealth implements providers.HealthSource.
-func (h *healthTracker) ProviderHealth(window time.Duration) map[string]providers.HealthStats {
+// ProviderHealth implements observability.HealthSource.
+func (h *healthTracker) ProviderHealth(window time.Duration) map[string]observability.HealthStats {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
 	since := (now.Add(-window).Unix()) / 60
-	out := map[string]providers.HealthStats{}
+	out := map[string]observability.HealthStats{}
 	for id, p := range h.providers {
-		var stats providers.HealthStats
+		var stats observability.HealthStats
 		for minute, b := range p.buckets {
 			if minute < since {
 				continue

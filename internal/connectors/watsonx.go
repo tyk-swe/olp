@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
@@ -41,8 +43,8 @@ func watsonxModelValid(model string) bool {
 	return len(model) <= 256 && watsonxModel.MatchString(model) && !strings.Contains(model, "..")
 }
 
-func (c Config) watsonxURL(base string, wire openai.Family, stream bool) (string, error) {
-	if wire != openai.FamilyChat {
+func (c Config) watsonxURL(base string, encodedWire wire.Format, stream bool) (string, error) {
+	if encodedWire != wire.Chat {
 		return "", errors.New("watsonx serves its chat API only")
 	}
 	path := "/ml/v1/text/chat"
@@ -136,7 +138,7 @@ func (s *watsonxStream) Read(p []byte) (int, error) {
 			if stated := openai.ParseErrorBody([]byte(frame.Data)); stated != nil {
 				return 0, stated
 			}
-			return 0, &openai.UpstreamError{Message: "watsonx stream failed"}
+			return 0, &wire.UpstreamError{Message: "watsonx stream failed"}
 		case frame.Data == "[DONE]":
 			s.done = true
 			s.pending = []byte("data: [DONE]\n\n")

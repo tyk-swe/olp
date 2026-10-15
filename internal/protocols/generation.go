@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/generation"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
-type generationAdapter struct{ family openai.Family }
+type generationAdapter struct{ family wire.Format }
 
 func field(v oif.Value, name string) oif.Value  { out, _ := v.Lookup(name); return out }
 func textField(v oif.Value, name string) string { s, _ := field(v, name).Text(); return s }
@@ -32,7 +33,7 @@ func (a generationAdapter) LiftRequest(r oif.Request) (oif.View, error) {
 				m.Role = native
 			}
 			contentName := "content"
-			if a.family == openai.FamilyGemini {
+			if a.family == wire.Gemini {
 				contentName = "parts"
 			}
 			m.Nodes = a.nodes(field(v, contentName), oif.Pointer(path, contentName))
@@ -51,17 +52,17 @@ func (a generationAdapter) LiftRequest(r oif.Request) (oif.View, error) {
 	}
 	ignored := map[string]bool{"model": true, "stream": true, "stream_options": true, "tools": true}
 	switch a.family {
-	case openai.FamilyChat, openai.FamilyCohereChat:
+	case wire.Chat, wire.CohereChat:
 		ignored["messages"] = true
 		for i, v := range field(root, "messages").Elements() {
 			add(v, fmt.Sprintf("/messages/%d", i), textField(v, "role"), "message")
 		}
-	case openai.FamilyMistralFIM:
+	case wire.MistralFIM:
 		ignored["prompt"] = true
 		ignored["suffix"] = true
 		add(field(root, "prompt"), "/prompt", "user", "mistral-fim.prompt")
 		add(field(root, "suffix"), "/suffix", "user", "mistral-fim.suffix")
-	case openai.FamilyResponses:
+	case wire.Responses:
 		ignored["input"] = true
 		ignored["instructions"] = true
 		add(field(root, "instructions"), "/instructions", "system", "responses.instructions")
@@ -80,14 +81,14 @@ func (a generationAdapter) LiftRequest(r oif.Request) (oif.View, error) {
 				add(v, fmt.Sprintf("/input/%d", i), role, "responses.item")
 			}
 		}
-	case openai.FamilyAnthropic, openai.FamilyBedrock:
+	case wire.Anthropic, wire.Bedrock:
 		ignored["messages"] = true
 		ignored["system"] = true
 		add(field(root, "system"), "/system", "system", string(a.family)+".system")
 		for i, v := range field(root, "messages").Elements() {
 			add(v, fmt.Sprintf("/messages/%d", i), textField(v, "role"), "message")
 		}
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		ignored["contents"] = true
 		ignored["systemInstruction"] = true
 		add(field(root, "systemInstruction"), "/systemInstruction", "system", "gemini.systemInstruction")
@@ -136,7 +137,7 @@ func (a generationAdapter) LiftRequest(r oif.Request) (oif.View, error) {
 		}
 		addTool(t, tool, path)
 	}
-	if a.family == openai.FamilyBedrock {
+	if a.family == wire.Bedrock {
 		for i, t := range field(field(root, "toolConfig"), "tools").Elements() {
 			if spec := field(t, "toolSpec"); spec.Kind() == oif.Object {
 				addTool(t, spec, fmt.Sprintf("/toolConfig/tools/%d/toolSpec", i))
@@ -258,7 +259,7 @@ func (a generationAdapter) LiftResult(r oif.Result) (oif.View, error) {
 		result.Candidates = append(result.Candidates, generation.Candidate{ID: id, Pointer: path, Index: index, Source: v, Nodes: a.nodes(content, contentPath), FinishReason: finish})
 	}
 	switch a.family {
-	case openai.FamilyChat, openai.FamilyMistralFIM:
+	case wire.Chat, wire.MistralFIM:
 		for i, c := range field(root, "choices").Elements() {
 			path := fmt.Sprintf("/choices/%d", i)
 			index := i
@@ -273,16 +274,16 @@ func (a generationAdapter) LiftResult(r oif.Result) (oif.View, error) {
 				last.Nodes = append(last.Nodes, generation.Node{ID: path + "/message/refusal", Pointer: path + "/message/refusal", Kind: "refusal", Source: refusal})
 			}
 		}
-	case openai.FamilyResponses:
+	case wire.Responses:
 		add(root, "", 0, field(root, "output"), "/output", textField(root, "status"))
-	case openai.FamilyAnthropic:
+	case wire.Anthropic:
 		add(root, "", 0, field(root, "content"), "/content", textField(root, "stop_reason"))
-	case openai.FamilyCohereChat:
+	case wire.CohereChat:
 		message := field(root, "message")
 		add(root, "", 0, field(message, "content"), "/message/content", textField(root, "finish_reason"))
 		last := &result.Candidates[len(result.Candidates)-1]
 		last.Nodes = append(last.Nodes, a.nodes(field(message, "tool_calls"), "/message/tool_calls")...)
-	case openai.FamilyGemini:
+	case wire.Gemini:
 		result.Usage = field(root, "usageMetadata")
 		for i, c := range field(root, "candidates").Elements() {
 			path := fmt.Sprintf("/candidates/%d", i)
@@ -292,7 +293,7 @@ func (a generationAdapter) LiftResult(r oif.Result) (oif.View, error) {
 			}
 			add(c, path, index, field(field(c, "content"), "parts"), path+"/content/parts", textField(c, "finishReason"))
 		}
-	case openai.FamilyBedrock:
+	case wire.Bedrock:
 		add(root, "", 0, field(field(field(root, "output"), "message"), "content"), "/output/message/content", textField(root, "stopReason"))
 	default:
 		return nil, fmt.Errorf("generation result view unavailable")

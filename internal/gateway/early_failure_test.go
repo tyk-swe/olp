@@ -10,11 +10,11 @@ import (
 	"testing/iotest"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestEveryEarlyInferenceFailureEmitsOneTerminalEnvelope(t *testing.T) {
-	for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+	for _, family := range []wire.Format{wire.Chat, wire.Responses} {
 		for _, tc := range []struct {
 			name, code string
 			status     int
@@ -59,7 +59,7 @@ func TestEveryEarlyInferenceFailureEmitsOneTerminalEnvelope(t *testing.T) {
 			t.Run(string(family)+"/"+tc.name, func(t *testing.T) {
 				h := newHarness(t, Config{})
 				body := `{"model":"team-chat","messages":[{"role":"user","content":"private prompt"}]}`
-				if family == openai.FamilyResponses {
+				if family == wire.Responses {
 					body = `{"model":"team-chat","input":"private prompt"}`
 				}
 				r := httptest.NewRequest(http.MethodPost, "/v1"+endpointPath(family), strings.NewReader(body))
@@ -97,7 +97,7 @@ func TestReadDeadlineFailureEmitsTerminalEnvelope(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	// ResponseRecorder deliberately has no SetReadDeadline implementation.
 	w := httptest.NewRecorder()
-	h.gateway.inference(openai.FamilyChat)(w, r)
+	h.gateway.inference(wire.Chat)(w, r)
 	if w.Code != http.StatusInternalServerError || len(h.sink.envs) != 1 || h.sink.envs[0].Status != w.Code || h.sink.envs[0].Outcome != "failure" {
 		t.Fatalf("deadline setup failure: response=%d envelopes=%+v", w.Code, h.sink.envs)
 	}
@@ -115,7 +115,7 @@ func TestResponsesReferencesNeverReachUpstream(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer "+fullKey)
 			r.Header.Set("Content-Type", "application/json")
 			w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}
-			h.gateway.inference(openai.FamilyResponses)(w, r)
+			h.gateway.inference(wire.Responses)(w, r)
 			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"unsupported_stateful_reference"`) || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
 				t.Fatalf("stateful reference reached upstream: %d %s", w.Code, w.Body.String())
 			}

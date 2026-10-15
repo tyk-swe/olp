@@ -23,13 +23,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
@@ -334,7 +335,7 @@ func TestCodeCodingPlanKeyEnrollmentStoresOnlyAFingerprintedKey(t *testing.T) {
 	}
 
 	// The real authorizer places the key in the header each protocol's native client uses.
-	cfg := runtime.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, ProfileRevision: f.digest, Endpoint: codeplans.ZAIUpstream}
+	cfg := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, ProfileRevision: f.digest, Endpoint: codeplans.ZAIUpstream}
 	var a codemode.Account
 	encoded, _ := json.Marshal(account)
 	if err := json.Unmarshal(encoded, &a); err != nil {

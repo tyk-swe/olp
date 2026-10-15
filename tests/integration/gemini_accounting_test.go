@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/gateway"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/gateway"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"

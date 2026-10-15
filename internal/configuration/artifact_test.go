@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -20,7 +22,6 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -152,7 +153,7 @@ func testDocument() *Document {
 			OverallTimeoutMS: 30000,
 			MaxAttempts:      2,
 			Targets:          []TargetEntry{{Provider: "acme", ProviderModel: "gpt-x", Priority: 0, Weight: 1, TimeoutMS: 30000}},
-			RoutingPolicy:    &runtime.Policy{AllowedStrategies: []string{"weighted"}},
+			RoutingPolicy:    &routing.Policy{AllowedStrategies: []string{"weighted"}},
 		}},
 		Pricing: &PricingEntry{
 			EffectiveAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339),

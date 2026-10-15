@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"io"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestNativeConverseRetainsResultAndAWSFrames(t *testing.T) {
 	body := []byte(`{"output":{"message":{"role":"assistant","content":[{"text":"native"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2,"totalTokens":3},"future":{"integer":9007199254740993}}`)
-	completion, err := Decode(openai.FamilyBedrock, openai.FamilyBedrock, body, "route", "")
+	completion, err := Decode(wire.Bedrock, wire.Bedrock, body, "route", "")
 	if err != nil || !bytes.Equal(completion.Body, body) {
 		t.Fatalf("native result changed: %v %+v", err, completion)
 	}
@@ -32,7 +32,7 @@ func TestNativeConverseRetainsResultAndAWSFrames(t *testing.T) {
 		}
 	}
 	var observed bytes.Buffer
-	_, err = Stream(openai.FamilyBedrock, openai.FamilyBedrock, bytes.NewReader(source.Bytes()), 4096, "route", true, func(frame []byte) error { _, err := observed.Write(frame); return err })
+	_, err = Stream(wire.Bedrock, wire.Bedrock, bytes.NewReader(source.Bytes()), 4096, "route", true, func(frame []byte) error { _, err := observed.Write(frame); return err })
 	if err != nil || !bytes.Equal(observed.Bytes(), source.Bytes()) {
 		t.Fatalf("AWS native framing changed: %v", err)
 	}
@@ -41,11 +41,11 @@ func TestNativeConverseRetainsResultAndAWSFrames(t *testing.T) {
 func TestConverseRejectsAmbiguousReservedAndExtensionHeaders(t *testing.T) {
 	for _, name := range []string{":message-type", ":event-type", ":exception-type", "future-header"} {
 		headers := eventstream.Headers{{Name: name, Value: eventstream.StringValue("first")}, {Name: name, Value: eventstream.StringValue("last")}}
-		var wire bytes.Buffer
-		if err := eventstream.NewEncoder().Encode(&wire, eventstream.Message{Headers: headers, Payload: []byte(`{}`)}); err != nil {
+		var encodedWire bytes.Buffer
+		if err := eventstream.NewEncoder().Encode(&encodedWire, eventstream.Message{Headers: headers, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ReadBedrockEvent(&wire, 4096); err == nil {
+		if _, err := ReadBedrockEvent(&encodedWire, 4096); err == nil {
 			t.Fatalf("duplicate %s was decoded last-wins", name)
 		}
 	}
@@ -53,36 +53,36 @@ func TestConverseRejectsAmbiguousReservedAndExtensionHeaders(t *testing.T) {
 
 func TestBedrockInlineImagesAcrossSurfaces(t *testing.T) {
 	for _, tc := range []struct {
-		family openai.Family
+		family wire.Format
 		body   string
 	}{
-		{openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1hZ2U="}}]}]}`},
-		{openai.FamilyResponses, `{"model":"route","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="}]}]}`},
-		{openai.FamilyInputTokens, `{"model":"route","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="}]}]}`},
-		{openai.FamilyAnthropic, `{"model":"route","max_tokens":16,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}]}`},
-		{openai.FamilyAnthropicCount, `{"model":"route","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}]}`},
-		{openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}]}`},
-		{openai.FamilyGeminiStream, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}]}`},
-		{openai.FamilyGeminiCount, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}]}`},
+		{wire.Chat, `{"model":"route","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1hZ2U="}}]}]}`},
+		{wire.Responses, `{"model":"route","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="}]}]}`},
+		{wire.InputTokens, `{"model":"route","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="}]}]}`},
+		{wire.Anthropic, `{"model":"route","max_tokens":16,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}]}`},
+		{wire.AnthropicCount, `{"model":"route","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}]}`},
+		{wire.Gemini, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}]}`},
+		{wire.GeminiStream, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}]}`},
+		{wire.GeminiCount, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}]}`},
 	} {
 		t.Run(string(tc.family), func(t *testing.T) {
 			request, err := Parse(tc.family, []byte(tc.body), "route")
 			if err != nil {
 				t.Fatal(err)
 			}
-			body, wire, err := Encode(request, "bedrock", "amazon-bedrock", "wire-model", nil)
+			body, encodedWire, err := Encode(request, "bedrock", "amazon-bedrock", "wire-model", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantWire := openai.Family("bedrock")
+			wantWire := wire.Format("bedrock")
 			if tc.family.Operation() == "token_count" {
 				wantWire = "bedrock_count"
 				if !bytes.Contains(body, []byte(`"converse"`)) {
 					t.Fatalf("missing CountTokens converse envelope: %s", body)
 				}
 			}
-			if wire != wantWire || !bytes.Contains(body, []byte(`"image":{"format":"png","source":{"bytes":"aW1hZ2U="}}`)) {
-				t.Fatalf("lost inline image: %s %s", wire, body)
+			if encodedWire != wantWire || !bytes.Contains(body, []byte(`"image":{"format":"png","source":{"bytes":"aW1hZ2U="}}`)) {
+				t.Fatalf("lost inline image: %s %s", encodedWire, body)
 			}
 		})
 	}
@@ -122,7 +122,7 @@ func TestBedrockImageFormatsAndRefusals(t *testing.T) {
 	}
 }
 
-func encodeBedrockMessages(t *testing.T, family openai.Family, body string) []map[string]json.RawMessage {
+func encodeBedrockMessages(t *testing.T, family wire.Format, body string) []map[string]json.RawMessage {
 	t.Helper()
 	request, err := Parse(family, []byte(body), "route")
 	if err != nil {
@@ -132,22 +132,22 @@ func encodeBedrockMessages(t *testing.T, family openai.Family, body string) []ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wire struct {
+	var encodedWire struct {
 		Messages []map[string]json.RawMessage `json:"messages"`
 	}
-	if err := json.Unmarshal(encoded, &wire); err != nil {
+	if err := json.Unmarshal(encoded, &encodedWire); err != nil {
 		t.Fatal(err)
 	}
-	for i := 1; i < len(wire.Messages); i++ {
-		if string(wire.Messages[i]["role"]) == string(wire.Messages[i-1]["role"]) {
-			t.Fatalf("adjacent %s messages: %s", wire.Messages[i]["role"], encoded)
+	for i := 1; i < len(encodedWire.Messages); i++ {
+		if string(encodedWire.Messages[i]["role"]) == string(encodedWire.Messages[i-1]["role"]) {
+			t.Fatalf("adjacent %s messages: %s", encodedWire.Messages[i]["role"], encoded)
 		}
 	}
-	return wire.Messages
+	return encodedWire.Messages
 }
 
 func TestBedrockMergesAdjacentSameRoleMessages(t *testing.T) {
-	messages := encodeBedrockMessages(t, openai.FamilyChat, `{"model":"route","messages":[
+	messages := encodeBedrockMessages(t, wire.Chat, `{"model":"route","messages":[
 		{"role":"user","content":"hi"},
 		{"role":"assistant","content":null,"tool_calls":[
 			{"id":"a","type":"function","function":{"name":"f","arguments":"{}"}},
@@ -167,7 +167,7 @@ func TestBedrockMergesAdjacentSameRoleMessages(t *testing.T) {
 		t.Fatalf("last user turn = %s", messages[2]["content"])
 	}
 
-	messages = encodeBedrockMessages(t, openai.FamilyResponses, `{"model":"route","input":[
+	messages = encodeBedrockMessages(t, wire.Responses, `{"model":"route","input":[
 		{"role":"user","content":"hi"},
 		{"type":"function_call","call_id":"a","name":"f","arguments":"{}"},
 		{"type":"function_call","call_id":"b","name":"f","arguments":"{}"},
@@ -183,7 +183,7 @@ func TestBedrockSkipsEmptyTextParts(t *testing.T) {
 	g := &Generation{Messages: []Message{
 		{Role: "system", Parts: []Part{{Text: ""}}},
 		{Role: "user", Parts: []Part{{Text: "hi"}}},
-		{Role: "assistant", Parts: []Part{{Text: ""}}, Calls: []openai.ToolCall{{ID: "call-1", Name: "lookup", Arguments: "{}"}}},
+		{Role: "assistant", Parts: []Part{{Text: ""}}, Calls: []wire.ToolCall{{ID: "call-1", Name: "lookup", Arguments: "{}"}}},
 		{Role: "tool", ToolID: "call-1", Parts: []Part{{Text: "ok"}}},
 	}}
 	for _, operation := range []string{"generation", "token_count"} {
@@ -214,17 +214,17 @@ func TestBedrockOmitsEmptyToolDescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wire struct {
+	var encodedWire struct {
 		ToolConfig struct {
 			Tools []struct {
 				ToolSpec map[string]json.RawMessage `json:"toolSpec"`
 			} `json:"tools"`
 		} `json:"toolConfig"`
 	}
-	if err := json.Unmarshal(raw(body), &wire); err != nil {
+	if err := json.Unmarshal(raw(body), &encodedWire); err != nil {
 		t.Fatal(err)
 	}
-	tools := wire.ToolConfig.Tools
+	tools := encodedWire.ToolConfig.Tools
 	if len(tools) != 2 {
 		t.Fatalf("tools = %s", raw(body))
 	}
@@ -255,8 +255,8 @@ func TestReadBedrockEventTruncatedAfterPrelude(t *testing.T) {
 	encode(&stream, "messageStart", `{"role":"assistant"}`)
 	encode(&stream, "messageStop", `{"stopReason":"end_turn"}`)
 	stream.Write(prelude)
-	_, err := Stream(openai.FamilyBedrock, openai.FamilyChat, bytes.NewReader(stream.Bytes()), 4096, "route", true, func([]byte) error { return nil })
-	var protocolErr *openai.ProtocolError
+	_, err := Stream(wire.Bedrock, wire.Chat, bytes.NewReader(stream.Bytes()), 4096, "route", true, func([]byte) error { return nil })
+	var protocolErr *wire.ProtocolError
 	if !errors.As(err, &protocolErr) || !protocolErr.Truncated {
 		t.Fatalf("stream err = %v", err)
 	}

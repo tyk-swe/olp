@@ -12,13 +12,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -36,7 +37,7 @@ type Server struct {
 	UnconfinedPlugins bool
 	// Supply and Fleet give simulation the capacity, spend-cap and shared
 	// circuit state the gateways plan with; nil without shared state.
-	Supply runtime.SupplyReader
+	Supply routing.SupplyReader
 	Fleet  interface {
 		Circuits(ctx context.Context, now time.Time) (map[string]time.Time, error)
 	}
@@ -67,7 +68,7 @@ type draft struct {
 	Operations       []string
 	OverallTimeoutMS int
 	MaxAttempts      int
-	Targets          []runtime.PublishedTarget
+	Targets          []routing.PublishedTarget
 	ContentPolicy    []byte
 	Fidelity         []byte
 	Behavior         []byte
@@ -117,7 +118,7 @@ type resolved struct {
 	Published     bool
 	Certified     map[string]bool
 	AuthMode      string
-	Slots         []runtime.Slot
+	Slots         []routing.Slot
 	// Lifecycle is the target model's documented deprecation and retirement.
 	Lifecycle *catalog.LifecycleView
 }
@@ -129,7 +130,7 @@ func (r *resolved) available() bool {
 // resolve looks up every provider model referenced by the targets against the
 // providers' activated revisions, which is what the gateway will serve, and
 // the reference catalog's documented lifecycle of each.
-func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedTarget) (map[string]*resolved, error) {
+func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []routing.PublishedTarget) (map[string]*resolved, error) {
 	ids := make([]string, 0, len(targets))
 	for _, t := range targets {
 		ids = append(ids, t.ProviderModelID)
@@ -170,7 +171,7 @@ func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []runtim
 				slot.CredentialID = nil
 			}
 		}
-		var published []runtime.RevisionModel
+		var published []routing.RevisionModel
 		if err = json.Unmarshal(models, &published); err != nil {
 			return nil, err
 		}
@@ -190,7 +191,7 @@ func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []runtim
 	return out, rows.Err()
 }
 
-func targetJSON(t runtime.PublishedTarget, live *resolved) map[string]any {
+func targetJSON(t routing.PublishedTarget, live *resolved) map[string]any {
 	name, model, providerID := t.ProviderName, t.ProviderModel, t.ProviderID
 	if live != nil {
 		name, model, providerID = live.ProviderName, live.ProviderModel, live.ProviderID
@@ -205,10 +206,10 @@ func targetJSON(t runtime.PublishedTarget, live *resolved) map[string]any {
 // behaviorJSON flattens a stored route behavior into a draft or revision
 // representation, with empty collections rather than absent fields.
 func behaviorJSON(out map[string]any, raw []byte) map[string]any {
-	behavior, _ := runtime.DecodeBehavior(raw)
+	behavior, _ := routing.DecodeBehavior(raw)
 	retry := behavior.Retry
 	if retry == nil {
-		retry = runtime.Retry{}
+		retry = routing.Retry{}
 	}
 	out["fallbacks"], out["selectors"], out["retry"] = orEmpty(behavior.Fallbacks), orEmpty(behavior.Selectors), retry
 	out["affinity"], out["budget"] = behavior.Affinity, behavior.Budget
@@ -224,7 +225,7 @@ func orEmpty[T any](values []T) []T {
 	return values
 }
 
-func targetsJSON(targets []runtime.PublishedTarget, live map[string]*resolved) []map[string]any {
+func targetsJSON(targets []routing.PublishedTarget, live map[string]*resolved) []map[string]any {
 	out := make([]map[string]any, 0, len(targets))
 	for _, t := range targets {
 		out = append(out, targetJSON(t, live[t.ProviderModelID]))
@@ -256,7 +257,7 @@ type TargetInput struct {
 	Weight          int64           `json:"weight"`
 	TimeoutMS       int             `json:"timeout_ms"`
 	Tags            []string        `json:"tags,omitempty"`
-	Shadow          *runtime.Shadow `json:"shadow,omitempty"`
+	Shadow          *routing.Shadow `json:"shadow,omitempty"`
 }
 
 type DraftInput struct {
@@ -270,17 +271,17 @@ type DraftInput struct {
 	ContentPolicy    json.RawMessage     `json:"content_policy"`
 	Fidelity         json.RawMessage     `json:"fidelity,omitempty"`
 	ProjectID        *string             `json:"project_id"`
-	Fallbacks        []runtime.Fallback  `json:"fallbacks,omitempty"`
-	Selectors        []runtime.Selector  `json:"selectors,omitempty"`
-	Retry            runtime.Retry       `json:"retry,omitempty"`
-	Affinity         *runtime.Affinity   `json:"affinity,omitempty"`
-	Budget           *runtime.CostLimits `json:"budget,omitempty"`
+	Fallbacks        []routing.Fallback  `json:"fallbacks,omitempty"`
+	Selectors        []routing.Selector  `json:"selectors,omitempty"`
+	Retry            routing.Retry       `json:"retry,omitempty"`
+	Affinity         *routing.Affinity   `json:"affinity,omitempty"`
+	Budget           *routing.CostLimits `json:"budget,omitempty"`
 	// Behavior is the validated, stored form of the adaptive routing fields.
 	Behavior []byte `json:"-"`
 }
 
-func (in *DraftInput) behavior() runtime.Behavior {
-	return runtime.Behavior{CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
+func (in *DraftInput) behavior() routing.Behavior {
+	return routing.Behavior{CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
 }
 
 func sameProject(a, b *string) bool {
@@ -290,7 +291,7 @@ func sameProject(a, b *string) bool {
 	return *a == *b
 }
 
-func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []runtime.PublishedTarget) ([]runtime.PublishedTarget, error) {
+func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
 	if !access.RouteSlug.MatchString(in.Slug) {
 		return nil, access.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
@@ -327,11 +328,11 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 	if len(in.Targets) == 0 || len(in.Targets) > maxTargets {
 		return nil, access.Invalid("targets", "Use 1–64 targets.")
 	}
-	previous := map[string]runtime.PublishedTarget{}
+	previous := map[string]routing.PublishedTarget{}
 	for _, t := range existing {
 		previous[t.ProviderModelID] = t
 	}
-	targets := make([]runtime.PublishedTarget, 0, len(in.Targets))
+	targets := make([]routing.PublishedTarget, 0, len(in.Targets))
 	seen := map[string]bool{}
 	for i, t := range in.Targets {
 		if t.Priority < 0 || t.Priority > maxPriority {
@@ -343,7 +344,7 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		if t.TimeoutMS < 1 || t.TimeoutMS > in.OverallTimeoutMS {
 			return nil, access.Invalid("targets.timeout_ms", "Use a target timeout from 1 millisecond up to the overall timeout.")
 		}
-		if !runtime.ValidTargetTags(t.Tags) {
+		if !routing.ValidTargetTags(t.Tags) {
 			return nil, access.Invalid("targets.tags", "Use up to 8 distinct tags of lowercase letters, digits, underscores or hyphens.")
 		}
 		if t.Shadow != nil {
@@ -385,15 +386,15 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		if prev, ok := previous[modelID]; ok {
 			id = prev.ID
 		}
-		targets = append(targets, runtime.PublishedTarget{ID: id, ProviderModelID: modelID, ProviderID: providerID, ProviderName: providerName, ProviderModel: providerModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int64(t.TimeoutMS), Position: i, Tags: sortedTags(t.Tags), Shadow: t.Shadow})
+		targets = append(targets, routing.PublishedTarget{ID: id, ProviderModelID: modelID, ProviderID: providerID, ProviderName: providerName, ProviderModel: providerModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int64(t.TimeoutMS), Position: i, Tags: sortedTags(t.Tags), Shadow: t.Shadow})
 	}
-	serving := slices.IndexFunc(targets, func(t runtime.PublishedTarget) bool { return t.Shadow == nil })
+	serving := slices.IndexFunc(targets, func(t routing.PublishedTarget) bool { return t.Shadow == nil })
 	if serving < 0 {
 		return nil, access.Invalid("targets", "Declare at least one target that serves callers rather than shadowing them.")
 	}
 	behavior := in.behavior()
 	tagged := func(tag string) bool {
-		return slices.ContainsFunc(targets, func(t runtime.PublishedTarget) bool { return t.Shadow == nil && slices.Contains(t.Tags, tag) })
+		return slices.ContainsFunc(targets, func(t routing.PublishedTarget) bool { return t.Shadow == nil && slices.Contains(t.Tags, tag) })
 	}
 	if err := behavior.Validate(in.Slug, tagged); err != nil {
 		return nil, err
@@ -434,7 +435,7 @@ func (s *Server) drafts(r *http.Request, p access.Principal) (access.Reply, erro
 	}
 	defer rows.Close()
 	var drafts []*draft
-	var all []runtime.PublishedTarget
+	var all []routing.PublishedTarget
 	for rows.Next() {
 		d, err := scanDraft(rows)
 		if err != nil {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Class is the failure class of an attempt, shared with the routing retry
@@ -72,7 +72,7 @@ type Evidence struct {
 	Settled bool
 	// Error is the failure the upstream stated: the error body of Status, or
 	// an in-band error inside an accepted response.
-	Error *openai.UpstreamError
+	Error *wire.UpstreamError
 	// Committed reports that response bytes had been delivered to the client.
 	Committed bool
 	// Interrupted is why this side ended the exchange: context.Canceled when
@@ -182,8 +182,8 @@ func (c Classifier) class(e Evidence) Class {
 	case e.Committed:
 		return Protocol
 	}
-	var malformed *openai.ProtocolError
-	if errors.As(e.Err, &malformed) || errors.Is(e.Err, openai.ErrEventTooLarge) {
+	var malformed *wire.ProtocolError
+	if errors.As(e.Err, &malformed) || errors.Is(e.Err, wire.ErrEventTooLarge) {
 		return Protocol
 	}
 	return Connect
@@ -204,7 +204,7 @@ func (c Classifier) declared(e Evidence) (Class, bool) {
 }
 
 // rejection classifies an unsuccessful status by its code and error body.
-func (c Classifier) rejection(status int, stated *openai.UpstreamError) Class {
+func (c Classifier) rejection(status int, stated *wire.UpstreamError) Class {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return Credential
@@ -222,7 +222,7 @@ func (c Classifier) rejection(status int, stated *openai.UpstreamError) Class {
 
 // inBand classifies the typed envelope a streaming provider reports inside a
 // successful response, at the same attempt boundary as an HTTP status.
-func (c Classifier) inBand(stated *openai.UpstreamError, committed bool) Class {
+func (c Classifier) inBand(stated *wire.UpstreamError, committed bool) Class {
 	kind := codeFold.Replace(strings.ToLower(stated.Type + " " + stated.Code))
 	has := func(names ...string) bool {
 		for _, name := range names {
@@ -278,7 +278,7 @@ var codeFold = strings.NewReplacer("_", "", "-", "", " ", "")
 
 // contextRejected matches typed context-window codes and types exactly;
 // message prose never classifies.
-func contextRejected(e *openai.UpstreamError) bool {
+func contextRejected(e *wire.UpstreamError) bool {
 	if e == nil {
 		return false
 	}
@@ -288,7 +288,7 @@ func contextRejected(e *openai.UpstreamError) bool {
 
 // filterRejected matches typed content-filter codes and types exactly, as
 // contextRejected does.
-func filterRejected(e *openai.UpstreamError) bool {
+func filterRejected(e *wire.UpstreamError) bool {
 	if e == nil {
 		return false
 	}

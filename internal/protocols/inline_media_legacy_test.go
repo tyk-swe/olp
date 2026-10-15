@@ -6,24 +6,24 @@ import (
 	"io"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // legacyValidateInlineMedia is ValidateInlineMedia as it read a request when
 // every field of it was json.RawMessage, decoded level by level, before it read
 // the request's parsed document instead. The two are held to the same answer for
 // any request by inline_media_parity_test.go.
-func legacyValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) error {
-	if request.Family.Operation() != openai.OperationGeneration && request.Family.Operation() != "token_count" {
+func legacyValidateInlineMedia(request *wire.Request, limits InlineMediaLimits) error {
+	if request.Family.Operation() != wire.OperationGeneration && request.Family.Operation() != "token_count" {
 		return nil
 	}
 	doc := request.Document()
 	messages, partKey := arr(doc["messages"]), "content"
-	if request.Family == openai.FamilyResponses || request.Family == openai.FamilyInputTokens {
+	if request.Family == wire.Responses || request.Family == wire.InputTokens {
 		messages = arr(doc["input"])
 	}
 	switch request.Family {
-	case openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount:
+	case wire.Gemini, wire.GeminiStream, wire.GeminiCount:
 		content := doc
 		if nested, err := object(doc["generateContentRequest"]); err == nil {
 			content = nested

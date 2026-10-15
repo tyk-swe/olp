@@ -19,23 +19,6 @@ import (
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
-// HealthStats summarises gateway attempts against one provider.
-type HealthStats struct {
-	Attempts        int64
-	Successes       int64
-	RateLimits      int64
-	ServerErrors    int64
-	TransportErrors int64
-	TotalLatency    time.Duration
-	LastAttemptAt   time.Time
-}
-
-// HealthSource reports attempt statistics; nil when this process serves no
-// inference.
-type HealthSource interface {
-	ProviderHealth(window time.Duration) map[string]HealthStats
-}
-
 // QuotaSource reports the shared quota state a provider connection and its
 // credential slots are in right now. *limits.Limiter implements it. The field
 // stays nil where no Valkey is configured, and the console is then told the

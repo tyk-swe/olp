@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -18,7 +20,7 @@ import (
 )
 
 // mediaProvider returns the named fixture provider and its snapshot id.
-func mediaProvider(t *testing.T, h *harness, name string) (string, runtime.Provider) {
+func mediaProvider(t *testing.T, h *harness, name string) (string, routing.Provider) {
 	t.Helper()
 	for id, p := range h.rt.release.Snapshot.Providers {
 		if p.Name == name {
@@ -26,7 +28,7 @@ func mediaProvider(t *testing.T, h *harness, name string) (string, runtime.Provi
 		}
 	}
 	t.Fatalf("provider %q not in fixture", name)
-	return "", runtime.Provider{}
+	return "", routing.Provider{}
 }
 
 // mediaFormBody renders one multipart body with a single file field.
@@ -462,7 +464,7 @@ func TestMediaRevocationBetweenSiblingCredentials(t *testing.T) {
 			credentials[*slot.CredentialID], _ = release.Credential(*slot.CredentialID)
 		}
 		if provider.Name == "a" {
-			provider.Slots = append(provider.Slots, runtime.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
+			provider.Slots = append(provider.Slots, routing.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
 			snapshot.Providers[id] = provider
 		}
 	}
@@ -548,7 +550,7 @@ func TestPinnedSettleReturnsHalfOpenProbe(t *testing.T) {
 			if gate.verdict != gateAdmitted || !gate.hold.probed {
 				t.Fatalf("expected an admitted probe, got %+v", gate)
 			}
-			x := &execution{dispatched: tc.dispatched}
+			x := &call{dispatched: tc.dispatched}
 			if tc.dispatched {
 				x.facts = []AttemptFact{tc.fact}
 			}

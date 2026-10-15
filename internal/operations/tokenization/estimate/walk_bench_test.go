@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // benchRequest is a chat request of the size the benchmark names: a system
 // message, a long user message, and a tool catalogue.
-func benchRequest(tb testing.TB, tokens int) *openai.Request {
+func benchRequest(tb testing.TB, tokens int) *wire.Request {
 	tb.Helper()
 	text := promptOf(tb, O200kBase, corpus(tb, "prose-2", "prose-3", "prose-6"), tokens)
 	body, err := json.Marshal(map[string]any{
@@ -23,7 +25,7 @@ func benchRequest(tb testing.TB, tokens int) *openai.Request {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	request, err := openai.Parse(openai.FamilyChat, body)
+	request, err := openai.Parse(wire.Chat, body)
 	if err != nil {
 		tb.Fatal(err)
 	}

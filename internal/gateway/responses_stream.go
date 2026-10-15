@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -92,7 +94,7 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, nil, errors.New("response stream frame is malformed")
 	}
-	nativeEvent, err := oif.NewEvent(openai.Descriptor(openai.FamilyResponses, true), doc, "", 0)
+	nativeEvent, err := oif.NewEvent(wire.Descriptor(wire.Responses, true), doc, "", 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -215,7 +217,7 @@ func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]by
 	return out, nil
 }
 
-func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *execution, res *resources.Resource, p *pin, query url.Values) *Error {
+func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *call, res *resources.Resource, p *pin, query url.Values) *Error {
 	if res.Kind == resources.KindStrictResponse &&
 		(!p.provider.Supports(p.model, "generation", "openai", "streaming") || !p.provider.Connector().Supports("generation", "openai", "streaming")) {
 		return invalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
@@ -223,7 +225,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
 	if res.Kind == resources.KindStrictResponse {
 		var parentErr error
-		projection.previousUpstream, projection.previousLocal, parentErr = responseParentProjection(res, x.responseContract)
+		projection.previousUpstream, projection.previousLocal, parentErr = responseParentProjection(res, x.generation.responseContract)
 		if parentErr != nil {
 			return serverError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 		}
@@ -329,7 +331,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		}
 		return nil
 	}
-	_, streamErr := protocols.StreamWithEvents(openai.FamilyResponses, openai.FamilyResponses,
+	_, streamErr := protocols.StreamWithEvents(wire.Responses, wire.Responses,
 		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, observe)
 	if streamErr != nil && (errors.Is(streamErr, errClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
 		// The client left; the provider is not at fault.
@@ -342,7 +344,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		return nil
 	}
 	if streamErr != nil {
-		var upstream *openai.UpstreamError
+		var upstream *wire.UpstreamError
 		if errors.As(streamErr, &upstream) && nativeTerminalFailure {
 			x.failure = serverError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
 			fact.Class = classUpstreamServer

@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -139,8 +141,8 @@ func (s *Service) FinalizeDeletion(ctx context.Context, id string) (bool, error)
 // JobTarget retains the historical connection and quota identities together.
 type JobTarget struct {
 	Target
-	Provider runtime.Provider
-	Slot     runtime.Slot
+	Provider routing.Provider
+	Slot     routing.Slot
 }
 
 // JobTarget reconstructs the historical provider target a retained job was
@@ -158,7 +160,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 	if err != nil {
 		return nil, 0, "media_job_runtime_unavailable"
 	}
-	pin, err := runtime.DecodeReleasePin(raw, runtime.ReleasePinIdentity{ProviderID: record.ProviderID, ProviderRevisionID: record.ProviderRevisionID, RouteSlug: record.RouteSlug, Model: record.UpstreamModel, SlotID: record.SlotID, CredentialID: record.CredentialVersionID})
+	pin, err := routing.DecodeReleasePin(raw, routing.ReleasePinIdentity{ProviderID: record.ProviderID, ProviderRevisionID: record.ProviderRevisionID, RouteSlug: record.RouteSlug, Model: record.UpstreamModel, SlotID: record.SlotID, CredentialID: record.CredentialVersionID})
 	if err != nil {
 		return nil, 0, "media_job_runtime_unavailable"
 	}
@@ -178,7 +180,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 		// The pinned release must still reference this exact credential
 		// version, and a current explicit revocation always wins over a
 		// retained historical reference.
-		if eligibility := s.eligibility(credentialID); eligibility != runtime.Eligible {
+		if eligibility := s.eligibility(credentialID); eligibility != routing.Eligible {
 			return nil, 0, "media_job_credential_" + string(eligibility)
 		}
 		var err error
@@ -187,7 +189,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 			return nil, 0, "media_job_runtime_unavailable"
 		}
 	} else if record.CredentialVersionID != nil {
-		if eligibility := s.eligibility(*record.CredentialVersionID); eligibility != runtime.Eligible {
+		if eligibility := s.eligibility(*record.CredentialVersionID); eligibility != routing.Eligible {
 			return nil, 0, "media_job_credential_" + string(eligibility)
 		}
 	}
@@ -212,9 +214,9 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 
 // eligibility fails closed without a credential source: no authority vouches
 // for the credential version.
-func (s *Service) eligibility(credentialID string) runtime.Eligibility {
+func (s *Service) eligibility(credentialID string) routing.Eligibility {
 	if s.Credentials == nil {
-		return runtime.StaleAuthority
+		return routing.StaleAuthority
 	}
 	return s.Credentials.Eligibility(credentialID)
 }

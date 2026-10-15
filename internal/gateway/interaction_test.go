@@ -9,15 +9,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func strictHarness(t *testing.T, configure func(*runtime.Snapshot)) *harness {
+func strictHarness(t *testing.T, configure func(*routing.Snapshot)) *harness {
 	t.Helper()
 	h := newHarness(t, Config{})
 	release := h.rt.release
@@ -31,7 +33,7 @@ func strictHarness(t *testing.T, configure func(*runtime.Snapshot)) *harness {
 		}
 	}
 	route := snapshot.Routes[routeSlug]
-	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
 	snapshot.Routes[routeSlug] = route
 	if configure != nil {
 		configure(snapshot)
@@ -111,7 +113,7 @@ func TestStrictServerFailureLeavesUpstreamOutcomeUnknown(t *testing.T) {
 }
 
 func TestStrictSemanticEligibilityPrecedesPriorityAndPreservesNativeSource(t *testing.T) {
-	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
 			if provider.Name == "a" {
 				provider.Kind, provider.ProfileID = "anthropic", "anthropic-messages"
@@ -166,7 +168,7 @@ func TestStrictKnownRejectionCannotSubstituteServingEnvironment(t *testing.T) {
 func TestStrictFailoverAcrossSlotsKeepsTheObservedPrincipal(t *testing.T) {
 	for _, principal := range []string{"", "operator@example.com"} {
 		t.Run("principal="+principal, func(t *testing.T) {
-			h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+			h := strictHarness(t, func(snapshot *routing.Snapshot) {
 				for id, provider := range snapshot.Providers {
 					if provider.Name == "a" {
 						backup := provider.Slots[0]
@@ -202,7 +204,7 @@ func TestStrictFailoverAcrossSlotsKeepsTheObservedPrincipal(t *testing.T) {
 
 func TestStrictRevokedCandidateDoesNotEstablishServingBaselineOrSpendBudget(t *testing.T) {
 	credentialID := uuid.NewString()
-	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
 			if provider.Name == "a" {
 				provider.Slots[0].CredentialID = &credentialID
@@ -221,7 +223,7 @@ func TestStrictRevokedCandidateDoesNotEstablishServingBaselineOrSpendBudget(t *t
 }
 
 func TestStrictFailoverCannotChangeDefaultsThroughModelAlias(t *testing.T) {
-	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
 			if provider.Name != "a" {
 				continue
@@ -230,13 +232,13 @@ func TestStrictFailoverCannotChangeDefaultsThroughModelAlias(t *testing.T) {
 				modelA:          {Model: "same-upstream", Defaults: map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage("1024")}}}},
 				"smaller-alias": {Model: "same-upstream", Defaults: map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage("32")}}}},
 			}
-			provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: "smaller-alias", Operation: "generation", Surface: "openai", Mode: "unary"})
+			provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: "smaller-alias", Operation: "generation", Surface: "openai", Mode: "unary"})
 			snapshot.Providers[id] = provider
 			route := snapshot.Routes[routeSlug]
 			first := route.Targets[0]
 			second := first
 			second.ID, second.RoutingID, second.ProviderModel, second.Priority = uuid.NewString(), uuid.NewString(), "smaller-alias", 1
-			route.Targets = []runtime.Target{first, second}
+			route.Targets = []routing.Target{first, second}
 			snapshot.Routes[routeSlug] = route
 		}
 	})
@@ -271,7 +273,7 @@ func TestStrictPartialToolDeliveryRemainsPotentiallyActionable(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+fullKey)
 	req.Header.Set("Content-Type", "application/json")
 	writer := &strictPartialWriter{&unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}}
-	h.gateway.inference(openai.FamilyChat)(writer, req)
+	h.gateway.inference(wire.Chat)(writer, req)
 	envelope := h.sink.last(t)
 	if len(envelope.Attempts) != 1 || h.mock.count("b") != 0 {
 		t.Fatalf("partial tool delivery replayed: %+v", envelope)
