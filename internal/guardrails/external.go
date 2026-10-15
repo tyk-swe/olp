@@ -48,6 +48,19 @@ type ModelRule struct {
 	Prompt   string          `json:"prompt,omitempty"`
 }
 
+// ValidateCredential accepts the sealed JSON credentials supported by the
+// guardrail evaluator and its network connection.
+func ValidateCredential(secret []byte) error {
+	var c externalCredential
+	if len(secret) > 0 && len(secret) <= 256<<10 && decodeConfig(secret, &c) == nil && (c.APIKey != "" || len(c.SigningKey) >= 32 || (c.AccessKeyID != "" && c.SecretAccessKey != "")) {
+		return nil
+	}
+	if len(secret) > 0 && len(secret) <= 256<<10 && egress.ValidateConnectionSecret(secret) == nil {
+		return nil
+	}
+	return errors.New("supply a bounded guardrail credential object")
+}
+
 func ValidateExternal(d Revision) error {
 	var c ExternalConfig
 	if err := decodeConfig(d.Configuration, &c); err != nil {

@@ -99,7 +99,15 @@ func (s *Surface) walk(v oif.Value, pointer, role, kind, name string) {
 				// admission instead of pretending they were inspected.
 				s.Segments = append(s.Segments, Segment{ID: "!unavailable"})
 				continue
-			case "function", "functionCall", "toolUse":
+			case "function":
+				// Chat declarations and invocations both use a function wrapper.
+				// Only invocations carry arguments; a name alone declares a tool.
+				functionKind := "tool_definition"
+				if _, ok := m.Value.Lookup("arguments"); ok {
+					functionKind = "tool_call"
+				}
+				s.walk(m.Value, p, role, functionKind, name)
+			case "function_call", "functionCall", "toolUse":
 				s.walk(m.Value, p, role, "tool_call", name)
 			case "functionResponse", "toolResult":
 				s.walk(m.Value, p, role, "tool_result", name)
@@ -114,7 +122,7 @@ func (s *Surface) walk(v oif.Value, pointer, role, kind, name string) {
 			case "parameters", "input_schema", "inputSchema", "parametersJsonSchema":
 				s.add(m.Value, p, role, "tool_definition", name)
 			case "name":
-				if kind == "" {
+				if kind == "" || kind == "tool_definition" {
 					s.add(m.Value, p, role, "tool_definition", name)
 				}
 			default:

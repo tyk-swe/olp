@@ -71,6 +71,12 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	if x.guardrailMasks == nil {
 		x.guardrailMasks = &guardrails.Masking{}
 	}
+	// Retained content is read directly from the provider, outside this
+	// request's output inspection and masking lifetime.
+	retainsOutput := x.providerState && (responseStoreRequested(x.generation.parsed) || backgroundResponseRequested(x.generation.parsed))
+	if retainsOutput && (x.guardrailEngine.HasPhase(guardrails.Output) || x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
+		return guardrailError(guardrails.ErrSurface)
+	}
 	if x.generation.parsed != nil && x.generation.parsed.Stream {
 		if err := x.guardrailEngine.ValidateStream(x.snapshot().Guardrails.Window()); err != nil {
 			if x.route.ContentPolicy != nil {
@@ -82,9 +88,6 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 			}
 			return guardrailError(err)
 		}
-		if x.providerState {
-			return guardrailError(guardrails.ErrSurface)
-		}
 	}
 	return nil
 }
@@ -94,23 +97,56 @@ func (x *call) recordGuardrails(values []guardrails.Evidence) {
 	}
 	x.guardrailMu.Lock()
 	defer x.guardrailMu.Unlock()
+	x.guardrailDecisions = appendGuardrailEvidence(x.guardrailDecisions, values)
+	if x.guardrailPreparation != nil {
+		x.guardrailPreparation.guardrailDecisions = appendGuardrailEvidence(x.guardrailPreparation.guardrailDecisions, values)
+	}
+	if x.guardrailAttemptActive {
+		x.guardrailAttemptDecisions = appendGuardrailEvidence(x.guardrailAttemptDecisions, values)
+	}
+}
+
+func appendGuardrailEvidence(decisions, values []guardrails.Evidence) []guardrails.Evidence {
 	size := 2
-	for _, d := range x.guardrailDecisions {
+	for _, d := range decisions {
 		size += guardrails.EvidenceSize(d)
 	}
 	for _, v := range values {
 		seen := false
-		for _, d := range x.guardrailDecisions {
+		for _, d := range decisions {
 			if d.GuardrailID == v.GuardrailID && d.Revision == v.Revision && d.Phase == v.Phase && d.Action == v.Action && d.Outcome == v.Outcome && slices.Equal(d.Categories, v.Categories) {
 				seen = true
 				break
 			}
 		}
-		if !seen && len(x.guardrailDecisions) < guardrails.MaxEntries*4 && size+guardrails.EvidenceSize(v) <= guardrails.MaxEvidenceBytes {
-			x.guardrailDecisions = append(x.guardrailDecisions, v)
+		if !seen && len(decisions) < guardrails.MaxEntries*4 && size+guardrails.EvidenceSize(v) <= guardrails.MaxEvidenceBytes {
+			decisions = append(decisions, v)
 			size += guardrails.EvidenceSize(v)
 		}
 	}
+	return decisions
+}
+
+func (x *call) startGuardrailAttempt(input []guardrails.Evidence) {
+	x.guardrailMu.Lock()
+	defer x.guardrailMu.Unlock()
+	x.guardrailAttemptActive = true
+	x.guardrailAttemptDecisions = slices.Clone(input)
+}
+
+func (x *call) finishGuardrailAttempt() []guardrails.Evidence {
+	x.guardrailMu.Lock()
+	defer x.guardrailMu.Unlock()
+	decisions := x.guardrailAttemptDecisions
+	x.guardrailAttemptActive = false
+	x.guardrailAttemptDecisions = nil
+	return decisions
+}
+
+func (x *call) attemptGuardrailEvidence() []guardrails.Evidence {
+	x.guardrailMu.Lock()
+	defer x.guardrailMu.Unlock()
+	return slices.Clone(x.guardrailAttemptDecisions)
 }
 func (x *call) guardrailEvidence() []guardrails.Evidence {
 	x.guardrailMu.Lock()
@@ -124,7 +160,15 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 		x.recordGuardrails(result.Decisions)
 		return document, nil, e
 	}
-	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail}, x.guardrailMasks)
+	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail}
+	if x.strict() && x.guardrailEngine.HasLegacyInput() {
+		texts := contentpolicy.InputTexts(document)
+		evaluation.LegacyInput = make([]guardrails.Segment, len(texts))
+		for i, text := range texts {
+			evaluation.LegacyInput[i] = guardrails.Segment{ID: "legacy_" + strconv.Itoa(i), Text: text}
+		}
+	}
+	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, evaluation, x.guardrailMasks)
 	x.recordGuardrails(result.Decisions)
 	err = x.legacyGuardrailError(result, err)
 	if err != nil {

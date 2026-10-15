@@ -170,7 +170,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	fact := &e.Attempts[index]
 	evidence := attemptUsage(fact, e.Operation)
 	attempt := usage.Attempt{
-		GuardrailDecisions: e.GuardrailDecisions,
+		GuardrailDecisions: fact.GuardrailDecisions,
 		ID:                 uuid.Must(uuid.NewV7()).String(),
 		// The ordinal is the position in the sequence of attempts made.
 		Ordinal:       index + 1,

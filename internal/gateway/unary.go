@@ -108,6 +108,9 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 	if record.unary.plan != nil {
 		return record.unary.plan, nil
 	}
+	previous := x.guardrailPreparation
+	x.guardrailPreparation = record
+	defer func() { x.guardrailPreparation = previous }()
 	template, _ := x.snapshot().OperationTemplate(x.route.Slug, targetID, x.operationName())
 	if template == nil {
 		return nil, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")

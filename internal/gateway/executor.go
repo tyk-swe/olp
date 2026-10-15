@@ -467,6 +467,9 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 	if slot.CredentialVersion != nil && fact.CredentialSource != "caller" {
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
+	if record := x.targets[preparationKey{target: a.TargetID, provider: a.ProviderID, revision: a.ProviderRevisionID, model: a.UpstreamModel}]; record != nil {
+		fact.GuardrailDecisions = append([]guardrails.Evidence(nil), record.guardrailDecisions...)
+	}
 	if x.strict() {
 		provider := x.snapshot().Providers[a.ProviderID]
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {

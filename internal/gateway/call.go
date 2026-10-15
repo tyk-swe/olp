@@ -80,16 +80,19 @@ type call struct {
 	parent   string
 	priority string
 
-	guardrailEngine    *guardrails.Engine
-	guardrailCtx       context.Context
-	guardrailMasks     *guardrails.Masking
-	guardrailInput     []guardrails.Segment
-	guardrailMu        sync.Mutex
-	guardrailDecisions []guardrails.Evidence
-	guardrailModels    map[[32]byte]guardrails.Verdict
-	internalGuardrail  bool
-	operationOverride  string
-	policyDecisions    []contentpolicy.Decision
+	guardrailEngine           *guardrails.Engine
+	guardrailCtx              context.Context
+	guardrailMasks            *guardrails.Masking
+	guardrailInput            []guardrails.Segment
+	guardrailMu               sync.Mutex
+	guardrailDecisions        []guardrails.Evidence
+	guardrailPreparation      *targetPreparation
+	guardrailAttemptActive    bool
+	guardrailAttemptDecisions []guardrails.Evidence
+	guardrailModels           map[[32]byte]guardrails.Verdict
+	internalGuardrail         bool
+	operationOverride         string
+	policyDecisions           []contentpolicy.Decision
 
 	capture    *export.Collector
 	estimate   int64

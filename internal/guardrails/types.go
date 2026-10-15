@@ -90,6 +90,9 @@ type Evaluation struct {
 	Route     string    `json:"route,omitempty"`
 	Phase     string    `json:"phase"`
 	Segments  []Segment `json:"segments"`
+	// LegacyInput is the strict native scalar view used only by migrated
+	// blocking input rules. It never changes the writable native surface.
+	LegacyInput []Segment `json:"-"`
 	// InternalModel prevents recursive evaluator invocations. It is not accepted
 	// from an HTTP caller and is set only by the gateway's evaluator runner.
 	InternalModel bool `json:"-"`

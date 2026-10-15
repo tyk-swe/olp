@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -19,11 +20,12 @@ type requestPreparation struct {
 type preparationKey struct{ target, provider, revision, model string }
 
 type targetPreparation struct {
-	provider  preparedProvider
-	unary     unaryAdmission
-	encoding  encodedRequest
-	output    effectiveOutput
-	hasOutput bool
+	guardrailDecisions []guardrails.Evidence
+	provider           preparedProvider
+	unary              unaryAdmission
+	encoding           encodedRequest
+	output             effectiveOutput
+	hasOutput          bool
 }
 
 type unaryAdmission struct {

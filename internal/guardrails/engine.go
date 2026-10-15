@@ -37,6 +37,17 @@ type compiledEntry struct {
 }
 type Engine struct{ entries []compiledEntry }
 
+func (e *Engine) HasLegacyInput() bool {
+	if e != nil {
+		for _, r := range e.entries {
+			if r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (e *Engine) WithEvaluator(external Evaluator) *Engine {
 	if e == nil {
 		return nil
@@ -253,14 +264,18 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		started := time.Now()
 		bounded, cancel := context.WithTimeout(ctx, time.Duration(r.definition.TimeoutMS)*time.Millisecond)
 		request.Segments = result.Segments
-		verdict, err := r.detector.detect(bounded, request)
+		evaluation := request
+		if r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block && request.LegacyInput != nil {
+			evaluation.Segments = request.LegacyInput
+		}
+		verdict, err := r.detector.detect(bounded, evaluation)
 		if err == nil {
 			err = bounded.Err()
 		}
 		cancel()
 		ev.LatencyMS = time.Since(started).Milliseconds()
 		if err == nil {
-			err = validateVerdict(verdict, request.Segments)
+			err = validateVerdict(verdict, evaluation.Segments)
 		}
 		if err != nil {
 			ev.Outcome = "failed_open"

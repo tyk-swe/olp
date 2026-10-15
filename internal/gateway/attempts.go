@@ -130,7 +130,13 @@ route:
 				fact := s.newFact(x, attempt, slot, x.spent)
 				// Streams can persist accounting before dispatch returns.
 				fact.Retry, fact.Budgets = retry, gate.hold.budgets
+				if x.guardrailEngine != nil {
+					x.startGuardrailAttempt(fact.GuardrailDecisions)
+				}
 				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, fact)
+				if x.guardrailEngine != nil {
+					fact.GuardrailDecisions = x.finishGuardrailAttempt()
+				}
 				// Only work handed to an upstream spends the request's key
 				// reservation. Local failures remain refundable.
 				dispatched := failure == nil || failure.dispatched

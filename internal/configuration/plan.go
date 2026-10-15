@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -741,6 +742,23 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 
 func validateBindings(doc *Document, bindings bindingSet) error {
 	refs, grants := map[string]bool{}, map[string]bool{}
+	guardrailRefs, guardrailNetworkRefs := map[string]bool{}, map[string]bool{}
+	for _, entry := range doc.Guardrails {
+		if strings.HasPrefix(entry.Type, "builtin.") {
+			continue
+		}
+		var config guardrails.ExternalConfig
+		if json.Unmarshal(entry.Configuration, &config) != nil {
+			return access.Invalid("guardrails", "Invalid guardrail configuration.")
+		}
+		if config.CredentialRef != "" {
+			refs[config.CredentialRef], guardrailRefs[config.CredentialRef] = true, true
+		}
+		if config.Network != nil && config.Network.CredentialID != "" {
+			name := config.Network.CredentialID
+			refs[name], guardrailRefs[name], guardrailNetworkRefs[name] = true, true, true
+		}
+	}
 	mcpRefs := map[string]bool{}
 	for _, e := range doc.MCPServers {
 		if e.CredentialRef != nil {
@@ -772,6 +790,18 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 		}
 	}
 	for name, secret := range bindings {
+		if guardrailRefs[name] {
+			if secret.reference != nil {
+				return access.Invalid("external_credential_bindings", "Guardrail credentials require sealed secret bindings.")
+			}
+			if err := guardrails.ValidateCredential([]byte(secret.secret)); err != nil || len(secret.secret) > maxSecretBytes {
+				return access.Invalid("secret_bindings."+name, "Supply a bounded guardrail credential object.")
+			}
+			if guardrailNetworkRefs[name] && egress.ValidateConnectionSecret([]byte(secret.secret)) != nil {
+				return access.Invalid("secret_bindings."+name, "Supply a valid network credential object.")
+			}
+			continue
+		}
 		if mcpRefs[name] {
 			if secret.reference != nil {
 				return access.Invalid("external_credential_bindings", "MCP static bearer material uses sealed bindings.")

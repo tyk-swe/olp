@@ -96,6 +96,13 @@ cannot fit the window. Such requests return `422 guardrail_surface_unavailable`;
 there is no silent reduction in enforcement. Opaque media and retained surfaces
 without a complete inspection contract are refused in the same way.
 
+Stored or background Responses requests are refused when an output policy or
+input masking is configured, because later retrieval cannot replay that
+inspection or restore the request's masking map. Input-only policies remain
+active on requests that use a previous response or continuation, including
+when its provider or route revision is historical. Migrated strict input rules
+continue matching individual schema keys and scalar values.
+
 Refusals use `400 guardrail_blocked`; refusals after stream commitment use the
 native in-band error. The gateway joins parallel evaluators before sending a
 successful terminal marker. Historical route content-policy error codes remain
@@ -199,6 +206,8 @@ categories and latency. Request and attempt history, telemetry and the
 or patterns. Clients may request `X-OLP-Guardrails: true` metadata; late decisions
 use the response trailer. Values are bounded and may list only the first acting
 guardrails when the header limit is reached.
+Each attempt records its own input and output decisions; request history keeps
+the combined evidence across attempts.
 
 ## Migration and qualification
 

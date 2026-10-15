@@ -97,6 +97,9 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 	if record.provider.invocation.Prepared.Document().Valid() {
 		return record.provider, nil
 	}
+	previous := x.guardrailPreparation
+	x.guardrailPreparation = record
+	defer func() { x.guardrailPreparation = previous }()
 	if x.strict() {
 		template, _ := x.snapshot().InteractionTemplate(x.route.Slug, targetID)
 		if template == nil {

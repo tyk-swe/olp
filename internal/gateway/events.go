@@ -73,9 +73,10 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
-	BudgetExempt     bool
-	CredentialSource string
-	Interaction      *usage.InteractionEvidence
+	GuardrailDecisions []guardrails.Evidence
+	BudgetExempt       bool
+	CredentialSource   string
+	Interaction        *usage.InteractionEvidence
 	// Leg is the fallback or selector route the attempt ran on; nil on the
 	// route the caller named. Selector is the selector that chose its target,
 	// Retry how many times the route's retry policy repeated it, and Budgets

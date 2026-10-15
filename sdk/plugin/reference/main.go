@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/url"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,7 +53,7 @@ func (reference) Manifest() plugin.Manifest {
 	headers := map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"}
 	return plugin.Manifest{
 		Name:        "reference",
-		Guardrail:   true,
+		Guardrail:   runtime.GOOS == "wasip1",
 		Version:     version,
 		Description: "Reference plugin for the OpenLLMProxy plugin SDK.",
 		Origins:     slices.Compact([]string{api, origin(authority)}),

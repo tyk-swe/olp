@@ -31,6 +31,9 @@ func (s *Server) pendingResponseUsage(x *call, fact *AttemptFact, metadata map[s
 
 func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
 	copyFact := *fact
+	if x.guardrailAttemptActive {
+		copyFact.GuardrailDecisions = x.attemptGuardrailEvidence()
+	}
 	copyFact.GenerationUsageDeferred = false
 	copyFact.recordEvidence(true)
 	// Native acceptance and financial evidence are already known. The original

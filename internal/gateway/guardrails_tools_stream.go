@@ -129,11 +129,15 @@ func (g *guardrailStream) collectTools(frame []byte) (bool, error) {
 			}
 		}
 	case wire.Responses:
+		type item struct{ ID, Type, Name, Arguments string }
 		var event struct {
 			Type, Delta string
-			ItemID      string                                     `json:"item_id"`
-			Arguments   string                                     `json:"arguments"`
-			Item        struct{ ID, Type, Name, Arguments string } `json:"item"`
+			ItemID      string `json:"item_id"`
+			Arguments   string `json:"arguments"`
+			Item        item   `json:"item"`
+			Response    struct {
+				Output []item `json:"output"`
+			} `json:"response"`
 		}
 		if json.Unmarshal(data, &event) != nil {
 			return false, guardrails.ErrSurface
@@ -159,6 +163,15 @@ func (g *guardrailStream) collectTools(frame []byte) (bool, error) {
 			call := g.tool(event.ItemID)
 			call.arguments = event.Arguments
 			call.done = true
+		}
+		// Terminal responses repeat full tool calls, even when their deltas
+		// and output_item.done frames have already been inspected and emitted.
+		for _, item := range event.Response.Output {
+			if item.Type == "function_call" {
+				touched = true
+				call := g.tool(item.ID)
+				call.name, call.arguments, call.done = item.Name, item.Arguments, true
+			}
 		}
 	case wire.Gemini, wire.GeminiStream:
 		var event struct {
@@ -327,6 +340,14 @@ func (g *guardrailStream) rewriteTools() error {
 						item["arguments"] = call.arguments
 					} else {
 						item["arguments"] = ""
+					}
+				}
+			}
+			for _, value := range jsonArray(jsonObject(root["response"])["output"]) {
+				item := jsonObject(value)
+				if jsonText(item["type"]) == "function_call" {
+					if call := g.calls[jsonText(item["id"])]; call != nil {
+						item["arguments"] = call.arguments
 					}
 				}
 			}

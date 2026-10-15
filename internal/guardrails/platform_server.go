@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -591,12 +590,7 @@ func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.R
 	if err := access.DecodeUnique(r, &in, 256<<10); err != nil {
 		return access.Reply{}, err
 	}
-	var c externalCredential
-	validSecret := decodeConfig(in.Credential, &c) == nil && (c.APIKey != "" || len(c.SigningKey) >= 32 || (c.AccessKeyID != "" && c.SecretAccessKey != ""))
-	if !validSecret {
-		validSecret = egress.ValidateConnectionSecret(in.Credential) == nil
-	}
-	if !validSecret || in.Name == "" || len(in.Name) > 100 {
+	if ValidateCredential(in.Credential) != nil || in.Name == "" || len(in.Name) > 100 {
 		return access.Reply{}, access.Invalid("credential", "Supply a named credential object.")
 	}
 	tx, err := s.Access.Begin(r)
