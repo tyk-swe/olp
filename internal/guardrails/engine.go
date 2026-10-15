@@ -48,6 +48,17 @@ func (e *Engine) HasLegacyInput() bool {
 	return false
 }
 
+func (e *Engine) HasLegacyOutput() bool {
+	if e != nil {
+		for _, r := range e.entries {
+			if r.definition.LegacyRuleID != "" && r.entry.Phase == Output {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (e *Engine) WithEvaluator(external Evaluator) *Engine {
 	if e == nil {
 		return nil

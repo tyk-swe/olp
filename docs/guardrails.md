@@ -95,6 +95,9 @@ and enforcing external evaluators require unary delivery when their requirements
 cannot fit the window. Such requests return `422 guardrail_surface_unavailable`;
 there is no silent reduction in enforcement. Opaque media and retained surfaces
 without a complete inspection contract are refused in the same way.
+Chat streams requesting `logprobs` are refused before dispatch when output
+guardrails or input masking are active, including when provider defaults enable
+them. Unexpected log-probability payloads are refused before their frame is sent.
 
 Stored or background Responses requests are refused when an output policy or
 input masking is configured, because later retrieval cannot replay that
@@ -172,6 +175,10 @@ prompt?}`. The evaluator uses a generation, classification or moderation route
 under the caller's authorization, deadlines and budgets. Its usage is a child
 request attributed to the parent and guardrail. Internal evaluator requests skip
 model guardrails to prevent recursion.
+Evaluator routes resolve from the request's full pinned release, including for
+retained continuations. Evaluator usage preserves the caller's resolved end-user
+identity. Keyless playground evaluations reserve installation, organization and
+project budgets before dispatch and stop when cost accounting is unavailable.
 
 Presidio may also specify `anonymizer_endpoint`; its `/anonymize` request uses the analyzer results and the same egress policy, credentials and deadline. Without it, analyzer offsets drive local replacement.
 

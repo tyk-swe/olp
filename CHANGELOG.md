@@ -9,6 +9,10 @@ semantic versioning and take their source from root `package.json`;
 
 ### Security
 
+- Reject uninspectable streamed log-probability output and isolate tool-call
+  completion by candidate. Enforce system budgets for playground model evaluators,
+  preserve their pinned routes and end-user attribution, and persist their parent
+  request links through a forward-only database migration.
 - Validate guardrail credential ownership before publication, reject opaque
   transformed input, and enforce admission for standalone evaluations. Preserve
   streaming redaction across Unicode and word boundaries, independent candidates,

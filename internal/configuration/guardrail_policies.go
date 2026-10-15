@@ -174,7 +174,10 @@ func validateGuardrailPolicies(doc *Document) error {
 					}
 				}
 				if applies {
-					f, _ := routing.DecodeFidelity(route.Fidelity)
+					f, fidelityErr := routing.DecodeFidelity(route.Fidelity)
+					if fidelityErr != nil {
+						continue // Route validation reports the invalid fidelity field.
+					}
 					if err = engine.ValidateRoute(f.Strict(), int64(route.OverallTimeoutMS)); err != nil {
 						return access.Invalid("guardrail_policies", "Guardrails are incompatible with an attached route's fidelity or deadline.")
 					}

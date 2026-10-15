@@ -270,18 +270,18 @@ func TestRouteFidelityConfigurationTreatsOmissionAsStrict(t *testing.T) {
 		t.Fatal("exported document did not round-trip", planned)
 	}
 
-	// Omission is strict, so a redaction policy without a declared mode is a
-	// strict policy conflict rather than an inherited transformed contract.
+	// Omission is strict, so the exported v2 redaction attachment cannot inherit
+	// the published transformed contract.
 	delete(route, "fidelity")
-	if problemCode(t, h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422)) != "fidelity_policy_conflict" {
-		t.Fatal("omitted imported fidelity inherited the published transformed contract")
-	}
+	requireFieldError(t, h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422), "guardrail_policies")
 	route["fidelity"] = map[string]any{"mode": "legacy"}
 	requireFieldError(t, h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422), "routes.0.fidelity")
 	requireFieldError(t, h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 422), "routes.0.fidelity")
 
 	delete(route, "fidelity")
-	route["content_policy"] = fidelityPolicy("block", "input")
+	policies := document["guardrail_policies"].([]any)
+	entries := policies[0].(map[string]any)["entries"].([]any)
+	entries[0].(map[string]any)["action"] = "block"
 	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
 	var staged map[string]any
 	for _, item := range h.want(owner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any) {

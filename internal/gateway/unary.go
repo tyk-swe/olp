@@ -141,6 +141,9 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 			x.recordGuardrails(result.Decisions)
 			parallel, parallelErr := x.guardrailEngine.Unavailable(guardrails.InputParallel)
 			x.recordGuardrails(parallel.Decisions)
+			if x.guardrailEngine.HasLegacyInput() {
+				return nil, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
+			}
 			if unavailable != nil {
 				return nil, unavailable
 			}

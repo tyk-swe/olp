@@ -193,6 +193,12 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 	return nil
 }
 
+// CheckLegacyOutputCoverage preserves the native coverage requirement when a
+// route's legacy output policy is executed by the guardrail engine.
+func CheckLegacyOutputCoverage(encodedWire wire.Format, document oif.Document) error {
+	return outputPolicyCoverage(encodedWire, document)
+}
+
 func outputPolicyCoverage(encodedWire wire.Format, document oif.Document) error {
 	fail := func() error {
 		return incompatible("policy_conflict", "/result", "output_policy_coverage", "The output policy cannot inspect native opaque or nontext result content.")

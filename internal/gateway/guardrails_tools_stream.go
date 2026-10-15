@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -86,8 +87,11 @@ func (g *guardrailStream) collectTools(frame []byte) (bool, error) {
 				call.arguments += part.Arguments
 			}
 			if choice.Finish != nil {
-				for _, call := range g.calls {
-					call.done = true
+				prefix := strconv.Itoa(choice.Index) + "_"
+				for id, call := range g.calls {
+					if strings.HasPrefix(id, prefix) {
+						call.done = true
+					}
 				}
 			}
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
@@ -78,6 +79,9 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 		return guardrailError(guardrails.ErrSurface)
 	}
 	if x.generation.parsed != nil && x.generation.parsed.Stream {
+		if err := x.guardrailStreamSurface(x.generation.parsed.OIF().Document()); err != nil {
+			return guardrailError(err)
+		}
 		if err := x.guardrailEngine.ValidateStream(x.snapshot().Guardrails.Window()); err != nil {
 			if x.route.ContentPolicy != nil {
 				for _, rule := range x.route.ContentPolicy.Rules {
@@ -91,6 +95,19 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	}
 	return nil
 }
+
+func (x *call) guardrailStreamSurface(document oif.Document) error {
+	if x.family == wire.Chat && x.generation.parsed != nil && x.generation.parsed.Stream &&
+		(x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
+		// Log-probability alternatives and their byte encodings are separate
+		// output surfaces that cannot share the content delta's stream window.
+		if value, ok := document.Root().Lookup("logprobs"); ok && value.Raw() == "true" {
+			return guardrails.ErrSurface
+		}
+	}
+	return nil
+}
+
 func (x *call) recordGuardrails(values []guardrails.Evidence) {
 	if len(values) == 0 {
 		return
@@ -154,6 +171,10 @@ func (x *call) guardrailEvidence() []guardrails.Evidence {
 	return slices.Clone(x.guardrailDecisions)
 }
 func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []guardrails.Segment, error) {
+	// Effective provider defaults may enable an unsupported stream surface.
+	if err := x.guardrailStreamSurface(document); err != nil {
+		return document, nil, err
+	}
 	surface, err := guardrails.NativeSurface(document, false)
 	if err != nil {
 		result, e := x.guardrailEngine.Unavailable("")
@@ -187,7 +208,7 @@ func (x *call) inspectOperationInput(texts []operations.Text) error {
 	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: segments, InternalModel: x.internalGuardrail}, x.guardrailMasks)
 	x.recordGuardrails(result.Decisions)
 	x.guardrailInput = segments
-	return err
+	return x.legacyGuardrailError(result, err)
 }
 func (x *call) inspectOperationOutput(texts []operations.Text) error {
 	segments := make([]guardrails.Segment, len(texts))
@@ -205,6 +226,13 @@ func (x *call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: guardrails.MaxContentBytes})
 	if err != nil {
 		return body, guardrails.ErrSurface
+	}
+	if x.strict() && x.guardrailEngine.HasLegacyOutput() {
+		if err := interaction.CheckLegacyOutputCoverage(x.family, doc); err != nil {
+			result, _ := x.guardrailEngine.Unavailable(guardrails.Output)
+			x.recordGuardrails(result.Decisions)
+			return body, &responseLocalRefusal{cause: err}
+		}
 	}
 	surface, err := guardrails.NativeSurface(doc, true)
 	if err != nil {
@@ -420,7 +448,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 
 func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e guardrails.Evaluation) (verdict guardrails.Verdict, err error) {
 	parent, _ := ctx.Value(guardrailCallerKey{}).(*call)
-	if parent == nil || parent.internalGuardrail {
+	if parent == nil || parent.internalGuardrail || parent.request.release == nil {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
 	// Candidate preparation can see identical effective input for several
@@ -447,7 +475,9 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 	if json.Unmarshal(d.Configuration, &config) != nil || config.Rule == nil {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
-	route, ok := parent.snapshot().Routes[config.Route]
+	// A retained serving snapshot contains only its pinned route/provider.
+	// Evaluators belong to the full release pinned at request admission.
+	route, ok := parent.request.release.Snapshot.Routes[config.Route]
 	if !ok {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
@@ -459,7 +489,23 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 	}
 	segments, _ := json.Marshal(e.Segments)
 	text := config.Rule.Prompt + "\n" + string(segments)
-	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release}, actor: parent.actor, keyID: parent.keyID, budgetGroupID: parent.budgetGroupID, authority: parent.authority, attribution: parent.attribution, origin: usage.OriginClassifier, parent: parent.request.accountingID(), priority: parent.priority, internalGuardrail: true, evaluatorGuardrailID: d.GuardrailID, authorize: parent.authorize, routeLeg: routeLeg{route: &route}}
+	x := &call{
+		request:              request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
+		actor:                parent.actor,
+		keyID:                parent.keyID,
+		budgetGroupID:        parent.budgetGroupID,
+		authority:            parent.authority,
+		attribution:          parent.attribution,
+		endUserDigest:        parent.endUserDigest,
+		userID:               parent.userID,
+		origin:               usage.OriginClassifier,
+		parent:               parent.request.accountingID(),
+		priority:             parent.priority,
+		internalGuardrail:    true,
+		evaluatorGuardrailID: d.GuardrailID,
+		authorize:            parent.authorize,
+		routeLeg:             routeLeg{route: &route},
+	}
 	if parent.keyID == "" {
 		x.origin = usage.OriginPlayground
 	}

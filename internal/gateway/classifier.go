@@ -238,11 +238,15 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 // admitClassifier budgets the classifier independently of its caller, which
 // cannot finish planning until the label is known. It shares the caller's
 // admission permit, awaiting it before any upstream work.
+// Keyless evaluations share the installation, organization and project budgets.
 func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
 	if e := s.awaitAdmission(ctx, x); e != nil {
 		return e
 	}
 	x.estimate = requestEstimate(x)
+	if x.keyID == "" {
+		return s.reserveSystemBudgets(ctx, x)
+	}
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	var e *Error
 	admitted := x.admissionAuthority(x.authority)

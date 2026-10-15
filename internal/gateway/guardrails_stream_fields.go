@@ -82,6 +82,10 @@ func guardrailDocumentFields(family wire.Format, doc oif.Document) ([]guardrailS
 	case wire.Chat:
 		choices, _ := doc.Root().Lookup("choices")
 		for i, choice := range choices.Elements() {
+			// Refuse unsolicited logprobs too, before any of this frame escapes.
+			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
+				return nil, guardrails.ErrSurface
+			}
 			prefix := "chat_" + index(choice, i) + "_"
 			for _, key := range []string{"content", "refusal"} {
 				add(prefix+key, "/choices/"+strconv.Itoa(i)+"/delta/"+key, false)
