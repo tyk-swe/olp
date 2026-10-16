@@ -65,9 +65,9 @@ var aggregateEventDeltasSQL = `WITH event_facts AS MATERIALIZED (
  UNION SELECT a.id FROM subjects s JOIN olp.aggregate_budget_accounts a ON a.project_id=s.project_id
  WHERE a.attribution_key IS NULL OR s.attribution->>a.attribution_key=a.attribution_value
  UNION SELECT a.id FROM subjects s JOIN olp.aggregate_budget_accounts a ON a.api_key_id=s.api_key_id AND a.route_slug=s.route_slug
-) SELECT a.id::text,COALESCE(SUM(f.estimated_cost),0)::text,
+) SELECT a.id::text,COALESCE(SUM(COALESCE(f.estimated_cost,0)+f.cache_budget_cost),0)::text,
  count(f.attempt_id) FILTER(WHERE f.charge_status<>'not_billable' AND f.unpriced),
- COALESCE(SUM(f.charge),0)::text,
+ COALESCE(SUM(COALESCE(f.charge,0)+f.cache_budget_charge),0)::text,
  count(f.attempt_id) FILTER(WHERE f.charge_status<>'not_billable' AND f.charge IS NULL)
  FROM owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.id LEFT JOIN event_facts f ON ` +
 	aggregateOwnershipSQL("a", usageProjectSQL("f"), "f.api_key_id", "f.route_slug", "f.attribution") + `
@@ -124,8 +124,8 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  SELECT a.* FROM olp.aggregate_budget_accounts a
  WHERE $1::timestamptz IS NOT NULL AND ($2::uuid IS NULL OR a.id=$2::uuid)
 ), usage AS (
- SELECT a.id,f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,
-   COALESCE(f.charge,0)::numeric AS charge,
+ SELECT a.id,f.observed_at,(COALESCE(f.estimated_cost,0)+f.cache_budget_cost)::numeric AS cost,
+   (COALESCE(f.charge,0)+f.cache_budget_charge)::numeric AS charge,
    CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts,
    CASE WHEN f.charge_status<>'not_billable' AND f.charge IS NULL THEN 1 ELSE 0 END::bigint AS uncharged_attempts
  FROM accounts a JOIN (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) f ON true
@@ -135,7 +135,7 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "f.api_key_id", "f.route_slug", "f.attribution")+`
    AND f.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND f.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
- SELECT a.id,h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,COALESCE(h.charge,0)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
+ SELECT a.id,h.budget_bucket,(COALESCE(h.estimated_cost,0)+h.cache_budget_cost)::numeric,(COALESCE(h.charge,0)+h.cache_budget_charge)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
  FROM accounts a JOIN (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) h ON true
  LEFT JOIN olp.api_keys k ON k.id=h.api_key_id
  LEFT JOIN olp.providers p ON p.id=h.provider_id

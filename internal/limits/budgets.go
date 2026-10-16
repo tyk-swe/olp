@@ -28,12 +28,12 @@ func budgetTotalsSQL(owner budgetOwnership, basis string) string {
  COALESCE(SUM(u.charge) FILTER (WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0) AS monthly_charged,
  COALESCE(SUM(u.unpriced_attempts) FILTER (WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0)::bigint AS unpriced_attempts,
  COALESCE(SUM(u.uncharged_attempts) FILTER (WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0)::bigint AS uncharged_attempts
- FROM (SELECT f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,COALESCE(f.charge,0)::numeric AS charge,
+ FROM (SELECT f.observed_at,(COALESCE(f.estimated_cost,0)+f.cache_budget_cost)::numeric AS cost,(COALESCE(f.charge,0)+f.cache_budget_charge)::numeric AS charge,
  CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts,
  CASE WHEN f.charge_status<>'not_billable' AND f.charge IS NULL THEN 1 ELSE 0 END::bigint AS uncharged_attempts
  FROM olp.attempt_usage_facts f WHERE NOT f.budget_exempt AND (%s)
  AND f.observed_at>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND f.observed_at<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)
- UNION ALL SELECT h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,COALESCE(h.charge,0)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
+ UNION ALL SELECT h.budget_bucket,(COALESCE(h.estimated_cost,0)+h.cache_budget_cost)::numeric,(COALESCE(h.charge,0)+h.cache_budget_charge)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
  FROM olp.attempt_usage_hourly h WHERE NOT h.budget_exempt AND (%s)
  AND h.budget_bucket>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND h.budget_bucket<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)) u) t
  , LATERAL (SELECT %s='charge' AS charged) basis`, owner.raw, owner.hourly, basis)
@@ -440,8 +440,8 @@ var reconciliationSnapshotsSQL = reconcileCostWindowsSQL(costOwnerKey, false, `a
   WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $1::timestamptz)
 ), usage AS (
   SELECT fact.api_key_id AS id, fact.observed_at,
-         COALESCE(fact.estimated_cost, 0)::numeric AS cost,
-         COALESCE(fact.charge, 0)::numeric AS charge,
+         (COALESCE(fact.estimated_cost, 0)+fact.cache_budget_cost)::numeric AS cost,
+         (COALESCE(fact.charge, 0)+fact.cache_budget_charge)::numeric AS charge,
          CASE WHEN fact.charge_status <> 'not_billable' AND fact.unpriced
               THEN 1 ELSE 0 END::bigint AS unpriced_attempts,
          CASE WHEN fact.charge_status <> 'not_billable' AND fact.charge IS NULL
@@ -451,8 +451,8 @@ var reconciliationSnapshotsSQL = reconcileCostWindowsSQL(costOwnerKey, false, `a
   WHERE fact.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND fact.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
   UNION ALL
   SELECT hourly.api_key_id AS id, hourly.budget_bucket,
-         COALESCE(hourly.estimated_cost, 0)::numeric,
-         COALESCE(hourly.charge, 0)::numeric,
+         (COALESCE(hourly.estimated_cost, 0)+hourly.cache_budget_cost)::numeric,
+         (COALESCE(hourly.charge, 0)+hourly.cache_budget_charge)::numeric,
          hourly.unpriced_attempt_count, hourly.uncharged_attempt_count
   FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly
   JOIN accounts a ON a.id = hourly.api_key_id
@@ -464,14 +464,14 @@ var reconciliationGroupSnapshotsSQL = reconcileCostWindowsSQL(costOwnerGroup, fa
  WHERE $1::timestamptz IS NOT NULL
    AND (effective_limits->>'daily_cost_limit' IS NOT NULL OR effective_limits->>'monthly_cost_limit' IS NOT NULL OR effective_limits->>'weekly_cost_limit' IS NOT NULL)
 ), usage AS (
- SELECT fact.budget_group_id AS id,fact.observed_at,COALESCE(fact.estimated_cost,0)::numeric AS cost,
-   COALESCE(fact.charge,0)::numeric AS charge,
+ SELECT fact.budget_group_id AS id,fact.observed_at,(COALESCE(fact.estimated_cost,0)+fact.cache_budget_cost)::numeric AS cost,
+   (COALESCE(fact.charge,0)+fact.cache_budget_charge)::numeric AS charge,
    CASE WHEN fact.charge_status<>'not_billable' AND fact.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts,
    CASE WHEN fact.charge_status<>'not_billable' AND fact.charge IS NULL THEN 1 ELSE 0 END::bigint AS uncharged_attempts
  FROM (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) fact JOIN accounts a ON a.id = fact.budget_group_id
  WHERE fact.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND fact.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
- SELECT hourly.budget_group_id AS id,hourly.budget_bucket,COALESCE(hourly.estimated_cost,0)::numeric,COALESCE(hourly.charge,0)::numeric,hourly.unpriced_attempt_count,hourly.uncharged_attempt_count
+ SELECT hourly.budget_group_id AS id,hourly.budget_bucket,(COALESCE(hourly.estimated_cost,0)+hourly.cache_budget_cost)::numeric,(COALESCE(hourly.charge,0)+hourly.cache_budget_charge)::numeric,hourly.unpriced_attempt_count,hourly.uncharged_attempt_count
  FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly JOIN accounts a ON a.id = hourly.budget_group_id
  WHERE hourly.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND hourly.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)

@@ -202,7 +202,7 @@ const rollupSQL = `WITH candidates AS (
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
                 attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
                 commitment_weight, commitment_amount, commitment_period, charge,
-                list_cost, contracted_cost
+                list_cost, contracted_cost, cache_budget_cost, cache_budget_charge
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -219,7 +219,7 @@ const rollupSQL = `WITH candidates AS (
          model_family, estimate_provenance, estimated_input_tokens,
          estimate_reported_input_tokens, estimate_attempt_count,
          commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count,
-         list_cost, contracted_cost)
+         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt,
@@ -256,7 +256,8 @@ const rollupSQL = `WITH candidates AS (
              COALESCE(SUM(commitment_weight), 0), commitment_amount, commitment_period,
              SUM(charge), COUNT(*) FILTER (WHERE charge_status <> 'not_billable' AND charge IS NULL),
              SUM(COALESCE(list_cost, estimated_cost + COALESCE(commitment_weight, 0))),
-             SUM(COALESCE(contracted_cost, estimated_cost + COALESCE(commitment_weight, 0)))
+             SUM(COALESCE(contracted_cost, estimated_cost + COALESCE(commitment_weight, 0))),
+             SUM(cache_budget_cost), SUM(cache_budget_charge)
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -309,6 +310,8 @@ const rollupSQL = `WITH candidates AS (
           ELSE COALESCE(attempt_usage_hourly.list_cost,
                         attempt_usage_hourly.estimated_cost + attempt_usage_hourly.commitment_weight, 0)
                + COALESCE(EXCLUDED.list_cost, 0) END,
+        cache_budget_cost = attempt_usage_hourly.cache_budget_cost + EXCLUDED.cache_budget_cost,
+        cache_budget_charge = attempt_usage_hourly.cache_budget_charge + EXCLUDED.cache_budget_charge,
         contracted_cost = CASE
           WHEN attempt_usage_hourly.contracted_cost IS NULL AND attempt_usage_hourly.estimated_cost IS NULL
                AND EXCLUDED.contracted_cost IS NULL THEN NULL

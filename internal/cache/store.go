@@ -44,6 +44,10 @@ type Entry struct {
 	Frames    [][]byte        `json:"frames,omitempty"`
 	Metadata  json.RawMessage `json:"metadata"`
 }
+type storedEntry struct {
+	Bucket string `json:"bucket"`
+	Entry
+}
 type sealed struct {
 	Version int    `json:"version"`
 	Data    []byte `json:"data"`
@@ -134,10 +138,11 @@ func (s *Store) open(ticket Ticket, value any, controls Controls) (*Entry, error
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	var entry Entry
-	if json.Unmarshal(plain, &entry) != nil {
+	var stored storedEntry
+	if json.Unmarshal(plain, &stored) != nil || stored.Bucket == "" || stored.Bucket != ticket.Bucket {
 		return nil, ErrUnavailable
 	}
+	entry := stored.Entry
 	now := s.now()
 	if entry.CreatedAt.After(now) || !entry.ExpiresAt.After(now) || controls.MaxAge != nil && now.Sub(entry.CreatedAt) > time.Duration(*controls.MaxAge)*time.Second {
 		return nil, nil
@@ -158,7 +163,9 @@ func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy Poli
 	}
 	entry.CreatedAt = s.now()
 	entry.ExpiresAt = entry.CreatedAt.Add(time.Duration(ttl) * time.Second)
-	plain, err := json.Marshal(entry)
+	// Search metadata is untrusted. Bind the original scope and namespace
+	// generation to the encrypted entry before accepting semantic candidates.
+	plain, err := json.Marshal(storedEntry{Bucket: ticket.Bucket, Entry: entry})
 	if err != nil || len(plain) > p.MaxEntryBytes {
 		return ErrNotStored
 	}

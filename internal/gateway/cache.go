@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -290,7 +291,16 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	}
 	// Effective entries pin immutable definition revisions and capture attachment
 	// changes at every scope, without hashing unrelated tenants' policy registries.
-	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, x.mode, headers, x.semanticQuery})
+	encoding := ""
+	if x.unary == nil && x.family == wire.Embeddings {
+		// Native provider documents can omit this client response control, but
+		// the cache stores the response after projection to the caller's format.
+		encoding = protocols.EmbeddingEncoding(x.generation.parsed, p.ParameterDefaults)
+		if encoding == "" {
+			encoding = "float"
+		}
+	}
+	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, x.mode, headers, x.semanticQuery, encoding})
 	if c.policy.Mode == "semantic" {
 		er, ok := x.snapshot().Routes[c.policy.EmbeddingRoute]
 		if !ok {

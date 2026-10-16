@@ -15,9 +15,10 @@ import (
 )
 
 type memory struct {
-	mu     sync.Mutex
-	values map[string]string
-	fail   bool
+	mu            sync.Mutex
+	values        map[string]string
+	fail          bool
+	searchResults []any
 }
 
 func (m *memory) Do(_ context.Context, a ...string) (any, error) {
@@ -27,6 +28,10 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 		return nil, errors.New("offline")
 	}
 	switch a[0] {
+	case "FT.CREATE":
+		return "OK", nil
+	case "FT.SEARCH":
+		return m.searchResults, nil
 	case "SET":
 		m.values[a[1]] = a[2]
 		return "OK", nil
@@ -57,6 +62,80 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 		return int64(1), nil
 	}
 	return nil, errors.New("unsupported")
+}
+func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
+	for _, change := range []string{"same scope", "project", "route", "key", "revision", "project purge", "route purge"} {
+		t.Run(change, func(t *testing.T) {
+			s, m := testStore(t)
+			space := Space{Project: "project", Route: "route", Scope: "key", Fingerprint: "revision"}
+			original, err := s.Begin(t.Context(), space, []byte("original"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := Policy{Mode: "semantic", AllowUnsealedVectors: true, EmbeddingRoute: "embeddings"}
+			if err := s.Put(t.Context(), original, Entry{Body: []byte("private response")}, p, Controls{}, []float32{1, 0}); err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "project":
+				space.Project = "other"
+			case "route":
+				space.Route = "other"
+			case "key":
+				space.Scope = "other"
+			case "revision":
+				space.Fingerprint = "other"
+			case "project purge":
+				err = s.Purge(t.Context(), "project", space.Project)
+			case "route purge":
+				err = s.Purge(t.Context(), "route", space.Route)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			query, err := s.Begin(t.Context(), space, []byte("similar"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Simulate an altered search result pointing to a valid ciphertext
+			// from a different caller, revision, or purged namespace.
+			m.searchResults = []any{int64(1), original.Key, []any{"__vector_score", "0"}}
+			entry, _, err := s.Nearest(t.Context(), query, []float32{1, 0}, p, Controls{})
+			if change == "same scope" {
+				if err != nil || entry == nil || string(entry.Body) != "private response" {
+					t.Fatalf("valid semantic candidate rejected: %v %v", entry, err)
+				}
+			} else if entry != nil || !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("foreign semantic candidate accepted: %v %v", entry, err)
+			}
+		})
+	}
+}
+
+func TestUnscopedSealedEntriesAreRejected(t *testing.T) {
+	s, m := testStore(t)
+	ticket, err := s.Begin(t.Context(), Space{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Older ciphertext authenticated only the entry key. It cannot establish
+	// that a semantic search candidate belongs to the requested namespace.
+	plain, err := json.Marshal(Entry{CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Hour), Body: []byte("unscoped")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := s.Keys.Seal(s.Installation, secrets.ResponseCache, ticket.Key, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := json.Marshal(sealed{Version: s.Keys.Active, Data: ciphertext})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.values[ticket.Key] = string(blob)
+	if entry, err := s.Get(t.Context(), ticket, Controls{}); entry != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unscoped entry accepted: %v %v", entry, err)
+	}
 }
 func testStore(t *testing.T) (*Store, *memory) {
 	t.Helper()

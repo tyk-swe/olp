@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -56,6 +57,84 @@ func TestResponseCacheSharingScopesRemainInsideProject(t *testing.T) {
 			h.rt.mu.Unlock()
 			if status, result := request(otherKey); status != 403 || strings.Contains(result, "hit") {
 				t.Fatal("shared cache crossed a project boundary", status, result)
+			}
+		})
+	}
+}
+
+func TestResponseCacheTransformedEmbeddingEncoding(t *testing.T) {
+	for _, tc := range []struct{ name, kind, reply string }{
+		{"gemini", "gemini", `{"embedding":{"values":[1,0.5]},"usageMetadata":{"promptTokenCount":1}}`},
+		{"vertex", "vertex_ai", `{"predictions":[{"embeddings":{"values":[1,0.5],"statistics":{"token_count":1}}}]}`},
+		{"bedrock", "bedrock", `{"embedding":[1,0.5],"inputTextTokenCount":1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := cacheHarness(t)
+			if tc.kind == "bedrock" {
+				useBedrockProvider(h)
+			}
+			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range snapshot.Providers {
+					provider.Kind = tc.kind
+					if tc.kind == "vertex_ai" {
+						provider.CloudRegion = "us-central1"
+						provider.Endpoint = "https://us-central1-aiplatform.googleapis.com/" + provider.Name + "/v1"
+					}
+					model := provider.Capabilities[0].Model
+					if tc.kind == "bedrock" {
+						model = "amazon.titan-embed-text-v2:0"
+					}
+					provider.Capabilities = []routing.Capability{{Model: model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.Operations = []string{"embeddings"}
+				if tc.kind == "bedrock" {
+					for i := range route.Targets {
+						route.Targets[i].ProviderModel = "amazon.titan-embed-text-v2:0"
+					}
+				}
+				snapshot.Routes[routeSlug] = route
+			})
+			if tc.kind == "vertex_ai" {
+				// Vertex authenticates only its Google host. Serve that host
+				// with an in-memory transport so this stays a local fixture.
+				h.gateway.client = &http.Client{Transport: pinnedTransportFunc(func(r *http.Request) (*http.Response, error) {
+					w := httptest.NewRecorder()
+					h.mock.ServeHTTP(w, r)
+					return w.Result(), nil
+				})}
+			}
+			h.mock.set("a", status(http.StatusOK, tc.reply))
+			for _, request := range []struct{ format, want string }{
+				{"float", "miss"}, {"base64", "miss"}, {"float", "hit"}, {"base64", "hit"}, {"", "hit"},
+			} {
+				body := `{"model":"team-chat","input":"hello"`
+				if request.format != "" {
+					body += `,"encoding_format":"` + request.format + `"`
+				}
+				response := h.do(t.Context(), http.MethodPost, "/v1/embeddings", fullKey, []byte(body+`}`), nil)
+				raw, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != request.want {
+					t.Fatalf("encoding=%s: status=%d cache=%s body=%s", request.format, response.StatusCode, response.Header.Get("X-OLP-Cache"), raw)
+				}
+				var decoded struct {
+					Data []struct{ Embedding any } `json:"data"`
+				}
+				if err := json.Unmarshal(raw, &decoded); err != nil || len(decoded.Data) != 1 {
+					t.Fatalf("invalid embedding response: %s (%v)", raw, err)
+				}
+				if request.format == "base64" {
+					if decoded.Data[0].Embedding != "AACAPwAAAD8=" {
+						t.Fatalf("base64 embedding=%v", decoded.Data[0].Embedding)
+					}
+				} else if embedding, ok := decoded.Data[0].Embedding.([]any); !ok || len(embedding) != 2 || embedding[0] != float64(1) || embedding[1] != 0.5 {
+					t.Fatalf("float embedding=%v", decoded.Data[0].Embedding)
+				}
+			}
+			if h.mock.count("a") != 2 || h.mock.count("b") != 0 {
+				t.Fatalf("provider calls=%d/%d", h.mock.count("a"), h.mock.count("b"))
 			}
 		})
 	}

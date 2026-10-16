@@ -43,17 +43,20 @@ func (s *CacheManagement) purge(r *http.Request, p access.Principal) (access.Rep
 	project := in.ProjectID
 	if in.RouteID != nil {
 		kind, id = "route", in.RouteID
-		if _, err = uuid.Parse(*id); err != nil {
-			return access.Reply{}, access.Invalid("route_id", "Use a route UUID.")
-		}
+	}
+	parsed, err := uuid.Parse(*id)
+	if err != nil {
+		return access.Reply{}, access.Invalid(kind+"_id", "Use a "+kind+" UUID.")
+	}
+	canonical := parsed.String()
+	id = &canonical
+	if kind == "route" {
 		if err = tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.routes WHERE id=$1", *id).Scan(&project); err != nil {
 			return access.Reply{}, err
 		}
 	}
 	if kind == "project" {
-		if _, err = uuid.Parse(*id); err != nil {
-			return access.Reply{}, access.Invalid("project_id", "Use a project UUID.")
-		}
+		project = id
 		if err = s.Access.RequireProject(r.Context(), tx, p, project); err != nil {
 			return access.Reply{}, err
 		}

@@ -5,6 +5,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -62,6 +63,32 @@ func TestIntegrationCacheExactSemanticAndPurge(t *testing.T) {
 	}
 	if hit == nil || similarity < .99 || string(hit.Body) != "secret response" {
 		t.Fatalf("semantic match failed: %v %.4f", hit, similarity)
+	}
+	otherSpace := space
+	otherSpace.Scope = "another-key"
+	other, err := s.Begin(ctx, otherSpace, []byte("nearby"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Do(ctx, "HSET", ticket.Key, "bucket", other.Bucket); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		hit, _, err = s.Nearest(ctx, other, []float32{1, 0, 0}, p, Controls{})
+		if hit != nil {
+			t.Fatal("tampered search bucket exposed another key's response")
+		}
+		if errors.Is(err, ErrUnavailable) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatal("tampered search candidate was not authenticated")
 	}
 	if err = s.Purge(ctx, "project", "p"); err != nil {
 		t.Fatal(err)

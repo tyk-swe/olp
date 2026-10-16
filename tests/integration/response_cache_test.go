@@ -73,7 +73,7 @@ func TestResponseCachePublicLifecycleAndAccounting(t *testing.T) {
 			routeID = r["id"].(string)
 		}
 	}
-	h.want(owner, "POST", "/api/v1/cache/purge", map[string]any{"route_id": routeID}, nil, 200)
+	h.want(owner, "POST", "/api/v1/cache/purge", map[string]any{"route_id": strings.ToUpper(routeID)}, nil, 200)
 	if result, _ := request(key, false, nil); result != "miss" {
 		t.Fatal("purge did not invalidate")
 	}
@@ -102,6 +102,38 @@ func TestResponseCachePublicLifecycleAndAccounting(t *testing.T) {
 	}
 }
 
+func TestResponseCachePurgeCanonicalScopeIDs(t *testing.T) {
+	h := newAccessHarness(t)
+	installResponseCache(t, h)
+	fixture := newOpenAIFixture(t, "")
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, nil)
+	project := createProject(h, owner, "Purge namespace")
+	var route string
+	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.routes WHERE slug=$1", slug).Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	space := cache.Space{Project: project, Route: route, Scope: "key", Fingerprint: "revision"}
+	for kind, id := range map[string]string{"project": project, "route": route} {
+		for _, spelling := range []string{strings.ToUpper(id), strings.ReplaceAll(id, "-", ""), "urn:uuid:" + id} {
+			t.Run(kind+"/"+spelling, func(t *testing.T) {
+				store := h.Gateway.Cache
+				ticket, err := store.Begin(t.Context(), space, []byte("request"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Put(t.Context(), ticket, cache.Entry{Body: []byte("cached response")}, cache.Policy{Mode: "exact"}, cache.Controls{}, nil); err != nil {
+					t.Fatal(err)
+				}
+				h.want(owner, "POST", "/api/v1/cache/purge", map[string]any{kind + "_id": spelling}, nil, 200)
+				next, entry, err := store.Lookup(t.Context(), space, []byte("request"), cache.Controls{})
+				if err != nil || entry != nil || next.Key == ticket.Key {
+					t.Fatalf("purge left the canonical namespace reachable: entry=%v error=%v", entry, err)
+				}
+			})
+		}
+	}
+}
+
 func TestResponseCacheHitsRespectRequestsAndExemptTokens(t *testing.T) {
 	f := glSeedIn(t, "cache-admission", glPrice{})
 	installResponseCache(t, f.h)
@@ -127,6 +159,45 @@ func TestResponseCacheHitsRespectRequestsAndExemptTokens(t *testing.T) {
 	if status, code, _ := f.chat(key); status != 429 || code != "rate_limit_exceeded" {
 		t.Fatalf("request quota bypassed: %d %s", status, code)
 	}
+}
+
+func TestResponseCacheHitsConsumeAggregateBudget(t *testing.T) {
+	f := glSeedIn(t, "cache-budget", glPrice{input: "1000000", output: "1000000"})
+	installResponseCache(t, f.h)
+	draft := f.h.want(f.owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"},
+		"cache":    map[string]any{"mode": "exact", "count_hits_against": []string{"requests", "budgets"}},
+		"targets":  []any{map[string]any{"provider_id": f.provider, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 8000}},
+	}, idem(uuid.NewString()), 201)
+	f.h.want(f.owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	_, key := f.key("cache-budget", nil)
+	await := endUserAccounting(t, f.h, f.limiter)
+	if status, code, headers := f.chat(key); status != 200 || headers.Get("X-OLP-Cache") != "miss" {
+		t.Fatalf("warm: %d %s %v", status, code, headers)
+	}
+	await()
+	path := "/api/v1/budgets/installation"
+	before := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	f.h.want(f.owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "20"}}, etagHeader(before), 200)
+	f.h.refresh()
+	// The first observation installs this new account's historical balance.
+	if status, code, _ := f.chat(key); status != 503 {
+		t.Fatalf("uninitialized budget: %d %s", status, code)
+	}
+	await()
+	if status, code, headers := f.chat(key); status != 200 || headers.Get("X-OLP-Cache") != "hit" {
+		t.Fatalf("counted cache hit: %d %s %v", status, code, headers)
+	}
+	await()
+	usage := f.h.want(f.owner, "GET", path, nil, nil, 200)["usage"].(map[string]any)
+	if got := usage["daily"].(map[string]any)["accrued"]; got != "20.000000000000" {
+		t.Fatalf("cache debit missing from aggregate usage: %v", usage)
+	}
+	if status, code, _ := f.chat(key); status != 429 || code != "budget_exhausted" {
+		t.Fatalf("cache hit bypassed exhausted aggregate budget: %d %s", status, code)
+	}
+	await()
 }
 
 func TestResponseCacheSemanticPublicationAndChildAccounting(t *testing.T) {
