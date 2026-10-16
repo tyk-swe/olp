@@ -170,17 +170,6 @@ func inspectorFields(t *testing.T, decision map[string]any) map[string]map[strin
 	return result
 }
 
-func assertInspectorRejection(t *testing.T, decision map[string]any, code string) {
-	t.Helper()
-	if decision["eligible"] != false || decision["attempt"] != nil || decision["reason"] != code {
-		t.Fatalf("inspection did not reject %s precisely: %v", code, decision)
-	}
-	diagnostic, ok := decision["incompatibility"].(map[string]any)
-	if !ok || diagnostic["code"] != code || diagnostic["requirement"] == "" || diagnostic["message"] == "" {
-		t.Fatal("inspection omitted its safe incompatibility contract")
-	}
-}
-
 func TestStrictPlanInspectorPreservesNativeSettingsAndRedactsContent(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()

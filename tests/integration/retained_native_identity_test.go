@@ -22,24 +22,6 @@ func retainedNativeState(t *testing.T, h *accessHarness, local string) string {
 	return snapshot
 }
 
-func ambiguousNativeIDs(body, id string) map[string]string {
-	field := `"id":"` + id + `"`
-	return map[string]string{
-		"duplicate":          strings.Replace(body, field, `"id":"another-native-resource",`+field, 1),
-		"escaped-duplicate":  strings.Replace(body, field, `"id":"another-native-resource","\u0069d":"`+id+`"`, 1),
-		"unpaired-surrogate": strings.Replace(body, field, `"id":"native-\ud800"`, 1),
-		"invalid-utf8":       strings.Replace(body, field, "\"id\":\"native-\xff\"", 1),
-	}
-}
-
-func assertNoNativeMapping(t *testing.T, h *accessHarness, slug, kind string) {
-	t.Helper()
-	var count int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE route_slug=$1 AND kind=$2`, slug, kind).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("malformed native identity created authority: kind=%s count=%d %v", kind, count, err)
-	}
-}
-
 func assertRetainedPendingUsage(t *testing.T, h *accessHarness, local, original string, input, output, cached int64) {
 	t.Helper()
 	var raw []byte

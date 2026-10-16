@@ -5,7 +5,6 @@ package integration_test
 import (
 	"context"
 	"crypto/rand"
-	"os"
 	"regexp"
 	"strconv"
 	"testing"
@@ -39,10 +38,7 @@ func limScriptMicroseconds(b *testing.B, c *coordination.Client) (calls, microse
 // a namespace of its own, which is emptied when the benchmark ends.
 func limBenchLimiter(b *testing.B) (*coordination.Client, *limits.Limiter) {
 	b.Helper()
-	raw := os.Getenv("OLP_TEST_VALKEY_URL")
-	if raw == "" {
-		b.Fatal("OLP_TEST_VALKEY_URL is required; run make integration")
-	}
+	raw := required(b, "OLP_TEST_VALKEY_URL")
 	cfg, err := coordination.Configuration(raw, "", 5*time.Second)
 	if err != nil {
 		b.Fatal(err)

@@ -236,7 +236,7 @@ func kbReserved(t *testing.T, f *glFixture, owner string) string {
 func kbWaitReserved(t *testing.T, f *glFixture, owner, want string) {
 	t.Helper()
 	var got string
-	glEventually(t, "the reservation to read "+want, func() bool {
+	eventually(t, "the reservation to read "+want, 15*time.Second, func() bool {
 		got = kbReserved(t, f, owner)
 		return got == want
 	})
@@ -347,10 +347,4 @@ func TestKeyWithoutACostBudgetMakesNoExtraValkeyCall(t *testing.T) {
 	if cost != 2 {
 		t.Fatalf("a cost-budgeted key ran %d scripts, want its reservation and its settlement and no rate script", cost)
 	}
-}
-
-func limPendingKeys(namespace, owner string) (string, string) {
-	day, _ := limCostKeys(namespace, owner)
-	prefix := day[:len(day)-len(":day")]
-	return prefix + ":pending", prefix + ":expiry"
 }

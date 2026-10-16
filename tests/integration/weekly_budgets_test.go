@@ -12,9 +12,7 @@ import (
 )
 
 func TestWeeklyBudgetAdmissionNeedsCompleteCurrentEvidence(t *testing.T) {
-	client := limClient(t)
-	namespace := limNamespace(t, client, "weekly")
-	limiter := limLimiter(t, client, namespace)
+	_, _, limiter := limSetup(t, "weekly")
 	w := limits.BudgetWindows(time.Now())
 	owner := uuid.NewString()
 	request := limRequest(limLookup())

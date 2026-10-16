@@ -31,8 +31,7 @@ func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
 	dp := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", dp+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", dp+"/activate", nil, withMatch(validated, idem("activate-template-route")), 200)
-	client := limClient(t)
-	limiter := limLimiter(t, client, limNamespace(t, client, "templates"))
+	client, _, limiter := limSetup(t, "templates")
 	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
 	replica := newAccessHarnessOn(t, h.Pool, h.DBURL)
 	replica.Gateway.Admission = h.Gateway.Admission

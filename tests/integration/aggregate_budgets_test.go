@@ -36,9 +36,7 @@ func TestAggregateProjectAndInstallationCapsBothApply(t *testing.T) {
 		keys = append(keys, key["secret"].(string))
 	}
 	h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": "azure_openai", "provider_id": provider["id"], "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000"}}}, idem("price"), 201)
-	client := limClient(t)
-	namespace := limNamespace(t, client, "aggregate-project")
-	limiter := limLimiter(t, client, namespace)
+	_, _, limiter := limSetup(t, "aggregate-project")
 	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
 	await := endUserAccounting(t, h, limiter)
 	installationPath := "/api/v1/budgets/installation"
@@ -52,7 +50,7 @@ func TestAggregateProjectAndInstallationCapsBothApply(t *testing.T) {
 	set(installationPath, "1000")
 	set(projectPath, "1000")
 	set(organizationPath, "1000")
-	glEventually(t, "prices", func() bool { h.refresh(); return len(h.Runtime.RoutingInputs().Prices) > 0 })
+	eventually(t, "prices", 15*time.Second, func() bool { h.refresh(); return len(h.Runtime.RoutingInputs().Prices) > 0 })
 	call := func(key string, want int) {
 		t.Helper()
 		status, err := endUserChat(t.Context(), h, key, slug, "unused")

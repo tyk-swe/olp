@@ -26,23 +26,6 @@ type acctEpochRow struct {
 	UncertaintyGapID   *string
 }
 
-func acctLoadEpoch(t *testing.T, pool *pgxpool.Pool, instance, epoch string) acctEpochRow {
-	t.Helper()
-	var row acctEpochRow
-	err := pool.QueryRow(t.Context(), `SELECT accepted, persisted, dropped, abandoned, retrying,
-            writer_closed, gracefully_closed_at, stale_candidate_at, stale_detected_at,
-            uncertainty_gap_id::text
-        FROM olp.request_metadata_gateway_epochs
-        WHERE gateway_instance = $1 AND process_epoch = $2::uuid`, instance, epoch).
-		Scan(&row.Accepted, &row.Persisted, &row.Dropped, &row.Abandoned, &row.Retrying,
-			&row.WriterClosed, &row.GracefullyClosedAt, &row.StaleCandidateAt,
-			&row.StaleDetectedAt, &row.UncertaintyGapID)
-	if err != nil {
-		t.Fatalf("load epoch %s/%s: %v", instance, epoch, err)
-	}
-	return row
-}
-
 // acctGapRow is one admission that request metadata never became usage.
 type acctGapRow struct {
 	EventCount int64
@@ -52,31 +35,6 @@ type acctGapRow struct {
 	Last       time.Time
 }
 
-func acctGaps(t *testing.T, pool *pgxpool.Pool, instance string) []acctGapRow {
-	t.Helper()
-	rows, err := pool.Query(t.Context(), `SELECT event_count, reason, certainty,
-            first_observed_at, last_observed_at
-        FROM olp.request_metadata_ingestion_gaps WHERE gateway_instance = $1
-        ORDER BY reported_at, id`, instance)
-	if err != nil {
-		t.Fatalf("query gaps: %v", err)
-	}
-	defer rows.Close()
-	var gaps []acctGapRow
-	for rows.Next() {
-		var gap acctGapRow
-		if err := rows.Scan(&gap.EventCount, &gap.Reason, &gap.Certainty,
-			&gap.First, &gap.Last); err != nil {
-			t.Fatalf("scan gap: %v", err)
-		}
-		gaps = append(gaps, gap)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read gaps: %v", err)
-	}
-	return gaps
-}
-
 // acctSameInstant compares a timestamp with one that made a round trip through
 // PostgreSQL, which keeps microseconds rather than nanoseconds.
 func acctSameInstant(t *testing.T, got, want time.Time, what string) {
@@ -84,11 +42,6 @@ func acctSameInstant(t *testing.T, got, want time.Time, what string) {
 	if difference := got.Sub(want); difference > time.Microsecond || difference < -time.Microsecond {
 		t.Fatalf("%s = %s, want %s", what, got, want)
 	}
-}
-
-func acctInstance(t *testing.T) string {
-	t.Helper()
-	return "gateway-" + acctID(t)
 }
 
 // Only what was lost since the previous checkpoint is reported again.

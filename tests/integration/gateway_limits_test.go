@@ -56,9 +56,8 @@ func glSeedIn(t *testing.T, label string, price glPrice) *glFixture {
 // glSeedInFidelity is glSeedIn with the fidelity mode of the route named.
 func glSeedInFidelity(t *testing.T, label string, price glPrice, fidelity string) *glFixture {
 	t.Helper()
-	c := limClient(t)
-	namespace := limNamespace(t, c, label)
-	f := glSeedFidelity(t, limLimiter(t, c, namespace), limits.FailClosed, price, fidelity)
+	c, namespace, limiter := limSetup(t, label)
+	f := glSeedFidelity(t, limiter, limits.FailClosed, price, fidelity)
 	f.valkey, f.namespace = c, namespace
 	return f
 }
@@ -132,7 +131,7 @@ func glSeedFidelity(t *testing.T, limiter *limits.Limiter, policy limits.OutageP
 		// The gateway reads prices from routing inputs that refresh at most every
 		// few seconds, so a list published after the first load would not be seen
 		// yet. It is published before it here; this only proves it was.
-		glEventually(t, "the price list to reach the gateway", func() bool {
+		eventually(t, "the price list to reach the gateway", 15*time.Second, func() bool {
 			h.refresh()
 			inputs := h.Runtime.RoutingInputs()
 			return inputs != nil && len(inputs.Prices) > 0
@@ -271,24 +270,10 @@ func glAccounting(t *testing.T, f *glFixture) {
 	acctConsumer(t, f.h.Pool, acctValkey(t), stream, "gateway-accounting", f.limiter, 30*time.Second)
 }
 
-// glEventually waits for a condition that a settlement outside the request
-// path decides, such as a concurrency slot coming back.
-func glEventually(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
 // glInFlight waits until the upstream has taken the request a caller started.
 func glInFlight(t *testing.T, up *vendor, before int64) {
 	t.Helper()
-	glEventually(t, "the upstream to receive the request", func() bool { return up.chats.Load() > before })
+	eventually(t, "the upstream to receive the request", 15*time.Second, func() bool { return up.chats.Load() > before })
 }
 
 // The message is part of the contract, not decoration: it is the only

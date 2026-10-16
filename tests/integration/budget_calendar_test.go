@@ -32,8 +32,7 @@ func TestBudgetCalendarSettingAndValkeyAdmission(t *testing.T) {
 	if _, err := h.Pool.Exec(t.Context(), "DELETE FROM olp.budget_calendar_changes WHERE effective_at>'1970-01-01'; INSERT INTO olp.budget_calendar_changes SELECT k,'2020-01-01'::timestamptz,'Asia/Kathmandu' FROM unnest(ARRAY['day','week','month']) k"); err != nil {
 		t.Fatal(err)
 	}
-	client := limClient(t)
-	limiter := limLimiter(t, client, limNamespace(t, client, "calendar"))
+	client, _, limiter := limSetup(t, "calendar")
 	now := time.UnixMilli(limServerTimeMS(t, client))
 	w, err := limits.CurrentBudgetWindows(t.Context(), h.Pool, now)
 	if err != nil {

@@ -15,59 +15,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
-
-func pricingHarness(t *testing.T) *accessHarness {
-	t.Helper()
-	h := newAccessHarness(t)
-	policy := alertPolicy()
-	h.Server.Egress = policy
-	mux := http.NewServeMux()
-	management.Register(mux)
-	h.Server.Register(mux)
-	(&usage.Server{Access: h.Server, VendorKind: repVendorKind, Egress: policy}).Register(mux)
-	// Configuration endpoints exercise the pricing round trip through export,
-	// plan and apply; this harness carries no providers, so the credential
-	// stores and rate limiter are never reached.
-	(&configuration.Server{Access: h.Server, Egress: policy, VendorKind: repVendorKind}).Register(mux)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	h.HTTP = server
-	return h
-}
-
-type sourceFixture struct {
-	*httptest.Server
-	document atomic.Value
-	fetches  atomic.Int64
-}
-
-func newSourceFixture(t *testing.T, document string) *sourceFixture {
-	f := &sourceFixture{}
-	f.document.Store(document)
-	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		f.fetches.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, f.document.Load().(string))
-	}))
-	t.Cleanup(f.Close)
-	return f
-}
-
-const sourceDocumentV1 = `{"currency":"USD","prices":[
- {"provider_kind":"openai","model":"gpt-source","operation":"generation","currency":"USD","input_per_million":"1.000000","output_per_million":"4.000000"},
- {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.02"}
-]}`
-
-const sourceDocumentV2 = `{"currency":"USD","prices":[
- {"provider_kind":"openai","model":"gpt-source","operation":"generation","currency":"USD","input_per_million":"2.000000","output_per_million":"4.000000"},
- {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.02"},
- {"provider_kind":"anthropic","model":"claude-source","operation":"generation","currency":"USD","input_per_million":"3.000000","output_per_million":"15.000000"}
-]}`
 
 // signedCatalogFixture serves a signed reference catalog and its detached
 // signature, as a static host such as raw.githubusercontent.com does.
@@ -295,11 +246,3 @@ func checkComponentPrice(t *testing.T, entry map[string]any) {
 		t.Fatalf("windows = %v", entry["windows"])
 	}
 }
-
-// A revision carries every component through create and list.
-
-// A prices-format source round-trips them through refresh and publish.
-
-// The stored snapshot document holds the components too.
-
-// Configuration export, plan and apply carry the components without drift.

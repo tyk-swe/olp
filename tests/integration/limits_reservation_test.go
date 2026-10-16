@@ -35,10 +35,9 @@ type limCostFixture struct {
 // limCostSeed opens an owner at the given accrued spend in both windows.
 func limCostSeed(t *testing.T, label, accrued string) *limCostFixture {
 	t.Helper()
-	c := limClient(t)
-	namespace := limNamespace(t, c, label)
+	c, namespace, limiter := limSetup(t, label)
 	f := &limCostFixture{
-		c: c, namespace: namespace, limiter: limLimiter(t, c, namespace),
+		c: c, namespace: namespace, limiter: limiter,
 		owner: uuid.NewString(), windows: limits.BudgetWindows(time.Now()),
 	}
 	f.accrue(t, "", accrued)
@@ -133,24 +132,6 @@ func limMoney(t *testing.T, text string) *big.Rat {
 		t.Fatalf("%q is not a decimal", text)
 	}
 	return value
-}
-
-func limExpiryScore(t *testing.T, c *coordination.Client, key, member string) int64 {
-	t.Helper()
-	switch score := do(t, c, "ZSCORE", key, member).(type) {
-	case float64:
-		return int64(score)
-	case string:
-		parsed, ok := new(big.Float).SetString(score)
-		if !ok {
-			t.Fatalf("score %q", score)
-		}
-		milliseconds, _ := parsed.Int64()
-		return milliseconds
-	default:
-		t.Fatalf("ZSCORE %s %s = %#v", key, member, score)
-		return 0
-	}
 }
 
 // limHas reports whether a hash holds a field.
@@ -654,10 +635,6 @@ func limLostReply(match func(keys []string) bool, lost func(value any) (any, err
 		}
 		return lost(value)
 	}}, ran
-}
-
-func limKeysEndWith(count int, suffix string) func([]string) bool {
-	return func(keys []string) bool { return len(keys) == count && strings.HasSuffix(keys[0], suffix) }
 }
 
 // limSlow answers every command after latency, and gives up on one whose

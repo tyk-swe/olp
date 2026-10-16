@@ -194,7 +194,7 @@ func rhSeed(t *testing.T, label string, price glPrice) *rhFixture {
 	}
 	g.h.refresh()
 	if price != (glPrice{}) {
-		glEventually(t, "the price list to reach the gateway", func() bool {
+		eventually(t, "the price list to reach the gateway", 15*time.Second, func() bool {
 			g.h.refresh()
 			inputs := g.h.Runtime.RoutingInputs()
 			return inputs != nil && len(inputs.Prices) >= 3
@@ -519,7 +519,7 @@ func rhMetadata(header http.Header) map[string]string {
 func rhCost(t *testing.T, f *rhFixture, requestID string) string {
 	t.Helper()
 	var cost string
-	glEventually(t, "accounting to price request "+requestID, func() bool {
+	eventually(t, "accounting to price request "+requestID, 15*time.Second, func() bool {
 		err := f.h.Pool.QueryRow(t.Context(),
 			`SELECT COALESCE(sum(estimated_cost)::text, '') FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, requestID).Scan(&cost)
 		return err == nil && cost != ""

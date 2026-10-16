@@ -51,8 +51,7 @@ func TestWorkloadIdentityMapsAndAccountsWithoutRetainingCredentials(t *testing.T
 	input := map[string]any{"name": "CI issuer", "issuer": jwks.URL, "jwks_url": jwks.URL, "enabled": true, "audiences": []string{"olp"}, "algorithms": []string{"EdDSA"}, "max_lifetime_seconds": 600, "disabled_key_ids": []string{}, "mappings": []any{map[string]any{"name": "build", "match": map[string]string{"/repository": "example/repo"}, "project_id": projectID, "limit_template": "worker", "route_groups": []string{"generation"}, "scopes": []string{"inference", "models_read"}, "end_user_claim": "/customer"}}}
 	issuer := h.want(owner, "POST", "/api/v1/workload-issuers", input, idem("issuer"), 201)
 	issuerPath := "/api/v1/workload-issuers/" + issuer["id"].(string)
-	client := limClient(t)
-	limiter := limLimiter(t, client, limNamespace(t, client, "workload"))
+	client, _, limiter := limSetup(t, "workload")
 	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
 	await := endUserAccounting(t, h, limiter)
 	replica := newAccessHarnessOn(t, h.Pool, h.DBURL)

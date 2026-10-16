@@ -277,26 +277,6 @@ func fleetStream(ctx context.Context, origin, secret string) (int, error) {
 	return resp.StatusCode, err
 }
 
-// fleetEventually waits for a condition something outside the request path decides:
-// a worker pass, a settled reservation, a drained stream.
-func fleetEventually(t *testing.T, what string, timeout time.Duration, check func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		if check() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out after %s waiting for %s", timeout, what)
-		}
-		select {
-		case <-t.Context().Done():
-			t.Fatalf("waiting for %s: %v", what, t.Context().Err())
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-}
-
 // fleetRetryAfter reads the whole number of seconds a refusal advertised.
 func fleetRetryAfter(t *testing.T, header http.Header) int {
 	t.Helper()

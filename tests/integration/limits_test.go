@@ -75,6 +75,15 @@ func limLimiter(t *testing.T, c *coordination.Client, namespace string) *limits.
 	return limiter
 }
 
+// limSetup wires the pieces a limits scenario starts from together: a Valkey
+// client, a fresh namespace it cleans up, and a limiter on it.
+func limSetup(t *testing.T, label string) (*coordination.Client, string, *limits.Limiter) {
+	t.Helper()
+	c := limClient(t)
+	namespace := limNamespace(t, c, label)
+	return c, namespace, limLimiter(t, c, namespace)
+}
+
 // limLookup mints a lookup identifier in the shape the gateway derives from an
 // API key: short, opaque, and unique per test.
 func limLookup() string { return "lk" + strings.ToLower(rand.Text()[:12]) }
@@ -242,9 +251,7 @@ func limWantCounters(t *testing.T, c *coordination.Client, key string, requests,
 // and agree with each other, and then crosses into the next window, where the
 // allowance starts over and resets at the end of that minute.
 func TestLimitsMinuteEndGivesAPositiveRetryAndTheNextMinuteItsOwnAllowance(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "minute-end")
-	limiter := limLimiter(t, c, namespace)
+	c, _, limiter := limSetup(t, "minute-end")
 
 	for attempt := range 3 {
 		// Land inside the last part of a window, where a naive implementation
@@ -339,9 +346,7 @@ func TestLimitsMinuteEndGivesAPositiveRetryAndTheNextMinuteItsOwnAllowance(t *te
 // Only an explicit clear ends it.
 
 func TestLimitsCostBudgetsFailClosedUntilReconciled(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "cost")
-	limiter := limLimiter(t, c, namespace)
+	c, namespace, limiter := limSetup(t, "cost")
 	windows := limits.BudgetWindows(time.Now())
 
 	apiKey := uuid.NewString()
@@ -459,9 +464,7 @@ func TestLimitsCostBudgetsFailClosedUntilReconciled(t *testing.T) {
 }
 
 func TestLimitsMonthlyBudgetExhaustionRejectsWithItsOwnWindow(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "monthly")
-	limiter := limLimiter(t, c, namespace)
+	_, _, limiter := limSetup(t, "monthly")
 	windows := limits.BudgetWindows(time.Now())
 
 	apiKey := uuid.NewString()
@@ -604,9 +607,7 @@ func limWindowRows(t *testing.T, pool *pgxpool.Pool, apiKey string) map[string]s
 
 func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	pool, _ := limAccounting(t)
-	c := limClient(t)
-	namespace := limNamespace(t, c, "accounting")
-	limiter := limLimiter(t, c, namespace)
+	c, namespace, limiter := limSetup(t, "accounting")
 
 	var now time.Time
 	if err := pool.QueryRow(t.Context(), "SELECT now()").Scan(&now); err != nil {
@@ -815,9 +816,7 @@ func limAwaitLeadership(t *testing.T, pool *pgxpool.Pool) *limits.Leader {
 
 func TestLimitsCostReconciliationLeadershipIsExclusive(t *testing.T) {
 	pool, dbURL := limAccounting(t)
-	c := limClient(t)
-	namespace := limNamespace(t, c, "leadership")
-	limiter := limLimiter(t, c, namespace)
+	_, _, limiter := limSetup(t, "leadership")
 	owner, provider := limSeedAuthority(t, pool)
 	spender := limSeedKey(t, pool, owner, false)
 	limSeedFact(t, pool, provider, spender, time.Now().UTC(), limPointer("0.020000000000"))

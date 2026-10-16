@@ -6,7 +6,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -362,111 +361,10 @@ func repSeedReports(f *repFixture) {
 	        lag_events, checked_at) VALUES (true, 0, 0, now())`)
 }
 
-func repRange(f *repFixture, fromHours, toHours float64) usage.Filters {
-	return usage.Filters{
-		Start:       f.Base.Add(time.Duration(fromHours * float64(time.Hour))),
-		End:         f.Base.Add(time.Duration(toHours * float64(time.Hour))),
-		AllProjects: true,
-	}
-}
-
 // The whole bucket inside the range plus both live facts; the half bucket the
 // range starts in is left out rather than counted in part.
 
 // A row without a key is the installation's own, reported as system.
-
-// Keep both windows safely in the past at any hour while exercising each
-// side of the UTC day boundary.
-
-func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
-	t.Helper()
-	window := "start=" + f.Base.Format(time.RFC3339) +
-		"&end=" + f.Base.Add(3*time.Hour).Format(time.RFC3339)
-
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/usage/summary?"+window, nil, nil, 200)
-	if body["request_count"].(float64) != 5 || body["input_tokens"].(string) != "117" {
-		t.Fatalf("summary body = %v", body)
-	}
-	if body["complete"].(bool) {
-		t.Fatal("the summary reported itself complete")
-	}
-	consumer := body["request_metadata_consumer"].(map[string]any)
-	if consumer["state"].(string) != "healthy" {
-		t.Fatalf("consumer = %v", consumer)
-	}
-	coverage := body["coverage"].(map[string]any)
-	if !coverage["range_complete"].(bool) || coverage["excluded_partial_aggregate_boundaries"].(float64) != 0 {
-		t.Fatalf("coverage = %v", coverage)
-	}
-
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/usage/completeness?"+window, nil, nil, 200)
-	if body["priced_count"].(float64) != 3 {
-		t.Fatalf("completeness body = %v", body)
-	}
-
-	body = f.h.want(f.Owner, http.MethodGet,
-		"/api/v1/usage/breakdown?"+window+"&dimension=provider&limit=5", nil, nil, 200)
-	items := body["items"].([]any)
-	if len(items) != 2 {
-		t.Fatalf("breakdown items = %v", items)
-	}
-
-	body = f.h.want(f.Owner, http.MethodGet,
-		"/api/v1/usage/time-series?"+window+"&granularity=day", nil, nil, 200)
-	wantByBucket := map[string]float64{}
-	for _, point := range []struct {
-		at    time.Time
-		count float64
-	}{
-		{f.Base, 2},
-		{f.Base.Add(time.Hour), 1},
-		{f.Base.Add(2*time.Hour + 15*time.Minute), 2},
-	} {
-		bucket := point.at.UTC().Truncate(24 * time.Hour).Format(time.RFC3339)
-		wantByBucket[bucket] += point.count
-	}
-	wantBuckets := make([]string, 0, len(wantByBucket))
-	for bucket := range wantByBucket {
-		wantBuckets = append(wantBuckets, bucket)
-	}
-	sort.Strings(wantBuckets)
-	series := body["items"].([]any)
-	if len(series) != len(wantBuckets) {
-		t.Fatalf("daily series = %v, want %d UTC buckets", series, len(wantBuckets))
-	}
-	var total float64
-	for i, raw := range series {
-		point := raw.(map[string]any)
-		if point["bucket"] != wantBuckets[i] || point["request_count"] != wantByBucket[wantBuckets[i]] {
-			t.Fatalf("daily bucket %d = %v, want %s with %v requests", i, point,
-				wantBuckets[i], wantByBucket[wantBuckets[i]])
-		}
-		total += point["request_count"].(float64)
-	}
-	if total != 5 {
-		t.Fatalf("daily series total = %v, want 5", total)
-	}
-
-	for _, c := range []struct{ query, code string }{
-		{"start=" + f.Base.Format(time.RFC3339), "invalid_range"},
-		{window + "&operation=telepathy", "invalid_operation"},
-		{window + "&dimension=sideways", "invalid_dimension"},
-	} {
-		path := "/api/v1/usage/summary?" + c.query
-		if strings.Contains(c.query, "dimension") {
-			path = "/api/v1/usage/breakdown?" + c.query
-		}
-		problem := f.h.want(f.Owner, http.MethodGet, path, nil, nil, 400)
-		if code := repProblemCode(t, problem); code != c.code {
-			t.Fatalf("query %q gave %s, want %s", c.query, code, c.code)
-		}
-	}
-	problem := f.h.want(f.Owner, http.MethodGet,
-		"/api/v1/usage/breakdown?"+window+"&dimension=route&limit=0", nil, nil, 400)
-	if code := repProblemCode(t, problem); code != "invalid_limit" {
-		t.Fatalf("limit problem = %s", code)
-	}
-}
 
 func TestRequestHistoryPagesAndDetails(t *testing.T) {
 	f := repSetup(t)
@@ -934,36 +832,3 @@ func repSeedEstimates(f *repFixture) {
 	// Reported usage without any input count: nothing to compare the estimate to.
 	repEstimated(f, hour, "alpha", "gpt-x", with(billable, nil, repCount(7), "tokenizer", "openai-o200k"))
 }
-
-type repEstimateTotals struct {
-	Requests              int64
-	Input                 string
-	Estimated, Reported   string
-	EstimatedAttemptCount int64
-}
-
-func repEstimateOf(totals usage.Totals) repEstimateTotals {
-	return repEstimateTotals{totals.RequestCount, totals.InputTokens, totals.EstimatedInputTokens,
-		totals.ReportedInputTokens, totals.EstimatedAttemptCount}
-}
-
-// Only attempts with both an estimate and reported input are compared, and
-// both sums run over those same attempts: the retained hour contributes its
-// stored sums, not its all-attempt input of 100.
-
-// The attempt that was never estimated is in its model's family, where it
-// adds to the tokens and nothing to the estimate. Only a row recorded
-// before families were is unknown.
-
-// A range with no estimated attempt reports zeros, which the console shows
-// as no error rather than a perfect one.
-
-// Media units keep the live and retained media totals at the same scale.
-
-// Never estimated, but of a family: its own row, apart from the estimated
-// attempts of that family and from the rows recorded before families were.
-
-// Facts that differ only in family or provenance roll into separate rows.
-
-// A later fact in the same hour and family folds into its row: the sums
-// accumulate rather than being replaced.

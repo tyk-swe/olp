@@ -4,7 +4,6 @@ package integration_test
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -267,74 +266,6 @@ func testGrantRefreshLockLoss(t *testing.T, outcome string) {
 	dueNow(t, h, credentialID)
 	if !pass(t, second) || readGrant(t, h, credentialID).generation != 3 {
 		t.Fatal("the rotated token could not refresh the grant again")
-	}
-}
-
-func testLostRefreshResponse(t *testing.T, failure string) {
-	t.Helper()
-	h := newAccessHarness(t)
-	owner := h.owner()
-	authority := testutil.NewOAuthServer(t)
-	var refreshes atomic.Int64
-	lost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Error(err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if r.Form.Get("grant_type") == "refresh_token" {
-			refreshes.Add(1)
-			response := httptest.NewRecorder()
-			authority.Config.Handler.ServeHTTP(response, r)
-			switch failure {
-			case "follow-up refused":
-				w.Write(response.Body.Bytes())
-				return
-			case "truncated body":
-				w.Header().Set("Content-Length", fmt.Sprint(response.Body.Len()+1))
-				w.Write(response.Body.Bytes())
-				return
-			}
-			conn, _, err := w.(http.Hijacker).Hijack()
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			conn.Close()
-			return
-		}
-		if failure == "follow-up refused" && refreshes.Load() > 0 && r.URL.Path == "/userinfo" {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprint(w, `{"error":"temporarily_unavailable"}`)
-			return
-		}
-		authority.Config.Handler.ServeHTTP(w, r)
-	}))
-	t.Cleanup(lost.Close)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+lost.URL)
-	credentialID := enrollGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
-	enrolled := len(authority.Issued())
-	dueNow(t, h, credentialID)
-	if !pass(t, grantRefresher(t, h)) || refreshes.Load() != 1 || len(authority.Issued()) != enrolled+2 {
-		t.Fatal("the upstream did not rotate the token before its response was lost")
-	}
-	grant := readGrant(t, h, credentialID)
-	if grant.generation != 1 || grant.attempt == nil || grant.refresh == nil || time.Until(*grant.refresh) < 90*time.Second {
-		t.Errorf("the ambiguous refresh lost its fence: %+v", grant)
-	}
-	if err := runtime.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
-		t.Fatal(err)
-	}
-	if pass(t, grantRefresher(t, h)) || refreshes.Load() != 1 {
-		t.Fatal("an early refresh request retried the ambiguous attempt")
-	}
-	dueNow(t, h, credentialID)
-	pass(t, grantRefresher(t, h))
-	if refreshes.Load() != 1 {
-		t.Fatalf("the spent refresh token was sent upstream %d times", refreshes.Load())
-	}
-	if grant := readGrant(t, h, credentialID); grant.lapsed == nil || grant.refreshToken != nil || grant.failure == nil || !strings.Contains(*grant.failure, "outcome was lost") {
-		t.Fatalf("the lost refresh outcome did not lapse the grant: %+v", grant)
 	}
 }
 

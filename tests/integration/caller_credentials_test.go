@@ -92,7 +92,7 @@ func TestCallerCredentialsStayOutOfDurableStateAndTelemetry(t *testing.T) {
 			t.Fatalf("unexpected response %d: %s", response.StatusCode, body)
 		}
 	}
-	glEventually(t, "caller accounting", func() bool {
+	eventually(t, "caller accounting", 15*time.Second, func() bool {
 		var n int
 		_ = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.attempts WHERE provider_id=$1 AND routing->>'credential_source'='caller'`, provider["id"]).Scan(&n)
 		return n == 3

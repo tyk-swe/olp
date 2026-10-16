@@ -18,13 +18,35 @@ import (
 	glide "github.com/valkey-io/valkey-glide/go/v2"
 )
 
-func required(t *testing.T, name string) string {
+func required(t testing.TB, name string) string {
 	t.Helper()
 	value := os.Getenv(name)
 	if value == "" {
 		t.Fatalf("%s is required; run make integration", name)
 	}
 	return value
+}
+
+// eventually waits for a condition something outside the request path decides:
+// a worker settles accounting, a detector marks a replica stale, a refreshed
+// grant lands. It polls until the timeout and fails the test if the condition
+// never holds.
+func eventually(t *testing.T, what string, timeout time.Duration, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if check() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %s waiting for %s", timeout, what)
+		}
+		select {
+		case <-t.Context().Done():
+			t.Fatalf("waiting for %s: %v", what, t.Context().Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
 }
 
 func client(t *testing.T, rawURL string, timeout time.Duration) *coordination.Client {

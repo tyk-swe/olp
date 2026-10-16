@@ -81,7 +81,7 @@ func testEndUserConcurrentCostBudget(t *testing.T, dimension string) {
 		t.Fatalf("unknown balance: %d %v", status, err)
 	}
 	day, month := limCostKeys(f.namespace, owner)
-	glEventually(t, "authoritative end-user balance", func() bool {
+	eventually(t, "authoritative end-user balance", 15*time.Second, func() bool {
 		value, err := valkey.Do(t.Context(), "HGET", day, "accrued")
 		return err == nil && value != nil
 	})
@@ -114,13 +114,13 @@ func testEndUserConcurrentCostBudget(t *testing.T, dimension string) {
 	if admitted == 0 || admitted > 10 {
 		t.Fatalf("budget admitted %d ten-dollar requests", admitted)
 	}
-	glEventually(t, "all request metadata", func() bool {
+	eventually(t, "all request metadata", 15*time.Second, func() bool {
 		var count int
 		err := f.h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.requests WHERE api_key_id=$1", id).Scan(&count)
 		return err == nil && count == requests+1
 	})
 	wantCost := big.NewRat(int64(admitted*10), 1)
-	glEventually(t, "settled daily and monthly balances", func() bool {
+	eventually(t, "settled daily and monthly balances", 15*time.Second, func() bool {
 		for _, key := range []string{day, month} {
 			value, err := valkey.Do(t.Context(), "HGET", key, "accrued")
 			if err != nil {
@@ -133,7 +133,7 @@ func testEndUserConcurrentCostBudget(t *testing.T, dimension string) {
 		}
 		return true
 	})
-	glEventually(t, "settled cost reservations", func() bool {
+	eventually(t, "settled cost reservations", 15*time.Second, func() bool {
 		reserved, err := f.limiter.Reserved(t.Context(), owner)
 		return err == nil && reserved == "0"
 	})
@@ -172,7 +172,7 @@ func testEndUserConcurrentCostBudget(t *testing.T, dimension string) {
 			}
 		}
 	}
-	glEventually(t, "completed request traces", func() bool {
+	eventually(t, "completed request traces", 15*time.Second, func() bool {
 		count := 0
 		for _, span := range exporter.GetSpans() {
 			if span.Name == "request" {

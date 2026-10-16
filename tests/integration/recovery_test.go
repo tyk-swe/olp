@@ -95,7 +95,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 		if err := database.Migrate(t.Context(), fresh); err != nil {
 			t.Fatal(err)
 		}
-		check := exec.CommandContext(t.Context(), os.Getenv("OLP_TEST_BINARY"), "doctor")
+		check := exec.CommandContext(t.Context(), required(t, "OLP_TEST_BINARY"), "doctor")
 		checkEnv := maps.Clone(env)
 		checkEnv["OLP_DATABASE_URL"] = freshURL
 		check.Env = testutil.Environment(checkEnv)
@@ -162,7 +162,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 				restartEnv["OLP_LISTEN_ADDR"] = "127.0.0.1:0"
 				restartEnv["OLP_OBSERVABILITY_LISTEN_ADDR"] = "127.0.0.1:0"
 				restartEnv["OLP_SHUTDOWN_TIMEOUT"] = "2s"
-				process := testutil.StartProcess(t, os.Getenv("OLP_TEST_BINARY"), "all", restartEnv)
+				process := testutil.StartProcess(t, required(t, "OLP_TEST_BINARY"), "all", restartEnv)
 				if err := process.Stop(5 * time.Second); err != nil {
 					t.Fatal(err)
 				}

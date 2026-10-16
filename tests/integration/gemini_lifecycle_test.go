@@ -5,22 +5,11 @@ package integration_test
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -348,59 +337,6 @@ func geminiPublic(t *testing.T, h *accessHarness, method, path, key string, body
 		t.Fatal(err)
 	}
 	return resp, raw
-}
-
-// The raw peer never reads a WebSocket frame, so the SDK cannot quietly
-// drain the socket in the background. A stalled or disconnected client
-// must release the provider connection and the gateway's session slot.
-
-func geminiTrustedTLSServer(t *testing.T, handler http.Handler) (*httptest.Server, string) {
-	t.Helper()
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "OLP Gemini qualification CA"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}
-	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	caParsed, err := x509.ParseCertificate(caDER)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverCertificate := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "127.0.0.1"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), BasicConstraintsValid: true,
-		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	serverDER, err := x509.CreateCertificate(rand.Reader, serverCertificate, caParsed, &serverKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	private, err := x509.MarshalPKCS8PrivateKey(serverKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	certificate, err := tls.X509KeyPair(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverDER}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	caFile := filepath.Join(t.TempDir(), "gemini-qualification-ca.pem")
-	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0600); err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewUnstartedServer(handler)
-	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}
-	server.StartTLS()
-	t.Cleanup(server.Close)
-	return server, caFile
 }
 
 // The fixture CA is scoped to the SDK's local TLS connection. uv also

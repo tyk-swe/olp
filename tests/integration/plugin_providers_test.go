@@ -388,25 +388,3 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 		}
 	})
 }
-
-// The superseded revision still pins the first build.
-
-// Destination-affecting plugin edits require retiring all selectable versions,
-// then explicitly supplying a credential for the new destination.
-func revokePluginCredentials(t *testing.T, h *accessHarness, owner *browser, path string) {
-	t.Helper()
-	for _, raw := range h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any) {
-		credential := raw.(map[string]any)
-		if credential["revoked_at"] != nil {
-			continue
-		}
-		detail := h.want(owner, "GET", path, nil, nil, 200)
-		h.want(owner, "POST", path+"/credentials/"+credential["id"].(string)+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
-	}
-}
-
-func replacePluginCredential(t *testing.T, h *accessHarness, owner *browser, path string) {
-	t.Helper()
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	h.want(owner, "POST", path+"/credentials", map[string]any{"credential": pluginCredential}, withMatch(detail, idem(uuid.NewString())), 201)
-}

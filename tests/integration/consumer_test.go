@@ -95,19 +95,6 @@ func acctConsumer(t *testing.T, pool *pgxpool.Pool, valkey *coordination.Client,
 	return stop
 }
 
-// acctEventually waits for a condition the consumer reaches asynchronously.
-func acctEventually(t *testing.T, what string, check func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if check() {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
 func acctStreamLength(t *testing.T, valkey *coordination.Client, stream string) int64 {
 	t.Helper()
 	length, ok := do(t, valkey, "XLEN", stream).(int64)
@@ -208,10 +195,10 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 	acctPublish(t, valkey, stream, goodPayload)
 
 	acctConsumer(t, fixture.Pool, valkey, stream, "recorder", nil, usage.ReclaimIdle)
-	acctEventually(t, "the good delivery to become usage", func() bool {
+	eventually(t, "the good delivery to become usage", 30*time.Second, func() bool {
 		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
 	})
-	acctEventually(t, "only the unsupported version to remain", func() bool {
+	eventually(t, "only the unsupported version to remain", 30*time.Second, func() bool {
 		return acctStreamLength(t, valkey, stream) == 1
 	})
 	if payloads := fleetPayloads(t, valkey, stream); len(payloads) != 1 || payloads[0] != futurePayload {

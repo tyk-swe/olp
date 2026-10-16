@@ -19,8 +19,6 @@ func (h *accessHarness) download(b *browser, method, path string, headers map[st
 	return response.StatusCode, response.Header, string(raw)
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func TestExportRequestCSVDownload(t *testing.T) {
 	h := repHarness(t)
 	owner := h.owner()

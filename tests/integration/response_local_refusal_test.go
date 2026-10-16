@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -100,9 +99,9 @@ func newResponseRefusalFixture(t *testing.T, fidelity string) *responseRefusalFi
 		"allow_provider_state": true, "tokens_per_minute": 100000, "requests_per_minute": 100,
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
 	f.key, f.lookup = created["secret"].(string), created["lookup_id"].(string)
-	f.valkey = limClient(t)
-	f.namespace = limNamespace(t, f.valkey, "response-local-refusal")
-	f.h.Gateway.Admission = gateway.NewAdmission(limLimiter(t, f.valkey, f.namespace),
+	var limiter *limits.Limiter
+	f.valkey, f.namespace, limiter = limSetup(t, "response-local-refusal")
+	f.h.Gateway.Admission = gateway.NewAdmission(limiter,
 		func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	f.h.Gateway.Sink = f.sink
 	f.h.refresh()
@@ -203,45 +202,4 @@ func (f *responseRefusalFixture) retainedOwner(t *testing.T) (string, string, bo
 		t.Fatal(err)
 	}
 	return local, original, pending
-}
-
-func assertResponseOriginalMetadata(t *testing.T, h *accessHarness, event gateway.Envelope, status int) {
-	t.Helper()
-	var storedStatus int
-	var committed bool
-	last := event.Attempts[len(event.Attempts)-1]
-	err := h.Pool.QueryRow(t.Context(), `SELECT r.status_code,a.committed
- FROM olp.requests r JOIN olp.attempts a ON a.request_id=r.id AND a.request_started_at=r.started_at
- WHERE r.id=$1 AND a.ordinal=$2`, event.AccountingID, last.Ordinal).Scan(&storedStatus, &committed)
-	if err != nil || storedStatus != status || committed != last.Committed {
-		t.Fatalf("financial owner replaced original HTTP delivery metadata: stored_status=%d stored_commit=%t actual_status=%d actual_commit=%t err=%v", storedStatus, committed, status, last.Committed, err)
-	}
-}
-
-func responseRefusalTrigger(t *testing.T, h *accessHarness, table, predicate string) func() {
-	t.Helper()
-	// table and predicate are test-owned literals, scoped to this installation.
-	statement := `CREATE FUNCTION olp.reject_response_local_test() RETURNS trigger LANGUAGE plpgsql AS $$
- BEGIN IF ` + predicate + ` THEN RAISE EXCEPTION 'injected response local refusal'; END IF; RETURN NEW; END $$;
- CREATE TRIGGER reject_response_local_test BEFORE INSERT ON olp.` + table + `
- FOR EACH ROW EXECUTE FUNCTION olp.reject_response_local_test()`
-	if _, err := h.Pool.Exec(t.Context(), statement); err != nil {
-		t.Fatal(err)
-	}
-	removed := false
-	remove := func() {
-		t.Helper()
-		if removed {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := h.Pool.Exec(ctx, `DROP TRIGGER reject_response_local_test ON olp.`+table+`; DROP FUNCTION olp.reject_response_local_test()`); err != nil {
-			t.Errorf("remove response refusal injection: %v", err)
-			return
-		}
-		removed = true
-	}
-	t.Cleanup(remove)
-	return remove
 }

@@ -174,13 +174,13 @@ func TestGatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	}
 	// Waiting for the accounting proves the replica's events were delivered,
 	// so what the epoch below reports is a shutdown and not a backlog.
-	fleetEventually(t, "the worker to account for the requests", 60*time.Second, func() bool {
+	eventually(t, "the worker to account for the requests", 60*time.Second, func() bool {
 		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 	})
 	// The epoch is checkpointed while the replica runs, so waiting for it to
 	// report the events it accepted is what makes the record below a statement
 	// about a shutdown rather than about a checkpoint that never happened.
-	fleetEventually(t, "the replica to report the events it accepted", 30*time.Second, func() bool {
+	eventually(t, "the replica to report the events it accepted", 30*time.Second, func() bool {
 		return in.count(`SELECT count(*) FROM olp.request_metadata_gateway_epochs
             WHERE gateway_instance = $1 AND accepted = $2`, lostInstance, requests) == 1
 	})
@@ -190,7 +190,7 @@ func TestGatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 
 	// Detection deliberately waits before it declares a replica gone, and then
 	// confirms on a later pass, so this takes over a minute by design.
-	fleetEventually(t, "the detector to confirm the lost replica's epoch",
+	eventually(t, "the detector to confirm the lost replica's epoch",
 		usage.EpochStaleAfter+usage.EpochConfirmAfter+90*time.Second, func() bool {
 			return in.count(`SELECT count(*) FROM olp.request_metadata_gateway_epochs
                 WHERE gateway_instance = $1 AND stale_detected_at IS NOT NULL`, lostInstance) == 1
@@ -245,7 +245,7 @@ func TestGatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	if err := kept.Stop(15 * time.Second); err != nil {
 		t.Fatalf("stop the replica: %v", err)
 	}
-	fleetEventually(t, "the stopped replica to close its epoch", 30*time.Second, func() bool {
+	eventually(t, "the stopped replica to close its epoch", 30*time.Second, func() bool {
 		return in.count(`SELECT count(*) FROM olp.request_metadata_gateway_epochs
             WHERE gateway_instance = $1 AND gracefully_closed_at IS NOT NULL`, keptInstance) == 1
 	})

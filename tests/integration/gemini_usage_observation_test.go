@@ -5,7 +5,6 @@ package integration_test
 import (
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -36,19 +35,6 @@ func (reply *geminiAccountingReply) write(w http.ResponseWriter, id string, stre
 
 func geminiUsageCheckpoint(input, output, cached int64) string {
 	return fmt.Sprintf(`{"total_input_tokens":%d,"total_output_tokens":%d,"total_cached_tokens":%d}`, input, output, cached)
-}
-
-func observeGeminiCheckpoint(t *testing.T, h *accessHarness, provider *geminiLifecycleProvider, local, key, counts string, stream bool) {
-	t.Helper()
-	provider.accountingReply.Store(&geminiAccountingReply{status: "in_progress", usage: counts})
-	path := "/gemini/v1beta/interactions/" + local
-	if stream {
-		path += "?stream=true"
-	}
-	response, raw := geminiPublic(t, h, http.MethodGet, path, key, nil)
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"id":"`+local+`"`) {
-		t.Fatalf("checkpoint retrieval: %d %s", response.StatusCode, raw)
-	}
 }
 
 func assertGeminiUsageSnapshot(t *testing.T, h *accessHarness, original string, complete bool, input, output, cached int64) {

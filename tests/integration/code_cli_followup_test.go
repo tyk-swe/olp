@@ -71,54 +71,6 @@ func followupClient(t *testing.T, f *codeFleet, ws bool) (*codecli.Client, *cliI
 	return client, capture, flags
 }
 
-func followupAccounting(t *testing.T, f *codeFleet, uncertain int) {
-	t.Helper()
-	requests := f.peer.Requests()
-	var attempts []codemode.Attempt
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		attempts = codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
-		finished := len(attempts) == len(requests)
-		for _, a := range attempts {
-			finished = finished && a.FinishedAt != nil
-		}
-		if finished {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%d upstream generations vs unfinished attempts: %+v", len(requests), attempts)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
-	if len(bindings) != 1 {
-		t.Fatalf("expected one durable root, got %+v", bindings)
-	}
-	unknown := 0
-	for _, a := range attempts {
-		if a.AccountID != bindings[0].AccountID || a.BindingID != bindings[0].ID {
-			t.Fatal("retry changed account or binding")
-		}
-		if a.Operation == "prewarm" {
-			if a.ReservedTokens != 0 || a.ReportedTokens != nil {
-				t.Fatal("prewarm fabricated usage or reserved a budget")
-			}
-			continue
-		}
-		if a.State == "uncertain" && a.ReportedTokens == nil {
-			unknown++
-		}
-	}
-	if unknown != uncertain {
-		t.Fatalf("uncertain attempts=%d, want %d: %+v", unknown, uncertain, attempts)
-	}
-	for _, r := range requests {
-		if r.Header.Get("Authorization") != requests[0].Header.Get("Authorization") || r.Header.Get("Thread-Id") != bindings[0].Conversation || r.Header.Get("X-OLP-Code-Model") != "" {
-			t.Fatal("pin, identity or OLP control boundary changed")
-		}
-	}
-}
-
 func TestCodeCLIFollowupFreshReviewParentEstablishment(t *testing.T) {
 	for _, scenario := range []string{"http-only", "websocket", "websocket-http-fallback"} {
 		t.Run(scenario, func(t *testing.T) {

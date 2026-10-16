@@ -17,8 +17,8 @@ import (
 
 func TestBudgetGroupIdentitySurvivesInFlightUnassignmentAndDeletion(t *testing.T) {
 	h := newAccessHarness(t)
-	c := limClient(t)
-	h.Gateway.Admission = gateway.NewAdmission(limLimiter(t, c, limNamespace(t, c, "group-lifetime")), nil, slog.New(slog.DiscardHandler))
+	_, _, limiter := limSetup(t, "group-lifetime")
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
 	owner := h.owner()
 	group := h.want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "inflight group", "requests_per_minute": 100}, idem(uuid.NewString()), 201)
 	provider := newGeminiLifecycleProvider(t)

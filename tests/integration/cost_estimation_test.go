@@ -39,15 +39,6 @@ func maxCostChat(t *testing.T, h *accessHarness, secret, slug, ceiling string) (
 	return reply.StatusCode, parsed
 }
 
-func pricedGenerationFixture(t *testing.T) (*glFixture, string) {
-	t.Helper()
-	client := limClient(t)
-	namespace := limNamespace(t, client, "max-cost")
-	f := glSeedPriced(t, limLimiter(t, client, namespace), limits.FailClosed, glPrice{input: "1000000", output: "1000000"})
-	_, secret := f.key("estimate", map[string]any{})
-	return f, secret
-}
-
 // Anthropic surface renders the same refusal in its own envelope.
 
 // No price published: the bound is unknowable, so the ceiling refuses.
@@ -142,7 +133,7 @@ func glSeedCommitted(t *testing.T, limiter *limits.Limiter) (f struct {
 	namespace := limNamespace(t, limClient(t), "max-cost-committed")
 	_ = namespace
 	h.refresh()
-	glEventually(t, "the committed provider to publish", func() bool {
+	eventually(t, "the committed provider to publish", 15*time.Second, func() bool {
 		h.refresh()
 		snapshot := h.Runtime.Release().Snapshot
 		p := snapshot.Providers[created["id"].(string)]

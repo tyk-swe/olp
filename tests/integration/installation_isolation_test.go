@@ -50,7 +50,7 @@ func TestSharedValkeyIsolatesInstallations(t *testing.T) {
 			t.Fatalf("inference: %d %s", status, code)
 		}
 	}
-	fleetEventually(t, "the first installation to account for its own traffic", 60*time.Second,
+	eventually(t, "the first installation to account for its own traffic", 60*time.Second,
 		func() bool {
 			return first.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 		})
@@ -156,7 +156,7 @@ func fleetAwaitWorkerPlane(t *testing.T, in *fleetInstall, since time.Time) {
 	t.Helper()
 	tasks := []usage.Task{usage.TaskRequestMetadataConsumer, usage.TaskMaintenance,
 		usage.TaskCostReconciliation, usage.TaskEpochDetection}
-	fleetEventually(t, "the worker plane to check in", 40*time.Second, func() bool {
+	eventually(t, "the worker plane to check in", 40*time.Second, func() bool {
 		for _, task := range tasks {
 			if in.count(`SELECT count(*) FROM olp.worker_task_health
                 WHERE task = $1 AND checked_at >= $2`, string(task), since) == 0 {

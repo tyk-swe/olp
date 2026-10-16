@@ -70,8 +70,7 @@ func codeForwardServer(t *testing.T, f *codeFixture, upstream string) (*httptest
 	f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: pinned, authority: access.Authority{ID: f.key, LookupID: lookup, ProjectID: &f.project, Policy: policy}}
 	f.h.Gateway.CodeLedger = f.store
 	f.h.Gateway.CodeAuthorizer = codeForwardAuthorizer{}
-	c := limClient(t)
-	limiter := limLimiter(t, c, limNamespace(t, c, "code-forwarding"))
+	_, _, limiter := limSetup(t, "code-forwarding")
 	f.h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	mux := http.NewServeMux()
 	f.h.Gateway.RegisterCode(mux)

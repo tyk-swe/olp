@@ -70,9 +70,8 @@ func TestProjectEndUserPoliciesEnforceBothBoundaries(t *testing.T) {
 		key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": fmt.Sprintf("key-%d", i), "project_id": projectID, "scopes": []string{"inference"}, "allowed_routes": []string{"end-user-project"}, "end_user_source": "native", "end_user_policy": map[string]any{"defaults": map[string]any{"requests_per_minute": 2}}}, idem(fmt.Sprintf("key-%d", i)), 201)
 		secrets[i] = key["secret"].(string)
 	}
-	c := limClient(t)
-	namespace := limNamespace(t, c, "project-end-users")
-	h.Gateway.Admission = gateway.NewAdmission(limLimiter(t, c, namespace), nil, slog.New(slog.DiscardHandler))
+	c, namespace, limiter := limSetup(t, "project-end-users")
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
 	h.refresh()
 	replica := newAccessHarnessOn(t, h.Pool, h.DBURL)
 	replica.Gateway.Admission = gateway.NewAdmission(limLimiter(t, limClient(t), namespace), nil, slog.New(slog.DiscardHandler))
@@ -102,7 +101,7 @@ func TestProjectEndUserPoliciesEnforceBothBoundaries(t *testing.T) {
 			replica.refresh()
 		}
 		setBudget("1000")
-		glEventually(t, "project price publication", func() bool {
+		eventually(t, "project price publication", 15*time.Second, func() bool {
 			h.refresh()
 			replica.refresh()
 			inputs := replica.Runtime.RoutingInputs()

@@ -165,14 +165,6 @@ func billingProviderID(provider map[string]any) string { return provider["id"].(
 // Scoping: a manager of another project gets 404; a viewer of the
 // provider's project reads it.
 
-// DELETE removes the import but keeps it deletable-idempotent via the
-// 404 that follows.
-
-func userETag(h *accessHarness, owner *browser, userID string) string {
-	record := h.want(owner, "GET", "/api/v1/users/"+userID, nil, nil, 200)
-	return record["etag"].(string)
-}
-
 // TestBillingImportEndToEnd runs the importer against the fake vendors and
 // checks the stored invoiced costs and the reconciliation report.
 func TestBillingImportEndToEnd(t *testing.T) {

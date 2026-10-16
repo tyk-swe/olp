@@ -3,12 +3,8 @@
 package integration_test
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -227,71 +223,6 @@ func TestDeviceAuthorizationEnrollsAnySlotThroughAnUnconfinedPlugin(t *testing.T
 	if grant := readGrant(t, h, credentialID); grant.generation != 2 || grant.failures != 0 {
 		t.Fatalf("refreshed grant %+v", grant)
 	}
-}
-
-// deviceLoginAuthority is a fake upstream authority with its own variant of
-// device authorization, like ChatGPT Codex's device login: a JSON request
-// issues a user code, polls answer 403 until the operator approves, and then
-// return an authorization code and its PKCE verifier, which /oauth/token
-// exchanges once.
-type deviceLoginAuthority struct {
-	*httptest.Server
-	mu       sync.Mutex
-	userCode string
-	approved bool
-	// code is the authorization code the approved device login returned,
-	// until it is exchanged.
-	code string
-	// hold, while set, holds each poll until it is closed, once the poll is
-	// announced on arrived.
-	hold, arrived chan struct{}
-}
-
-func newDeviceLoginAuthority(t *testing.T) *deviceLoginAuthority {
-	a := &deviceLoginAuthority{}
-	const verifier = "device-login-verifier"
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/accounts/deviceauth/usercode", func(w http.ResponseWriter, r *http.Request) {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.userCode = "DL-" + uuid.NewString()[:4]
-		writeJSON(w, map[string]string{"device_auth_id": "auth-1", "user_code": a.userCode, "interval": "7"})
-	})
-	mux.HandleFunc("POST /api/accounts/deviceauth/token", func(w http.ResponseWriter, r *http.Request) {
-		a.mu.Lock()
-		hold := a.hold
-		a.mu.Unlock()
-		if hold != nil {
-			a.arrived <- struct{}{}
-			<-hold
-		}
-		var polled struct {
-			DeviceAuthID string `json:"device_auth_id"`
-			UserCode     string `json:"user_code"`
-		}
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		if json.NewDecoder(r.Body).Decode(&polled) != nil || polled.DeviceAuthID != "auth-1" || polled.UserCode != a.userCode || !a.approved {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		a.code = uuid.NewString()
-		writeJSON(w, map[string]string{"authorization_code": a.code, "code_verifier": verifier})
-	})
-	mux.HandleFunc("POST /oauth/token", func(w http.ResponseWriter, r *http.Request) {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		if r.ParseForm() != nil || a.code == "" || r.PostForm.Get("code") != a.code || r.PostForm.Get("code_verifier") != verifier ||
-			r.PostForm.Get("redirect_uri") != a.URL+"/deviceauth/callback" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		a.code = ""
-		writeJSON(w, map[string]any{"access_token": "device-login-access", "refresh_token": "device-login-refresh", "expires_in": 3600, "account_id": "account-7"})
-	})
-	a.Server = httptest.NewServer(mux)
-	t.Cleanup(a.Close)
-	return a
 }
 
 // A status request abandoned while its poll runs leaves the enrollment
