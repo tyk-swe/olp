@@ -3636,16 +3636,19 @@ func (e RequestDetailResponseCacheResult) Valid() bool {
 
 // Defines values for RequestOrigin.
 const (
-	RequestOriginCaller     RequestOrigin = "caller"
-	RequestOriginClassifier RequestOrigin = "classifier"
-	RequestOriginPlayground RequestOrigin = "playground"
-	RequestOriginProbe      RequestOrigin = "probe"
-	RequestOriginShadow     RequestOrigin = "shadow"
+	RequestOriginCacheEmbedding RequestOrigin = "cache_embedding"
+	RequestOriginCaller         RequestOrigin = "caller"
+	RequestOriginClassifier     RequestOrigin = "classifier"
+	RequestOriginPlayground     RequestOrigin = "playground"
+	RequestOriginProbe          RequestOrigin = "probe"
+	RequestOriginShadow         RequestOrigin = "shadow"
 )
 
 // Valid indicates whether the value is a known member of the RequestOrigin enum.
 func (e RequestOrigin) Valid() bool {
 	switch e {
+	case RequestOriginCacheEmbedding:
+		return true
 	case RequestOriginCaller:
 		return true
 	case RequestOriginClassifier:
@@ -10272,7 +10275,7 @@ type RequestDetailResponse struct {
 	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
 	Operation            string                                `json:"operation"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
@@ -10351,7 +10354,7 @@ type RequestMetadataGatewayEpochResponse struct {
 	WriterClosed     bool                                  `json:"writer_closed"`
 }
 
-// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 type RequestOrigin string
 
 // RequestSummary defines model for RequestSummary.
@@ -10393,7 +10396,7 @@ type RequestSummary struct {
 	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
 	Operation            string                                `json:"operation"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 

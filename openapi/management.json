@@ -17131,11 +17131,12 @@
         "type": "object"
       },
       "RequestOrigin": {
-        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.",
+        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.",
         "enum": [
           "caller",
           "shadow",
           "classifier",
+          "cache_embedding",
           "probe",
           "playground"
         ],

@@ -174,7 +174,8 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamTerminal
 	}
-	fact.recordEvidence(true)
+	// Moderation has no usage counters; a validated result completes its evidence.
+	fact.recordEvidence(x.operationName() != "moderation")
 	finish()
 	return fact, result, nil
 }

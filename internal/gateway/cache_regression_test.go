@@ -407,6 +407,191 @@ func TestResponseCacheAdmissionFailureRefundsRequest(t *testing.T) {
 	}
 }
 
+func TestResponseCacheZeroTokenHits(t *testing.T) {
+	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", fidelity, stream), func(t *testing.T) {
+				h, _ := enableTestCache(t, strictHarness(t, func(s *routing.Snapshot) {
+					route := s.Routes[routeSlug]
+					route.Fidelity.Mode = fidelity
+					s.Routes[routeSlug] = route
+				}))
+				h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+					route := s.Routes[routeSlug]
+					route.Cache.CountHitsAgainst = []string{"requests", "tokens"}
+					s.Routes[routeSlug] = route
+				})
+				reply := `{"id":"c","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`
+				if stream {
+					reply = "data: " + `{"id":"c","object":"chat.completion.chunk","model":"model-a","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}` + "\n\ndata: [DONE]\n\n"
+				}
+				h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+					if stream {
+						w.Header().Set("Content-Type", "text/event-stream")
+					} else {
+						w.Header().Set("Content-Type", "application/json")
+					}
+					io.WriteString(w, reply)
+				})
+				body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"stream":%t}`, routeSlug, stream))
+				request := func(wantStatus int, wantCache string) {
+					t.Helper()
+					response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, nil)
+					raw, err := io.ReadAll(response.Body)
+					response.Body.Close()
+					if err != nil || response.StatusCode != wantStatus || response.Header.Get("X-OLP-Cache") != wantCache {
+						t.Fatalf("status=%d cache=%s error=%v body=%s", response.StatusCode, response.Header.Get("X-OLP-Cache"), err, raw)
+					}
+				}
+				request(http.StatusOK, "miss")
+				h.sink.nth(t, 1)
+				window := admitThrough(t, h)
+				h.rt.mu.Lock()
+				key := h.rt.keys[fullKey]
+				key.LookupID = "cache_zero_tokens"
+				key.Policy.RequestsPerMinute, key.Policy.TokensPerMinute = perMinute(2), perMinute(1)
+				h.rt.keys[fullKey] = key
+				h.rt.mu.Unlock()
+				for i := range 2 {
+					request(http.StatusOK, "hit")
+					fact := h.sink.nth(t, i+2).Attempts[0]
+					if fact.Usage == nil || fact.Usage.InputTokens != 0 || fact.Usage.OutputTokens != 0 || !fact.UsageComplete {
+						t.Fatalf("zero-token replay lost usage: %+v", fact)
+					}
+				}
+				request(http.StatusTooManyRequests, "")
+				window.mu.Lock()
+				defer window.mu.Unlock()
+				var requests, tokens int64
+				for _, counter := range window.counters {
+					requests += counter.requests
+					tokens += counter.tokens
+				}
+				if requests != 2 || tokens != 0 || h.mock.count("a") != 1 {
+					t.Fatalf("requests=%d tokens=%d upstream calls=%d", requests, tokens, h.mock.count("a"))
+				}
+			})
+		}
+	}
+}
+
+func TestResponseCacheReportedTotalCountsAgainstTokenLimit(t *testing.T) {
+	h, _ := cacheHarness(t)
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Cache.CountHitsAgainst = []string{"requests", "tokens"}
+		s.Routes[routeSlug] = route
+	})
+	h.mock.set("a", status(http.StatusOK, `{"id":"c","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":3}}`))
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("warm cache: %d %v", response.StatusCode, body)
+	}
+	h.sink.nth(t, 1)
+	window := admitThrough(t, h)
+	h.rt.mu.Lock()
+	key := h.rt.keys[fullKey]
+	key.LookupID = "cache_reported_total"
+	key.Policy.TokensPerMinute = perMinute(2)
+	h.rt.keys[fullKey] = key
+	h.rt.mu.Unlock()
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusBadRequest || errorCode(t, body) != "request_exceeds_token_limit" {
+		t.Fatalf("reported total did not enforce the token limit: %d %v", response.StatusCode, body)
+	}
+	h.rt.mu.Lock()
+	key.Policy.TokensPerMinute = perMinute(10)
+	h.rt.keys[fullKey] = key
+	h.rt.mu.Unlock()
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != "hit" {
+		t.Fatalf("admitted replay: status=%d cache=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), body)
+	}
+	if window.lastReserved() != 3 || h.mock.count("a") != 1 {
+		t.Fatalf("reserved=%d upstream calls=%d", window.lastReserved(), h.mock.count("a"))
+	}
+}
+
+func TestResponseCacheUnmeteredModeration(t *testing.T) {
+	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
+		t.Run(fidelity, func(t *testing.T) {
+			h, _ := enableTestCache(t, strictHarness(t, func(s *routing.Snapshot) {
+				for id, provider := range s.Providers {
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "moderation", Surface: "openai", Mode: "unary"}}
+					s.Providers[id] = provider
+				}
+				route := s.Routes[routeSlug]
+				route.Operations, route.Fidelity.Mode = []string{"moderation"}, fidelity
+				s.Routes[routeSlug] = route
+			}))
+			h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+				route := s.Routes[routeSlug]
+				route.Cache.Operations = []string{"moderation"}
+				route.Cache.CountHitsAgainst = []string{"requests", "tokens"}
+				s.Routes[routeSlug] = route
+			})
+			h.mock.set("a", status(http.StatusOK, `{"id":"mod_1","model":"model-a","results":[{"flagged":false,"categories":{"violence":false},"category_scores":{"violence":0.01}}]}`))
+			var first string
+			for i, want := range []string{"miss", "hit", "hit"} {
+				response := h.do(t.Context(), http.MethodPost, "/v1/moderations", fullKey, []byte(`{"model":"team-chat","input":"hello"}`), nil)
+				raw, err := io.ReadAll(response.Body)
+				response.Body.Close()
+				if err != nil || response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != want {
+					t.Fatalf("request %d: status=%d cache=%s want=%s error=%v body=%s", i, response.StatusCode, response.Header.Get("X-OLP-Cache"), want, err, raw)
+				}
+				if i == 0 {
+					first = string(raw)
+				} else if string(raw) != first {
+					t.Fatalf("replay changed moderation response: %s / %s", first, raw)
+				}
+				env := h.sink.nth(t, i+1)
+				fact := env.Attempts[0]
+				if fact.Usage != nil || fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
+					t.Fatalf("unmetered moderation has incorrect accounting: %+v", fact)
+				}
+				if _, err := usage.Validate(accountingEvent(env)); err != nil {
+					t.Fatalf("invalid moderation accounting: %v", err)
+				}
+				if i == 0 {
+					admitThrough(t, h)
+					h.rt.mu.Lock()
+					key := h.rt.keys[fullKey]
+					key.LookupID = "cache_moderation"
+					key.Policy.TokensPerMinute = perMinute(1)
+					h.rt.keys[fullKey] = key
+					h.rt.mu.Unlock()
+				}
+			}
+			if h.mock.count("a") != 1 {
+				t.Fatalf("provider calls=%d, want one", h.mock.count("a"))
+			}
+		})
+	}
+}
+
+func TestResponseCacheUnmeteredGenerationStaysMiss(t *testing.T) {
+	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
+		t.Run(fidelity, func(t *testing.T) {
+			h, _ := enableTestCache(t, strictHarness(t, func(s *routing.Snapshot) {
+				route := s.Routes[routeSlug]
+				route.Fidelity.Mode = fidelity
+				s.Routes[routeSlug] = route
+			}))
+			h.mock.set("a", evidenceUnmetered(modelA))
+			for i := range 2 {
+				response, body := h.chat(fullKey, nil)
+				if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != "miss" {
+					t.Fatalf("incomplete usage was cached: status=%d cache=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), body)
+				}
+				fact := h.sink.nth(t, i+1).Attempts[0]
+				if fact.UsageComplete || !fact.BillingUncertain {
+					t.Fatalf("incomplete usage was treated as complete: %+v", fact)
+				}
+			}
+			if h.mock.count("a") != 2 {
+				t.Fatalf("provider calls=%d, want two", h.mock.count("a"))
+			}
+		})
+	}
+}
+
 func TestResponseCacheSharingScopesRemainInsideProject(t *testing.T) {
 	for _, scope := range []string{"key", "project", "route"} {
 		t.Run(scope, func(t *testing.T) {

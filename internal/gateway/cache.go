@@ -175,9 +175,12 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *access
 		budgets = slices.Contains(x.cache.policy.CountHitsAgainst, "budgets")
 		estimate = 0
 		if tokens {
-			if u := x.cache.metadata.Usage; u != nil {
-				estimate = u.InputTokens + u.OutputTokens
+			if actual := totalTokens(x.cache.metadata.Usage); actual != nil {
+				estimate = *actual
 			}
+			// Final zero-token usage needs no token reservation. The limiter
+			// requires a positive allowance and cannot reconcile it downward.
+			tokens = estimate > 0
 		}
 		hold = costReservation{amount: x.cache.budgetCost, charge: x.cache.budgetCharge, requestID: x.request.accountingID()}
 	}
@@ -418,14 +421,14 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	if entry == nil {
 		return nil
 	}
-	if json.Unmarshal(entry.Metadata, &c.metadata) != nil || c.metadata.ProviderID != a.ProviderID || c.metadata.ProviderRevisionID != p.RevisionID || c.metadata.UpstreamModel != a.UpstreamModel || c.metadata.Usage == nil {
+	if json.Unmarshal(entry.Metadata, &c.metadata) != nil || c.metadata.ProviderID != a.ProviderID || c.metadata.ProviderRevisionID != p.RevisionID || c.metadata.UpstreamModel != a.UpstreamModel || !c.metadata.UsageComplete || c.metadata.Usage == nil && x.operationName() != "moderation" {
 		c.result = "bypass"
 		return nil
 	}
 	c.entry = entry
 	c.age = int64(max(s.now().Sub(entry.CreatedAt)/time.Second, 0))
 	c.budgetCost, c.budgetCharge = "0", "0"
-	fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: true, UsageComplete: c.metadata.UsageComplete}
+	fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
 	u := attemptUsage(&fact, x.operationName())
 	var costPtr *usage.Cost
 	at := s.now()
@@ -460,7 +463,7 @@ func (s *Server) recordCacheHit(x *call) {
 		e.BudgetCost = c.budgetCost
 		e.BudgetCharge = c.budgetCharge
 	}
-	f := AttemptFact{Cache: e, Class: "cache_hit", Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: true, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
+	f := AttemptFact{Cache: e, Class: "cache_hit", Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
 	x.facts = append(x.facts, f)
 	x.mirrors = false
 }
@@ -503,7 +506,7 @@ func (s *Server) storeCache(x *call, out *outcome, status int) {
 		return
 	}
 	f := x.facts[len(x.facts)-1]
-	if f.Class != classSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil {
+	if f.Class != classSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil && x.operationName() != "moderation" {
 		return
 	}
 	if out.completion != nil {

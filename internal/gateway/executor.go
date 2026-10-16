@@ -1043,9 +1043,9 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	}
 	fact.Committed = committed
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	// A success carrying no usage was still served and billed upstream, with
-	// nothing this gateway can meter.
-	fact.recordEvidence(true)
+	// Moderation intentionally has no usage counters. Other successful work
+	// without usage may have been billed with nothing this gateway can meter.
+	fact.recordEvidence(x.operationName() != "moderation")
 	finishTrace()
 	return fact, completion, nil
 }

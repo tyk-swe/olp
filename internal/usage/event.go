@@ -28,8 +28,8 @@ var ErrUnsupportedVersion = errors.New("unsupported request metadata version")
 // shadow mirrors of caller traffic, classifier calls of request selectors and
 // health probes, and a console member makes Playground calls. Shadow, probe
 // and Playground requests belong to the installation and carry no API key; a
-// classifier call is made for, and charged to, the key whose request it
-// routes.
+// classifier or cache embedding call is made for, and charged to, the key whose
+// request it routes or matches.
 const (
 	OriginCaller         = "caller"
 	OriginShadow         = "shadow"
@@ -60,7 +60,7 @@ type Event struct {
 	APIKeyID    string            `json:"api_key_id"`
 	Attribution map[string]string `json:"attribution,omitempty"`
 	// Origin is empty for a caller request. ParentRequestID names the caller
-	// request a shadow or classifier request was made for.
+	// request a shadow, classifier or cache embedding request was made for.
 	Origin          string  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
