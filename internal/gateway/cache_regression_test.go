@@ -19,6 +19,94 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+func TestResponseCacheStreamUsageIsolation(t *testing.T) {
+	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
+		for _, firstUsage := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/first-usage=%t", fidelity, firstUsage), func(t *testing.T) {
+				h, _ := enableTestCache(t, strictHarness(t, func(s *routing.Snapshot) {
+					route := s.Routes[routeSlug]
+					route.Fidelity.Mode = fidelity
+					s.Routes[routeSlug] = route
+				}))
+				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "text/event-stream")
+					io.WriteString(w, "data: "+`{"id":"c","object":"chat.completion.chunk","model":"model-a","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`+"\n\n")
+					io.WriteString(w, "data: "+`{"id":"c","object":"chat.completion.chunk","model":"model-a","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`+"\n\ndata: [DONE]\n\n")
+				})
+				for i, includeUsage := range []bool{firstUsage, !firstUsage, firstUsage, !firstUsage} {
+					body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":%t}}`, routeSlug, includeUsage)
+					response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(body), nil)
+					raw, err := io.ReadAll(response.Body)
+					response.Body.Close()
+					wantCache := "miss"
+					if i >= 2 {
+						wantCache = "hit"
+					}
+					if err != nil || response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != wantCache {
+						t.Fatalf("request %d: status=%d cache=%s want=%s error=%v body=%s", i, response.StatusCode, response.Header.Get("X-OLP-Cache"), wantCache, err, raw)
+					}
+					if strings.Contains(string(raw), `"usage":`) != includeUsage || !strings.Contains(string(raw), `"content":"hello"`) || !strings.HasSuffix(string(raw), "data: [DONE]\n\n") {
+						t.Fatalf("include_usage=%t: incorrect stream: %s", includeUsage, raw)
+					}
+					h.sink.nth(t, i+1)
+				}
+				if h.mock.count("a") != 2 {
+					t.Fatalf("provider calls=%d, want one for each usage setting", h.mock.count("a"))
+				}
+			})
+		}
+	}
+}
+
+func TestResponseCacheDelegatedRoutePurge(t *testing.T) {
+	for _, scope := range []string{"key", "project", "route"} {
+		t.Run(scope, func(t *testing.T) {
+			h, _ := cacheHarness(t)
+			h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+				splitRoutes(s, b, routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}})
+				named := s.Routes[routeSlug]
+				named.Cache = nil
+				s.Routes[routeSlug] = named
+				serving := s.Routes[backupSlug]
+				serving.Cache.Scope = scope
+				s.Routes[backupSlug] = serving
+			})
+			requests := 0
+			request := func(model, wantCache string) {
+				t.Helper()
+				response, body := h.chat(fullKey, nil, `,"model":"`+model+`"`)
+				if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != wantCache || body["model"] != model {
+					t.Fatalf("%s: status=%d cache=%s want=%s body=%v", model, response.StatusCode, response.Header.Get("X-OLP-Cache"), wantCache, body)
+				}
+				requests++
+				h.sink.nth(t, requests)
+			}
+			for _, model := range []string{routeSlug, backupSlug} {
+				request(model, "miss")
+				request(model, "hit")
+			}
+			purge := func(model string) {
+				t.Helper()
+				if err := h.gateway.Cache.Purge(t.Context(), "route", h.rt.Release().Snapshot.Routes[model].ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			purge(routeSlug)
+			request(backupSlug, "hit")
+			request(routeSlug, "miss")
+			request(routeSlug, "hit")
+			purge(backupSlug)
+			for _, model := range []string{routeSlug, backupSlug} {
+				request(model, "miss")
+				request(model, "hit")
+			}
+			if h.mock.count("b") != 5 {
+				t.Fatalf("provider calls=%d, want five after both route purges", h.mock.count("b"))
+			}
+		})
+	}
+}
+
 func TestResponseCacheNativeDialectIsolation(t *testing.T) {
 	h, _ := enableTestCache(t, strictHarness(t, func(s *routing.Snapshot) {
 		for id, p := range s.Providers {

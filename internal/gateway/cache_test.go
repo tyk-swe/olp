@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -45,18 +46,23 @@ func (m *cacheMemory) Do(_ context.Context, a ...string) (any, error) {
 		}
 		return v, nil
 	case "EVAL":
-		if a[2] == "2" {
-			v := []any{}
-			for i := range 2 {
+		if a[2] != "1" {
+			n, err := strconv.Atoi(a[2])
+			if err != nil {
+				return nil, err
+			}
+			v := []string{}
+			for i := range n {
 				if m.values[a[3+i]] == "" {
-					m.values[a[3+i]] = a[5+i]
+					m.values[a[3+i]] = a[3+n+i]
 				}
 				v = append(v, m.values[a[3+i]])
 			}
-			key := a[7] + ":" + v[0].(string) + ":" + v[1].(string)
-			bucket := a[8] + ":" + v[0].(string) + ":" + v[1].(string)
+			base := 3 + 2*n
+			key := a[base] + ":" + strings.Join(v, ":")
+			bucket := a[base+1] + ":" + strings.Join(v, ":")
 			value := ""
-			if a[9] == "1" {
+			if a[base+2] == "1" {
 				value = m.values[key]
 			}
 			return []any{key, bucket, value}, nil

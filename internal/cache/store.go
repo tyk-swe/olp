@@ -33,6 +33,7 @@ type Store struct {
 type Space struct {
 	Project     string `json:"project"`
 	Route       string `json:"route"`
+	NamedRoute  string `json:"named_route,omitempty"`
 	Scope       string `json:"scope"`
 	Fingerprint string `json:"fingerprint"`
 }
@@ -76,13 +77,13 @@ func (s *Store) generationKey(kind, id string) string {
 
 // The random generation must change when eviction removes its counter. A
 // numeric counter recreated at zero could make old entries reachable again.
-const lookupSource = `local g={}; for i,k in ipairs(KEYS) do local v=redis.call('GET',k); if not v then v=ARGV[i]; redis.call('SET',k,v) end; g[i]=v end; local suffix=g[1]..':'..g[2]; local key=ARGV[3]..':'..suffix; local bucket=redis.sha1hex(ARGV[4]..':'..suffix); local value=''; if ARGV[5]=='1' then value=redis.call('HGET',key,'sealed') or '' end; return {key,bucket,value}`
+const lookupSource = `local g={}; for i,k in ipairs(KEYS) do local v=redis.call('GET',k); if not v then v=ARGV[i]; redis.call('SET',k,v) end; g[i]=v end; local n=#KEYS; local suffix=table.concat(g,':'); local key=ARGV[n+1]..':'..suffix; local bucket=redis.sha1hex(ARGV[n+2]..':'..suffix); local value=''; if ARGV[n+3]=='1' then value=redis.call('HGET',key,'sealed') or '' end; return {key,bucket,value}`
 
 func (s *Store) resolve(ctx context.Context, space Space, canonical []byte, read bool) (Ticket, any, error) {
 	if s == nil || s.Client == nil || s.Auth == nil || s.Keys == nil {
 		return Ticket{}, nil, ErrUnavailable
 	}
-	var nonce [32]byte
+	var nonce [48]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return Ticket{}, nil, ErrUnavailable
 	}
@@ -91,7 +92,18 @@ func (s *Store) resolve(ctx context.Context, space Space, canonical []byte, read
 		flag = "1"
 	}
 	base := s.prefix() + "entry:" + s.digest([]any{space, string(canonical)})
-	result, err := s.Client.Do(ctx, "EVAL", lookupSource, "2", s.generationKey("project", space.Project), s.generationKey("route", space.Route), hex.EncodeToString(nonce[:16]), hex.EncodeToString(nonce[16:]), base, s.digest(space), flag)
+	// Resolve both route generations atomically so purging either the named
+	// route or its delegate invalidates exact entries and semantic candidates.
+	generations := []string{s.generationKey("project", space.Project), s.generationKey("route", space.Route)}
+	if space.NamedRoute != "" && space.NamedRoute != space.Route {
+		generations = append(generations, s.generationKey("route", space.NamedRoute))
+	}
+	args := append([]string{"EVAL", lookupSource, strconv.Itoa(len(generations))}, generations...)
+	for i := range generations {
+		args = append(args, hex.EncodeToString(nonce[i*16:(i+1)*16]))
+	}
+	args = append(args, base, s.digest(space), flag)
+	result, err := s.Client.Do(ctx, args...)
 	if err != nil {
 		return Ticket{}, nil, ErrUnavailable
 	}

@@ -326,9 +326,11 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	if x.unary != nil {
 		dialect = x.unary.dialect.Identity
 	}
+	includeUsage := x.mode == "streaming" && x.family == wire.Chat && x.generation.parsed.IncludeUsage
 	// Entries already contain the caller's projected response, including its
-	// native dialect and named model even when routing delegates elsewhere.
-	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding})
+	// native dialect, named model, and usage preference. Upstream preparation
+	// always requests stream usage for accounting, even when the caller does not.
+	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding, includeUsage})
 	if c.policy.Mode == "semantic" {
 		er, ok := x.snapshot().Routes[c.policy.EmbeddingRoute]
 		if !ok {
@@ -342,7 +344,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 		}
 	}
 	sum := sha256.Sum256(fingerprint)
-	space := cache.Space{Project: project, Route: x.route.ID, Scope: scope, Fingerprint: hex.EncodeToString(sum[:])}
+	space := cache.Space{Project: project, Route: x.route.ID, NamedRoute: x.named().ID, Scope: scope, Fingerprint: hex.EncodeToString(sum[:])}
 	canonical := cache.Canonical(doc)
 	var query string
 	if c.policy.Mode == "semantic" {

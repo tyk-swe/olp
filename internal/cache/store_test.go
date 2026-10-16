@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -42,18 +43,23 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 		}
 		return v, nil
 	case "EVAL":
-		if a[2] == "2" {
-			out := []any{}
-			for i := range 2 {
+		if a[2] != "1" {
+			n, err := strconv.Atoi(a[2])
+			if err != nil {
+				return nil, err
+			}
+			out := []string{}
+			for i := range n {
 				if m.values[a[3+i]] == "" {
-					m.values[a[3+i]] = a[5+i]
+					m.values[a[3+i]] = a[3+n+i]
 				}
 				out = append(out, m.values[a[3+i]])
 			}
-			key := a[7] + ":" + out[0].(string) + ":" + out[1].(string)
-			bucket := a[8] + ":" + out[0].(string) + ":" + out[1].(string)
+			base := 3 + 2*n
+			key := a[base] + ":" + strings.Join(out, ":")
+			bucket := a[base+1] + ":" + strings.Join(out, ":")
 			value := ""
-			if a[9] == "1" {
+			if a[base+2] == "1" {
 				value = m.values[key]
 			}
 			return []any{key, bucket, value}, nil
@@ -64,10 +70,10 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 	return nil, errors.New("unsupported")
 }
 func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
-	for _, change := range []string{"same scope", "embedding model", "project", "route", "key", "revision", "project purge", "route purge"} {
+	for _, change := range []string{"same scope", "embedding model", "project", "route", "named route", "key", "revision", "project purge", "route purge", "named route purge", "named route eviction"} {
 		t.Run(change, func(t *testing.T) {
 			s, m := testStore(t)
-			space := Space{Project: "project", Route: "route", Scope: "key", Fingerprint: "revision"}
+			space := Space{Project: "project", Route: "route", NamedRoute: "named", Scope: "key", Fingerprint: "revision"}
 			original, err := s.Begin(t.Context(), space, []byte("original"))
 			if err != nil {
 				t.Fatal(err)
@@ -82,6 +88,8 @@ func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
 				space.Project = "other"
 			case "route":
 				space.Route = "other"
+			case "named route":
+				space.NamedRoute = "other"
 			case "key":
 				space.Scope = "other"
 			case "revision":
@@ -90,6 +98,10 @@ func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
 				err = s.Purge(t.Context(), "project", space.Project)
 			case "route purge":
 				err = s.Purge(t.Context(), "route", space.Route)
+			case "named route purge":
+				err = s.Purge(t.Context(), "route", space.NamedRoute)
+			case "named route eviction":
+				delete(m.values, s.generationKey("route", space.NamedRoute))
 			}
 			if err != nil {
 				t.Fatal(err)
