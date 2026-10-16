@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
-
+	"github.com/openai/openai-go/v3"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"google.golang.org/genai"
 )
