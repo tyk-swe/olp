@@ -322,7 +322,13 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 			encoding = "float"
 		}
 	}
-	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, x.mode, headers, x.semanticQuery, encoding})
+	var dialect oif.Identity
+	if x.unary != nil {
+		dialect = x.unary.dialect.Identity
+	}
+	// Entries already contain the caller's projected response, including its
+	// native dialect and named model even when routing delegates elsewhere.
+	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding})
 	if c.policy.Mode == "semantic" {
 		er, ok := x.snapshot().Routes[c.policy.EmbeddingRoute]
 		if !ok {
@@ -423,6 +429,9 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	at := s.now()
 	if a.Price != nil {
 		if cost, ok := a.Price.Cost(u, at, true, a.Discount); ok {
+			if x.committed(a.ProviderID) {
+				cost = usage.Cost{}
+			}
 			costPtr = &cost
 			c.budgetCost = cost.String()
 			c.budgetCharge = cost.String()
@@ -467,6 +476,7 @@ func (s *Server) replayCache(ctx context.Context, x *call) *outcome {
 			if err := x.generation.emit(frame); err != nil {
 				return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), committed: true, cancelled: true}
 			}
+			x.captureDeliveredFrame(frame)
 		}
 		return &outcome{committed: true}
 	}

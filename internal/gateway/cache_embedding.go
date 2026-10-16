@@ -38,6 +38,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 		s.settleAdmission(context.WithoutCancel(ctx), x)
 	}()
 	body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": text, "encoding_format": "float"})
+	x.request.body = &measuredBody{decoded: int64(len(body))}
 	var raw []byte
 	if route.Fidelity.Strict() {
 		codec, _ := operationregistry.Lookup("openai-embeddings")
