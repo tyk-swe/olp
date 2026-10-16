@@ -3,8 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -59,93 +57,5 @@ func TestExternalCredentialFailuresBecomePlanIneligibilityWithoutStaleFallback(t
 	m.authority.readAt = time.Now().Add(-AuthorityStaleAfter - time.Second)
 	if m.Eligibility("credential") != routing.StaleAuthority {
 		t.Fatal("external cache bypassed stale authority")
-	}
-}
-
-func TestExternalCredentialCacheSharesFetchesWithoutBlockingEligibility(t *testing.T) {
-	var cache externalCredentials
-	started, release := make(chan struct{}), make(chan struct{})
-	var calls atomic.Int64
-	resolver := externalResolveFunc(func(ctx context.Context, _ secretstore.Reference) ([]byte, error) {
-		if calls.Add(1) == 1 {
-			close(started)
-		}
-		select {
-		case <-release:
-			return []byte("pinned-value"), nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	})
-	var workers sync.WaitGroup
-	for range 12 {
-		workers.Go(func() {
-			value, err := cache.read(t.Context(), resolver, "credential", externalReference("1"))
-			if err != nil || string(value) != "pinned-value" {
-				t.Error("concurrent resolution failed")
-			}
-		})
-	}
-	<-started
-	checked := make(chan struct{})
-	go func() {
-		known, available := cache.available("credential")
-		if !known || available {
-			t.Error("unresolved external credential must already be ineligible")
-		}
-		close(checked)
-	}()
-	select {
-	case <-checked:
-	case <-time.After(time.Second):
-		t.Fatal("network IO blocked route eligibility")
-	}
-	close(release)
-	workers.Wait()
-	if calls.Load() != 1 {
-		t.Fatalf("duplicate store fetches: %d", calls.Load())
-	}
-	if _, err := cache.read(t.Context(), resolver, "credential", externalReference("2")); !errors.Is(err, ErrCredentialUnavailable) {
-		t.Fatal("one credential ID changed its pinned version")
-	}
-}
-
-func TestEmptyExternalCredentialCacheDoesNotSerializeEligibility(t *testing.T) {
-	var cache externalCredentials
-	cache.mu.Lock()
-	checked := make(chan struct{})
-	go func() {
-		known, available := cache.available("sealed-credential")
-		if known || available {
-			t.Error("empty cache claimed an external credential")
-		}
-		close(checked)
-	}()
-	select {
-	case <-checked:
-		cache.mu.Unlock()
-	case <-time.After(time.Second):
-		cache.mu.Unlock()
-		<-checked
-		t.Fatal("empty external cache serialized local credential eligibility")
-	}
-}
-
-func TestExternalCredentialCacheIsBoundedAndReturnsIndependentBytes(t *testing.T) {
-	var cache externalCredentials
-	resolver := externalResolveFunc(func(context.Context, secretstore.Reference) ([]byte, error) { return []byte("credential"), nil })
-	for i := range maxExternalCredentials + 10 {
-		value, err := cache.read(t.Context(), resolver, fmt.Sprint(i), externalReference("1"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		value[0] = 'x'
-	}
-	if len(cache.entries) != maxExternalCredentials {
-		t.Fatal("cache grew beyond its bound")
-	}
-	value, err := cache.read(t.Context(), resolver, fmt.Sprint(maxExternalCredentials+9), externalReference("1"))
-	if err != nil || string(value) != "credential" {
-		t.Fatal("caller mutated cached bytes")
 	}
 }

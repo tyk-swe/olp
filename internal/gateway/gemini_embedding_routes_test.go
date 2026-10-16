@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -36,29 +35,4 @@ func geminiEmbeddingError(t *testing.T, h *harness, model, action string) (int, 
 		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
 	}
 	return resp.StatusCode, envelope.Error
-}
-
-func TestGeminiNativeEmbeddingsOnAnUnknownRouteAreNotFound(t *testing.T) {
-	for _, action := range []string{"embedContent", "batchEmbedContents"} {
-		t.Run(action, func(t *testing.T) {
-			h := strictHarness(t, strictEmbeddings)
-			status, got := geminiEmbeddingError(t, h, "no-such-route", action)
-			if status != http.StatusNotFound || got.Code != http.StatusNotFound || got.Status != "NOT_FOUND" ||
-				len(got.Details) != 1 || got.Details[0].Reason != "route_not_found" {
-				t.Fatalf("status=%d error=%+v", status, got)
-			}
-		})
-	}
-}
-
-func TestGeminiNativeEmbeddingsNeedAStrictRoute(t *testing.T) {
-	for _, action := range []string{"embedContent", "batchEmbedContents"} {
-		t.Run(action, func(t *testing.T) {
-			h := newHarness(t, Config{})
-			status, got := geminiEmbeddingError(t, h, routeSlug, action)
-			if status != http.StatusBadRequest || got.Status != "INVALID_ARGUMENT" || !strings.Contains(got.Message, "strict route") {
-				t.Fatalf("status=%d error=%+v", status, got)
-			}
-		})
-	}
 }

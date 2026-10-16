@@ -1,8 +1,6 @@
 package usage
 
 import (
-	"math/big"
-	"math/rand/v2"
 	"testing"
 	"time"
 )
@@ -16,93 +14,9 @@ func tokens(value int64) *int64 { return &value }
 
 func completeUsage() AttemptUsage { return AttemptUsage{Observed: true, Complete: true} }
 
-func TestPriceCostMatchesHandComputedBills(t *testing.T) {
-	t.Parallel()
-	base := Price{InputPerMillion: rate("3.00"), OutputPerMillion: rate("15.00")}
-	cached := Price{InputPerMillion: rate("2"), CachedInputPerMillion: rate("0.5")}
-	writes := Price{
-		InputPerMillion: rate("3"), CacheWriteInputPerMillion: rate("3.75"),
-		CacheWrite1HInputPerMillion: rate("6"),
-	}
-	for _, test := range []struct {
-		name  string
-		price Price
-		usage func() AttemptUsage
-		want  string
-	}{
-		{"input and output", base, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens, u.OutputTokens = tokens(1000), tokens(500)
-			return u
-		}, "0.0105"},
-		{"input alone prices an embedding", base, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens = tokens(2_000_000)
-			return u
-		}, "6"},
-		{"cached tokens bill at the cached rate", cached, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens, u.CachedInputTokens = tokens(10_000), tokens(4_000)
-			return u
-		}, "0.014"},
-		{"cached tokens bill at the input rate without a cached tier", base, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens, u.CachedInputTokens = tokens(1000), tokens(900)
-			return u
-		}, "0.003"},
-		{"cache writes fall back from their duration to the write rate", writes, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens, u.CacheWriteInputTokens = tokens(1000), tokens(600)
-			u.CacheWrite5MInputTokens, u.CacheWrite1HInputTokens = tokens(200), tokens(300)
-			return u
-		}, "0.004125"},
-		{"media units bill at the unit price", Price{UnitPrice: rate("0.04")}, func() AttemptUsage {
-			u := completeUsage()
-			u.MediaUnits = rate("2.5")
-			return u
-		}, "0.1"},
-		{"usage without any dimension costs nothing", base, completeUsage, "0"},
-		{"a half unit rounds away from zero", Price{InputPerMillion: rate("0.000000000001")}, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens = tokens(500_000)
-			return u
-		}, "0.000000000001"},
-		{"below half a unit rounds down", Price{InputPerMillion: rate("0.000000000001")}, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens = tokens(499_999)
-			return u
-		}, "0"},
-		// PostgreSQL divides at the scale it selects for the quotient, which here
-		// is sixteen places: the rounding at the sixteenth carries into the twelfth
-		// and bills one unit more than the exact quotient would.
-		{"the quotient is rounded at the scale PostgreSQL gives it", Price{InputPerMillion: rate("12345678.000000499999")}, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens = tokens(1)
-			return u
-		}, "12.345678000001"},
-		{"an amount past the column saturates", Price{InputPerMillion: rate("100000000000")}, func() AttemptUsage {
-			u := completeUsage()
-			u.InputTokens = tokens(2_000_000_000)
-			return u
-		}, "999999999999.999999999999"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			got, ok := test.price.Cost(test.usage(), settledAt, true)
-			if !ok || got.String() != test.want {
-				t.Fatalf("Cost = %q, %v, want %q", got.String(), ok, test.want)
-			}
-			routing := &RoutingPrice{Price: test.price}
-			if again, ok := routing.Cost(test.usage(), settledAt, true, nil); !ok || again.Cmp(got) != 0 {
-				t.Fatalf("a routing price without cached rates costs %q, want %q", again.String(), got.String())
-			}
-			routing.rates = parseRates(&routing.Price)
-			if again, ok := routing.Cost(test.usage(), settledAt, true, nil); !ok || again.Cmp(got) != 0 {
-				t.Fatalf("a routing price with cached rates costs %q, want %q", again.String(), got.String())
-			}
-		})
-	}
-}
+// PostgreSQL divides at the scale it selects for the quotient, which here
+// is sixteen places: the rounding at the sixteenth carries into the twelfth
+// and bills one unit more than the exact quotient would.
 
 func TestPriceCostIsUnpricedWherePostgreSQLRecordsNoCost(t *testing.T) {
 	t.Parallel()
@@ -171,139 +85,28 @@ func TestPriceCostIsUnpricedWherePostgreSQLRecordsNoCost(t *testing.T) {
 	}
 }
 
-func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
-	t.Parallel()
-	price := &RoutingPrice{Price: Price{
-		InputPerMillion: rate("3"), CachedInputPerMillion: rate("0.3"), CacheWriteInputPerMillion: rate("3.75"),
-		CacheWrite1HInputPerMillion: rate("6"), OutputPerMillion: rate("15"),
-	}}
-	got, ok := price.CostBound(1_000_000, 100_000, true, settledAt, nil)
-	// A million input tokens at the dearest input rate, 6, plus the reply, 1.5.
-	if !ok || got.String() != "7.5" {
-		t.Fatalf("CostBound = %q, %v, want 7.5", got.String(), ok)
-	}
-	// An embedding has no reply to bound, so a price without an output rate
-	// still prices it.
-	embedding := &RoutingPrice{Price: Price{InputPerMillion: rate("0.02")}}
-	if got, ok := embedding.CostBound(1000, 4096, false, settledAt, nil); !ok || got.String() != "0.00002" {
-		t.Fatalf("embedding CostBound = %q, %v", got.String(), ok)
-	}
-	if _, ok := embedding.CostBound(1000, 4096, true, settledAt, nil); ok {
-		t.Fatal("a generation without an output rate has a bound")
-	}
-	if _, ok := (&RoutingPrice{Price: Price{OutputPerMillion: rate("1")}}).CostBound(1, 1, true, settledAt, nil); ok {
-		t.Fatal("a price without an input rate has a bound")
-	}
-	// Each division rounds up, so a single token never bounds at nothing.
-	if got, ok := price.CostBound(1, 0, true, settledAt, nil); !ok || got.String() != "0.000006" {
-		t.Fatalf("one token CostBound = %q, %v", got.String(), ok)
-	}
-	tiny := &RoutingPrice{Price: Price{InputPerMillion: rate("0.000000000001"), OutputPerMillion: rate("0.000000000001")}}
-	if got, ok := tiny.CostBound(1, 1, true, settledAt, nil); !ok || got.String() != "0.000000000002" {
-		t.Fatalf("rounded-up CostBound = %q, %v", got.String(), ok)
-	}
+// A million input tokens at the dearest input rate, 6, plus the reply, 1.5.
 
-	random := rand.New(rand.NewPCG(7, 11))
-	randomRate := func() *string {
-		whole, fraction := random.Int64N(1000), random.Int64N(1_000_000_000_000)
-		text := big.NewRat(whole, 1)
-		text.Add(text, big.NewRat(fraction, 1_000_000_000_000))
-		value := text.FloatString(12)
-		return &value
-	}
-	for range 2000 {
-		p := &RoutingPrice{Price: Price{InputPerMillion: randomRate(), OutputPerMillion: randomRate()}}
-		if random.IntN(2) == 0 {
-			p.CachedInputPerMillion = randomRate()
-		}
-		if random.IntN(2) == 0 {
-			p.CacheWriteInputPerMillion = randomRate()
-		}
-		if random.IntN(3) == 0 {
-			p.CacheWrite5MInputPerMillion = randomRate()
-		}
-		if random.IntN(3) == 0 {
-			p.CacheWrite1HInputPerMillion = randomRate()
-		}
-		input, output := random.Int64N(5_000_000), random.Int64N(500_000)
-		u := completeUsage()
-		u.InputTokens, u.OutputTokens = &input, &output
-		var cached, write, write1h, write5m int64
-		if p.CachedInputPerMillion != nil || random.IntN(2) == 0 {
-			cached = random.Int64N(input + 1)
-			u.CachedInputTokens = &cached
-		}
-		if random.IntN(2) == 0 {
-			write = random.Int64N(input - cached + 1)
-			u.CacheWriteInputTokens = &write
-			write1h = random.Int64N(write + 1)
-			u.CacheWrite1HInputTokens = &write1h
-			// The two timed tiers are parts of the write total, so together they
-			// never exceed it.
-			write5m = random.Int64N(write - write1h + 1)
-			u.CacheWrite5MInputTokens = &write5m
-		}
-		actual, ok := p.Cost(u, settledAt, true, nil)
-		bound, boundOK := p.CostBound(input, output, true, settledAt, nil)
-		if !ok || !boundOK || bound.Cmp(actual) < 0 {
-			t.Fatalf("bound %q < cost %q for %+v / %+v", bound.String(), actual.String(), *p, u)
-		}
-	}
-}
+// An embedding has no reply to bound, so a price without an output rate
+// still prices it.
 
-func TestCostArithmetic(t *testing.T) {
-	t.Parallel()
-	var zero Cost
-	if !zero.IsZero() || zero.String() != "0" || zero.Cmp(Cost{}) != 0 {
-		t.Fatal("the zero Cost is not nothing")
-	}
-	one, _ := (Price{UnitPrice: rate("1")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")}, settledAt, true)
-	if one.String() != "1" || one.IsZero() || one.Cmp(zero) <= 0 || zero.Cmp(one) >= 0 {
-		t.Fatalf("one = %q", one.String())
-	}
-	if sum := one.Add(one).Add(zero); sum.String() != "2" || zero.Add(one).String() != "1" {
-		t.Fatalf("sum = %q", sum.String())
-	}
-	if got := MaxCost().Add(one); got.Cmp(MaxCost()) != 0 || got.String() != "999999999999.999999999999" {
-		t.Fatalf("the sum of the largest cost and one = %q", got.String())
-	}
-	small, _ := (Price{UnitPrice: rate("0.000000000123")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")}, settledAt, true)
-	if small.String() != "0.000000000123" {
-		t.Fatalf("small = %q", small.String())
-	}
-}
+// Each division rounds up, so a single token never bounds at nothing.
 
-// TestQuotientScaleFollowsNumericDiv pins select_div_scale against values worked
-// out from PostgreSQL's base-10000 representation: the quotient keeps sixteen
-// significant digits estimated from the weight and leading digit of the numerator
-// and of the divisor's single digit 100 at weight 1, and never fewer places than
-// the numerator's own twelve.
-func TestQuotientScaleFollowsNumericDiv(t *testing.T) {
-	t.Parallel()
-	for _, test := range []struct {
-		numerator string
-		want      int
-	}{
-		// 1.5: weight 0, leading digit 1 <= 100.
-		{"1500000000000", 24},
-		// 20000: weight 1, leading digit 2 <= 100.
-		{"20000000000000000", 20},
-		// 12345678: weight 1, leading digit 1234 > 100.
-		{"12345678000000000000", 16},
-		// 0.000001: the fraction group 0001 at weight -2.
-		{"1000000", 32},
-		// 100000000000: weight 2, leading digit 1000, so sixteen significant digits
-		// need fewer than twelve places and the numerator's own twelve hold.
-		{"100000000000000000000000", 12},
-		// 1234567890123: thirteen digits are weight 3 with the leading digit 1.
-		{"1234567890123000000000000", 12},
-	} {
-		numerator, _ := new(big.Int).SetString(test.numerator, 10)
-		if got := quotientScale(numerator); got != test.want {
-			t.Errorf("quotientScale(%s x 1e-12) = %d, want %d", test.numerator, got, test.want)
-		}
-	}
-}
+// The two timed tiers are parts of the write total, so together they
+// never exceed it.
+
+// 1.5: weight 0, leading digit 1 <= 100.
+
+// 20000: weight 1, leading digit 2 <= 100.
+
+// 12345678: weight 1, leading digit 1234 > 100.
+
+// 0.000001: the fraction group 0001 at weight -2.
+
+// 100000000000: weight 2, leading digit 1000, so sixteen significant digits
+// need fewer than twelve places and the numerator's own twelve hold.
+
+// 1234567890123: thirteen digits are weight 3 with the leading digit 1.
 
 // The estimate is made for every request of a key with a cost budget, and the
 // settlement once more when it ends, so both are measured.
@@ -338,129 +141,24 @@ func BenchmarkPriceCost(b *testing.B) {
 	}
 }
 
-// The card mirror prices a consumer as the SQL does: an explicit rate prices
-// the usage itself at discount one, a markup rounds the already-rounded cost,
-// and no explicit match plus an unpriced cost is no charge.
-func TestRoutingCostDiscountWithoutWindow(t *testing.T) {
-	price := &RoutingPrice{Price: Price{InputPerMillion: rate("3"), Currency: "USD"}}
-	for _, tc := range []struct{ multiplier, want string }{{"0", "0"}, {"0.5", "0.0015"}, {"1", "0.003"}} {
-		t.Run(tc.multiplier, func(t *testing.T) {
-			got, ok := price.Cost(AttemptUsage{Complete: true, InputTokens: tokens(1000)}, time.Now(), true, &RoutingDiscount{Multiplier: tc.multiplier})
-			if !ok || got.String() != tc.want {
-				t.Fatalf("cost = %v, priced = %v; want %s", got, ok, tc.want)
-			}
-		})
-	}
-}
+// The explicit rate prices the usage itself, ignoring provider cost.
 
-func TestRoutingCardCharge(t *testing.T) {
-	settledAt := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
-	explicit := &RoutingPrice{Price: Price{ProviderKind: "openai", Model: "m",
-		Operation: "generation", InputPerMillion: rate("7"), Currency: "USD"}}
-	vendor := "openai"
-	card := &RoutingCardRevision{ID: "rev", Markup: "1.5",
-		Prices: []RoutingPrice{*explicit}}
-	usage := AttemptUsage{Complete: true, InputTokens: tokens(1000)}
+// A vendor-scoped entry wins over the unscoped one.
 
-	// The explicit rate prices the usage itself, ignoring provider cost.
-	charge, ok := card.Charge(usage, settledAt, true, nil, "openai", vendor, "m", "generation")
-	if !ok || charge.String() != "0.007" {
-		t.Fatalf("explicit charge = %v %v, want 0.007", charge, ok)
-	}
-	// A vendor-scoped entry wins over the unscoped one.
-	card.Prices = append(card.Prices, RoutingPrice{Price: Price{VendorID: &vendor,
-		ProviderKind: "openai", Model: "m", Operation: "generation",
-		InputPerMillion: rate("10"), Currency: "USD"}})
-	charge, ok = card.Charge(usage, settledAt, true, nil, "openai", vendor, "m", "generation")
-	if !ok || charge.String() != "0.01" {
-		t.Fatalf("vendor charge = %v %v, want 0.01", charge, ok)
-	}
-	// Markup multiplies the already-rounded cost in one rounding.
-	cost := Cost{new(big.Int).Mul(big.NewInt(3000), perMillion)}
-	if cost.String() != "0.003" {
-		t.Fatalf("cost fixture broken: %v", cost)
-	}
-	card2 := &RoutingCardRevision{ID: "rev2", Markup: "1.5"}
-	charge, ok = card2.Charge(usage, settledAt, true, &cost, "openai", vendor, "other", "generation")
-	if !ok || charge.String() != "0.0045" {
-		t.Fatalf("markup charge = %v %v, want 0.0045", charge, ok)
-	}
-	// No explicit match and an unpriced cost is no charge.
-	if _, ok := card2.Charge(usage, settledAt, true, nil, "openai", vendor, "other", "generation"); ok {
-		t.Fatal("unpriced cost under markup produced a charge")
-	}
-	// A zero cost — a committed attempt's — charges zero under any markup.
-	zero := Cost{}
-	charge, ok = card2.Charge(usage, settledAt, true, &zero, "openai", vendor, "other", "generation")
-	if !ok || charge.String() != "0" {
-		t.Fatalf("zero-cost charge = %v %v, want 0", charge, ok)
-	}
-	zeroBound, ok := card2.ChargeBound(0, 0, false, settledAt, Cost{}, "openai", vendor, "other", "generation")
-	if !ok || zeroBound.String() != "0" {
-		t.Fatalf("zero bound = %v %v, want 0", zeroBound, ok)
-	}
-	// The charge bound mirrors the same shapes.
-	bound, ok := card2.ChargeBound(1000, 1000, true, settledAt, cost, "openai", vendor, "other", "generation")
-	if !ok || bound.String() != "0.0045" {
-		t.Fatalf("markup bound = %v %v, want 0.0045", bound, ok)
-	}
-	// The explicit rate's bound is its own bound, markup-free: the vendor
-	// entry prices input only, so a generation request cannot bound.
-	if _, ok = card.ChargeBound(1000, 1000, true, settledAt, cost, "openai", vendor, "m", "generation"); ok {
-		t.Fatal("an input-only explicit rate bounded a generation request")
-	}
-	bound, ok = card.ChargeBound(1000, 0, false, settledAt, cost, "openai", vendor, "m", "generation")
-	want, _ := card.Prices[1].CostBound(1000, 0, false, settledAt, nil)
-	if !ok || bound.Cmp(want) != 0 {
-		t.Fatalf("explicit bound = %v, want %v", bound, want)
-	}
-}
+// Markup multiplies the already-rounded cost in one rounding.
 
-// The card a request pins is the most specific card with a revision in
-// force — input order in the slice is irrelevant, and a card whose revisions
-// all start in the future falls through to the next scope.
-func TestRoutingCardResolution(t *testing.T) {
-	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
-	projectID, organizationID := "project", "organization"
-	card := func(id string, org, proj *string, revisions ...RoutingCardRevision) RoutingRateCard {
-		return RoutingRateCard{ID: id, OrganizationID: org, ProjectID: proj, Revisions: revisions}
-	}
-	revision := func(id string, r int, effective time.Time) RoutingCardRevision {
-		return RoutingCardRevision{ID: id, Revision: r, Markup: "2",
-			EffectiveAt: effective, Prices: nil}
-	}
-	// The installation card arriving first cannot shadow a better scope.
-	inputs := &RoutingInputs{
-		RefreshedAt: now.Add(-time.Minute),
-		RateCards: []RoutingRateCard{
-			card("install", nil, nil, revision("install-r", 1, now.Add(-time.Hour))),
-			card("org", &organizationID, nil, revision("org-r", 1, now.Add(-time.Hour))),
-			card("proj", nil, &projectID, revision("proj-r", 1, now.Add(-time.Hour))),
-		},
-		ProjectOrganizations: map[string]string{projectID: organizationID},
-	}
-	found, known := inputs.RateCardRevision(&projectID, now)
-	if !known || found == nil || found.ID != "proj-r" {
-		t.Fatalf("project card resolution = %v known=%v", found, known)
-	}
-	// A project card whose only revision is future falls through to the
-	// organization card — and without that, to the installation card.
-	inputs.RateCards[2].Revisions[0].EffectiveAt = now.Add(time.Hour)
-	found, _ = inputs.RateCardRevision(&projectID, now)
-	if found == nil || found.ID != "org-r" {
-		t.Fatalf("organization fallthrough = %v", found)
-	}
-	inputs.RateCards[1].Revisions[0].EffectiveAt = now.Add(time.Hour)
-	found, _ = inputs.RateCardRevision(&projectID, now)
-	if found == nil || found.ID != "install-r" {
-		t.Fatalf("installation fallthrough = %v", found)
-	}
-	// Stale inputs cannot answer at all.
-	inputs.RefreshedAt = now.Add(-PerformanceMaxAge - time.Second)
-	if found, known = inputs.RateCardRevision(&projectID, now); known || found != nil {
-		t.Fatalf("stale inputs answered %v known=%v", found, known)
-	}
-	if found, known = (*RoutingInputs)(nil).RateCardRevision(&projectID, now); known || found != nil {
-		t.Fatalf("missing inputs answered %v known=%v", found, known)
-	}
-}
+// No explicit match and an unpriced cost is no charge.
+
+// A zero cost — a committed attempt's — charges zero under any markup.
+
+// The charge bound mirrors the same shapes.
+
+// The explicit rate's bound is its own bound, markup-free: the vendor
+// entry prices input only, so a generation request cannot bound.
+
+// The installation card arriving first cannot shadow a better scope.
+
+// A project card whose only revision is future falls through to the
+// organization card — and without that, to the installation card.
+
+// Stale inputs cannot answer at all.

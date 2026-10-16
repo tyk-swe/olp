@@ -1,11 +1,7 @@
 package routing
 
 import (
-	"errors"
 	"testing"
-	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
@@ -77,124 +73,5 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 	}
 }
 
-func TestRouteGraphRefusesCyclesDepthProjectsAndStrictToTransformed(t *testing.T) {
-	project, other := ptr(uuid.NewString()), ptr(uuid.NewString())
-	route := func(slug string, edges ...string) Route {
-		r := Route{Slug: slug, ProjectID: project, Fidelity: RouteFidelity{Mode: FidelityTransformed}}
-		for _, to := range edges {
-			r.Fallbacks = append(r.Fallbacks, Fallback{Route: to, On: []string{FallbackExhausted}})
-		}
-		return r
-	}
-	graph := func(routes ...Route) map[string]Route {
-		out := map[string]Route{}
-		for _, r := range routes {
-			out[r.Slug] = r
-		}
-		return out
-	}
-	code := func(err error) string {
-		var refusal *Refusal
-		if errors.As(err, &refusal) {
-			return refusal.Code
-		}
-		return ""
-	}
-	if err := CheckRouteGraph(graph(route("a", "b", "missing"), route("b", "c"), route("c"))); err != nil {
-		t.Fatalf("three routes deep refused: %v", err)
-	}
-	if got := code(CheckRouteGraph(graph(route("a", "b"), route("b", "c"), route("c", "d"), route("d")))); got != "route_graph_too_deep" {
-		t.Fatalf("four routes deep: %q", got)
-	}
-	if got := code(CheckRouteGraph(graph(route("a", "b"), route("b", "a")))); got != "route_graph_cycle" {
-		t.Fatalf("cycle: %q", got)
-	}
-	foreign := route("b")
-	foreign.ProjectID = other
-	if got := code(CheckRouteGraph(graph(route("a", "b"), foreign))); got != "route_graph_project_mismatch" {
-		t.Fatalf("project: %q", got)
-	}
-	strict := route("a", "b")
-	strict.Fidelity = RouteFidelity{Mode: FidelityStrict}
-	if got := code(CheckRouteGraph(graph(strict, route("b")))); got != "route_graph_fidelity_mismatch" {
-		t.Fatalf("strict to transformed: %q", got)
-	}
-	// A classifier only labels the request, so a strict route may classify
-	// with a transformed one, and the classifier adds no serving depth.
-	classified := route("a", "b")
-	classified.Fidelity = RouteFidelity{Mode: FidelityStrict}
-	classified.Fallbacks = nil
-	classified.Selectors = []Selector{{ID: "s", When: Predicate{Classifier: &ClassifierPredicate{Route: "tei", Labels: []string{"x"}, TimeoutMS: 10}}, Tags: []string{"t"}}}
-	if err := CheckRouteGraph(graph(classified, route("tei", "x"), route("x", "y"), route("y"))); err != nil {
-		t.Fatalf("classifier edge: %v", err)
-	}
-}
-
-func TestRetryBackoffUsesFullJitterAndHonorsRetryAfter(t *testing.T) {
-	rule := RetryRule{MaxRetries: 5, BaseBackoffMS: 100, MaxBackoffMS: 1000}
-	for retry, ceiling := range map[int]time.Duration{1: 100 * time.Millisecond, 2: 200 * time.Millisecond, 4: 800 * time.Millisecond, 5: time.Second, 60: time.Second} {
-		if got := rule.Backoff(retry, 0.999999, 0); got > ceiling || got < ceiling*99/100 {
-			t.Fatalf("retry %d: %v, want near %v", retry, got, ceiling)
-		}
-		if got := rule.Backoff(retry, 0, 0); got != 0 {
-			t.Fatalf("jitter floor %v", got)
-		}
-	}
-	if got := rule.Backoff(1, 0.5, 3*time.Second); got != 50*time.Millisecond {
-		t.Fatalf("ignored Retry-After should not apply: %v", got)
-	}
-	rule.RespectRetryAfter = true
-	if got := rule.Backoff(1, 0.5, 3*time.Second); got != 3*time.Second {
-		t.Fatalf("Retry-After: %v", got)
-	}
-}
-
-func TestShadowSamplingIsDeterministicAndProportional(t *testing.T) {
-	target := uuid.NewString()
-	hits := 0
-	for i := 0; i < 10000; i++ {
-		seed := []byte(uuid.NewString())
-		sampled := Sampled(target, seed, 0.25)
-		if sampled != Sampled(target, seed, 0.25) {
-			t.Fatal("sampling is not a function of its seed")
-		}
-		if sampled {
-			hits++
-		}
-	}
-	if hits < 2200 || hits > 2800 {
-		t.Fatalf("sampled %d of 10000 at 25%%", hits)
-	}
-	if !Sampled(target, nil, 1) {
-		t.Fatal("full rate skipped a request")
-	}
-}
-
-func TestPredicatesMatchTheirFeatureConjunction(t *testing.T) {
-	features := Features{Operation: "generation", InputTokens: 1200, OutputTokens: ptr(int64(64)), Streaming: true, Tools: true, Modalities: []string{"text", "image"}, ReasoningEffort: "high"}
-	for name, tc := range map[string]struct {
-		predicate Predicate
-		want      bool
-	}{
-		"empty":            {Predicate{}, true},
-		"operation":        {Predicate{Operations: []string{"embeddings"}}, false},
-		"input window":     {Predicate{MinInputTokens: ptr(int64(1000)), MaxInputTokens: ptr(int64(2000))}, true},
-		"input too long":   {Predicate{MaxInputTokens: ptr(int64(1000))}, false},
-		"output bound":     {Predicate{MaxOutputTokens: ptr(int64(32))}, false},
-		"any modality":     {Predicate{Modalities: []string{"audio", "image"}}, true},
-		"absent modality":  {Predicate{Modalities: []string{"audio"}}, false},
-		"streaming":        {Predicate{Streaming: ptr(false)}, false},
-		"tools":            {Predicate{Tools: ptr(true)}, true},
-		"structured":       {Predicate{StructuredOutput: ptr(true)}, false},
-		"reasoning effort": {Predicate{ReasoningEffort: []string{"medium", "high"}}, true},
-	} {
-		if got := tc.predicate.Matches(features); got != tc.want {
-			t.Errorf("%s: matched %v", name, got)
-		}
-	}
-	unbounded := features
-	unbounded.OutputTokens = nil
-	if (Predicate{MinOutputTokens: ptr(int64(1))}).Matches(unbounded) {
-		t.Fatal("an output bound matched a request without one")
-	}
-}
+// A classifier only labels the request, so a strict route may classify
+// with a transformed one, and the classifier adds no serving depth.

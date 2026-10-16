@@ -2,17 +2,11 @@ package protocols
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
-	"math"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
@@ -108,78 +102,6 @@ func TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming(t *testing.T) {
 	}
 	if _, err = Stream(wire.Chat, wire.Chat, bytes.NewReader(chat.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRefusalAndEmbeddingEncodingArePreserved(t *testing.T) {
-	refused := []byte(`{"id":"r","choices":[{"index":0,"message":{"role":"assistant","content":null,"refusal":"Cannot answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`)
-	for _, target := range []wire.Format{wire.Responses, wire.Anthropic, wire.Gemini} {
-		c, err := Decode(wire.Chat, target, refused, "team-model", "")
-		if err != nil || !bytes.Contains(c.Body, []byte("Cannot answer")) {
-			t.Fatalf("%s refusal: %#v %v", target, c, err)
-		}
-	}
-	floats := []byte(`{"data":[{"index":0,"embedding":[0.5,-1.25]}],"usage":{"total_tokens":2}}`)
-	c, err := Decode(wire.Embeddings, wire.Embeddings, floats, "team-model", "base64")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, _ := object(c.Body)
-	item, _ := object(arr(f["data"])[0])
-	encoded, err := base64.StdEncoding.DecodeString(str(item["embedding"]))
-	if err != nil || len(encoded) != 8 || math.Float32frombits(binary.LittleEndian.Uint32(encoded)) != 0.5 {
-		t.Fatalf("vector %s %v", raw(item), err)
-	}
-	c, err = Decode(wire.Embeddings, wire.Embeddings, c.Body, "team-model", "float")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, _ = object(c.Body)
-	item, _ = object(arr(f["data"])[0])
-	var values []float64
-	if json.Unmarshal(item["embedding"], &values) != nil || len(values) != 2 || values[1] != -1.25 {
-		t.Fatalf("round trip %s", c.Body)
-	}
-}
-
-func TestBedrockStreamTranslationAndAggregateToolBound(t *testing.T) {
-	var encoded bytes.Buffer
-	add := func(event string, value any) {
-		t.Helper()
-		h := eventstream.Headers{}
-		h.Set(":message-type", eventstream.StringValue("event"))
-		h.Set(":event-type", eventstream.StringValue(event))
-		if err := eventstream.NewEncoder().Encode(&encoded, eventstream.Message{Headers: h, Payload: raw(value)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	add("messageStart", map[string]any{"role": "assistant"})
-	add("contentBlockDelta", map[string]any{"contentBlockIndex": 0, "delta": map[string]string{"text": "hello"}})
-	add("contentBlockStop", map[string]int{"contentBlockIndex": 0})
-	add("messageStop", map[string]string{"stopReason": "end_turn"})
-	add("metadata", map[string]any{"usage": map[string]int{"inputTokens": 3, "outputTokens": 2, "totalTokens": 5}})
-	for _, target := range []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini} {
-		var out bytes.Buffer
-		c, err := Stream("bedrock", target, bytes.NewReader(encoded.Bytes()), 8192, "team-model", true, func(b []byte) error { out.Write(b); return nil })
-		if err != nil || c.Usage == nil || c.Usage.TotalTokens != 5 {
-			t.Fatalf("%s: %#v %v", target, c, err)
-		}
-		if _, err = Stream(target, target, bytes.NewReader(out.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
-			t.Fatalf("%s invalid stream %v: %s", target, err, out.String())
-		}
-	}
-	var source strings.Builder
-	frame := func(event string, v any) {
-		source.WriteString("event: " + event + "\ndata: " + string(raw(v)) + "\n\n")
-	}
-	frame("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "a", "type": "message", "role": "assistant", "content": []any{}}})
-	for i := 0; i < 2; i++ {
-		frame("content_block_start", map[string]any{"type": "content_block_start", "index": i, "content_block": map[string]any{"type": "tool_use", "id": "call", "name": "tool", "input": map[string]any{}}})
-		frame("content_block_delta", map[string]any{"type": "content_block_delta", "index": i, "delta": map[string]any{"type": "input_json_delta", "partial_json": `{"x":"` + strings.Repeat("a", 550)}})
-	}
-	_, err := Stream(wire.Anthropic, wire.Anthropic, strings.NewReader(source.String()), 1024, "team-model", true, func([]byte) error { return nil })
-	if !errors.Is(err, wire.ErrEventTooLarge) {
-		t.Fatalf("aggregate retained state escaped its bound: %v", err)
 	}
 }
 

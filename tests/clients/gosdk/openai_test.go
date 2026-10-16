@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go/v3"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"

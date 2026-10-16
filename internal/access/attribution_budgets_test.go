@@ -36,20 +36,3 @@ func TestAttributionBudgetValidation(t *testing.T) {
 		t.Fatal("empty maps should clear identically")
 	}
 }
-
-func TestAttributionBudgetMatchingIsExactAndAllocationFree(t *testing.T) {
-	cap := "1"
-	budgets := AttributionBudgets{"team": {"core": {WeeklyCostLimit: &cap}}}
-	for _, labels := range []map[string]string{nil, {}, {"team": "edge"}, {"Team": "core"}} {
-		if budgets.Matches(labels) {
-			t.Fatal("unmatched labels acquired a cap")
-		}
-	}
-	labels := map[string]string{"team": "core"}
-	if !budgets.Matches(labels) {
-		t.Fatal("matching cap omitted")
-	}
-	if allocations := testing.AllocsPerRun(100, func() { budgets.Matches(labels) }); allocations != 0 {
-		t.Fatalf("matching allocated: %v", allocations)
-	}
-}

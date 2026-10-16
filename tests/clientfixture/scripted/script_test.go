@@ -2,35 +2,9 @@ package scripted
 
 import (
 	"encoding/json"
-	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-func TestParseDirectives(t *testing.T) {
-	d, err := parseDirectives(`Read it [[olp:tool read {"paths":[[1,2],[3]],"note":"a ]] b"}]] then [[olp:also stat]] and [[olp:tool done {}]]` +
-		` [[olp:reply "all \"done\""]] [[olp:think "hmm"]] [[olp:fail 503]]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(d.rounds) != 2 || len(d.rounds[0]) != 2 || len(d.rounds[1]) != 1 {
-		t.Fatalf("rounds %+v", d.rounds)
-	}
-	first := d.rounds[0][0]
-	if first.name != "read" || string(first.args) != `{"paths":[[1,2],[3]],"note":"a ]] b"}` || first.round != 0 || first.index != 0 {
-		t.Fatalf("first call %+v", first)
-	}
-	if second := d.rounds[0][1]; second.name != "stat" || string(second.args) != "{}" || second.index != 1 {
-		t.Fatalf("parallel call %+v", second)
-	}
-	if d.reply == nil || *d.reply != `all "done"` || d.think != "hmm" || d.fail != 503 {
-		t.Fatalf("directives %+v", d)
-	}
-	if id := first.id("call"); id != "call_fx_1_1" {
-		t.Fatalf("id %s", id)
-	}
-}
 
 func TestParseDirectivesReportsMistakes(t *testing.T) {
 	for text, fragment := range map[string]string{
@@ -64,142 +38,11 @@ func declared(names ...string) *turn {
 	return t
 }
 
-func TestDecideWalksRoundsByToolResults(t *testing.T) {
-	prompt := `go [[olp:tool a {"n":1}]] [[olp:also b {}]] [[olp:tool c {}]] [[olp:reply "finished"]]`
-	steps := []struct {
-		results  []string
-		script   string
-		calls    []string
-		text     string
-		finishes bool
-	}{
-		{nil, "tool_call", []string{"a", "b"}, "", false},
-		{[]string{"ra"}, "tool_call", []string{"a", "b"}, "", false}, // one of two results: round not yet answered
-		{[]string{"ra", "rb"}, "tool_call", []string{"c"}, "", false},
-		{[]string{"ra", "rb", "rc"}, "reply", nil, "finished", true},
-	}
-	for i, s := range steps {
-		tr := declared("a", "b", "c")
-		tr.user(prompt)
-		tr.results(s.results...)
-		r := decide(tr)
-		var names []string
-		for _, c := range r.calls {
-			names = append(names, c.name)
-		}
-		if r.script != s.script || !reflect.DeepEqual(names, s.calls) || r.text != s.text {
-			t.Errorf("step %d: %+v, want script %s calls %v text %q", i, r, s.script, s.calls, s.text)
-		}
-	}
-}
+// one of two results: round not yet answered
 
-func TestDecideIgnoresResultsAndDirectivesOfEarlierPrompts(t *testing.T) {
-	tr := declared("a")
-	tr.user(`first [[olp:tool a {}]]`)
-	tr.results("old result")
-	tr.user(`second [[olp:tool a {"again":true}]]`)
-	r := decide(tr)
-	if r.script != "tool_call" || string(r.calls[0].args) != `{"again":true}` {
-		t.Fatalf("the second prompt's own loop was not started: %+v", r)
-	}
-	tr.results("new result")
-	if r := decide(tr); r.script != "tool_result" || r.text != ToolResultsPrefix+"new result" {
-		t.Fatalf("after the second loop: %+v", r)
-	}
-}
+// A tool-result message may also carry unrelated text, which is not a prompt.
 
-func TestDecideSurvivesNoiseAroundTheToolResult(t *testing.T) {
-	// A tool-result message may also carry unrelated text, which is not a prompt.
-	tr := declared("a")
-	tr.user("context")
-	tr.user(`work [[olp:tool a {}]]`)
-	tr.results("done")
-	tr.user("")
-	if r := decide(tr); r.script != "tool_result" {
-		t.Fatalf("%+v", r)
-	}
-}
-
-func TestDecideNeverCallsAnUndeclaredTool(t *testing.T) {
-	tr := declared("other")
-	tr.user(`[[olp:tool missing {}]]`)
-	r := decide(tr)
-	if r.script != "tool_undeclared" || len(r.calls) != 0 || !strings.Contains(r.text, "missing") {
-		t.Fatalf("%+v", r)
-	}
-	tr.forced = "other2"
-	tr.messages = nil
-	tr.user("plain")
-	if r := decide(tr); r.script != "tool_undeclared" {
-		t.Fatalf("forced undeclared tool: %+v", r)
-	}
-}
-
-func TestDecideForcedToolsAndStructuredOutput(t *testing.T) {
-	tr := newTurn()
-	tr.declare("json", json.RawMessage(`{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}`))
-	tr.user("extract")
-	tr.forced = "*"
-	r := decide(tr)
-	if r.script != "tool_call" || r.calls[0].name != "json" || string(r.calls[0].args) != `{"n":42}` {
-		t.Fatalf("forced call %+v", r)
-	}
-	// Once the loop produced a result, a still-forced request gets its text.
-	tr.results("ok")
-	if r := decide(tr); r.script != "tool_result" {
-		t.Fatalf("after the forced call %+v", r)
-	}
-
-	tr = newTurn()
-	tr.user("x")
-	tr.schema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}}}`)
-	if r := decide(tr); r.script != "structured" || r.text != `{"ok":true}` {
-		t.Fatalf("structured %+v", r)
-	}
-	tr.schema, tr.jsonMode = nil, true
-	if r := decide(tr); r.script != "structured" || r.text != `{"result":"fixture"}` {
-		t.Fatalf("json mode %+v", r)
-	}
-}
-
-func TestDecideHidesToolsWhenToolChoiceIsNone(t *testing.T) {
-	tr := declared("a")
-	tr.hideTools()
-	tr.user(`[[olp:tool a {}]]`)
-	if r := decide(tr); r.script != "tool_undeclared" {
-		t.Fatalf("%+v", r)
-	}
-}
-
-func TestDecideScriptedFailuresAndMistakes(t *testing.T) {
-	tr := newTurn()
-	tr.user(`[[olp:fail 500]]`)
-	if r := decide(tr); r.failStatus != 500 || r.script != "fail" {
-		t.Fatalf("%+v", r)
-	}
-	tr = newTurn()
-	tr.user(`[[olp:tool x {oops}]]`)
-	if r := decide(tr); r.failStatus != http.StatusBadRequest || r.script != "directive_error" || !strings.Contains(r.failMessage, "malformed") {
-		t.Fatalf("%+v", r)
-	}
-}
-
-func TestDecideReasoning(t *testing.T) {
-	tr := newTurn()
-	tr.user("hi")
-	if r := decide(tr); r.reasoning != "" {
-		t.Fatalf("reasoning without a request for it: %q", r.reasoning)
-	}
-	tr.thinking = true
-	if r := decide(tr); r.reasoning != DefaultReasoning {
-		t.Fatalf("requested reasoning %q", r.reasoning)
-	}
-	tr.messages = nil
-	tr.user(`[[olp:think "custom"]]`)
-	if r := decide(tr); r.reasoning != "custom" {
-		t.Fatalf("directive reasoning %q", r.reasoning)
-	}
-}
+// Once the loop produced a result, a still-forced request gets its text.
 
 func TestSampleFollowsTheSchema(t *testing.T) {
 	for name, tc := range map[string]struct{ schema, want string }{

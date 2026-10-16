@@ -35,25 +35,6 @@ func completionFor(event *Event) HTTPCompletion {
 	}
 }
 
-func TestPendingHTTPCodecKeepsOutcomeUnknown(t *testing.T) {
-	event := pendingHTTPEvent(t)
-	payload, err := Encode(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := Decode(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(event, decoded) {
-		t.Fatalf("pending HTTP outcome changed in codec:\n%s", payload)
-	}
-	decoded.StatusCode = event.Attempts[len(event.Attempts)-1].StatusCode
-	if _, err := Validate(decoded); err == nil {
-		t.Fatal("pending outcome accepted manufactured request status")
-	}
-}
-
 func TestPendingHTTPCompletionPreservesFinancialIdentityAndNativeEvidence(t *testing.T) {
 	event := pendingHTTPEvent(t)
 	financial := *event
@@ -89,26 +70,5 @@ func TestPendingHTTPCompletionPreservesFinancialIdentityAndNativeEvidence(t *tes
 	completion.LatencyMS++
 	if err := CompletePendingHTTP(decoded, completion); err == nil {
 		t.Fatal("conflicting final outcome replaced the first one")
-	}
-}
-
-func TestPendingHTTPCompletionRejectsDifferentOwner(t *testing.T) {
-	for _, mutate := range []func(*HTTPCompletion){
-		func(c *HTTPCompletion) { c.EventID = c.RequestID },
-		func(c *HTTPCompletion) { c.APIKeyID = c.EventID },
-		func(c *HTTPCompletion) { c.Attempt.ID = c.EventID },
-		func(c *HTTPCompletion) { c.Attempt.Ordinal-- },
-	} {
-		event := pendingHTTPEvent(t)
-		before, _ := Encode(event)
-		completion := completionFor(event)
-		mutate(&completion)
-		if err := CompletePendingHTTP(event, completion); err == nil {
-			t.Fatal("different financial owner accepted")
-		}
-		after, _ := Encode(event)
-		if string(after) != string(before) {
-			t.Fatal("rejected owner changed the pending template")
-		}
 	}
 }

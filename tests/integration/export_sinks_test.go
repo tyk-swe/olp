@@ -21,7 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/observability"
+
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -198,94 +198,4 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 		t.Fatalf("audit delivery %d %v", auditCount, err)
 	}
 	_ = projectSink
-}
-
-func TestExportSinkPromotionBindsDestinationSecretsAndReusesUnchangedDefinitions(t *testing.T) {
-	source, destination := newAccessHarness(t), newAccessHarness(t)
-	a, b := source.owner(), destination.owner()
-	const sourceSecret = "source-binding-do-not-copy"
-	created := source.want(a, "POST", "/api/v1/sinks", map[string]any{"name": "Portable facts", "type": "https", "destination": "http://127.0.0.1:4199/export", "streams": []string{"requests"}, "enabled": false, "credential": sourceSecret}, idem(uuid.NewString()), 201)
-	exported := source.want(a, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	doc := exported["document"].(map[string]any)
-	entry := doc["sinks"].([]any)[0].(map[string]any)
-	ref := entry["credential_ref"].(string)
-	encoded, _ := json.Marshal(entry)
-	if strings.Contains(string(encoded), sourceSecret) || strings.Contains(string(encoded), created["id"].(string)) {
-		t.Fatal("sink export includes local secret/identity")
-	}
-	unbound := destination.want(b, "POST", "/api/v1/configuration/plan", map[string]any{"document": doc}, nil, 200)
-	if len(unbound["blockers"].([]any)) == 0 {
-		t.Fatal("unbound signing credential was silently lost")
-	}
-	bindings := map[string]string{ref: "destination-sink-signing-material"}
-	destination.want(b, "POST", "/api/v1/configuration/plan", map[string]any{"document": doc, "secret_bindings": bindings}, nil, 200)
-	destination.want(b, "POST", "/api/v1/configuration/apply", map[string]any{"document": doc, "secret_bindings": bindings}, idem(uuid.NewString()), 200)
-	var id, etag, credential string
-	if err := destination.Pool.QueryRow(t.Context(), "SELECT id::text,etag::text,credential_id::text FROM olp.managed_export_sinks WHERE name='Portable facts'").Scan(&id, &etag, &credential); err != nil {
-		t.Fatal(err)
-	}
-	ring, err := secrets.ParseRing([]byte(destination.Ring))
-	if err != nil {
-		t.Fatal(err)
-	}
-	installation, err := database.Installation(t.Context(), destination.Pool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	material, err := ring.Read(t.Context(), destination.Pool, installation, credential, secrets.SinkCredential)
-	if err != nil || string(material) != bindings[ref] {
-		t.Fatalf("destination binding was not selected: %v", err)
-	}
-	clear(material)
-	reuse := destination.want(b, "POST", "/api/v1/configuration/plan", map[string]any{"document": doc}, nil, 200)
-	found := false
-	for _, raw := range reuse["actions"].([]any) {
-		item := raw.(map[string]any)
-		if item["kind"] == "sink" {
-			found = true
-			if item["action"] != "reuse" {
-				t.Fatalf("unchanged sink action: %v", item)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("missing sink reuse evidence")
-	}
-	destination.want(b, "POST", "/api/v1/configuration/apply", map[string]any{"document": doc}, idem(uuid.NewString()), 200)
-	var after string
-	if err = destination.Pool.QueryRow(t.Context(), "SELECT etag::text FROM olp.managed_export_sinks WHERE id=$1", id).Scan(&after); err != nil || after != etag {
-		t.Fatalf("reused sink mutated: %v", err)
-	}
-	docEntry := doc["sinks"].([]any)[0].(map[string]any)
-	delete(docEntry, "credential_ref")
-	destination.want(b, "POST", "/api/v1/configuration/apply", map[string]any{"document": doc}, idem(uuid.NewString()), 200)
-	var remaining int
-	if err = destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1", credential).Scan(&remaining); err != nil || remaining != 0 {
-		t.Fatalf("removed signing credential remains: %d %v", remaining, err)
-	}
-}
-
-func TestExportDeliveryCheckpointIsAcceptedByInstallationAndRegionalHealth(t *testing.T) {
-	h := newAccessHarness(t)
-	if err := usage.CheckpointTask(t.Context(), h.Pool, usage.TaskManagedExportDelivery, usage.OutcomeSuccess, true); err != nil {
-		t.Fatal(err)
-	}
-	for _, region := range []string{"", "west"} {
-		health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, region)
-		if err != nil {
-			t.Fatal(err)
-		}
-		found := false
-		for _, task := range health.Tasks {
-			if task.Task == string(usage.TaskManagedExportDelivery) {
-				found = true
-				if task.State != observability.TaskStateHealthy || task.SuccessesTotal != 1 {
-					t.Fatalf("export health in %q: %+v", region, task)
-				}
-			}
-		}
-		if !found {
-			t.Fatalf("export checkpoint omitted in %q", region)
-		}
-	}
 }

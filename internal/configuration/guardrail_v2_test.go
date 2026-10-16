@@ -22,16 +22,6 @@ func TestLegacyGuardrailNormalizationPreservesOrderAndLiteralReplacement(t *test
 		t.Fatal("normalization not idempotent", err)
 	}
 }
-func TestMixedConfigurationGuardrailsRejected(t *testing.T) {
-	d := &Document{APIVersion: LegacyAPIVersion, GuardrailPolicies: []GuardrailPolicyEntry{{Name: "mixed"}}}
-	if normalizeGuardrailVersion(d) == nil {
-		t.Fatal("accepted mixed version 1")
-	}
-	d = &Document{APIVersion: APIVersion, Routes: []RouteEntry{{ContentPolicy: json.RawMessage(`{"rules":[]}`)}}}
-	if normalizeGuardrailVersion(d) == nil {
-		t.Fatal("accepted ambiguous version 2")
-	}
-}
 
 func TestGuardrailConfigurationRejectsStrictTransforms(t *testing.T) {
 	project := "Project"

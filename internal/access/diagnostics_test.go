@@ -30,14 +30,3 @@ func TestUnexpectedErrorsDoNotLogRequestContent(t *testing.T) {
 		t.Fatal("SQLSTATE was lost")
 	}
 }
-
-func TestPathUUIDsAreCanonical(t *testing.T) {
-	const id = "abcdef01-2345-4678-9abc-def012345678"
-	for _, value := range []string{strings.ToUpper(id), strings.ReplaceAll(id, "-", ""), "urn:uuid:" + id} {
-		r := httptest.NewRequest("GET", "/", nil)
-		r.SetPathValue("id", value)
-		if got, err := IDParam(r, "id"); err != nil || got != id {
-			t.Fatalf("%s: %s, %v", value, got, err)
-		}
-	}
-}

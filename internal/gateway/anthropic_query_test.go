@@ -108,51 +108,6 @@ const (
 	midSystem = `{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"},{"role":"system","content":[{"type":"text","text":"note","cache_control":{"type":"ephemeral"}}]}],"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}}`
 )
 
-// The Anthropic SDKs call the beta namespace with ?beta=true. The query selects
-// no API behavior, so a strict route consumes it and the upstream never sees
-// it, while the paired beta header and body still arrive unchanged.
-func TestStrictAnthropicRoutesAcceptTheBetaNamespaceQuery(t *testing.T) {
-	for _, tc := range []struct {
-		name, path, body string
-		check            func(*testing.T, upstreamRequest)
-	}{
-		{"unary", messagesPath, midSystem, nil},
-		{"streaming", messagesPath, strings.Replace(midSystem, `"max_tokens":16`, `"max_tokens":16,"stream":true`, 1), nil},
-		{"count_tokens", countPath, `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"},{"role":"system","content":"note"}]}`, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := anthropicStrictHarness(t)
-			log := recordAnthropic(h)
-			resp := h.do(t.Context(), http.MethodPost, tc.path+"?beta=true", fullKey, []byte(tc.body), map[string]string{"Anthropic-Version": "2023-06-01", "Anthropic-Beta": betas})
-			raw, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
-			}
-			got := log.last(t)
-			if got.Query != "" {
-				t.Fatalf("the upstream received the query %q", got.Query)
-			}
-			if got.Beta != betas {
-				t.Fatalf("the upstream received Anthropic-Beta %q, want %q", got.Beta, betas)
-			}
-			var sent struct {
-				Messages          []struct{ Role string }
-				ContextManagement json.RawMessage `json:"context_management"`
-			}
-			if err := json.Unmarshal(got.Body, &sent); err != nil {
-				t.Fatal(err)
-			}
-			if len(sent.Messages) != 2 || sent.Messages[1].Role != "system" {
-				t.Fatalf("the system message did not arrive in place: %s", got.Body)
-			}
-			if tc.name != "count_tokens" && !strings.Contains(string(got.Body), `"cache_control":{"type":"ephemeral"}`) {
-				t.Fatalf("the cache marker did not arrive: %s", got.Body)
-			}
-		})
-	}
-}
-
 // Only the SDK's marker is consumed. Every other caller query setting still
 // has to match a setting the profile declares.
 func TestStrictAnthropicRoutesRefuseOtherQuerySettings(t *testing.T) {

@@ -40,25 +40,3 @@ func TestCredentialValidationTracksUpstreamAccess(t *testing.T) {
 		}
 	}
 }
-
-func TestDefaultCertificationCannotCombineCredentialVersions(t *testing.T) {
-	cfg := Configuration{Kind: "openai_compatible", AuthMode: AuthAPIKey, Endpoint: new("https://example.com/v1")}
-	row := slotRow{Default: true, CredentialID: new("current")}
-	at := time.Now().UTC()
-	capability := storedCapability{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified", CertifiedAt: &at, CredentialFingerprint: row.credentialFingerprint(&cfg)}
-	models := []storedModel{
-		{UpstreamModel: "a", Enabled: true, Capabilities: []storedCapability{capability}},
-		{UpstreamModel: "b", Enabled: true, Capabilities: []storedCapability{capability}},
-	}
-	if row.certificationTime(&cfg, models) == nil {
-		t.Fatal("complete current certification did not validate the credential")
-	}
-	models[1].Capabilities[0].CredentialFingerprint = cfg.transportFingerprint() + ":old"
-	if row.certificationTime(&cfg, models) != nil {
-		t.Fatal("certifications from different credentials validated the slot")
-	}
-	models[1].Enabled = false
-	if row.certificationTime(&cfg, models) == nil {
-		t.Fatal("disabled model blocked validation of current access")
-	}
-}

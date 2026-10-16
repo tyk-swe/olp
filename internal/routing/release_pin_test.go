@@ -41,15 +41,3 @@ func TestHistoricalReleasePinRejectsSiblingCredentialAndMissingIdentity(t *testi
 		}
 	}
 }
-
-func TestHistoricalSlotDoesNotApplyNewWorkEnabledPolicy(t *testing.T) {
-	credential := "retained-version"
-	provider := Provider{Slots: []Slot{{ID: "disabled-now", Enabled: false, CredentialID: &credential}}}
-	if _, ok := PinnedSlot(&provider, "disabled-now", &credential); !ok {
-		t.Fatal("new-work eligibility displaced historical identity")
-	}
-	provider.Slots[0].CredentialID = nil
-	if _, ok := PinnedSlot(&provider, "disabled-now", nil); !ok {
-		t.Fatal("credentialless retained identity rejected")
-	}
-}

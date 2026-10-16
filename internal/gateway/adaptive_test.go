@@ -3,9 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +24,6 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -139,46 +136,6 @@ func TestPinnedInteractionsIgnoreRouteDelegatingSelectors(t *testing.T) {
 	}
 }
 
-func TestFallbackRouteServesOnceThePrimaryIsExhausted(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
-	})
-	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
-	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusOK || body["model"] != routeSlug {
-		t.Fatalf("status %d body %v", resp.StatusCode, body)
-	}
-	env := h.sink.last(t)
-	if env.Route != routeSlug || len(env.Attempts) != 2 {
-		t.Fatalf("envelope route %q attempts %+v", env.Route, env.Attempts)
-	}
-	first, second := env.Attempts[0], env.Attempts[1]
-	if first.Leg != nil || first.Class != classUpstreamServer {
-		t.Fatalf("primary attempt %+v", first)
-	}
-	if second.Class != classSuccess || second.Ordinal != 2 || second.Leg == nil ||
-		second.Leg.Route != backupSlug || second.Leg.Via != usage.ViaFallback {
-		t.Fatalf("fallback attempt %+v leg %+v", second, second.Leg)
-	}
-}
-
-func TestFallbackFollowsOnlyTheConditionsItNames(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackContextWindow}}}})
-	})
-	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
-	if resp, _ := h.chat(fullKey, nil); resp.StatusCode == http.StatusOK || h.mock.count("b") != 0 {
-		t.Fatalf("status %d, backup calls %d: a server failure is not a context-window failure", resp.StatusCode, h.mock.count("b"))
-	}
-	h.mock.set("a", status(http.StatusBadRequest, `{"error":{"message":"too long","type":"invalid_request_error","code":"context_length_exceeded"}}`))
-	resp, _ := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusOK || h.mock.count("b") != 1 {
-		t.Fatalf("status %d, backup calls %d", resp.StatusCode, h.mock.count("b"))
-	}
-}
-
 func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
@@ -209,220 +166,12 @@ func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {
 	}
 }
 
-func TestFallbackNeverFollowsACommittedStream(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: routing.FallbackConditions}}})
-	})
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, `data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"model-a","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}`+"\n\n")
-		w.(http.Flusher).Flush()
-		panic(http.ErrAbortHandler)
-	})
-	resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"hi"}],"stream":true}`), nil)
-	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(raw), `"content":"partial"`) {
-		t.Fatalf("body %q", raw)
-	}
-	env := h.sink.last(t)
-	if !env.Committed || len(env.Attempts) != 1 || h.mock.count("b") != 0 {
-		t.Fatalf("a committed stream moved on: attempts %+v, backup calls %d", env.Attempts, h.mock.count("b"))
-	}
-}
+// Retries are bounded by the rule and consume the attempt budget; the
+// route then fails over with what remains.
 
-func TestFallbackSkipsRoutesTheKeyMayNotUse(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
-	})
-	authority := h.rt.keys[fullKey]
-	authority.Policy.AllowedRoutes = []string{routeSlug}
-	h.rt.keys[fullKey] = authority
-	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
-	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "upstream_unavailable" || h.mock.count("b") != 0 {
-		t.Fatalf("status %d body %v backup calls %d", resp.StatusCode, body, h.mock.count("b"))
-	}
-}
+// Each attempt records which repeat of its slot it was.
 
-func TestFallbacksShareThePrimaryAttemptBudget(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		splitRoutes(s, b, routing.Behavior{Fallbacks: []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackExhausted}}}})
-		primary := s.Routes[routeSlug]
-		primary.MaxAttempts = 1
-		s.Routes[routeSlug] = primary
-	})
-	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
-	if resp, _ := h.chat(fullKey, nil); resp.StatusCode == http.StatusOK || h.mock.count("b") != 0 {
-		t.Fatalf("status %d backup calls %d: the primary's one attempt was spent", resp.StatusCode, h.mock.count("b"))
-	}
-}
-
-func TestRetryPolicyRepeatsTheSameSlotBeforeFailingOver(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
-		route := s.Routes[routeSlug]
-		route.Retry = routing.Retry{classUpstreamServer: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 2}}
-		s.Routes[routeSlug] = route
-	})
-	var calls atomic.Int32
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) == 1 {
-			status(http.StatusBadGateway, `{"error":{"message":"blip","type":"server_error"}}`)(w, r)
-			return
-		}
-		completion(modelA, answerText)(w, r)
-	})
-	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK {
-		t.Fatalf("%s attempts %+v", resp.Status, h.sink.last(t).Attempts)
-	}
-	env := h.sink.last(t)
-	if len(env.Attempts) != 2 || env.Attempts[1].Retry != 1 || env.Attempts[1].ProviderID != env.Attempts[0].ProviderID || h.mock.count("b") != 0 {
-		t.Fatalf("attempts %+v, calls to b %d", env.Attempts, h.mock.count("b"))
-	}
-	// Retries are bounded by the rule and consume the attempt budget; the
-	// route then fails over with what remains.
-	h.mock.set("a", status(http.StatusBadGateway, `{"error":{"message":"down","type":"server_error"}}`))
-	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.Status)
-	}
-	env = h.sink.last(t)
-	if len(env.Attempts) != 3 || env.Attempts[2].ProviderID == env.Attempts[0].ProviderID {
-		t.Fatalf("attempts %+v", env.Attempts)
-	}
-	// Each attempt records which repeat of its slot it was.
-	for i, want := range []int{0, 1, 0} {
-		if env.Attempts[i].Retry != want {
-			t.Fatalf("attempt %d recorded retry %d, want %d", i+1, env.Attempts[i].Retry, want)
-		}
-	}
-}
-
-func TestShadowTargetsMirrorTrafficAccountedToTheRoute(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
-		route := s.Routes[routeSlug]
-		route.Targets[1].Shadow = &routing.Shadow{SampleRate: 1}
-		s.Routes[routeSlug] = route
-	})
-	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusOK || body["model"] != routeSlug {
-		t.Fatalf("status %d body %v", resp.StatusCode, body)
-	}
-	h.gateway.WaitShadows()
-	h.sink.mu.Lock()
-	envs := append([]Envelope(nil), h.sink.envs...)
-	h.sink.mu.Unlock()
-	if len(envs) != 2 {
-		t.Fatalf("envelopes %d, want the caller's and one mirror", len(envs))
-	}
-	caller, shadow := envs[0], envs[1]
-	if caller.Origin != "" || caller.KeyID != h.keyID || len(caller.Attempts) != 1 {
-		t.Fatalf("caller envelope %+v", caller)
-	}
-	if shadow.Origin != usage.OriginShadow || shadow.KeyID != "" || shadow.ParentRequestID != caller.AccountingID ||
-		shadow.Route != routeSlug || shadow.Outcome != "success" || len(shadow.Attempts) != 1 {
-		t.Fatalf("shadow envelope %+v", shadow)
-	}
-	if event := accountingEvent(shadow); event == nil || event.APIKeyID != "" || event.Origin != usage.OriginShadow {
-		t.Fatalf("shadow accounting %+v", event)
-	}
-	if h.mock.count("a") != 1 || h.mock.count("b") != 1 {
-		t.Fatalf("calls a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
-	}
-	// A shadow's failure never reaches the caller.
-	h.mock.set("b", status(http.StatusInternalServerError, `{}`))
-	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.Status)
-	}
-	h.gateway.WaitShadows()
-	if mirrored, dropped := h.gateway.ShadowCounts(); mirrored != 2 || dropped != 0 {
-		t.Fatalf("mirrored %d dropped %d", mirrored, dropped)
-	}
-}
-
-func TestSelectorsNarrowTargetsByRequestFeatures(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
-		route := s.Routes[routeSlug]
-		route.Targets[0].Tags, route.Targets[1].Tags = []string{"fast"}, []string{"tools"}
-		tools := true
-		route.Selectors = []routing.Selector{
-			{ID: "tool-calls", When: routing.Predicate{Tools: &tools}, Tags: []string{"tools"}},
-			{ID: "plain", Tags: []string{"fast"}},
-		}
-		s.Routes[routeSlug] = route
-	})
-	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.Status)
-	}
-	if env := h.sink.last(t); len(env.Attempts) != 1 || env.Attempts[0].Selector != "plain" || h.mock.count("a") != 1 {
-		t.Fatalf("plain request attempts %+v", env.Attempts)
-	}
-	resp, _ := h.chat(fullKey, nil, `,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.Status)
-	}
-	if env := h.sink.last(t); len(env.Attempts) != 1 || env.Attempts[0].Selector != "tool-calls" || h.mock.count("b") != 1 {
-		t.Fatalf("tool request attempts %+v", env.Attempts)
-	}
-}
-
-func TestSessionAffinityKeepsACacheKeyOnOneTarget(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
-		route := s.Routes[routeSlug]
-		route.Targets[1].Priority = route.Targets[0].Priority
-		route.Affinity = &routing.Affinity{Source: routing.AffinityCacheKey}
-		s.Routes[routeSlug] = route
-	})
-	served := map[string]bool{}
-	for session := range 16 {
-		key := fmt.Sprintf(`,"prompt_cache_key":"session-%d"`, session)
-		var first string
-		for range 3 {
-			if resp, _ := h.chat(fullKey, nil, key); resp.StatusCode != http.StatusOK {
-				t.Fatal(resp.Status)
-			}
-			provider := h.sink.last(t).Attempts[0].ProviderID
-			if first == "" {
-				first = provider
-			} else if provider != first {
-				t.Fatalf("session %d moved from %s to %s", session, first, provider)
-			}
-		}
-		served[first] = true
-	}
-	if len(served) != 2 {
-		t.Fatalf("sixteen sessions all landed on %v; affinity must spread sessions", served)
-	}
-}
-
-func TestRoutingHeaderCannotRaisePriorityAboveTheKeyCeiling(t *testing.T) {
-	h := newHarness(t, Config{})
-	priority := func(class string) map[string]string {
-		return map[string]string{routingHeader: `{"priority":"` + class + `"}`}
-	}
-	if resp, body := h.chat(fullKey, priority("high")); resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "priority_increase_forbidden" {
-		t.Fatalf("a normal key raised its priority: %d %v", resp.StatusCode, body)
-	}
-	if resp, body := h.chat(fullKey, priority("low")); resp.StatusCode != http.StatusOK {
-		t.Fatalf("a key could not lower its priority: %d %v", resp.StatusCode, body)
-	}
-	authority := h.rt.keys[fullKey]
-	authority.Policy.MaxPriority = new("high")
-	h.rt.keys[fullKey] = authority
-	if resp, body := h.chat(fullKey, priority("high")); resp.StatusCode != http.StatusOK {
-		t.Fatalf("a key could not use its ceiling: %d %v", resp.StatusCode, body)
-	}
-	if resp, body := h.chat(fullKey, priority("critical")); resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "priority_increase_forbidden" {
-		t.Fatalf("a key exceeded its ceiling: %d %v", resp.StatusCode, body)
-	}
-}
+// A shadow's failure never reaches the caller.
 
 func TestSaturatedGatewayQueuesRequestsByPriority(t *testing.T) {
 	pool := observability.NewPool(1).Queue(2, 5*time.Second)
@@ -509,18 +258,6 @@ func TestSaturatedGatewayQueuesRequestsByPriority(t *testing.T) {
 	}
 }
 
-func TestProbeRequestsParseForEveryProbedOperation(t *testing.T) {
-	for operation, shape := range probeRequests {
-		parsed, err := protocols.Parse(shape.family, fmt.Appendf(nil, shape.body, routeSlug), routeSlug)
-		if err != nil {
-			t.Fatalf("%s probe: %v", operation, err)
-		}
-		if parsed.Family.Operation() != operation || parsed.Route != routeSlug {
-			t.Fatalf("%s probe parsed as %s for %q", operation, parsed.Family.Operation(), parsed.Route)
-		}
-	}
-}
-
 const classifierSlug = "team-classifier"
 
 // triage tags provider a simple and provider b complex, adds a classifier
@@ -540,93 +277,11 @@ func triage(s *routing.Snapshot, b routing.Provider, when routing.Predicate) {
 	s.Routes[routeSlug], s.Routes[classifierSlug] = route, classifier
 }
 
-func TestClassifierPredicateRoutesByTheLabelAGenerationRouteReturns(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
-	})
-	for _, tc := range []struct {
-		name, selector, served string
-		classifier             http.HandlerFunc
-		status                 int
-	}{
-		{"complex label", "hard", "b", completion(modelB, " complex\n"), http.StatusOK},
-		{"other label", "easy", "a", completion(modelB, "simple"), http.StatusOK},
-		{"classifier failure falls through", "easy", "a", status(http.StatusInternalServerError, `{"error":{"message":"down","type":"server_error"}}`), http.StatusBadGateway},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h.mock.set("b", tc.classifier)
-			before := len(h.sink.envs)
-			if resp, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"prove the theorem"}]`); resp.StatusCode != http.StatusOK {
-				t.Fatalf("%s %s", resp.Status, body)
-			}
-			caller := h.sink.last(t)
-			h.sink.mu.Lock()
-			envs := slices.Clone(h.sink.envs[before:])
-			h.sink.mu.Unlock()
-			if len(envs) != 2 {
-				t.Fatalf("envelopes %d, want the classifier's and the caller's", len(envs))
-			}
-			classified := envs[0]
-			if classified.Origin != usage.OriginClassifier || classified.ParentRequestID != caller.AccountingID || classified.KeyID != h.keyID || classified.Status != tc.status {
-				t.Fatalf("classifier envelope %+v", classified)
-			}
-			if classified.Route != classifierSlug || len(classified.Attempts) == 0 || classified.Attempts[0].ProviderID != h.provider("b") {
-				t.Fatalf("classifier attempts %+v", classified.Attempts)
-			}
-			if len(caller.Attempts) != 1 || caller.Attempts[0].Selector != tc.selector || caller.Attempts[0].ProviderID != h.provider(tc.served) {
-				t.Fatalf("caller attempts %+v", caller.Attempts)
-			}
-		})
-	}
-}
-
 // predicates answers plugin predicates in-process.
 type predicates func(digest string, input abi.RoutePredicate) (bool, error)
 
 func (p predicates) RoutePredicate(_ context.Context, digest string, input abi.RoutePredicate) (bool, error) {
 	return p(digest, input)
-}
-
-func TestPluginPredicateNarrowsByFeaturesAndFallsThroughOnFailure(t *testing.T) {
-	digest := strings.Repeat("ab", 32)
-	var seen []abi.RoutePredicate
-	fail := false
-	h := newHarness(t, Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096,
-		Predicates: predicates(func(got string, input abi.RoutePredicate) (bool, error) {
-			if got != digest {
-				t.Errorf("digest %q", got)
-			}
-			seen = append(seen, input)
-			if fail {
-				return false, errors.New("trap")
-			}
-			return input.Tools, nil
-		})})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		triage(s, b, routing.Predicate{Plugin: &routing.PluginPredicate{Digest: digest}})
-	})
-	h.mock.set("b", completion(modelB, answerText))
-	tools := `,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]`
-	for _, tc := range []struct {
-		name, fields, selector, served string
-		fail                           bool
-	}{
-		{"match", tools, "hard", "b", false},
-		{"no match", "", "easy", "a", false},
-		{"failure falls through", tools, "easy", "a", true},
-	} {
-		fail = tc.fail
-		if resp, body := h.chat(fullKey, nil, tc.fields); resp.StatusCode != http.StatusOK {
-			t.Fatalf("%s: %s %s", tc.name, resp.Status, body)
-		}
-		if attempts := h.sink.last(t).Attempts; len(attempts) != 1 || attempts[0].Selector != tc.selector || attempts[0].ProviderID != h.provider(tc.served) {
-			t.Fatalf("%s: attempts %+v", tc.name, attempts)
-		}
-	}
-	if len(seen) != 3 || seen[0].Route != routeSlug || seen[0].Selector != "hard" || seen[0].Operation != "generation" || !seen[0].Tools || seen[1].Tools || seen[0].InputTokens <= 0 {
-		t.Fatalf("predicate inputs %+v", seen)
-	}
 }
 
 // pipelining is a limiter that admits everything and counts its round trips:

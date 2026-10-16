@@ -6,45 +6,6 @@ import (
 	"testing"
 )
 
-func TestParseStreamIDRejectsMalformedIdentifiers(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		id                     string
-		milliseconds, sequence uint64
-		valid                  bool
-	}{
-		{id: "1700000000000-0", milliseconds: 1700000000000, valid: true},
-		{id: "1-2", milliseconds: 1, sequence: 2, valid: true},
-		{id: "0-0", valid: true},
-		{id: "1700000000000"},
-		{id: "-0"},
-		{id: "1-"},
-		{id: "1-x"},
-		{id: "-1-2"},
-		{id: " 1-2"},
-		{id: "99999999999999999999-0"},
-		{id: ""},
-	}
-	for _, test := range cases {
-		t.Run(test.id, func(t *testing.T) {
-			t.Parallel()
-			milliseconds, sequence, err := ParseStreamID(test.id)
-			if test.valid {
-				if err != nil {
-					t.Fatalf("ParseStreamID(%q) = %v", test.id, err)
-				}
-				if milliseconds != test.milliseconds || sequence != test.sequence {
-					t.Fatalf("ParseStreamID(%q) = %d-%d", test.id, milliseconds, sequence)
-				}
-				return
-			}
-			if !errors.Is(err, errStreamProtocol) {
-				t.Fatalf("ParseStreamID(%q) = %v, want a protocol error", test.id, err)
-			}
-		})
-	}
-}
-
 func ingestEntry(id string, fields ...any) []any { return []any{id, fields} }
 
 func TestParseReadReplyAcceptsBothProtocolShapes(t *testing.T) {

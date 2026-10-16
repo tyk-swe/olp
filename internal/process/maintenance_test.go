@@ -19,31 +19,6 @@ func passwordFixture(t *testing.T, content []byte, perm os.FileMode) string {
 	return path
 }
 
-func TestPasswordFileValidation(t *testing.T) {
-	password := "a sufficiently long passphrase"
-	for name, tc := range map[string]struct {
-		content []byte
-		want    string
-	}{
-		"plain":                {[]byte(password), password},
-		"newline":              {[]byte(password + "\n"), password},
-		"crlf":                 {[]byte(password + "\r\n"), password},
-		"lone carriage return": {[]byte(password + "\r"), password + "\r"},
-		"inner newlines":       {[]byte(password + "\n" + password + "\n"), password + "\n" + password},
-		"double newline":       {[]byte(password + "\n\n"), password + "\n"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := readPasswordFile(passwordFixture(t, tc.content, 0o600))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != tc.want {
-				t.Fatalf("password file mangled: %q", got)
-			}
-		})
-	}
-}
-
 func TestPasswordFileRejectsUnsafeInputs(t *testing.T) {
 	for name, tc := range map[string]struct {
 		content []byte

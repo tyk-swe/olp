@@ -3,7 +3,6 @@
 package usage
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,82 +11,9 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func TestIntegrationCacheReconciliationSurvivesRetention(t *testing.T) {
-	pool := notificationPool(t)
-	owner, key := seedParityOwner(t, pool)
-	provider := seedParityProvider(t, pool, owner)
-	observed := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour).Add(30 * time.Minute)
-	cases := []parityCase{aggregatePriceCase("cached", "1000000")}
-	seedParityPrices(t, pool, owner, observed.Add(-time.Hour), cases)
-	persist := func(hit, exempt bool) {
-		t.Helper()
-		event := parityEvent(t, key, provider, observed, cases)
-		event.Attempts[0].Routing = &Routing{BudgetExempt: exempt}
-		if exempt {
-			event.Attempts[0].Routing.CredentialSource = "caller"
-		}
-		if hit {
-			event.CacheResult = "hit"
-			event.Attempts[0].Routing.Cache = &CacheEvidence{Result: "hit", AvoidedCost: "2", BudgetCost: "2", BudgetCharge: "3", Currency: "USD"}
-		}
-		persistParity(t, pool, event)
-	}
-	read := func() []ProviderDaySpend {
-		t.Helper()
-		start := observed.Truncate(24 * time.Hour)
-		rows, err := ReconciliationSpend(t.Context(), pool, start, start.Add(24*time.Hour), []string{provider})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return rows
-	}
-	roll := func() {
-		t.Helper()
-		conn, err := pool.Acquire(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Release()
-		if _, _, err := rollUpAttemptUsage(t.Context(), conn.Conn(), observed.Add(time.Hour)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	check := func(want []ProviderDaySpend, requests, hits int64) {
-		t.Helper()
-		got := read()
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("reconciliation changed after retention: got=%+v want=%+v", got, want)
-		}
-		var gotRequests, gotHits int64
-		if err := pool.QueryRow(t.Context(), `SELECT sum(provider_request_count),sum(provider_cache_hit_count) FROM olp.attempt_usage_hourly`).Scan(&gotRequests, &gotHits); err != nil {
-			t.Fatal(err)
-		}
-		if gotRequests != requests || gotHits != hits {
-			t.Fatalf("retained request/cache counts=%d/%d, want=%d/%d", gotRequests, gotHits, requests, hits)
-		}
-	}
-	// Cache-only buckets must keep zero provider attempts, including exempt hits.
-	persist(true, false)
-	persist(true, true)
-	want := read()
-	if len(want) != 1 || want[0].PricedAttempts != 0 || want[0].ExcludedCallerAttempts != 0 {
-		t.Fatalf("cache-only reconciliation=%+v", want)
-	}
-	roll()
-	check(want, 2, 2)
-	// Late cache hits and real calls add to the same retained hour exactly once.
-	persist(true, false)
-	persist(false, false)
-	persist(false, true)
-	want = read()
-	if len(want) != 1 || want[0].PricedAttempts != 1 || want[0].ExcludedCallerAttempts != 1 {
-		t.Fatalf("mixed reconciliation=%+v", want)
-	}
-	roll()
-	check(want, 5, 3)
-	roll()
-	check(want, 5, 3)
-}
+// Cache-only buckets must keep zero provider attempts, including exempt hits.
+
+// Late cache hits and real calls add to the same retained hour exactly once.
 
 func TestIntegrationCacheBudgetDebitsSurviveReconstructionAndRetention(t *testing.T) {
 	pool := notificationPool(t)

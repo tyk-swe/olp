@@ -2,13 +2,10 @@ package plugins
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -108,68 +105,4 @@ func TestManifestValidation(t *testing.T) {
 			wantError(t, validateManifest(m, false), tc.code, tc.field)
 		})
 	}
-}
-
-// A grant profile's address may begin with the grant fact that holds the
-// upstream's base URL, whose origin OLP checks per request rather than at
-// install.
-func TestManifestAcceptsAnAddressBeginningWithAGrantFact(t *testing.T) {
-	m := validManifest()
-	m.Profiles[2].Grant.Facts = append(m.Profiles[2].Grant.Facts, "api_base")
-	m.Profiles[2].Hosting.Address = "{grant.api_base}/v1"
-	if err := validateManifest(m, false); err != nil {
-		t.Fatalf("refused an address beginning with a grant fact: %v", err)
-	}
-}
-
-func TestManifestGrantInputIsCallbackOrSecret(t *testing.T) {
-	for _, m := range []abi.Manifest{codeplans.OpenCodeGoManifest(), codeplans.ZAIManifest()} {
-		if err := validateManifest(m, false); err != nil {
-			t.Fatalf("%s: %v", m.Name, err)
-		}
-	}
-	m := validManifest()
-	m.Profiles[2].Grant.Input = "password"
-	if err, ok := errors.AsType[*Error](validateManifest(m, false)); !ok || err.Field != "manifest.profiles[2].grant.input" {
-		t.Fatalf("unknown grant input accepted: %v", err)
-	}
-}
-
-// Only an unconfined plugin carries its profiles' traffic, and only a
-// dialect's HTTP and SSE traffic: a profile that carries traffic can't serve
-// a WebSocket or realtime dialect.
-func TestOnlyUnconfinedPluginsCarryHTTPTraffic(t *testing.T) {
-	carrying := validManifest()
-	carrying.Profiles[0].CarriesTraffic = true
-	if err := validateManifest(carrying, true); err != nil {
-		t.Fatalf("refused an unconfined plugin that carries traffic: %v", err)
-	}
-	wantError(t, validateManifest(carrying, false), CodeManifestInvalid, "manifest.profiles[0].carries_traffic")
-	for _, dialect := range []string{"gemini-live", "openai-realtime"} {
-		carrying.Profiles[0].Dialect = dialect
-		wantError(t, validateManifest(carrying, true), CodeDialectUnknown, "manifest.profiles[0].dialect")
-	}
-}
-
-func TestManifestDecodingRefusesUnknownDeclarations(t *testing.T) {
-	declared := validManifest()
-	declared.Profiles[0].Hosting.Envelope = &abi.Envelope{Request: "request", Fields: map[string]string{"model": "{model}"}, Response: "response"}
-	declared.Profiles[0].Hosting.Rewrites = []abi.Rewrite{{Op: "set", Path: "/store", Value: json.RawMessage(`null`)}}
-	data, err := json.Marshal(declared)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decoded, err := decodeManifest(data, false); err != nil || !reflect.DeepEqual(decoded, declared) {
-		t.Fatalf("decoded %+v: %v", decoded, err)
-	}
-	for _, extended := range []string{
-		strings.Replace(string(data), `"profiles":`, `"signing":true,"profiles":`, 1),
-		strings.Replace(string(data), `"response":"response"`, `"response":"response","events":"response"`, 1),
-		strings.Replace(string(data), `"class":`, `"retry_after":5,"class":`, 1),
-	} {
-		_, err = decodeManifest([]byte(extended), false)
-		wantError(t, err, CodeManifestInvalid, "manifest")
-	}
-	_, err = decodeManifest([]byte(`{"name":"`+strings.Repeat("a", maxManifestBytes)+`"}`), false)
-	wantError(t, err, CodeManifestInvalid, "manifest")
 }

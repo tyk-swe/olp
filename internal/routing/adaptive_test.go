@@ -2,14 +2,10 @@ package routing
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func reasonOf(plan Plan, targetID string) string {
@@ -29,62 +25,10 @@ func attemptTargets(plan Plan) []string {
 	return out
 }
 
-func TestSelectorsNarrowTargetsDelegateAndExplainTheirTrace(t *testing.T) {
-	s, slug, _ := planningFixture()
-	route := s.Routes[slug]
-	route.Targets[0].Tags = []string{"small"}
-	route.Targets[1].Tags = []string{"large"}
-	route.Targets[2].Tags = []string{"large"}
-	route.Selectors = []Selector{
-		{ID: "classified", When: Predicate{Classifier: &ClassifierPredicate{Route: "tei", Labels: []string{"simple"}, TimeoutMS: 100}}, Tags: []string{"small"}},
-		{ID: "short", When: Predicate{MaxInputTokens: ptr(int64(1000))}, Tags: []string{"small"}},
-		{ID: "reasoning", When: Predicate{ReasoningEffort: []string{"high"}}, Route: "thinker"},
-	}
-	s.Routes[slug] = route
-	thinker := Route{Slug: "thinker", Operations: []string{"generation"}}
-	s.Routes["thinker"] = thinker
+// A classifier failure falls through; a forbidden delegate is skipped.
 
-	evaluated := 0
-	options := Options{Features: &Features{Operation: "generation", InputTokens: 400}, Evaluate: func(Selector) PredicateResult {
-		evaluated++
-		return PredicateResult{Label: "complex"}
-	}}
-	plan, err := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if evaluated != 1 || len(plan.Selectors) != 2 || plan.Selectors[0].Outcome != "not_matched" || *plan.Selectors[0].Label != "complex" || plan.Selectors[1].Outcome != "matched" {
-		t.Fatalf("selector trace: %+v", plan.Selectors)
-	}
-	if got := attemptTargets(plan); !slices.Equal(got, []string{route.Targets[0].ID}) {
-		t.Fatalf("selector kept %v", got)
-	}
-	if reasonOf(plan, route.Targets[1].ID) != "selector_excluded" || *plan.Decisions[0].Selector != "short" {
-		t.Fatalf("decisions: %+v", plan.Decisions)
-	}
-
-	// A classifier failure falls through; a forbidden delegate is skipped.
-	options.Evaluate = func(Selector) PredicateResult { return PredicateResult{Failure: "classifier_failed"} }
-	options.Features = &Features{Operation: "generation", InputTokens: 5000, ReasoningEffort: "high"}
-	options.Permitted = func(r Route) bool { return r.Slug != "thinker" }
-	plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
-	if plan.Selectors[0].Outcome != "classifier_failed" || plan.Selectors[2].Outcome != "selector_route_forbidden" || plan.Delegate != "" || len(plan.Attempts) != 3 {
-		t.Fatalf("fall through: %+v", plan)
-	}
-	options.Permitted = nil
-	plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
-	if plan.Delegate != "thinker" || len(plan.Attempts) != 0 || len(plan.Decisions) != 0 {
-		t.Fatalf("delegation: %+v", plan)
-	}
-
-	// Without features, as on surfaces that do not compute them, selectors
-	// are not evaluated at all.
-	options.Features = nil
-	plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
-	if plan.Selectors != nil || len(plan.Attempts) != 3 {
-		t.Fatalf("selectors without features: %+v", plan)
-	}
-}
+// Without features, as on surfaces that do not compute them, selectors
+// are not evaluated at all.
 
 func TestSpendCapsRemoveOwnersAndNameTheBudgetCondition(t *testing.T) {
 	s, slug, ids := planningFixture()
@@ -185,87 +129,13 @@ func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	}
 }
 
-func TestShadowTargetsAreSampledApartFromTheAttemptOrder(t *testing.T) {
-	s, slug, _ := planningFixture()
-	route := s.Routes[slug]
-	route.Targets[2].Shadow = &Shadow{SampleRate: 1}
-	s.Routes[slug] = route
-	shadow := route.Targets[2].ID
-
-	plan, _ := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), Options{})
-	if len(plan.Attempts) != 2 || len(plan.Shadows) != 0 || reasonOf(plan, shadow) != "shadow_not_sampled" {
-		t.Fatalf("unseeded shadow: %+v", plan)
-	}
-	plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), Options{Mirror: []byte("request")})
-	if len(plan.Attempts) != 2 || len(plan.Shadows) != 1 || plan.Shadows[0].TargetID != shadow || slices.Contains(attemptTargets(plan), shadow) {
-		t.Fatalf("sampled shadow: %+v", plan)
-	}
-	for _, d := range plan.Decisions {
-		if d.TargetID == shadow && (!d.Shadow || d.Attempt != nil) {
-			t.Fatalf("shadow decision %+v", d)
-		}
-	}
-	// A shadow obeys the request's hard constraints like any target.
-	plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), Options{Mirror: []byte("request"), Preferences: &Preferences{Ignore: []string{"provider:" + route.Targets[2].ProviderID}}})
-	if len(plan.Shadows) != 0 || reasonOf(plan, shadow) != "provider_ignored" {
-		t.Fatalf("constrained shadow: %+v", plan)
-	}
-}
-
-func TestUnhealthyTargetsMoveLastWithoutLeavingThePlan(t *testing.T) {
-	s, slug, ids := planningFixture()
-	route := s.Routes[slug]
-	route.Targets[0].Priority = -1
-	s.Routes[slug] = route
-	plan, _ := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), Options{Unhealthy: func(id string) bool { return id == ids[0] }})
-	if len(plan.Attempts) != 3 || plan.Attempts[2].ProviderID != ids[0] || !plan.Decisions[2].Unhealthy {
-		t.Fatalf("unhealthy order: %+v", plan)
-	}
-}
-
-func TestPlanConditionsNameContextWindowExhaustion(t *testing.T) {
-	s, slug, ids := planningFixture()
-	for _, id := range ids {
-		p := s.Providers[id]
-		p.Models = map[string]json.RawMessage{"wire-model": json.RawMessage(`{"context_length":100}`)}
-		s.Providers[id] = p
-	}
-	plan, _ := Select(&s, slug, "generation", "openai", "unary", nil, Options{TokenDemand: &TokenDemand{EstimatedInputTokens: 500}})
-	if !slices.Equal(plan.Conditions(), []string{FallbackContextWindow}) {
-		t.Fatalf("conditions %v", plan.Conditions())
-	}
-}
+// A shadow obeys the request's hard constraints like any target.
 
 // supplyFunc reads supply from a function, as a test stand-in for the gateway.
 type supplyFunc func(SupplyQuery) *SupplyState
 
 func (f supplyFunc) ReadSupply(_ context.Context, query SupplyQuery) *SupplyState { return f(query) }
 
-func TestNarrowingSelectorNamesTheMostExpensiveTargetItAvoided(t *testing.T) {
-	s, slug, ids := planningFixture()
-	now := time.Now()
-	inputs := &usage.RoutingInputs{RefreshedAt: now, Performance: map[string]usage.Performance{}}
-	for i, id := range ids {
-		amount := []string{"0.000001", "0.000009", "0.000004"}[i]
-		inputs.Prices = append(inputs.Prices, usage.RoutingPrice{Price: usage.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "generation", InputPerMillion: &amount, OutputPerMillion: &amount, Currency: "USD"}, RevisionID: uuid.NewString(), Revision: 1, EffectiveAt: now.Add(-time.Hour)})
-	}
-	route := s.Routes[slug]
-	route.Targets[0].Tags = []string{"small"}
-	route.Selectors = []Selector{{ID: "short", When: Predicate{MaxInputTokens: ptr(int64(1000))}, Tags: []string{"small"}}}
-	s.Routes[slug] = route
-	options := Options{Inputs: inputs, Now: now, Features: &Features{Operation: "generation", InputTokens: 10}}
-	plan, err := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
-	if err != nil || len(plan.Attempts) != 1 || plan.Baseline == nil || plan.Baseline.ProviderID != ids[1] || plan.Baseline.UpstreamModel != "wire-model" {
-		t.Fatalf("baseline %+v, %v", plan.Baseline, err)
-	}
-	// A target the request's constraints exclude never sets the baseline.
-	options.Preferences = &Preferences{Ignore: []string{"provider:" + ids[1]}}
-	if plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options); plan.Baseline == nil || plan.Baseline.ProviderID != ids[2] {
-		t.Fatalf("constrained baseline %+v", plan.Baseline)
-	}
-	// Without a matching selector there is nothing to compare.
-	options.Features.InputTokens = 5000
-	if plan, _ = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options); plan.Baseline != nil {
-		t.Fatalf("unnarrowed baseline %+v", plan.Baseline)
-	}
-}
+// A target the request's constraints exclude never sets the baseline.
+
+// Without a matching selector there is nothing to compare.

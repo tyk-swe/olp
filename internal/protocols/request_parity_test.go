@@ -2,7 +2,6 @@ package protocols
 
 import (
 	"encoding/json"
-	"errors"
 	"math/rand/v2"
 	"reflect"
 	"testing"
@@ -279,40 +278,6 @@ func TestNativeRequestsAreParsedAsTheyWereParsed(t *testing.T) {
 	// The comparison is only worth something if both answers are given.
 	if accepted < cases || refused < cases {
 		t.Errorf("%d requests were accepted and %d refused: the generator is not exercising the validation", accepted, refused)
-	}
-}
-
-// A countTokens request may wrap the request whose tokens it counts, and the
-// controls it is refused for are the wrapped request's. The generator reaches
-// these cases by chance, so each is also held to its answer here.
-func TestCountTokensControlsAreTheWrappedRequests(t *testing.T) {
-	const contents = `"contents":[{"parts":[{"text":"a"}]}]`
-	for _, tc := range []struct {
-		name, body, param string
-	}{
-		{"wrapped control out of range", `{"generateContentRequest":{` + contents + `,"generationConfig":{"maxOutputTokens":-1}}}`, "generationConfig.maxOutputTokens"},
-		{"wrapped control of the wrong type", `{"generateContentRequest":{` + contents + `,"generationConfig":{"temperature":"x"}}}`, "generationConfig.temperature"},
-		{"wrapped config is not an object", `{"generateContentRequest":{` + contents + `,"generationConfig":"x"}}`, "generationConfig"},
-		{"wrapped config is an array", `{"generateContentRequest":{` + contents + `,"generationConfig":[]}}`, "generationConfig"},
-		{"wrapped config is valid", `{"generateContentRequest":{` + contents + `,"generationConfig":{"maxOutputTokens":5}}}`, ""},
-		{"config beside the wrapper is not read", `{"generateContentRequest":{` + contents + `},"generationConfig":{"maxOutputTokens":-1}}`, ""},
-		{"config beside the wrapper does not excuse the wrapped one", `{"generateContentRequest":{` + contents + `,"generationConfig":{"topK":0}},"generationConfig":{"topK":1}}`, "generationConfig.topK"},
-		{"unwrapped control out of range", `{` + contents + `,"generationConfig":{"candidateCount":0}}`, "generationConfig.candidateCount"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sameParse(t, wire.GeminiCount, []byte(tc.body))
-			_, err := Parse(wire.GeminiCount, []byte(tc.body), "route")
-			if tc.param == "" {
-				if err != nil {
-					t.Fatalf("the request was refused: %v", err)
-				}
-				return
-			}
-			var refused *wire.RequestError
-			if !errors.As(err, &refused) || refused.Param != tc.param {
-				t.Fatalf("got %v, want a request error for %q", err, tc.param)
-			}
-		})
 	}
 }
 

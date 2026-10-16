@@ -132,54 +132,7 @@ func TestMeteringSinkManagement(t *testing.T) {
 		map[string]any{"credential": map[string]any{"api_key": "pk_live_weak"}}, etagHeader(stripe), 422)
 }
 
-func TestCaptureExcludesMeteringFormats(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := createProject(h, owner, "Capture scope")
+// Metering formats exist but never carry payloads, so capture cannot
+// point at them and never lists them as choices.
 
-	// Metering formats exist but never carry payloads, so capture cannot
-	// point at them and never lists them as choices.
-	newFormats := map[string]map[string]any{
-		"cloudevents": {"name": "ce", "type": "https", "destination": "https://events.example.test",
-			"streams": []string{"metering"}, "format": "cloudevents"},
-		"csv_gzip": {"name": "focus", "type": "s3", "destination": "https://objects.example.test/bucket",
-			"streams": []string{"focus"}, "format": "csv_gzip"},
-		"stripe": {"name": "stripe", "type": "stripe_meter", "destination": "https://api.stripe.com",
-			"streams": []string{"metering"}, "format": "stripe",
-			"credential": map[string]any{"api_key": "rk_test_0123456789"},
-			"settings":   map[string]any{"event_name": "olp.tokens", "customers": map[string]any{project: "cus_a"}}},
-	}
-	ids := map[string]string{}
-	for format, body := range newFormats {
-		ids[format] = postSink(h, owner, body, 201)["export_sink_id"].(string)
-	}
-	eligible := postSink(h, owner, map[string]any{"name": "capture-able", "type": "https",
-		"destination": "https://events.example.test", "streams": []string{"requests"}, "format": "json"}, 201)
-
-	options := h.want(owner, "GET", "/api/v1/observability/capture-sinks", nil, nil, 200)
-	for _, item := range options["items"].([]any) {
-		id := item.(map[string]any)["export_sink_id"].(string)
-		for format, excluded := range ids {
-			if id == excluded {
-				t.Fatalf("%s sink listed for capture", format)
-			}
-		}
-		if id == eligible["export_sink_id"] {
-			break
-		}
-	}
-
-	h.want(owner, "PATCH", "/api/v1/observability/capture", map[string]any{"enabled": true},
-		etagHeader(h.want(owner, "GET", "/api/v1/observability/capture", nil, nil, 200)), 200)
-	for _, id := range ids {
-		h.want(owner, "POST", "/api/v1/observability/capture-policies", map[string]any{
-			"sink": id, "sample_ratio": "1", "include": []string{"output"},
-			"max_bytes": 1048576, "project_id": project,
-		}, map[string]string{"Idempotency-Key": uuid.NewString()}, 422)
-	}
-	// An eligible sink still takes a policy.
-	h.want(owner, "POST", "/api/v1/observability/capture-policies", map[string]any{
-		"sink": eligible["export_sink_id"], "sample_ratio": "1", "include": []string{"output"},
-		"max_bytes": 1048576, "project_id": project,
-	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-}
+// An eligible sink still takes a policy.

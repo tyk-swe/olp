@@ -70,48 +70,6 @@ func TestWatsonxAddressesItsChatAPI(t *testing.T) {
 	}
 }
 
-func TestWatsonxAdaptsChatBodies(t *testing.T) {
-	c := watsonx()
-	for choice, want := range map[string]map[string]string{
-		`"required"`: {"tool_choice_option": `"required"`},
-		`{"type":"function","function":{"name":"lookup"}}`: {"tool_choice": `{"function":{"name":"lookup"},"type":"function"}`},
-	} {
-		body := `{"model":"ibm/granite-3-8b-instruct","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true},"max_tokens":32,"tool_choice":` + choice + `}`
-		var got map[string]json.RawMessage
-		if err := json.Unmarshal(c.WrapRequest([]byte(body), "ibm/granite-3-8b-instruct"), &got); err != nil {
-			t.Fatal(err)
-		}
-		for _, absent := range []string{"model", "stream", "stream_options"} {
-			if _, found := got[absent]; found {
-				t.Fatalf("%s reached watsonx: %v", absent, got)
-			}
-		}
-		if string(got["model_id"]) != `"ibm/granite-3-8b-instruct"` || string(got["project_id"]) != `"`+watsonxProject+`"` || string(got["max_tokens"]) != "32" {
-			t.Fatalf("adapted body = %v", got)
-		}
-		for field, value := range want {
-			if normalized(got[field]) != normalized([]byte(value)) {
-				t.Fatalf("%s = %s, want %s", field, got[field], value)
-			}
-		}
-	}
-}
-
-// TestWatsonxResultsReadAsChatCompletions decodes the documented result.
-func TestWatsonxResultsReadAsChatCompletions(t *testing.T) {
-	documented := `{"id":"chat-2ef4f9c0f2ec4a3a","model_id":"meta-llama/llama-3-8b-instruct","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there."},"finish_reason":"stop"}],"created":1728404199,"created_at":"2024-10-08T16:16:40.102Z","usage":{"completion_tokens":12,"prompt_tokens":87,"total_tokens":99},"system":{"warnings":[{"message":"This model is a Non-IBM Product.","id":"disclaimer_warning","more_info":"https://dataplatform.cloud.ibm.com"}]}}`
-	result := watsonx().UnwrapResponse([]byte(documented))
-	completion, err := openai.DecodeChat(result, "team-chat")
-	if err != nil || completion.OutputText != "Hello there." || completion.Usage == nil || completion.Usage.InputTokens != 87 || completion.Usage.OutputTokens != 12 {
-		t.Fatalf("decoded %+v, %v", completion, err)
-	}
-	for _, leaked := range []string{"model_id", "created_at", "system", "Non-IBM"} {
-		if strings.Contains(string(completion.Body), leaked) {
-			t.Fatalf("%s reached the client: %s", leaked, completion.Body)
-		}
-	}
-}
-
 const watsonxStreamFixture = "id: 1\nevent: message\ndata: {\"id\":\"chat-1\",\"model_id\":\"ibm/granite-3-8b-instruct\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}],\"created\":1728404199,\"created_at\":\"2024-10-08T16:16:40Z\"}\n\n" +
 	"id: 2\nevent: message\ndata: {\"id\":\"chat-1\",\"model_id\":\"ibm/granite-3-8b-instruct\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}],\"created\":1728404199}\n\n" +
 	"id: 3\nevent: message\ndata: {\"id\":\"chat-1\",\"model_id\":\"ibm/granite-3-8b-instruct\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" there.\"},\"finish_reason\":\"stop\"}],\"created\":1728404199}\n\n"

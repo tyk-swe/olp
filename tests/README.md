@@ -57,8 +57,7 @@ browser tests.
 
 `go test ./internal/guardrails ./internal/gateway -run 'Guardrail|Detector|PhaseAction|Streaming'`
 checks detection, action/phase compatibility, masking, split streams, cancellation
-and native errors. `go test ./internal/plugins -run Guardrail` exercises the WASM
-SDK and verifies that pinned guardrail calls do not read configuration.
+and native errors.
 
 With disposable PostgreSQL and Valkey, run the `integration`-tagged
 `TestGuardrailPlatform`, `TestNamedGuardrail`, `TestContentPolicy` and
@@ -79,10 +78,10 @@ Run individual suites or pass runner arguments through Make:
 ```sh
 make test-go GO_TEST_PACKAGES='./internal/protocols/... ./internal/gateway'
 make test-go GO_TEST_PACKAGES=./internal/coordination GO_TEST_ARGS='-run TestConfiguration -v -count=1'
-make test-console CONSOLE_TEST_ARGS='--project unit src/lib/format.test.ts'
+make test-console CONSOLE_TEST_ARGS='--project unit src/lib/features/inference/playground/browserContinuation.test.ts'
 make test-scripts
 make test-race GO_TEST_PACKAGES=./internal/gateway GO_TEST_TIMEOUT=10m
-make test-go GO_TEST_PACKAGES='./internal/access ./internal/gateway' GO_TEST_ARGS='-race -count=10 -run "Test(AccessBodyReadDeadline|IncompleteBodies|CompletedUpload|UnreadUnary|RealtimeBoundedWriter|MediaStreamCancellationAndDeadline)"'
+make test-go GO_TEST_PACKAGES='./internal/access ./internal/gateway' GO_TEST_ARGS='-race -count=10 -run "Test(MachinePrincipalResolution|ManagementTokenValidation|DuplexCancellationJoinsProviderObservationBeforeReturning|ForcedStreamFailuresAfterAcceptance)"'
 make test-go GO_TEST_ARGS=-cover
 ```
 
@@ -90,7 +89,7 @@ Authorization, key-location, and secret-purpose changes surface as diffs to
 golden files under `internal/*/testdata` and to the generated tables in
 [security architecture](../docs/security.md). Review such a diff as a security
 change, then regenerate deliberately with
-`go test ./internal/access ./internal/secrets ./internal/gateway -update`.
+`go test ./internal/access ./internal/secrets -update`.
 
 `GO_TEST_PACKAGES` defaults to `./...`, `GO_TEST_TIMEOUT` to `5m` per package,
 and `GO_TEST_ARGS` and `CONSOLE_TEST_ARGS` to empty. Go tests use
@@ -146,7 +145,7 @@ go test -tags=integration -run '^$' -bench LimitsPricedRequest ./tests/integrati
 With that configuration already provided, focused browser selections are:
 
 ```sh
-pnpm --dir console test:e2e --project=packaged tests/gateway/accounting.spec.ts
+pnpm --dir console test:e2e --project=packaged tests/gateway/openai-route.spec.ts
 pnpm --dir console test:e2e --project=vite
 OLP_CONSOLE_E2E_PACKAGED=true pnpm --dir console exec playwright test --config playwright.journeys.config.ts
 ```
@@ -154,8 +153,6 @@ OLP_CONSOLE_E2E_PACKAGED=true pnpm --dir console exec playwright test --config p
 Feature prerequisites share owner authentication and management API helpers.
 Owner cookies are cached only within a browser run's output directory, checked
 against the backend before reuse, and renewed through the UI after revocation.
-Setup, authentication, admission retry, invitation and provider/route onboarding
-journeys continue to exercise their real UI flows.
 
 ## Benchmarks
 
@@ -184,10 +181,7 @@ files, so `make test-go` compiles them and runs none of them.
 Go unit tests own algorithms/protocol fixtures; internal service tests own
 PostgreSQL/Valkey; external process suites own public API/SDK/recovery contracts.
 Keep distinct security, billing, concurrency, cancellation and failure regressions.
-
-Socket tests exercise real incomplete uploads/unread responses/admission release/
-keep-alive. Writer wrappers assert production deadlines before shortening test
-waits to 250 ms; failure guards remain bounded. Immutable plugin build artifacts
+Immutable plugin build artifacts
 are shared per process; callers/runtimes receive independent mutable state.
 
 Console helpers test problem/null decoding and bounded cursors; resource tests own
@@ -293,20 +287,11 @@ are exact for most benchmarks and vary by well under 1% for the streams, and
 bytes per operation by about as much, so read them first.
 
 The budget says that a feature that is not configured adds no allocations and
-no Valkey or PostgreSQL round trip to a request. An ordinary unit test holds the
-admission side to it, so `make test` does: `TestUnconfiguredFeaturesAddNoAllocations`
-in `internal/gateway` counts allocations with `testing.AllocsPerRun`, and the
-commands a counting limiter client was sent, for the admission and settlement of
-a key without limits or a cost budget and of a provider target without a quota.
-The request of the key has a price list to be estimated from, so that only the
-guard of the cost budget spares it the estimate. The test then admits a key and a
-target that are limited and expects the key to allocate and each to send its
-command, and estimates the same request for a key with a cost budget and expects
-that to allocate, to prove the zeros are not a request that never reaches the
-limiter or one that nothing could price. The test counts the whole process's
-allocations, so it does not run in parallel. It does not cover the read of the shared cooldown
-that precedes each attempt when a limiter is configured, which costs one Valkey
-round trip an attempt whatever the key and the target limit.
+no Valkey or PostgreSQL round trip to a request. Unconfigured-admission
+allocation accounting is covered by benchmark and integration evidence rather
+than a dedicated container-free unit test. The read of the shared cooldown that
+precedes each attempt when a limiter is configured costs one Valkey round trip
+an attempt whatever the key and the target limit.
 
 ## SDK and live-provider tests
 
@@ -353,23 +338,21 @@ See [harness ownership](clients/README.md) and
 
 ## Contract and browser coverage
 
-The release contract test, run inside the process suite, checks that every
-operation in the embedded OpenAPI contract reaches a handler. The
-authorization sweep calls every secured management operation as every caller
-in `internal/access/testdata/authorization.golden.json` and holds each
-outcome to that file, and the isolation sweep reads every operation as members
-of another project and fails on any disclosure of a canary project. A test's existence
+The contract test in `internal/access` checks that every operation in the
+embedded OpenAPI contract carries truthful requirements, and the isolation
+sweep reads every operation as members of another project and fails on any
+disclosure of a canary project. `internal/access/testdata/authorization.golden.json`
+still gates generated management clients and MCP discovery. A test's existence
 does not prove it ran; use CI results for the commit you are checking. Browser
-journeys cover accounting, cloud configuration, bulk certification, grouped
-routes, pools, policy exclusions, preview, publication, playground, and
-replacement recovery through deterministic local providers, not paid accounts.
+journeys cover the hosted console and replacement recovery through deterministic
+local providers, not paid accounts.
 
 ### Response caching
 
 `go test ./internal/cache ./internal/gateway -run 'Cache|Sealed|Canonical'`
 checks canonical identity, sealing, controls, native replay and key-policy opt-out.
 The `integration`-tagged `TestIntegrationCache*`,
-`TestIntegrationSemanticCacheRoutes` and `TestResponseCache*` tests use
+`TestIntegrationSemanticCache*` and `TestResponseCache*` tests use
 `OLP_TEST_CACHE_VALKEY_URL` for a separate Valkey Search service, alongside the
 normal PostgreSQL and coordination Valkey variables. `scripts/integration.sh`
 provisions all three services and runs these tests. The hosted Chromium suite

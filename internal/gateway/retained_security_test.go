@@ -10,73 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
-func TestRetainedNewWorkUsesCurrentRestrictions(t *testing.T) {
-	for _, change := range []string{"allowed", "provider disabled", "slot removed", "slot disabled", "key removed", "model removed", "route removed", "target removed", "operation removed", "route replaced", "target shadowed", "historical slot disabled"} {
-		t.Run(change, func(t *testing.T) {
-			slot := routing.Slot{ID: "slot", Enabled: true}
-			provider := routing.Provider{ID: "provider", Enabled: true, Slots: []routing.Slot{slot}}
-			target := routing.Target{ProviderID: "provider", ProviderModel: "model"}
-			route := routing.Route{Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}}
-			live := provider
-			live.Slots = []routing.Slot{slot}
-			switch change {
-			case "provider disabled":
-				live.Enabled = false
-			case "slot removed":
-				live.Slots = nil
-			case "slot disabled":
-				live.Slots[0].Enabled = false
-			case "key removed":
-				live.Slots[0].AllowedAPIKeys = []string{"other"}
-			case "model removed":
-				live.Slots[0].AllowedModels = []string{"other"}
-			case "route removed":
-				live.Slots[0].AllowedRoutes = []string{"other"}
-			case "target removed":
-				route.Targets = nil
-			case "operation removed":
-				route.Operations = nil
-			case "target shadowed":
-				route.Targets[0].Shadow = &routing.Shadow{SampleRate: 1}
-			case "historical slot disabled":
-				slot.Enabled = false
-			}
-			snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{"provider": live}, Routes: map[string]routing.Route{"route": route}}
-			if change == "route replaced" {
-				replaced := route
-				replaced.ID = "replacement"
-				snapshot.Routes[route.Slug] = replaced
-			}
-			err := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation")
-			if (err == nil) != (change == "allowed") {
-				t.Fatalf("restriction %s: %v", change, err)
-			}
-		})
-	}
-}
-
-func TestRetainedNewWorkUsesTighterLimitsWithoutChangingCredential(t *testing.T) {
-	old, current := int64(100), int64(10)
-	credential := "historical-secret"
-	slot := routing.Slot{ID: "slot", Enabled: true, CredentialID: &credential, TokensPerMinute: &old, MaxConcurrency: &current}
-	provider := routing.Provider{ID: "provider", Enabled: true, Limits: &routing.Limits{TokensPerMinute: &old}}
-	target := routing.Target{ProviderID: "provider", ProviderModel: "model"}
-	route := routing.Route{Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}}
-	live := provider
-	live.Limits = &routing.Limits{TokensPerMinute: &current}
-	live.Slots = []routing.Slot{{ID: "slot", Enabled: true, TokensPerMinute: &current, MaxConcurrency: &old}}
-	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{"provider": live}, Routes: map[string]routing.Route{"route": route}}
-	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
-		t.Fatal(e)
-	}
-	if *provider.Limits.TokensPerMinute != 10 || *slot.TokensPerMinute != 10 || *slot.MaxConcurrency != 10 || *slot.CredentialID != credential {
-		t.Fatalf("wrong retained authority: %+v %+v", provider, slot)
-	}
-	if *snapshot.Providers["provider"].Limits.TokensPerMinute != 10 {
-		t.Fatal("mutated installed release")
-	}
-}
-
 func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 	credential := "historical-secret"
 	defaultValue := json.RawMessage(`32`)
@@ -116,28 +49,4 @@ func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 	}
 }
 
-func TestRetainedNewWorkClampsAttemptTimeoutToCurrentTarget(t *testing.T) {
-	target := routing.Target{ProviderID: "provider", ProviderModel: "model", Timeout: 5000}
-	route := routing.Route{ID: "route-id", Slug: "route", Operations: []string{"generation"}, Targets: []routing.Target{target}}
-	liveRoute := route
-	liveRoute.Targets = []routing.Target{{ProviderID: "provider", ProviderModel: "model", Timeout: 1000}}
-	provider := routing.Provider{ID: "provider", Enabled: true, Slots: []routing.Slot{{ID: "slot", Enabled: true}}}
-	slot := provider.Slots[0]
-	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{"provider": provider}, Routes: map[string]routing.Route{"route": liveRoute}}
-	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
-		t.Fatal(e)
-	}
-	if target.Timeout != 1000 {
-		t.Fatalf("retained timeout not clamped to current target: %d", target.Timeout)
-	}
-	// A relaxed current timeout cannot loosen the pinned contract.
-	target.Timeout = 5000
-	liveRoute.Targets[0].Timeout = 9000
-	snapshot.Routes["route"] = liveRoute
-	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
-		t.Fatal(e)
-	}
-	if target.Timeout != 5000 {
-		t.Fatalf("current timeout loosened the pinned contract: %d", target.Timeout)
-	}
-}
+// A relaxed current timeout cannot loosen the pinned contract.

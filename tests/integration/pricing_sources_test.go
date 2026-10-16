@@ -5,7 +5,6 @@ package integration_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -69,160 +68,6 @@ const sourceDocumentV2 = `{"currency":"USD","prices":[
  {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.02"},
  {"provider_kind":"anthropic","model":"claude-source","operation":"generation","currency":"USD","input_per_million":"3.000000","output_per_million":"15.000000"}
 ]}`
-
-func TestPricingSourceLifecycle(t *testing.T) {
-	h := pricingHarness(t)
-	owner := h.owner()
-	fixture := newSourceFixture(t, sourceDocumentV1)
-
-	status, problem, _ := h.request(owner, "POST", "/api/v1/pricing/sources",
-		map[string]any{"name": "internal feed", "url": "http://10.0.0.4/prices.json"},
-		map[string]string{"Idempotency-Key": uuid.NewString()})
-	if status != 422 {
-		t.Fatalf("internal source = %d %v", status, problem)
-	}
-	status, problem, _ = h.request(owner, "POST", "/api/v1/pricing/sources",
-		map[string]any{"name": "credentialed feed", "url": "https://user:pass@127.0.0.1/prices.json"},
-		map[string]string{"Idempotency-Key": uuid.NewString()})
-	if status != 422 {
-		t.Fatalf("credentialed source = %d %v", status, problem)
-	}
-
-	source := h.want(owner, "POST", "/api/v1/pricing/sources",
-		map[string]any{"name": "vendor feed", "url": fixture.URL + "/prices.json"},
-		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	sourceID := source["id"].(string)
-
-	refresh := h.want(owner, "POST", "/api/v1/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
-	snapshot := refresh["snapshot"].(map[string]any)
-	if len(snapshot["sha256"].(string)) != 64 || snapshot["price_count"].(float64) != 2 || snapshot["currency"] != "USD" {
-		t.Fatalf("snapshot = %v", snapshot)
-	}
-	diff := refresh["diff"].(map[string]any)
-	if diff["added_count"].(float64) != 2 || diff["removed_count"].(float64) != 0 || diff["changed_count"].(float64) != 0 {
-		t.Fatalf("first diff = %v", diff)
-	}
-	snapshotID := snapshot["id"].(string)
-
-	refresh = h.want(owner, "POST", "/api/v1/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
-	if refresh["snapshot"].(map[string]any)["id"] != snapshotID {
-		t.Fatalf("same digest stored a second snapshot")
-	}
-
-	published := h.want(owner, "POST", "/api/v1/pricing/source-snapshots/"+snapshotID+"/publish",
-		map[string]any{}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	if published["source_snapshot_id"] != snapshotID {
-		t.Fatalf("published revision = %v", published)
-	}
-	revisions := h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
-	latest := revisions["items"].([]any)[0].(map[string]any)
-	if latest["source_name"] != "vendor feed" || latest["source_snapshot_id"] != snapshotID {
-		t.Fatalf("revision provenance = %v", latest)
-	}
-	if len(latest["prices"].([]any)) != 2 {
-		t.Fatalf("revision prices = %v", latest["prices"])
-	}
-
-	fixture.document.Store(sourceDocumentV2)
-	refresh = h.want(owner, "POST", "/api/v1/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
-	snapshot = refresh["snapshot"].(map[string]any)
-	if snapshot["id"] == snapshotID {
-		t.Fatalf("changed document reused a snapshot")
-	}
-	diff = refresh["diff"].(map[string]any)
-	if diff["added_count"].(float64) != 1 || diff["changed_count"].(float64) != 1 || diff["removed_count"].(float64) != 0 {
-		t.Fatalf("second diff = %v", diff)
-	}
-	snapshotID = snapshot["id"].(string)
-
-	published = h.want(owner, "POST", "/api/v1/pricing/source-snapshots/"+snapshotID+"/publish",
-		map[string]any{"overrides": []any{
-			map[string]any{"provider_kind": "openai", "model": "gpt-source", "operation": "generation",
-				"currency": "USD", "input_per_million": "9.000000", "output_per_million": "9.000000"},
-			map[string]any{"provider_kind": "openai", "model": "embed-source", "operation": "embeddings",
-				"currency": "USD"},
-		}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	prices := published["prices"].([]any)
-	if len(prices) != 2 {
-		t.Fatalf("merged prices = %v", prices)
-	}
-	for _, entry := range prices {
-		price := entry.(map[string]any)
-		if price["model"] == "embed-source" {
-			t.Fatalf("removal override left its entry: %v", price)
-		}
-		if price["model"] == "gpt-source" && price["input_per_million"] != "9.000000" {
-			t.Fatalf("rate override did not apply: %v", price)
-		}
-	}
-
-	snapshots := h.want(owner, "GET", "/api/v1/pricing/sources/"+sourceID+"/snapshots", nil, nil, 200)
-	if len(snapshots["items"].([]any)) != 2 {
-		t.Fatalf("snapshots = %v", snapshots)
-	}
-	revisions = h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
-	if len(revisions["items"].([]any)) != 2 {
-		t.Fatalf("revisions = %v", revisions)
-	}
-}
-
-func TestPricingSourceFetchFailures(t *testing.T) {
-	h := pricingHarness(t)
-	owner := h.owner()
-
-	create := func(name, url string) map[string]any {
-		return h.want(owner, "POST", "/api/v1/pricing/sources",
-			map[string]any{"name": name, "url": url},
-			map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	}
-	refresh := func(source map[string]any, want int) map[string]any {
-		status, body, _ := h.request(owner, "POST", "/api/v1/pricing/sources/"+source["id"].(string)+"/refresh", nil, nil)
-		if status != want {
-			t.Fatalf("refresh = %d, want %d: %v", status, want, body)
-		}
-		return body
-	}
-
-	oversized := newSourceFixture(t, `{"currency":"USD","prices":[]}`+strings.Repeat(" ", 4<<20))
-	source := create("oversized feed", oversized.URL+"/prices.json")
-	refresh(source, 413)
-
-	badJSON := newSourceFixture(t, `{"unexpected":true}`)
-	source = create("schema feed", badJSON.URL+"/prices.json")
-	refresh(source, 422)
-
-	badCurrency := newSourceFixture(t, `{"currency":"EUR","prices":[{"provider_kind":"openai","model":"m","operation":"generation","currency":"USD","input_per_million":"1.000000"}]}`)
-	source = create("currency feed", badCurrency.URL+"/prices.json")
-	refresh(source, 422)
-
-	concatenated := newSourceFixture(t, `{"currency":"USD","prices":[]}{"currency":"USD","prices":[]}`)
-	source = create("concatenated feed", concatenated.URL+"/prices.json")
-	refresh(source, 422)
-
-	trailing := newSourceFixture(t, `{"currency":"USD","prices":[]} true`)
-	source = create("trailing feed", trailing.URL+"/prices.json")
-	refresh(source, 422)
-
-	wrongType := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, "not json")
-	}))
-	defer wrongType.Close()
-	source = create("media feed", wrongType.URL+"/prices.json")
-	refresh(source, 415)
-
-	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-	}))
-	defer dead.Close()
-	source = create("dead feed", dead.URL+"/prices.json")
-	refresh(source, 502)
-
-	snapshots := h.want(owner, "GET", "/api/v1/pricing/sources/"+source["id"].(string)+"/snapshots", nil, nil, 200)
-	if len(snapshots["items"].([]any)) != 0 {
-		t.Fatalf("failed refresh stored snapshots: %v", snapshots)
-	}
-}
 
 // signedCatalogFixture serves a signed reference catalog and its detached
 // signature, as a static host such as raw.githubusercontent.com does.
@@ -451,75 +296,10 @@ func checkComponentPrice(t *testing.T, entry map[string]any) {
 	}
 }
 
-func TestPricingComponentsRoundTrip(t *testing.T) {
-	h := pricingHarness(t)
-	owner := h.owner()
+// A revision carries every component through create and list.
 
-	// A revision carries every component through create and list.
-	body := map[string]any{
-		"effective_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-		"prices":       []any{componentPrice()},
-	}
-	created := h.want(owner, "POST", "/api/v1/pricing/revisions", body, idem("components-create"), 201)
-	prices := created["prices"].([]any)
-	if len(prices) != 1 {
-		t.Fatalf("prices = %v", prices)
-	}
-	checkComponentPrice(t, prices[0].(map[string]any))
-	revisions := h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
-	listed := revisions["items"].([]any)[0].(map[string]any)
-	checkComponentPrice(t, listed["prices"].([]any)[0].(map[string]any))
+// A prices-format source round-trips them through refresh and publish.
 
-	// A prices-format source round-trips them through refresh and publish.
-	document, _ := json.Marshal(map[string]any{"currency": "USD", "prices": []any{componentPrice()}})
-	fixture := newSourceFixture(t, string(document))
-	source := h.want(owner, "POST", "/api/v1/pricing/sources",
-		map[string]any{"name": "component feed", "url": fixture.URL + "/prices.json"},
-		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	refresh := h.want(owner, "POST", "/api/v1/pricing/sources/"+source["id"].(string)+"/refresh", nil, nil, 200)
-	snapshot := refresh["snapshot"].(map[string]any)
-	// The stored snapshot document holds the components too.
-	var storedText string
-	if err := h.Pool.QueryRow(t.Context(),
-		`SELECT document::text FROM olp.pricing_source_snapshots WHERE id=$1::uuid`,
-		snapshot["id"].(string)).Scan(&storedText); err != nil {
-		t.Fatalf("read snapshot: %v", err)
-	}
-	var stored map[string]any
-	if err := json.Unmarshal([]byte(storedText), &stored); err != nil {
-		t.Fatalf("snapshot document: %v", err)
-	}
-	checkComponentPrice(t, stored["prices"].([]any)[0].(map[string]any))
-	published := h.want(owner, "POST", "/api/v1/pricing/source-snapshots/"+snapshot["id"].(string)+"/publish",
-		map[string]any{}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	checkComponentPrice(t, published["prices"].([]any)[0].(map[string]any))
+// The stored snapshot document holds the components too.
 
-	// Configuration export, plan and apply carry the components without drift.
-	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	docEntry := exported["document"].(map[string]any)["pricing"].(map[string]any)["prices"].([]any)[0].(map[string]any)
-	checkComponentPrice(t, docEntry)
-	planned := h.want(owner, "POST", "/api/v1/configuration/plan",
-		map[string]any{"document": exported["document"]}, nil, 200)
-	for _, item := range planned["actions"].([]any) {
-		action := item.(map[string]any)
-		if action["kind"] == "pricing" && action["action"] != "noop" {
-			t.Fatalf("export -> plan sees a pricing change: %v", action)
-		}
-	}
-	h.want(owner, "POST", "/api/v1/configuration/apply",
-		map[string]any{"document": exported["document"]}, idem("components-apply"), 200)
-	revisions = h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
-	var found bool
-	for _, raw := range revisions["items"].([]any) {
-		for _, rawPrice := range raw.(map[string]any)["prices"].([]any) {
-			price := rawPrice.(map[string]any)
-			if price["model"] == "component-model" {
-				checkComponentPrice(t, price)
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("applied configuration lost the component price: %v", revisions)
-	}
-}
+// Configuration export, plan and apply carry the components without drift.

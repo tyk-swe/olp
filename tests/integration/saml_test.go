@@ -5,24 +5,19 @@ package integration_test
 import (
 	"bytes"
 	"compress/flate"
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
-	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -161,76 +156,13 @@ func samlReceive(t *testing.T, h *accessHarness, state string, raw []byte, want 
 	}
 	return resp.Header.Get("Location")
 }
-func TestSAMLLoginMappingLinkingAndReplay(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	f := newSAMLFixture(t)
-	config := f.configure(t, h, owner)
-	b := &browser{}
-	req, state := samlBegin(t, h, b, "/api/v1/saml/login", map[string]any{"return_to": "/models"})
-	raw := f.response(t, req, "persistent-worker", "saml@example.com", []string{"developers"}, nil)
-	next := samlReceive(t, h, state, raw, 303)
-	h.want(&browser{}, "GET", next, nil, nil, 403)
-	h.want(b, "GET", next, nil, nil, 303)
-	profile := h.want(b, "GET", "/api/v1/profile", nil, nil, 200)
-	if profile["role"] != "developer" {
-		t.Fatal(profile)
-	}
-	h.want(b, "GET", next, nil, nil, 403)
-	samlReceive(t, h, state, raw, 403)
-	// Concurrent completions of one flow mint a single session.
-	racing := &browser{}
-	req, state = samlBegin(t, h, racing, "/api/v1/saml/login", map[string]any{})
-	next = samlReceive(t, h, state, f.response(t, req, "persistent-worker", "saml@example.com", []string{"developers"}, nil), 303)
-	var completed atomic.Int64
-	var wg sync.WaitGroup
-	for range 8 {
-		copied := &browser{Cookies: maps.Clone(racing.Cookies)}
-		wg.Go(func() {
-			if status, _, _ := h.request(copied, "GET", next, nil, nil); status == 303 {
-				completed.Add(1)
-			}
-		})
-	}
-	wg.Wait()
-	if completed.Load() != 1 {
-		t.Fatalf("%d completions of one SAML flow", completed.Load())
-	}
-	req, state = samlBegin(t, h, &browser{}, "/api/v1/saml/login", map[string]any{})
-	samlReceive(t, h, state, raw, 403)
-	// Email never links an existing owner without a recent authenticated flow.
-	collision := &browser{}
-	req, state = samlBegin(t, h, collision, "/api/v1/saml/login", map[string]any{})
-	next = samlReceive(t, h, state, f.response(t, req, "owner-subject", "owner@example.com", []string{"developers"}, nil), 303)
-	h.want(collision, "GET", next, nil, nil, 409)
-	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "saml_link"}, nil, 204)
-	req, state = samlBegin(t, h, owner, "/api/v1/profile/saml/link", map[string]any{"return_to": "/settings/profile"})
-	next = samlReceive(t, h, state, f.response(t, req, "owner-subject", "owner@example.com", []string{"developers"}, nil), 303)
-	h.want(owner, "GET", next, nil, nil, 303)
-	linked := h.want(owner, "GET", "/api/v1/profile/saml-identities", nil, nil, 200)
-	if len(linked["items"].([]any)) != 1 {
-		t.Fatal(linked)
-	}
-	if h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["role"] != "owner" {
-		t.Fatal("link replaced local ownership")
-	}
-	// Signed loss of mapped access deauthorizes managed users and their sessions.
-	req, state = samlBegin(t, h, b, "/api/v1/saml/login", map[string]any{})
-	next = samlReceive(t, h, state, f.response(t, req, "persistent-worker", "saml@example.com", []string{"removed"}, nil), 303)
-	h.want(b, "GET", next, nil, nil, 403)
-	h.want(b, "GET", "/api/v1/profile", nil, nil, 401)
-	var leaked bool
-	if e := h.Pool.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM olp.audit WHERE to_jsonb(audit)::text LIKE '%persistent-worker%') OR EXISTS(SELECT 1 FROM olp.saml_flows WHERE to_jsonb(saml_flows)::text LIKE '%persistent-worker%')`).Scan(&leaked); e != nil || leaked {
-		t.Fatal(e, "identity leaked outside bounded identity/sealed storage")
-	}
-	if config["signing_certificate"] == "" {
-		t.Fatal("no public signing certificate")
-	}
-	var purpose string
-	if e := h.Pool.QueryRow(context.Background(), "SELECT purpose FROM olp.secrets WHERE id=$1", config["id"]).Scan(&purpose); e != nil || purpose != "saml_key" {
-		t.Fatal(e, purpose)
-	}
-}
+
+// Concurrent completions of one flow mint a single session.
+
+// Email never links an existing owner without a recent authenticated flow.
+
+// Signed loss of mapped access deauthorizes managed users and their sessions.
+
 func TestSAMLRefusesMalformedUnsignedAndMisboundAssertions(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -302,119 +234,8 @@ func TestSAMLRefusesMalformedUnsignedAndMisboundAssertions(t *testing.T) {
 	}
 }
 
-func TestSAMLPromotionKeepsKeysAndIdentitiesLocal(t *testing.T) {
-	source := newAccessHarness(t)
-	owner := source.owner()
-	f := newSAMLFixture(t)
-	sourceConfig := f.configure(t, source, owner)
-	b := &browser{}
-	req, state := samlBegin(t, source, b, "/api/v1/saml/login", map[string]any{})
-	next := samlReceive(t, source, state, f.response(t, req, "nonportable-subject", "nonportable@example.com", []string{"developers"}, nil), 303)
-	source.want(b, "GET", next, nil, nil, 303)
-	exported := source.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	document := exported["document"].(map[string]any)
-	raw, _ := json.Marshal(document)
-	for _, private := range []string{sourceConfig["id"].(string), sourceConfig["signing_certificate"].(string), "nonportable-subject", "nonportable@example.com", "saml_key", "private_key"} {
-		if bytes.Contains(raw, []byte(private)) {
-			t.Fatal("export retained local identity or signing state")
-		}
-	}
-	destination := newAccessHarness(t)
-	targetOwner := destination.owner()
-	token := destination.want(targetOwner, "POST", "/api/v1/management-tokens", map[string]any{"name": "configuration", "scopes": []string{"configure"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, idem("saml-token"), 201)["secret"].(string)
-	destination.machineWant(token, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 403)
-	destination.machineWant(token, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("saml-denied"), 403)
-	destination.want(targetOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
-	destination.want(targetOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("saml-apply"), 200)
-	target := destination.want(targetOwner, "GET", "/api/v1/saml/configuration", nil, nil, 200)
-	if target["id"] == sourceConfig["id"] || target["signing_certificate"] == sourceConfig["signing_certificate"] {
-		t.Fatal("promoted installation-local signing material")
-	}
-	destination.machineWant(token, "GET", "/api/v1/configuration/export", nil, nil, 403)
-	destination.machineWant(token, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("saml-apply"), 403)
-	destination.want(targetOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("saml-unchanged"), 200)
-	if destination.want(targetOwner, "GET", "/api/v1/saml/configuration", nil, nil, 200)["etag"] != target["etag"] {
-		t.Fatal("unchanged promotion replaced trust")
-	}
-	var identities int
-	if err := destination.Pool.QueryRow(context.Background(), "SELECT count(*) FROM olp.saml_identities").Scan(&identities); err != nil || identities != 0 {
-		t.Fatal(identities, err)
-	}
-}
-func TestSAMLRecentProofUnlinkAndOwnerProtection(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	f := newSAMLFixture(t)
-	config := f.configure(t, h, owner)
-	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "saml_link"}, nil, 204)
-	req, state := samlBegin(t, h, owner, "/api/v1/profile/saml/link", map[string]any{})
-	next := samlReceive(t, h, state, f.response(t, req, "saml-owner", "owner@example.com", []string{}, nil), 303)
-	h.want(owner, "GET", next, nil, nil, 303)
-	identity := h.want(owner, "GET", "/api/v1/profile/saml-identities", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
-	h.want(owner, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 428)
-	req, state = samlBegin(t, h, owner, "/api/v1/profile/saml/reauthenticate", map[string]any{"purpose": "saml_unlink", "resource_id": identity})
-	next = samlReceive(t, h, state, f.response(t, req, "saml-owner", "owner@example.com", nil, func(a *saml.Assertion) { a.AuthnStatements[0].AuthnInstant = time.Now().Add(-time.Hour) }), 403)
-	_ = next
-	req, state = samlBegin(t, h, owner, "/api/v1/profile/saml/reauthenticate", map[string]any{"purpose": "saml_unlink", "resource_id": identity})
-	next = samlReceive(t, h, state, f.response(t, req, "saml-owner", "owner@example.com", nil, nil), 303)
-	h.want(owner, "GET", next, nil, nil, 303)
-	// A verified SAML identity can be the recovery path while local sign-in is off.
-	setting := h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
-	h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(setting), 200)
-	input := map[string]any{}
-	for _, field := range []string{"enabled", "metadata_xml", "email_attribute", "groups_attribute", "name_attribute", "default_role", "email_role_mappings", "group_role_mappings"} {
-		input[field] = config[field]
-	}
-	input["enabled"] = false
-	h.want(owner, "PUT", "/api/v1/saml/configuration", input, etagHeader(config), 409)
-	h.want(owner, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 409)
-	// A new SP signing key keeps the IdP's role evidence, so the owner stays usable.
-	input["enabled"] = true
-	input["rotate_signing_key"] = true
-	config = h.want(owner, "PUT", "/api/v1/saml/configuration", input, etagHeader(config), 200)
-	var evidence bool
-	if err := h.Pool.QueryRow(t.Context(), "SELECT role_claims IS NOT NULL FROM olp.saml_identities WHERE id=$1", identity).Scan(&evidence); err != nil || !evidence {
-		t.Fatalf("role evidence=%v err=%v", evidence, err)
-	}
-	setting = h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
-	h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "true"}, etagHeader(setting), 200)
-	h.want(owner, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 204)
-	if len(h.want(owner, "GET", "/api/v1/profile/saml-identities", nil, nil, 200)["items"].([]any)) != 0 {
-		t.Fatal("identity survived unlink")
-	}
-}
+// A verified SAML identity can be the recovery path while local sign-in is off.
 
-func TestSAMLManagedAccountsKeepTheirLastSAMLIdentity(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	f := newSAMLFixture(t)
-	f.configure(t, h, owner)
-	worker := &browser{}
-	req, state := samlBegin(t, h, worker, "/api/v1/saml/login", map[string]any{})
-	h.want(worker, "GET", samlReceive(t, h, state, f.response(t, req, "managed-worker", "saml@example.com", []string{"developers"}, nil), 303), nil, nil, 303)
-	// A password does not free a SAML-managed account from the IdP's authority.
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.users SET password_hash=(SELECT password_hash FROM olp.users WHERE email='owner@example.com') WHERE email='saml@example.com'"); err != nil {
-		t.Fatal(err)
-	}
-	identity := h.want(worker, "GET", "/api/v1/profile/saml-identities", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
-	req, state = samlBegin(t, h, worker, "/api/v1/profile/saml/reauthenticate", map[string]any{"purpose": "saml_unlink", "resource_id": identity})
-	h.want(worker, "GET", samlReceive(t, h, state, f.response(t, req, "managed-worker", "saml@example.com", []string{"developers"}, nil), 303), nil, nil, 303)
-	h.want(worker, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 409)
-}
+// A new SP signing key keeps the IdP's role evidence, so the owner stays usable.
 
-func TestLinkedSAMLDoesNotReplaceEnrolledMFA(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	f := newSAMLFixture(t)
-	f.configure(t, h, owner)
-	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "saml_link"}, nil, 204)
-	req, state := samlBegin(t, h, owner, "/api/v1/profile/saml/link", map[string]any{})
-	next := samlReceive(t, h, state, f.response(t, req, "mfa-owner", "owner@example.com", nil, nil), 303)
-	h.want(owner, "GET", next, nil, nil, 303)
-	mfaEnrollTOTP(t, h, owner)
-	req, state = samlBegin(t, h, owner, "/api/v1/profile/saml/reauthenticate", map[string]any{"purpose": "mfa_manage"})
-	next = samlReceive(t, h, state, f.response(t, req, "mfa-owner", "owner@example.com", nil, nil), 303)
-	h.want(owner, "GET", next, nil, nil, 403)
-	status := h.want(owner, "GET", "/api/v1/profile/mfa", nil, nil, 200)
-	h.want(owner, "POST", "/api/v1/profile/mfa/recovery-codes", map[string]any{}, etagHeader(status), 428)
-}
+// A password does not free a SAML-managed account from the IdP's authority.

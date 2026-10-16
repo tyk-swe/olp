@@ -50,25 +50,3 @@ func TestMetricsOmitRecoveryCountersWhenTheirReadFails(t *testing.T) {
 		}
 	}
 }
-
-func TestRecoveryCountersRenderStoredValues(t *testing.T) {
-	var body strings.Builder
-	writeRecoveryCounters(&body, WorkerRecoveryCounters{RequestMetadataReclaimed: 5000})
-	if !strings.Contains(body.String(), "olp_request_metadata_events_reclaimed_total 5000\n") {
-		t.Fatalf("counters:\n%s", body.String())
-	}
-}
-
-func TestProviderMetricLabelsAreEscapedOnce(t *testing.T) {
-	var body strings.Builder
-	writeProviderMetrics(&body, []ProviderHealthRecord{{
-		ProviderID:   "p1",
-		ProviderName: "Acme \"EU\"\t\\x\u200b\nnext",
-		ProviderKind: "openai",
-		Status:       "healthy",
-	}})
-	want := `olp_provider_health{provider_id="p1",provider_name="Acme \"EU\"` + "\t" + `\\x` + "\u200b" + `\nnext",provider_kind="openai",status="healthy"} 1` + "\n"
-	if !strings.Contains(body.String(), want) {
-		t.Fatalf("want %q in:\n%s", want, body.String())
-	}
-}

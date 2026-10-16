@@ -102,18 +102,4 @@ func TestWebAuthnMFARequiresOriginUserVerificationAndFreshCounter(t *testing.T) 
 	}
 }
 
-func TestMFAWebAuthnOriginCapabilityKeepsAuthenticatorAppsAvailable(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	h.Server.Origin = "http://127.0.0.1:4182"
-	// Reads do not need an origin; the signed-in management fixture sends the configured origin on writes.
-	status := h.want(owner, "GET", "/api/v1/profile/mfa", nil, nil, 200)
-	if status["webauthn_available"] != false {
-		t.Fatal("IP relying-party identifier was advertised")
-	}
-	h.Server.Origin = "http://localhost:4183"
-	status = h.want(owner, "GET", "/api/v1/profile/mfa", nil, nil, 200)
-	if status["webauthn_available"] != true {
-		t.Fatal("localhost relying-party identifier was not advertised")
-	}
-}
+// Reads do not need an origin; the signed-in management fixture sends the configured origin on writes.

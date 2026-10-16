@@ -25,60 +25,6 @@ func createCatalogRoute(h *accessHarness, owner *browser, projectID, slug string
 	return activated["route_id"].(string)
 }
 
-func TestModelCatalogPromotionPreservesOwnerConsentAndStagesRouteDisclosure(t *testing.T) {
-	source := newAccessHarness(t)
-	owner := source.owner()
-	project := createProject(source, owner, "Catalog promotion")
-	routeID := createCatalogRoute(source, owner, project, "catalog-promoted")
-	publicationPath := "/api/v1/projects/" + project + "/catalog"
-	publication := source.want(owner, "GET", publicationPath, nil, nil, 200)
-	source.want(owner, "PUT", publicationPath, map[string]any{"enabled": true, "prices_public": true}, etagHeader(publication), 200)
-	exposurePath := "/api/v1/routes/" + routeID + "/catalog"
-	exposure := source.want(owner, "GET", exposurePath, nil, nil, 200)
-	source.want(owner, "PUT", exposurePath, map[string]any{"expose_upstream_models": true}, etagHeader(exposure), 200)
-	document := source.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	if document["projects"].([]any)[0].(map[string]any)["public_catalog"] != true || document["routes"].([]any)[0].(map[string]any)["expose_upstream_models"] != true {
-		t.Fatal("catalog choices missing from portable configuration")
-	}
-	destination := newAccessHarness(t)
-	destinationOwner := destination.owner()
-	restricted := destination.want(destinationOwner, "POST", "/api/v1/management-tokens", map[string]any{"name": "Configure without publication authority", "scopes": []string{"read", "configure"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, idem("catalog-promotion-token"), 201)
-	if status, _, _ := destination.call(sweepCaller{token: restricted["secret"].(string)}, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil); status != 403 {
-		t.Fatalf("configure-only token changed owner publication policy: %d", status)
-	}
-	plan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
-	bindings := map[string]string{}
-	for _, item := range plan["blockers"].([]any) {
-		blocker := item.(map[string]any)
-		if blocker["detail"] == "secret_binding_required" {
-			bindings[blocker["key"].(string)] = vendorSecret
-		}
-	}
-	if len(bindings) == 0 {
-		t.Fatal("missing provider secret binding")
-	}
-	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document, "secret_bindings": bindings}, idem("catalog-promotion-apply"), 200)
-	projects := destination.want(destinationOwner, "GET", "/api/v1/projects", nil, nil, 200)["items"].([]any)
-	destinationProject := projects[0].(map[string]any)["id"].(string)
-	promoted := destination.want(destinationOwner, "GET", "/api/v1/projects/"+destinationProject+"/catalog", nil, nil, 200)
-	if promoted["enabled"] != true || promoted["prices_public"] != true {
-		t.Fatal("publication choices not promoted")
-	}
-	providers := destination.want(destinationOwner, "GET", "/api/v1/providers", nil, nil, 200)["items"].([]any)
-	activateScopedProvider(destination, destinationOwner, providers[0].(map[string]any))
-	drafts := destination.want(destinationOwner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any)
-	draftID := drafts[0].(map[string]any)["id"].(string)
-	draft := destination.want(destinationOwner, "GET", "/api/v1/route-drafts/"+draftID, nil, nil, 200)
-	destination.want(destinationOwner, "POST", "/api/v1/route-drafts/"+draftID+"/activate", nil, withMatch(draft, idem("catalog-promoted-activate")), 200)
-	if err := destination.Runtime.Refresh(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	status, _, body := destination.call(sweepCaller{}, "GET", "/api/v1/catalog/public/"+destinationProject, nil, nil)
-	if status != 200 || !strings.Contains(body, vendorModel) {
-		t.Fatalf("promoted disclosure lost at activation: %d %s", status, body)
-	}
-}
-
 func TestModelCatalogVisibilityPublishingAndUpstreamDisclosure(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()

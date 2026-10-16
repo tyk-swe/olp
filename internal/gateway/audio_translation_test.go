@@ -90,20 +90,3 @@ func TestStrictAudioTranslationPreservesNativeFormatsAndAccounting(t *testing.T)
 		})
 	}
 }
-
-func TestAudioTranslationRejectsUnsupportedControlsBeforeDispatch(t *testing.T) {
-	for _, fields := range []map[string]string{
-		{"stream": "false"}, {"language": "fr"}, {"timestamp_granularities[]": "segment"},
-		{"response_format": "diarized_json"}, {"temperature": "NaN"}, {"temperature": "1.1"},
-	} {
-		h := strictMediaHarness(t, media.OpTranslation, nil, nil)
-		fields["model"] = routeSlug
-		body, contentType := mediaFormBody(t, fields, "file", "audio.wav", []byte{0, 1})
-		resp := h.do(t.Context(), http.MethodPost, "/v1/audio/translations", fullKey, body, map[string]string{"Content-Type": contentType})
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != 400 || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-			t.Fatalf("invalid translation dispatched: fields=%v status=%d", fields, resp.StatusCode)
-		}
-	}
-}

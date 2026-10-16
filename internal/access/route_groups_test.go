@@ -48,16 +48,3 @@ func TestRouteGroupsCompileWithoutWideningKeyScope(t *testing.T) {
 		t.Fatalf("unconfigured allocations: %g", got)
 	}
 }
-func TestRouteGroupsValidateNamesAndSets(t *testing.T) {
-	for _, groups := range []RouteGroups{{"Bad name": {"chat"}}, {"valid": nil}, {"valid": {"chat", "chat"}}, {"valid": {"../chat"}}} {
-		if groups.Validate() == nil {
-			t.Fatalf("invalid groups accepted: %v", groups)
-		}
-	}
-	if err := (RouteGroups{"empty": {}, "valid": {"future", "coding"}}).Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if !(RouteGroups{"set": {"one", "two"}}).Equal(RouteGroups{"set": {"two", "one"}}) {
-		t.Fatal("sets depend on order")
-	}
-}

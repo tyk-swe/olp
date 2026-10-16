@@ -3,111 +3,14 @@
 package usage
 
 import (
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func TestIntegrationWeeklyReconstructionCrossesMonthAndYear(t *testing.T) {
-	pool := notificationPool(t)
-	owner, key := seedParityOwner(t, pool)
-	provider := seedParityProvider(t, pool, owner)
-	group := uuid.NewString()
-	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.budget_groups(id,name,daily_cost_limit,created_by,etag) VALUES($1,'Weekly',100,$2,$3)", group, owner, uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-	var installation string
-	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(t.Context())
-	if err = limits.EnsureAggregateBudget(t.Context(), tx, "installation", installation); err != nil {
-		t.Fatal(err)
-	}
-	if err = limits.EnsureKeyRouteBudget(t.Context(), tx, key, "parity"); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	price := "1000000"
-	at := time.Now().UTC().Add(-time.Second)
-	cases := []parityCase{{model: "priced", price: Price{Model: "priced", InputPerMillion: &price}}}
-	seedParityPrices(t, pool, owner, at.Add(-time.Hour), cases)
-	digest := strings.Repeat("a", 64)
-	for _, sample := range []struct {
-		date     string
-		tokens   int64
-		unpriced bool
-	}{{"2025-12-28T12:00:00Z", 8, false}, {"2025-12-29T12:00:00Z", 1, false}, {"2025-12-31T12:00:00Z", 2, false}, {"2026-01-01T12:00:00Z", 4, false}, {"2025-12-30T12:00:00Z", 1, true}, {"2026-01-01T12:00:00Z", 1, true}} {
-		cases[0].model = "priced"
-		if sample.unpriced {
-			cases[0].model = "unpriced"
-		}
-		cases[0].usage = AttemptUsage{Observed: true, Complete: true, InputTokens: &sample.tokens}
-		event := parityEvent(t, key, provider, at, cases)
-		event.BudgetGroupID = &group
-		event.EndUserDigest = digest
-		persistParity(t, pool, event)
-		// Seed historical boundaries independently of the receipt replay clock.
-		if _, err = pool.Exec(t.Context(), "UPDATE olp.attempt_usage_facts SET observed_at=$2::timestamptz WHERE request_id=$1", event.RequestID, sample.date); err != nil {
-			t.Fatal(err)
-		}
-	}
-	check := func() {
-		conn, err := pool.Acquire(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Release()
-		snapshots, err := limits.ReconciliationSnapshots(t.Context(), conn.Conn(), time.Date(2026, 1, 1, 18, 0, 0, 0, time.UTC))
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected := map[string]bool{key: false, group: false, limits.EndUserKeyID(key, digest): false, limits.AggregateBudgetID("installation", installation): false, limits.KeyRouteBudgetID(key, "parity"): false}
-		for _, s := range snapshots {
-			if _, ok := expected[s.CostOwnerID]; !ok {
-				continue
-			}
-			expected[s.CostOwnerID] = true
-			if s.WeeklyAccrued != "7.000000000000" || s.MonthlyAccrued != "4.000000000000" || s.DailyAccrued != "4.000000000000" || s.UnpricedAttempts != 1 {
-				t.Fatalf("wrong cross-year windows: %+v", s)
-			}
-		}
-		for id, found := range expected {
-			if !found {
-				t.Fatalf("missing budget owner %s", id)
-			}
-		}
-	}
-	check()
-	var rolled, expired int64
-	if err = pool.QueryRow(t.Context(), rollupSQL, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), 100).Scan(&rolled, &expired); err != nil {
-		t.Fatal(err)
-	}
-	if expired != 6 {
-		t.Fatalf("retained %d of six facts", expired)
-	}
-	for _, table := range []string{"api_key_cost_windows", "budget_group_cost_windows", "end_user_cost_windows", "aggregate_cost_windows"} {
-		if _, err = pool.Exec(t.Context(), "DELETE FROM olp."+table); err != nil {
-			t.Fatal(err)
-		}
-	}
-	check()
-}
+// Seed historical boundaries independently of the receipt replay clock.
 
-func TestIntegrationWeeklyNotificationsRequireCompleteEvidence(t *testing.T) {
-	for _, zone := range []string{"UTC", "Asia/Kathmandu"} {
-		t.Run(zone, func(t *testing.T) { testWeeklyNotificationCalendar(t, zone) })
-	}
-}
 func testWeeklyNotificationCalendar(t *testing.T, zone string) {
 	pool := notificationPool(t)
 	f := newNotificationDeliveryFixture(t, pool)

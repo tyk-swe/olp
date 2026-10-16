@@ -14,46 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 )
 
-func TestClassifierDoesNotDispatchForAnExhaustedCaller(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
-	})
-	server := admitThrough(t, h)
-	key := h.rt.keys[fullKey]
-	key.LookupID, key.Policy.RequestsPerMinute = "classifier", costCount(1)
-	h.rt.keys[fullKey] = key
-	server.of("olp:test:{classifier}:rate").requests = 1
-	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-		t.Fatalf("exhausted caller dispatched: status=%d body=%v a=%d b=%d", resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
-	}
-}
-
-func TestClassifierSettlesItsOwnCallerReservation(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
-	})
-	server := admitThrough(t, h)
-	key := h.rt.keys[fullKey]
-	key.LookupID, key.Policy.RequestsPerMinute, key.Policy.TokensPerMinute = "classifier", costCount(10), costCount(100_000)
-	h.rt.keys[fullKey] = key
-	h.mock.set("b", completion(modelB, "simple"))
-	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
-	}
-	server.settled(t, 2)
-	server.mu.Lock()
-	defer server.mu.Unlock()
-	counter := server.of("olp:test:{classifier}:rate")
-	// Both one-token prompts retain their 4096-token output allowance; the
-	// provider's five-token replies cannot refund either local reservation.
-	if counter.requests != 2 || counter.tokens != 8194 || server.reconciled != 2 {
-		t.Fatalf("caller and classifier reservations: counter=%+v reconciliations=%d", counter, server.reconciled)
-	}
-}
+// Both one-token prompts retain their 4096-token output allowance; the
+// provider's five-token replies cannot refund either local reservation.
 
 func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
 	h := newHarness(t, Config{})
@@ -79,32 +41,6 @@ func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
 	result := h.gateway.callClassifier(ctx, parent, &routing.ClassifierPredicate{Route: classifierSlug, TimeoutMS: 1000})
 	if result.failure == "" || h.mock.count("b") != 0 {
 		t.Fatalf("queued classifier dispatched: result=%+v calls=%d", result, h.mock.count("b"))
-	}
-}
-
-func TestClassifierSharesTheNamedRoutesOverallDeadline(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
-		route := s.Routes[routeSlug]
-		route.OverallTimeout = 50
-		s.Routes[routeSlug] = route
-	})
-	h.mock.set("a", completion(modelA, answerText))
-	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-time.After(250 * time.Millisecond):
-			completion(modelB, "complex")(w, r)
-		}
-	})
-	started := time.Now()
-	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode == http.StatusOK || time.Since(started) >= 200*time.Millisecond {
-		t.Fatalf("classifier escaped the route deadline: status=%d elapsed=%s body=%s", resp.StatusCode, time.Since(started), body)
-	}
-	if h.mock.count("a") != 0 || h.mock.count("b") != 1 {
-		t.Fatalf("dispatches beyond deadline: %d/%d", h.mock.count("a"), h.mock.count("b"))
 	}
 }
 

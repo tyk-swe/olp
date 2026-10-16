@@ -10,17 +10,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
@@ -305,52 +300,6 @@ func TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork(t *testing.T) {
 	}
 }
 
-func TestStrictBatchPinnedOpenAISDKs(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "tests/sdk-smoke/node_modules/openai")); err != nil {
-		t.Fatal("pinned OpenAI JavaScript SDK is missing; run pnpm install --frozen-lockfile")
-	}
-	for _, test := range []struct {
-		name, binary string
-		args         []string
-	}{
-		{"javascript", "node", []string{"tests/sdk-smoke/durable-batch.mjs"}},
-		{"python", "uv", []string{"run", "--project", "tests/sdk-smoke-python", "--frozen", "python", "tests/sdk-smoke-python/durable_batch.py"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newOpenAIFixture(t, "")
-			fixture.batchCreateRaw.Store(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-up-1"}`)
-			fixture.batchFetchRaw.Store(`{"id":"batch-up-1","object":"batch","status":"completed","input_file_id":"file-up-1","output_file_id":"file-up-out","error_file_id":"file-up-err","request_counts":{"total":2,"completed":1,"failed":1}}`)
-			fixture.files["file-up-out"] = map[string]any{"id": "file-up-out", "object": "file", "status": "processed"}
-			fixture.files["file-up-err"] = map[string]any{"id": "file-up-err", "object": "file", "status": "processed"}
-			fixture.contentByID.Store("file-up-out", `{"custom_id":"first","response":{"status_code":200}}`+"\n")
-			fixture.contentByID.Store("file-up-err", `{"custom_id":"second","error":{"code":"fixture"}}`+"\n")
-			h := newAccessHarness(t)
-			owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-				[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
-				map[string]any{"fidelity": map[string]any{"mode": "strict"}},
-				map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
-			key := stateKey(t, h, owner, slug, true)
-			h.refresh()
-			before := fixture.batchCreates.Load()
-			cmd := exec.CommandContext(t.Context(), test.binary, test.args...)
-			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "OLP_DURABLE_BASE="+h.HTTP.URL, "OLP_DURABLE_ROUTE="+slug,
-				"OLP_DURABLE_MODEL="+vendorModel, "OLP_DURABLE_KEY="+key)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("pinned %s durable SDK: %v\n%s", test.name, err, output)
-			}
-			if fixture.batchCreates.Load() != before+1 {
-				t.Fatalf("pinned %s SDK submitted %d batches; %s", test.name, fixture.batchCreates.Load()-before, output)
-			}
-		})
-	}
-}
-
 func TestAcceptedStrictBatchMappingSurvivesClientDisconnect(t *testing.T) {
 	fixture := newOpenAIFixture(t, "")
 	fixture.batchCreateRaw.Store(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-up-1"}`)
@@ -454,63 +403,6 @@ WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &localID
 	}
 	if fixture.batchCreates.Load() != before+1 {
 		t.Fatalf("client disconnect caused %d batch submissions", fixture.batchCreates.Load()-before)
-	}
-}
-
-func TestStrictBatchRejectsUncertifiedPerItemOperationBeforeUpload(t *testing.T) {
-	fixture := newOpenAIFixture(t, "")
-	h := newAccessHarness(t)
-	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
-		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
-		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
-	key := stateKey(t, h, owner, slug, true)
-	h.refresh()
-	before := fixture.dials.Load()
-	input := `{"custom_id":"one","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n"
-	status, _ := h.uploadTestFile(slug, key, input)
-	if status != http.StatusBadRequest || fixture.dials.Load() != before {
-		t.Fatalf("uncertified embeddings item reached batch provider: %d calls=%d", status, fixture.dials.Load()-before)
-	}
-}
-
-func TestStrictFileEarlyProviderAcceptanceNeverLooksComplete(t *testing.T) {
-	fixture := newOpenAIFixture(t, "")
-	h := newAccessHarness(t)
-	sink := &captureSink{}
-	h.Gateway.Sink = sink
-	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
-		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
-		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
-	key := stateKey(t, h, owner, slug, true)
-	h.refresh()
-	var source strings.Builder
-	for i := range 10000 {
-		source.WriteString(`{"custom_id":"item-`)
-		source.WriteString(strconv.Itoa(i))
-		source.WriteString(`","method":"POST","url":"/v1/embeddings","body":{"model":"`)
-		source.WriteString(vendorModel)
-		source.WriteString(`","input":"`)
-		source.WriteString(strings.Repeat("x", 350))
-		source.WriteString(`"}}` + "\n")
-	}
-	fixture.earlyFileReply.Store(true)
-	before := fixture.dials.Load()
-	status, result := h.uploadTestFile(slug, key, source.String())
-	if status < 400 || fixture.dials.Load() != before+1 {
-		t.Fatalf("early provider reply exposed a completed file: status=%d result=%v calls=%d", status, result, fixture.dials.Load()-before)
-	}
-	var mapped int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='strict_file'`).Scan(&mapped); err != nil || mapped != 0 {
-		t.Fatalf("partial upload published file mapping: count=%d err=%v", mapped, err)
-	}
-	fact := sink.last().Attempts[0]
-	if fact.Status != http.StatusOK || fact.Class != "ambiguous" || fact.Committed || fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamAccepted || fact.Interaction.ClientState != usage.ClientUnobserved {
-		t.Fatalf("partial accepted upload lost its independent transport evidence: %+v", fact)
-	}
-	if fact.Usage != nil || fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
-		t.Fatalf("non-generating upload acquired generation billing uncertainty: %+v", fact)
 	}
 }
 

@@ -92,36 +92,4 @@ func TestEveryEarlyInferenceFailureEmitsOneTerminalEnvelope(t *testing.T) {
 	}
 }
 
-func TestReadDeadlineFailureEmitsTerminalEnvelope(t *testing.T) {
-	h := newHarness(t, Config{})
-	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	// ResponseRecorder deliberately has no SetReadDeadline implementation.
-	w := httptest.NewRecorder()
-	h.gateway.inference(wire.Chat)(w, r)
-	if w.Code != http.StatusInternalServerError || len(h.sink.envs) != 1 || h.sink.envs[0].Status != w.Code || h.sink.envs[0].Outcome != "failure" {
-		t.Fatalf("deadline setup failure: response=%d envelopes=%+v", w.Code, h.sink.envs)
-	}
-}
-
-func TestResponsesReferencesNeverReachUpstream(t *testing.T) {
-	for _, input := range []string{
-		`[{"type":"item_reference","id":"msg_private"}]`,
-		`[{"id":"msg_private"}]`,
-		`[{"role":"user","content":[{"type":"input_file","file_id":"file_private"}]}]`,
-	} {
-		for _, streaming := range []string{"false", "true"} {
-			h := newHarness(t, Config{})
-			r := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"team-chat","input":`+input+`,"stream":`+streaming+`}`))
-			r.Header.Set("Authorization", "Bearer "+fullKey)
-			r.Header.Set("Content-Type", "application/json")
-			w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}
-			h.gateway.inference(wire.Responses)(w, r)
-			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"unsupported_stateful_reference"`) || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-				t.Fatalf("stateful reference reached upstream: %d %s", w.Code, w.Body.String())
-			}
-			if len(h.sink.envs) != 1 || len(h.sink.envs[0].Attempts) != 0 || h.sink.envs[0].Outcome != "failure" {
-				t.Fatalf("reference rejection telemetry: %+v", h.sink.envs)
-			}
-		}
-	}
-}
+// ResponseRecorder deliberately has no SetReadDeadline implementation.

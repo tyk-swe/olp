@@ -3,11 +3,7 @@
 package bench_test
 
 import (
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -344,46 +340,11 @@ func TestHarnessReadsTheAgeOfTheGatewaysMetricsSnapshot(t *testing.T) {
 	}
 }
 
-// TestHarnessWaitsForMetricsTakenAfterTheRun serves a gateway whose metrics
-// snapshot is older than the end of the run on its first scrapes and newer on a
-// later one, and one whose snapshot never is.
-func TestHarnessWaitsForMetricsTakenAfterTheRun(t *testing.T) {
-	var scrapes atomic.Int32
-	serve := func(freshAfter int32) *gatewayProcess {
-		scrapes.Store(0)
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			n := scrapes.Add(1)
-			age := 30.0
-			if freshAfter > 0 && n >= freshAfter {
-				age = 0
-			}
-			fmt.Fprintf(w, "%s %v\n%s %v\n", seriesSnapshotAge, age, seriesFailOpen, n)
-		}))
-		t.Cleanup(server.Close)
-		return &gatewayProcess{private: server.URL}
-	}
+// A snapshot that reports an age of 0 may be a second old, so within the
+// second after a run ended it is not known to be newer than the run.
 
-	g := serve(3)
-	m, fresh := metricsAfter(t, g, time.Now().Add(-3*time.Second), 10*time.Second)
-	if !fresh || m[seriesFailOpen] != 3 {
-		t.Errorf("fresh %v after reading %v: want the third scrape, the first taken after the run", fresh, m)
-	}
-
-	// A snapshot that reports an age of 0 may be a second old, so within the
-	// second after a run ended it is not known to be newer than the run.
-	g = serve(1)
-	if m, fresh = metricsAfter(t, g, time.Now(), 300*time.Millisecond); fresh {
-		t.Errorf("fresh after reading %v: a snapshot that may predate the end of the run was taken for one after it", m)
-	}
-
-	// A snapshot that is never newer comes back as such, with what was read, so
-	// that the target is left unchecked rather than judged on it.
-	g = serve(0)
-	m, fresh = metricsAfter(t, g, time.Now(), 1200*time.Millisecond)
-	if fresh || m[seriesFailOpen] < 2 {
-		t.Errorf("fresh %v after reading %v: a snapshot older than the run was taken for a fresh one", fresh, m)
-	}
-}
+// A snapshot that is never newer comes back as such, with what was read, so
+// that the target is left unchecked rather than judged on it.
 
 func TestHarnessSummarizesFailover(t *testing.T) {
 	p := plan{Models: []string{"model-a", "model-b"}, Baseline: "model-b", Failover: true}

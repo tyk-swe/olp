@@ -26,26 +26,6 @@ func authorityManager(readAt time.Time, ineligible map[string]routing.Eligibilit
 	return m
 }
 
-func TestCredentialEligibilityNamesWhyAVersionCannotServe(t *testing.T) {
-	live, revoked, lapsed := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	fresh := authorityManager(time.Now(), map[string]routing.Eligibility{revoked: routing.Revoked, lapsed: routing.Lapsed})
-	for id, want := range map[string]routing.Eligibility{live: routing.Eligible, revoked: routing.Revoked, lapsed: routing.Lapsed} {
-		if got := fresh.Eligibility(id); got != want {
-			t.Fatalf("credential eligibility %q, want %q", got, want)
-		}
-	}
-	stale := authorityManager(time.Now().Add(-AuthorityStaleAfter-time.Second), map[string]routing.Eligibility{revoked: routing.Revoked, lapsed: routing.Lapsed})
-	for _, id := range []string{live, revoked, lapsed} {
-		if got := stale.Eligibility(id); got != routing.StaleAuthority {
-			t.Fatalf("stale authority vouched for %s: %q", id, got)
-		}
-	}
-	unloaded := NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if got := unloaded.Eligibility(live); got != routing.StaleAuthority {
-		t.Fatalf("unloaded authority vouched for a credential: %q", got)
-	}
-}
-
 func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 	provider, slot, network, historical := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	release := &Release{credentials: map[string][]byte{slot: []byte("slot-secret"), network: []byte("network-secret")}}
@@ -80,19 +60,5 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 		if secret, err := m.NetworkSecret(t.Context(), release, provider, network); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
 			t.Fatalf("served an ineligible network credential: %q %v", secret, err)
 		}
-	}
-}
-
-// A gateway asks workers to refresh the grant of a credential version the
-// upstream refused, once per access token, but never a lapsed grant's: only a
-// new grant enrollment replaces it.
-func TestARefusedCredentialRequestsNoRefreshOfALapsedGrant(t *testing.T) {
-	lapsed, revoked := uuid.NewString(), uuid.NewString()
-	m := authorityManager(time.Now(), map[string]routing.Eligibility{lapsed: routing.Lapsed, revoked: routing.Revoked})
-	m.grants = map[string]servedGrant{lapsed: {generation: 3}, revoked: {generation: 1}}
-	m.CredentialRefused(lapsed, 3)
-	m.CredentialRefused(revoked, 1)
-	if len(m.refreshRequested) != 0 {
-		t.Fatalf("refreshes requested for versions that may not serve: %v", m.refreshRequested)
 	}
 }

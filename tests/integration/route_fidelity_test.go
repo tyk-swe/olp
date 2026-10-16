@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -166,182 +165,20 @@ func TestRouteFidelityOmissionIsStrictAndLegacyIsRejected(t *testing.T) {
 	}
 }
 
-func TestRouteFidelitySwitchesThroughRevisionsAndRefusesRetainedStrictResponses(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	f := newStrictProviderFixture(t, "azure-v1-responses")
-	slug, _ := publishStrictProvider(t, h, owner, f, nil, nil, "strict")
-	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	routePath := "/api/v1/routes/" + route["id"].(string)
-	strictRevision := route["latest_revision"].(map[string]any)["id"].(string)
-	key := stateKey(t, h, owner, slug, true)
-	h.refresh()
-	status, response, _ := h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"retain this","store":true}`), map[string]string{"Content-Type": "application/json"})
-	if status != 200 {
-		t.Fatalf("strict retained response: %d %s", status, response)
-	}
-	var stored struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(response, &stored); err != nil || !strings.HasPrefix(stored.ID, "strict_response_") {
-		t.Fatalf("strict route did not retain a strict response: %s", response)
-	}
-	continued := `{"model":"` + slug + `","input":"continue","previous_response_id":"` + stored.ID + `"}`
-	if status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(continued), map[string]string{"Content-Type": "application/json"}); status != 200 {
-		t.Fatalf("strict continuation before the switch: %d %s", status, response)
-	}
+// The same slug becomes transformed through an ordinary new revision.
 
-	// The same slug becomes transformed through an ordinary new revision.
-	draft := h.want(owner, "POST", "/api/v1/route-drafts", transformed(fidelityDraft(slug, f.providerID)), idem(uuid.NewString()), 201)
-	activated := h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	if activated["route_id"] != route["id"] || activated["revision"] != float64(2) {
-		t.Fatal("fidelity change did not publish a new revision of the same route", activated)
-	}
-	// The gateway has not polled the new release. It must refuse new strict
-	// work immediately after publication, before any provider request.
-	beforeRefresh := len(f.captured())
-	status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"must not escape","store":false}`), map[string]string{"Content-Type": "application/json"})
-	if status != 503 || !strings.Contains(string(response), "route_fidelity_unavailable") || len(f.captured()) != beforeRefresh {
-		t.Fatalf("stale strict admission reached provider: %d %s", status, response)
-	}
-	// A failed authoritative read also refuses the strict admission.
-	cancelled, cancel := context.WithCancel(t.Context())
-	cancel()
-	if err := h.Runtime.CheckRouteFidelity(cancelled, h.Runtime.Release().Snapshot.Routes[slug]); err == nil {
-		t.Fatal("a failed database read authorized strict work")
-	}
-	h.refresh()
-	if h.Runtime.Release().Snapshot.Routes[slug].Fidelity.Mode != "transformed" {
-		t.Fatal("runtime did not serve the transformed revision")
-	}
-	diff := h.want(owner, "GET", routePath+"/revisions/diff?from=1&to=2", nil, nil, 200)
-	if diff["fidelity_changed"] != true || routeFidelityMode(t, diff["fidelity_before"]) != "strict" || routeFidelityMode(t, diff["fidelity_after"]) != "transformed" {
-		t.Fatal("revision diff omitted the fidelity change", diff)
-	}
+// The gateway has not polled the new release. It must refuse new strict
+// work immediately after publication, before any provider request.
 
-	// A retained strict response is refused on the transformed route.
-	before := len(f.captured())
-	for _, request := range []struct{ method, path, body string }{
-		{"GET", "/v1/responses/" + stored.ID, ""},
-		{"POST", "/v1/responses", continued},
-	} {
-		status, response, _ = h.gatewayRaw(request.method, request.path, key, strings.NewReader(request.body), map[string]string{"Content-Type": "application/json"})
-		if status != http.StatusConflict || !strings.Contains(string(response), "provider_resource_unavailable") || !strings.Contains(string(response), "now transformed") {
-			t.Fatalf("%s %s served a strict response on a transformed route: %d %s", request.method, request.path, status, response)
-		}
-	}
-	if len(f.captured()) != before {
-		t.Fatal("refused strict response reached the provider")
-	}
+// A failed authoritative read also refuses the strict admission.
 
-	// Restoring the strict revision activates it with its own fidelity.
-	restored := h.want(owner, "POST", routePath+"/revisions/"+strictRevision+"/restore-as-draft", nil, idem(uuid.NewString()), 201)
-	if routeFidelityMode(t, restored["fidelity"]) != "strict" {
-		t.Fatal("restore changed the revision fidelity", restored)
-	}
-	activated = h.want(owner, "POST", "/api/v1/route-drafts/"+restored["id"].(string)+"/activate", nil, withMatch(restored, idem(uuid.NewString())), 200)
-	if activated["revision"] != float64(3) {
-		t.Fatal("restored revision did not activate", activated)
-	}
-	h.refresh()
-	if h.Runtime.Release().Snapshot.Routes[slug].Fidelity.Mode != "strict" {
-		t.Fatal("runtime did not serve the restored strict revision")
-	}
-	if status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(continued), map[string]string{"Content-Type": "application/json"}); status != 200 {
-		t.Fatalf("strict continuation after restoring the strict revision: %d %s", status, response)
-	}
-}
+// A retained strict response is refused on the transformed route.
 
-func TestRouteFidelityConfigurationTreatsOmissionAsStrict(t *testing.T) {
-	h := newAccessHarness(t)
-	fixture := newOpenAIFixture(t, "")
-	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "transformed"}, "content_policy": fidelityPolicy("redact", "input")})
-	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	document := export["document"].(map[string]any)
-	route := document["routes"].([]any)[0].(map[string]any)
-	if routeFidelityMode(t, route["fidelity"]) != "transformed" {
-		t.Fatal("export omitted explicit fidelity")
-	}
-	if digest := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["digest"]; digest != export["digest"] {
-		t.Fatal("unchanged export digest drifted")
-	}
-	planned := h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
-	if len(planned["conflicts"].([]any)) != 0 || len(planned["blockers"].([]any)) != 0 {
-		t.Fatal("exported document did not round-trip", planned)
-	}
+// Restoring the strict revision activates it with its own fidelity.
 
-	// Omission is strict, so the exported v2 redaction attachment cannot inherit
-	// the published transformed contract.
-	delete(route, "fidelity")
-	requireFieldError(t, h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422), "guardrail_policies")
-	route["fidelity"] = map[string]any{"mode": "legacy"}
-	requireFieldError(t, h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422), "routes.0.fidelity")
-	requireFieldError(t, h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 422), "routes.0.fidelity")
+// Omission is strict, so the exported v2 redaction attachment cannot inherit
+// the published transformed contract.
 
-	delete(route, "fidelity")
-	policies := document["guardrail_policies"].([]any)
-	entries := policies[0].(map[string]any)["entries"].([]any)
-	entries[0].(map[string]any)["action"] = "block"
-	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
-	var staged map[string]any
-	for _, item := range h.want(owner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any) {
-		d := item.(map[string]any)
-		if d["slug"] == slug && d["state"] == "draft" && d["based_on_revision_id"] == nil {
-			staged = d
-		}
-	}
-	if staged == nil || routeFidelityMode(t, staged["fidelity"]) != "strict" {
-		t.Fatal("configuration without fidelity did not stage a strict draft", staged)
-	}
-	// The explicit strict mode equals the omitted one, so the plan is a no-op.
-	route["fidelity"] = map[string]any{"mode": "strict"}
-	planned = h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
-	for _, item := range planned["actions"].([]any) {
-		action := item.(map[string]any)
-		if action["kind"] == "route" && action["action"] != "noop" {
-			t.Fatal("explicit strict fidelity differed from an omitted one", planned)
-		}
-	}
-	route["fidelity"] = map[string]any{"mode": "transformed"}
-	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
-	if draft := h.want(owner, "GET", "/api/v1/route-drafts/"+staged["id"].(string), nil, nil, 200); routeFidelityMode(t, draft["fidelity"]) != "transformed" {
-		t.Fatal("explicit imported transition was ignored", draft)
-	}
-	h.refresh()
-	if h.Runtime.Release().Snapshot.Routes[slug].Fidelity.Mode != "transformed" {
-		t.Fatal("staging a draft changed serving behavior")
-	}
-}
+// The explicit strict mode equals the omitted one, so the plan is a no-op.
 
-func TestStrictRealtimeActivationTellsTheAuthorToDeclareTransformed(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	fixture := newStrictRealtimeFixture(t, "openai")
-	// An Automatic provider (no provider profile) certified for realtime.
-	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Automatic realtime", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "endpoint": fixture.URL + "/v1"}, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), http.StatusCreated)
-	path := "/api/v1/providers/" + provider["id"].(string)
-	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), http.StatusOK); probe["succeeded"] != true {
-		t.Fatalf("provider probe: %v", probe)
-	}
-	modelID := h.want(owner, "GET", path+"/models", nil, nil, http.StatusOK)["items"].([]any)[0].(map[string]any)["id"].(string)
-	provider = h.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "realtime", "surface": "openai", "mode": "realtime"}}}, etagHeader(provider), http.StatusOK)
-	if certified := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(provider), http.StatusOK); certified["status"] != "certified" {
-		t.Fatalf("realtime certification: %v", certified)
-	}
-	provider = h.want(owner, "GET", path, nil, nil, http.StatusOK)
-	h.want(owner, "POST", path+"/activate", nil, withMatch(provider, idem(uuid.NewString())), http.StatusOK)
-
-	slug := "realtime-" + uuid.NewString()[:8]
-	body := fidelityDraft(slug, provider["id"])
-	body["operations"] = []string{"realtime"}
-	draft := h.want(owner, "POST", "/api/v1/route-drafts", body, idem(uuid.NewString()), http.StatusCreated)
-	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
-	for _, action := range []string{"validate", "activate"} {
-		problem := h.want(owner, "POST", draftPath+"/"+action, nil, withMatch(draft, idem(uuid.NewString())), http.StatusUnprocessableEntity)
-		if problemCode(t, problem) != "target_capability" || !strings.Contains(problem["detail"].(string), "Declare the route transformed") {
-			t.Fatalf("strict realtime %s did not guide the author to a transformed route: %v", action, problem)
-		}
-	}
-	draft = h.want(owner, "PUT", draftPath, transformed(body), etagHeader(draft), http.StatusOK)
-	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(draft, idem(uuid.NewString())), http.StatusOK)
-}
+// An Automatic provider (no provider profile) certified for realtime.

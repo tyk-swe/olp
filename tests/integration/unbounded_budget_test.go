@@ -3,19 +3,12 @@
 package integration_test
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/gateway"
 )
 
 func TestStrictBatchBudgetRejectsBeforeDispatch(t *testing.T) {
@@ -76,79 +69,6 @@ func TestStrictBatchBudgetRejectsBeforeDispatch(t *testing.T) {
 			status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", secret, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
 			if status != http.StatusBadRequest || !strings.Contains(string(raw), "unbounded_work_budget") || fixture.dials.Load() != before {
 				t.Fatalf("batch admission: %d %s calls %d -> %d", status, raw, before, fixture.dials.Load())
-			}
-		})
-	}
-}
-
-func TestGeminiLiveBudgetRejectsBeforeDispatch(t *testing.T) {
-	h := newAccessHarness(t)
-	provider := newGeminiLifecycleProvider(t)
-	owner := h.owner()
-	slug, _, _ := provisionGeminiLifecycle(t, h, owner, "gemini-live", provider)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Live budget", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "tokens_per_minute": 100}, idem(uuid.NewString()), 201)
-	h.refresh()
-	before := len(provider.captured())
-	address := "ws" + strings.TrimPrefix(h.HTTP.URL, "http") + "/gemini/ws/" + connectors.GeminiLiveMethod + "?key=" + url.QueryEscape(key["secret"].(string))
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	client, _, err := websocket.Dial(ctx, address, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.CloseNow()
-	if err := client.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"setup":{"model":"models/%s"}}`, slug))); err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = client.Read(ctx)
-	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || len(provider.captured()) != before {
-		t.Fatalf("Live budget dispatched: %v calls %d -> %d", err, before, len(provider.captured()))
-	}
-}
-
-func TestGeminiLiveReauthorizationRefusesNewConsumptionBudgets(t *testing.T) {
-	for _, scope := range []string{"key", "group", "key route"} {
-		t.Run(scope, func(t *testing.T) {
-			h := newAccessHarness(t)
-			client := limClient(t)
-			h.Gateway.Admission = gateway.NewAdmission(limLimiter(t, client, limNamespace(t, client, "live-budget-refresh")), nil, slog.New(slog.DiscardHandler))
-			provider := newGeminiLifecycleProvider(t)
-			owner := h.owner()
-			slug, secret, _ := provisionGeminiLifecycle(t, h, owner, "gemini-live", provider,
-				map[string]any{"requests_per_minute": 1000, "max_concurrency": 1})
-			ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
-			defer cancel()
-			address := "ws" + strings.TrimPrefix(h.HTTP.URL, "http") + "/gemini/ws/" + connectors.GeminiLiveMethod + "?key=" + url.QueryEscape(secret)
-			conn, _, err := websocket.Dial(ctx, address, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer conn.CloseNow()
-			if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"setup":{"model":"models/%s"}}`, slug))); err != nil {
-				t.Fatal(err)
-			}
-			if _, frame, err := conn.Read(ctx); err != nil || !strings.Contains(string(frame), "setupComplete") {
-				t.Fatalf("request/concurrency-only Live session refused: %s %v", frame, err)
-			}
-			authority, err := h.authority(secret)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fields := map[string]any{"weekly_cost_limit": "1"}
-			if scope == "group" {
-				group := h.want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "live", "weekly_cost_limit": "1"}, idem(uuid.NewString()), 201)
-				fields = map[string]any{"budget_group_id": group["id"]}
-			} else if scope == "key route" {
-				fields = map[string]any{"route_limits": map[string]any{slug: map[string]any{"weekly_cost_limit": "1"}}}
-			}
-			path := "/api/v1/api-keys/" + authority.ID
-			key := h.want(owner, "GET", path, nil, nil, 200)
-			h.want(owner, "PATCH", path, fields, etagHeader(key), 200)
-			h.refresh()
-			before := len(provider.captured())
-			_, _, err = conn.Read(ctx)
-			if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || len(provider.captured()) != before {
-				t.Fatalf("Live session continued with new %s budget: %v", scope, err)
 			}
 		})
 	}

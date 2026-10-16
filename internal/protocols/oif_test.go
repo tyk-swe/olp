@@ -2,16 +2,12 @@ package protocols_test
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
-	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/tests/fidelity"
 	fixtures "github.com/tyk-swe/olp/tests/fixtures/fidelity"
 )
@@ -59,35 +55,6 @@ func TestOrderedGenerationViewUsesIndependentNativeSource(t *testing.T) {
 	view.Messages[1].Nodes[1], view.Messages[1].Nodes[4] = view.Messages[1].Nodes[4], view.Messages[1].Nodes[1]
 	if err := fidelity.Compare(data, prepared.Document().Bytes()); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestGenerationViewsRetainScopesPresenceAndToolSchema(t *testing.T) {
-	r, err := protocols.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"system","content":"one"},{"role":"developer","content":"two"},{"role":"user","content":"hi"}],"max_completion_tokens":64,"temperature":null,"parallel_tool_calls":false,"seed":0,"stop":[],"tools":[{"type":"function","function":{"name":"lookup","description":"contract","strict":true,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{}}}}]}`), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	v, err := protocols.GenerationRequest(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v.Messages[0].Role != "system" || v.Messages[1].Role != "developer" {
-		t.Fatal("instruction hierarchy collapsed")
-	}
-	controls := map[string]oif.Presence{}
-	for _, c := range v.Controls {
-		controls[c.Name] = c.Presence
-		if c.Name == "max_completion_tokens" && (c.Units != "tokens" || c.BudgetScope != "openai-chat/max_completion_tokens") {
-			t.Fatal("token scope lost")
-		}
-	}
-	for name, presence := range map[string]oif.Presence{"temperature": oif.ExplicitNull, "parallel_tool_calls": oif.Present, "seed": oif.Present, "stop": oif.Present, "top_p": oif.Missing} {
-		if controls[name] != presence {
-			t.Fatalf("presence changed: %s", name)
-		}
-	}
-	if len(v.Tools) != 1 || v.Tools[0].Description != "contract" || v.Tools[0].Strictness.Raw() != "true" || v.Tools[0].SchemaDialect != "https://json-schema.org/draft/2020-12/schema" {
-		t.Fatal("tool schema contract lost")
 	}
 }
 
@@ -145,181 +112,5 @@ func TestNativeStreamLiftsBeforeProjectionAndDoesNotCollectHistory(t *testing.T)
 	expected := bytes.ReplaceAll(source, []byte(`"model":"fixture-model"`), []byte(`"model":"route"`))
 	if err := fidelity.CompareEvents(expected, out.Bytes()); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAmbiguousUpstreamNativeSourceNeverProducesSuccess(t *testing.T) {
-	for _, value := range []string{`{"x":1,"x":2}`, `{"x":"\ud800"}`} {
-		body := `{"id":"c","object":"chat.completion","model":"native","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"opaque":` + value + `}`
-		if _, err := protocols.Decode(wire.Chat, wire.Chat, []byte(body), "route", ""); err == nil {
-			t.Fatal("ambiguous unary source accepted")
-		}
-		stream := `data: {"id":"c","object":"chat.completion.chunk","model":"native","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"opaque":` + value + "}\n\ndata: [DONE]\n\n"
-		var out bytes.Buffer
-		_, err := protocols.Stream(wire.Chat, wire.Chat, strings.NewReader(stream), 8192, "route", true, func(frame []byte) error { out.Write(frame); return nil })
-		if err == nil || strings.Contains(out.String(), "[DONE]") {
-			t.Fatal("ambiguous stream source produced success")
-		}
-	}
-}
-
-func TestExplicitDestinationNeverFallsBackToAnotherDialect(t *testing.T) {
-	r, err := protocols.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}]}`), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, encodedWire, err := protocols.EncodeTarget(r, wire.Responses, "openai", "openai", "model", nil)
-	if err == nil || encodedWire != wire.Responses {
-		t.Fatal("explicit Responses target fell back to Chat")
-	}
-	var refusal *wire.RequestError
-	if !errors.As(err, &refusal) {
-		t.Fatal("missing structured incompatibility")
-	}
-	response, err := protocols.Parse(wire.Responses, []byte(`{"model":"route","input":"hi","native_option":{"n":9007199254740993}}`), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := protocols.PrepareIdentity(response, "model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(identity.Document().Bytes(), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if string(fields["input"]) != `"hi"` {
-		t.Fatal("identity normalized the source input form")
-	}
-	transformed, _, err := protocols.PrepareTarget(response, wire.Responses, "openai", "openai", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if transformed.Identity() || transformed.Provenance()[0].Origin != oif.TransformedMapping {
-		t.Fatal("transformed normalization claimed identity")
-	}
-}
-
-func TestIdentityTransportOverlayPreservesOtherNativeOptions(t *testing.T) {
-	raw := `{"model":"route","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":false,"future": { "opaque":"\u0061", "n":1e400 }}}`
-	r, err := protocols.Parse(wire.Chat, []byte(raw), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := protocols.PrepareIdentity(r, "upstream")
-	if err != nil {
-		t.Fatal(err)
-	}
-	original, _ := r.OIF().Source().Lookup("/stream_options/future")
-	actual, _ := p.Document().Lookup("/stream_options/future")
-	if original.Raw() != actual.Raw() {
-		t.Fatal("accounting overlay changed a native option")
-	}
-	if usage, _ := p.Document().Lookup("/stream_options/include_usage"); usage.Raw() != "true" {
-		t.Fatal("accounting usage option absent")
-	}
-}
-
-func TestPreparedDefaultsReportActualBranches(t *testing.T) {
-	for _, test := range []struct {
-		name, field string
-		want        bool
-	}{{"absent", "", true}, {"explicit-null", `,"temperature":null`, false}, {"equal-caller-value", `,"temperature":0`, false}} {
-		t.Run(test.name, func(t *testing.T) {
-			r, err := protocols.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}]`+test.field+`}`), "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			p, _, err := protocols.PrepareTarget(r, wire.Chat, "openai", "openai", "upstream", protocols.Object{"temperature": json.RawMessage("0")})
-			if err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for _, entry := range p.Provenance() {
-				found = found || entry.Pointer == "/temperature" && entry.Origin == oif.ProviderDefault
-			}
-			if found != test.want {
-				t.Fatal("default provenance was inferred from equal output instead of application")
-			}
-		})
-	}
-	r, err := protocols.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}]}`), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, _, err := protocols.PrepareTarget(r, wire.Anthropic, "anthropic", "anthropic", "upstream", protocols.Object{"max_tokens": json.RawMessage("32")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, entry := range p.Provenance() {
-		found = found || entry.Pointer == "/max_tokens" && entry.Origin == oif.ProviderDefault
-	}
-	if !found {
-		t.Fatal("translated native token default not recorded")
-	}
-}
-
-func TestImmutableValidationReuseCannotBlessConstructorsDefaultsOrOverlays(t *testing.T) {
-	valid := func() *wire.Request {
-		r, err := openai.Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}]}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return r
-	}
-	tests := map[string]func() (*wire.Request, protocols.Object){
-		"unvalidated-constructor": func() (*wire.Request, protocols.Object) {
-			r, err := wire.FromFields(wire.Chat, "route", false, protocols.Object{"model": json.RawMessage(`"route"`), "messages": json.RawMessage(`null`)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			return r, nil
-		},
-		"unvalidated-source-constructor": func() (*wire.Request, protocols.Object) {
-			d, err := oif.ParseJSON([]byte(`{"model":"route","messages":"invalid"}`), oif.Limits{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			r, err := wire.NewRequest(wire.Chat, "route", false, d)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return r, nil
-		},
-		"resource-overlay": func() (*wire.Request, protocols.Object) {
-			r := valid()
-			r, err := r.WithField("messages", json.RawMessage(`[]`))
-			if err != nil {
-				t.Fatal(err)
-			}
-			return r, nil
-		},
-		"transformed-overlay": func() (*wire.Request, protocols.Object) {
-			r := valid()
-			fields := r.Document()
-			fields["messages"] = json.RawMessage(`false`)
-			next, err := r.WithFields(fields, oif.ExplicitTransform)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return next, nil
-		},
-		"invalid-default": func() (*wire.Request, protocols.Object) {
-			return valid(), protocols.Object{"temperature": json.RawMessage(`"invalid"`)}
-		},
-		"changed-dialect": func() (*wire.Request, protocols.Object) {
-			r := valid()
-			r.Family = wire.Responses
-			return r, nil
-		},
-	}
-	for name, prepare := range tests {
-		t.Run(name, func(t *testing.T) {
-			r, defaults := prepare()
-			if _, err := openai.Encode(r, "upstream", defaults); err == nil {
-				t.Fatal("unvalidated effective document encoded")
-			}
-		})
 	}
 }

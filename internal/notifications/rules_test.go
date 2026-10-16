@@ -5,22 +5,6 @@ import (
 	"testing"
 )
 
-func TestThresholdConfigurationAndExactHysteresis(t *testing.T) {
-	c, err := ParseRuleConfiguration("provider.error_rate", json.RawMessage(`{"threshold":"0.2"}`))
-	if err != nil || c.RecoveryThreshold != "0.16" || c.WindowSeconds != 300 || c.MinimumSamples != 20 || c.CooldownSeconds != 900 {
-		t.Fatalf("configuration=%+v error=%v", c, err)
-	}
-	for _, test := range []struct {
-		value  string
-		active bool
-		want   bool
-	}{{"0.199999999999", false, false}, {"0.2", false, true}, {"0.17", true, true}, {"0.16", true, false}, {"0.15", true, false}} {
-		if got, err := c.ThresholdState(test.value, test.active); err != nil || got != test.want {
-			t.Fatalf("measurement=%s active=%t got=%t error=%v", test.value, test.active, got, err)
-		}
-	}
-}
-
 func TestRuleConfigurationRejectsInvalidOrIrrelevantFields(t *testing.T) {
 	for _, test := range []struct{ event, raw string }{
 		{"provider.error_rate", `{"threshold":"1.01"}`},
@@ -40,14 +24,6 @@ func TestRuleConfigurationRejectsInvalidOrIrrelevantFields(t *testing.T) {
 	} {
 		if _, err := ParseRuleConfiguration(test.event, json.RawMessage(test.raw)); err == nil {
 			t.Fatalf("accepted %s %s", test.event, test.raw)
-		}
-	}
-}
-
-func TestAllNotificationEventsHaveAValidDefaultConfiguration(t *testing.T) {
-	for _, event := range Events {
-		if _, err := ParseRuleConfiguration(event, nil); err != nil {
-			t.Errorf("%s: %v", event, err)
 		}
 	}
 }

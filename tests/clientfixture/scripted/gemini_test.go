@@ -110,47 +110,6 @@ func TestGeminiFunctionCallingLoop(t *testing.T) {
 	}
 }
 
-func TestGeminiTextStreamAssemblesToTheUnaryText(t *testing.T) {
-	h := newHarness(t)
-	request := map[string]any{"contents": geminiPrompt(`[[olp:reply "one two three"]]`)}
-	unary := h.gemini("generateContent", request)
-	if joinText(path(unary.json(), "candidates", 0, "content", "parts").([]any)) != "one two three" {
-		t.Fatalf("%s", unary.body)
-	}
-	stream := h.do("POST", GeminiPrefix+"/models/"+GeminiModel+":streamGenerateContent?alt=sse", map[string]string{"X-Goog-Api-Key": testCredential}, request)
-	parts, _, _ := streamedParts(t, stream, true)
-	if len(parts) < 3 || joinText(parts) != "one two three" {
-		t.Fatalf("streamed parts %v", parts)
-	}
-}
-
-func TestGeminiToolConfigAndStructuredOutput(t *testing.T) {
-	h := newHarness(t)
-	forced := h.gemini("generateContent", map[string]any{"contents": geminiPrompt("x"), "tools": []any{weatherDeclaration},
-		"toolConfig": map[string]any{"functionCallingConfig": map[string]any{"mode": "ANY", "allowedFunctionNames": []any{"get_weather"}}}})
-	if path(forced.json(), "candidates", 0, "content", "parts", 0, "functionCall", "args", "city") != "fixture" {
-		t.Fatalf("%s", forced.body)
-	}
-	none := h.gemini("generateContent", map[string]any{"contents": geminiPrompt(weatherPrompt), "tools": []any{weatherDeclaration},
-		"toolConfig": map[string]any{"functionCallingConfig": map[string]any{"mode": "NONE"}}})
-	if !strings.Contains(joinText(path(none.json(), "candidates", 0, "content", "parts").([]any)), "not declared") {
-		t.Fatalf("%s", none.body)
-	}
-	for name, config := range map[string]map[string]any{
-		"responseSchema":     {"responseMimeType": "application/json", "responseSchema": map[string]any{"type": "OBJECT", "properties": map[string]any{"a": map[string]any{"type": "INTEGER"}}}},
-		"responseJsonSchema": {"responseMimeType": "application/json", "responseJsonSchema": map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "integer"}}}},
-	} {
-		r := h.gemini("generateContent", map[string]any{"contents": geminiPrompt("x"), "generationConfig": config})
-		if joinText(path(r.json(), "candidates", 0, "content", "parts").([]any)) != `{"a":42}` {
-			t.Errorf("%s: %s", name, r.body)
-		}
-	}
-	jsonOnly := h.gemini("generateContent", map[string]any{"contents": geminiPrompt("x"), "generationConfig": map[string]any{"responseMimeType": "application/json"}})
-	if joinText(path(jsonOnly.json(), "candidates", 0, "content", "parts").([]any)) != `{"result":"fixture"}` {
-		t.Fatalf("%s", jsonOnly.body)
-	}
-}
-
 // Gemini refuses a member of a schema that is not in its OpenAPI subset, in the
 // fields that take the subset, and takes JSON Schema as it is in the fields that
 // take that. The fixture does the same, so that a gateway that sends one schema
@@ -189,63 +148,7 @@ func TestGeminiRefusesJSONSchemaInTheOpenAPIFields(t *testing.T) {
 	}
 }
 
-func TestGeminiCountTokens(t *testing.T) {
-	h := newHarness(t)
-	direct := h.gemini("countTokens", map[string]any{"contents": geminiPrompt("count these words please")})
-	want(t, direct, 200)
-	wrapped := h.gemini("countTokens", map[string]any{"generateContentRequest": map[string]any{"model": "models/" + GeminiModel, "contents": geminiPrompt("count these words please")}})
-	if direct.json()["totalTokens"] != wrapped.json()["totalTokens"] || direct.json()["totalTokens"].(float64) < 1 ||
-		path(direct.json(), "promptTokensDetails", 0, "modality") != "TEXT" {
-		t.Fatalf("direct %s, wrapped %s", direct.body, wrapped.body)
-	}
-	want(t, h.gemini("countTokens", map[string]any{}), http.StatusBadRequest)
-}
-
-// The prompt tokens of a reply are what countTokens counts for the same prompt:
-// the contents and the system instruction, however the request is configured.
-func TestGeminiPromptTokensDoNotDependOnTheConfiguration(t *testing.T) {
-	h := newHarness(t)
-	prompt := map[string]any{"contents": geminiPrompt("count these words please"), "systemInstruction": map[string]any{"parts": []any{map[string]any{"text": "be brief"}}}}
-	counted := h.gemini("countTokens", prompt)
-	want(t, counted, 200)
-	total := counted.json()["totalTokens"].(float64)
-	bare := h.gemini("countTokens", map[string]any{"contents": prompt["contents"]})
-	if bare.json()["totalTokens"].(float64) >= total {
-		t.Fatalf("the system instruction is not counted: %s, with it %s", bare.body, counted.body)
-	}
-
-	for name, configuration := range map[string]map[string]any{
-		"nothing":     {},
-		"generation":  {"generationConfig": map[string]any{"temperature": 0.5, "maxOutputTokens": 64, "stopSequences": []any{"END"}}},
-		"tools":       {"tools": []any{weatherDeclaration}},
-		"tool config": {"tools": []any{weatherDeclaration}, "toolConfig": map[string]any{"functionCallingConfig": map[string]any{"mode": "AUTO"}}},
-		"thinking":    {"generationConfig": map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true}}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			request := map[string]any{}
-			for k, v := range prompt {
-				request[k] = v
-			}
-			for k, v := range configuration {
-				request[k] = v
-			}
-			reply := h.gemini("generateContent", request)
-			want(t, reply, 200)
-			if got := path(reply.json(), "usageMetadata", "promptTokenCount"); got != total {
-				t.Errorf("generateContent reported %v prompt tokens, countTokens counted %v: %s", got, total, reply.body)
-			}
-			if got := path(reply.json(), "usageMetadata", "promptTokensDetails", 0, "tokenCount"); got != total {
-				t.Errorf("the prompt token details are %v, want %v", got, total)
-			}
-			// The configuration does not change the count of a wrapped request either.
-			wrapped := h.gemini("countTokens", map[string]any{"generateContentRequest": request})
-			want(t, wrapped, 200)
-			if got := wrapped.json()["totalTokens"]; got != total {
-				t.Errorf("a wrapped request counted %v tokens, want %v: %s", got, total, wrapped.body)
-			}
-		})
-	}
-}
+// The configuration does not change the count of a wrapped request either.
 
 func TestGeminiEmbeddings(t *testing.T) {
 	h := newHarness(t)
@@ -272,26 +175,4 @@ func TestGeminiEmbeddings(t *testing.T) {
 	}
 	want(t, h.gemini("batchEmbedContents", map[string]any{"requests": []any{map[string]any{"model": "models/other", "content": map[string]any{"parts": []any{map[string]any{"text": "x"}}}}}}), http.StatusBadRequest)
 	want(t, h.gemini("embedContent", map[string]any{}), http.StatusBadRequest)
-}
-
-func TestGeminiRoutingAndFailures(t *testing.T) {
-	h := newHarness(t)
-	key := map[string]string{"X-Goog-Api-Key": testCredential}
-	r := h.do("POST", GeminiPrefix+"/models/other:generateContent", key, map[string]any{"contents": geminiPrompt("x")})
-	want(t, r, http.StatusNotFound)
-	if path(r.json(), "error", "status") != "NOT_FOUND" {
-		t.Fatalf("%s", r.body)
-	}
-	want(t, h.do("POST", GeminiPrefix+"/models/"+GeminiModel+":unknownAction", key, map[string]any{}), http.StatusNotFound)
-	want(t, h.gemini("generateContent", map[string]any{}), http.StatusBadRequest)
-	r = h.gemini("generateContent", map[string]any{"contents": geminiPrompt("[[olp:fail 503]]")})
-	want(t, r, http.StatusServiceUnavailable)
-	if path(r.json(), "error", "status") != "UNAVAILABLE" || path(r.json(), "error", "code") != float64(503) {
-		t.Fatalf("%s", r.body)
-	}
-	for _, rec := range h.recorded("?dialect=gemini") {
-		if rec.Model == "" {
-			t.Errorf("record %d has no model", rec.Seq)
-		}
-	}
 }

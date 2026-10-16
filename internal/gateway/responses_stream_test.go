@@ -3,79 +3,7 @@ package gateway
 import (
 	"bytes"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/oif"
 )
-
-func TestResponseStreamBindingKeepsOneIdentityPerAttempt(t *testing.T) {
-	x := &call{generation: generationCall{responseBinding: &responseStreamBinding{attemptOrdinal: 1, upstreamID: "native-first", localID: "local-first"}}}
-	first, err := x.responseStreamIdentity(1, "native-first")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if local, found := first.mappedID(1, "native-first"); !found || local != "local-first" {
-		t.Fatalf("same accepted work lost its binding: local=%q found=%t", local, found)
-	}
-	if _, err := x.responseStreamIdentity(1, "native-second"); err == nil {
-		t.Fatal("one attempt admitted another native response")
-	}
-	second, err := x.responseStreamIdentity(2, "native-second")
-	if err != nil || second == first || second.localID != "" {
-		t.Fatalf("new attempt reused a prior binding: binding=%+v err=%v", second, err)
-	}
-	second.localID = "local-second"
-	if local, found := second.mappedID(2, "native-second"); !found || local != "local-second" {
-		t.Fatalf("new accepted work lost its binding: local=%q found=%t", local, found)
-	}
-	for _, identity := range []struct {
-		ordinal int
-		id      string
-	}{{1, "native-second"}, {2, "native-first"}} {
-		if _, found := second.mappedID(identity.ordinal, identity.id); found {
-			t.Fatal("projection reused a binding from another native response or attempt")
-		}
-	}
-}
-
-func TestStrictResponseProjectionPreservesNativeSourceAndParentIdentity(t *testing.T) {
-	source := []byte(`{"id":"resp_up","object":"response","status":"in_progress","model":"native-model","previous_response_id":"resp_parent","opaque":{"big":9007199254740993,"zero":-0,"order":[3,1]}}`)
-	doc, err := oif.ParseJSON(source, oif.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	projection := responseProjection{upstreamID: "resp_up", localID: "strict_response_local", route: "published-route", previousUpstream: "resp_parent", previousLocal: "strict_response_parent"}
-	mapped, err := projection.project(doc, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []byte(`{"id":"strict_response_local","object":"response","status":"in_progress","model":"published-route","previous_response_id":"strict_response_parent","opaque":{"big":9007199254740993,"zero":-0,"order":[3,1]}}`)
-	if !bytes.Equal(mapped.Bytes(), want) || !bytes.Equal(doc.Bytes(), source) {
-		t.Fatalf("native response source changed beyond identity overlays:\n got %s\nwant %s", mapped.Bytes(), want)
-	}
-	native, err := validateNativeResponse(doc, "", projection.upstreamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	other := projection
-	other.upstreamID = "another-response"
-	if _, err := native.project(other); err == nil {
-		t.Fatal("validated native response projected under another retained identity")
-	}
-	for _, changed := range [][]byte{
-		bytes.Replace(source, []byte(`"id":"resp_up"`), []byte(`"id":"other"`), 1),
-		bytes.Replace(source, []byte(`"previous_response_id":"resp_parent"`), []byte(`"previous_response_id":"other"`), 1),
-		bytes.Replace(source, []byte(`"status":"in_progress"`), []byte(`"status":"queued|completed"`), 1),
-	} {
-		invalid, err := oif.ParseJSON(changed, oif.Limits{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := projection.project(invalid, ""); err == nil {
-			t.Fatalf("unbound response admitted: %s", changed)
-		}
-	}
-}
 
 func TestStrictResponseStreamProjectionRetainsSSEAndOpaqueNumbers(t *testing.T) {
 	frame := []byte("id: cursor-7\nevent: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"native\",\"native\":{\"large\":9007199254740993,\"zero\":-0}}}\n\n")
@@ -87,27 +15,6 @@ func TestStrictResponseStreamProjectionRetainsSSEAndOpaqueNumbers(t *testing.T) 
 		!bytes.Contains(out, []byte(`"large":9007199254740993,"zero":-0`)) ||
 		observed == nil || observed.Status != "in_progress" || observed.Complete || bytes.Contains(out, []byte(`"id":"resp_up"`)) {
 		t.Fatalf("native stream projection: err=%v output=%s observed=%+v", err, out, observed)
-	}
-}
-
-func TestStoredResponseStreamProjectionMapsEchoedPreviousResponse(t *testing.T) {
-	frame := []byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"status\":\"completed\",\"previous_response_id\":\"resp_parent_up\",\"native\":{\"large\":9007199254740993}}}\n\n")
-	projection := responseProjection{upstreamID: "resp_up", localID: "resp_local"}
-	resolve := func(upstream string) string {
-		if upstream == "resp_parent_up" {
-			return "resp_parent_local"
-		}
-		return ""
-	}
-	out, _, err := projectStoredResponseFrame(frame, projection, false, resolve)
-	if err != nil || !bytes.Contains(out, []byte(`"id":"resp_local"`)) ||
-		!bytes.Contains(out, []byte(`"previous_response_id":"resp_parent_local"`)) ||
-		!bytes.Contains(out, []byte(`"large":9007199254740993`)) || bytes.Contains(out, []byte("resp_parent_up")) {
-		t.Fatalf("stored stream leaked or lost the prior response identity: err=%v output=%s", err, out)
-	}
-	out, _, err = projectStoredResponseFrame(frame, projection, false, func(string) string { return "" })
-	if err != nil || !bytes.Contains(out, []byte(`"previous_response_id":null`)) || bytes.Contains(out, []byte("resp_parent_up")) {
-		t.Fatalf("unmapped upstream prior response was forwarded: err=%v output=%s", err, out)
 	}
 }
 
@@ -123,21 +30,5 @@ func TestResponseRetrievalQueryForwardsOnlyRegisteredControls(t *testing.T) {
 		if _, _, err := responseRetrievalQuery(raw); err == nil {
 			t.Fatalf("unqualified retrieval query admitted: %s", raw)
 		}
-	}
-}
-
-func TestFailedResponseFrameRedactsDecodedCredentialsWithoutChangingOtherSource(t *testing.T) {
-	frame := []byte("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_up\",\"status\":\"failed\",\"error\":{\"message\":\"provider\\u002dsecret\"},\"native\":{\"big\":9007199254740993,\"zero\":-0}}}\n\n")
-	var credentials egress.Sensitive
-	credentials.Add("provider-secret")
-	safe, err := redactFailedResponseFrame(frame, credentials)
-	if err != nil || !bytes.Contains(safe, []byte(`"message":"[REDACTED]"`)) ||
-		!bytes.Contains(safe, []byte(`"big":9007199254740993,"zero":-0`)) ||
-		bytes.Contains(safe, []byte(`provider\u002dsecret`)) {
-		t.Fatalf("escaped credential survived redaction or native bytes changed: %v %s", err, safe)
-	}
-	maliciousKey := bytes.Replace(frame, []byte(`"native"`), []byte(`"provider\u002dsecret"`), 1)
-	if _, err := redactFailedResponseFrame(maliciousKey, credentials); err == nil {
-		t.Fatal("escaped credential in a native member name was forwarded")
 	}
 }

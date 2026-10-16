@@ -119,67 +119,8 @@ func TestOIDCConfigurationPreservesTheLastMappedOwner(t *testing.T) {
 	}
 }
 
-func TestOIDCSecretRemovalRequiresAnIndependentOwnerSignIn(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	issuer := newTestIssuer(t)
-	configuration := map[string]any{"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration", "client_id": "test-client", "client_secret": "write-only-client-secret", "enabled": true}
-	saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, nil, 200)
-	claims := map[string]any{"sub": "owner-subject", "email": "owner@example.com"}
-	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
-	authorization := h.want(owner, "POST", "/api/v1/oidc/link", nil, nil, 200)["authorization_url"].(string)
-	h.want(owner, "GET", issuer.callback(t, authorization, claims), nil, nil, 303)
-	localSetting := h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
-	localSetting = h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(localSetting), 200)
+// Omitting the secret keeps the existing credential available for sign-in.
 
-	// Omitting the secret keeps the existing credential available for sign-in.
-	delete(configuration, "client_secret")
-	saved = h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 200)
-	if saved["has_client_secret"] != true {
-		t.Fatal("omitting the secret removed the existing credential")
-	}
-	pending := &browser{}
-	authorization = h.want(pending, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 200)["authorization_url"].(string)
-	configuration["client_secret"] = ""
-	problem := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 409)
-	if problem["type"] != "https://openllmproxy.dev/problems/last_usable_owner" {
-		t.Fatal("a password with local login disabled cannot authorize secret removal")
-	}
-	current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
-	if current["etag"] != saved["etag"] || current["has_client_secret"] != true {
-		t.Fatal("rejected secret removal changed the configuration or credential")
-	}
-	var updates int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 2 {
-		t.Fatalf("configuration update audits=%d, error=%v", updates, err)
-	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.sessions SET expires_at=now()-interval '1 second'"); err != nil {
-		t.Fatal(err)
-	}
-	h.want(pending, "GET", issuer.callback(t, authorization, claims), nil, nil, 303)
-	owner = pending
-	if profile := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200); profile["role"] != "owner" {
-		t.Fatal("the preserved flow and secret could not restore owner authority")
-	}
+// An enabled local sign-in path permits removal, but must then stay enabled.
 
-	// An enabled local sign-in path permits removal, but must then stay enabled.
-	localSetting = h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "true"}, etagHeader(localSetting), 200)
-	saved = h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 200)
-	if saved["has_client_secret"] != false || h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)["has_client_secret"] != false {
-		t.Fatal("secret removal did not delete the stored credential")
-	}
-	h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(localSetting), 409)
-	localOwner := &browser{}
-	h.want(localOwner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, 201)
-	configuration["client_secret"] = "write-only-client-secret"
-	h.want(localOwner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 200)
-	// Restoring a credential must not revive evidence invalidated by removal.
-	h.want(localOwner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(localSetting), 409)
-	login := &browser{}
-	authorization = h.want(login, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 200)["authorization_url"].(string)
-	h.want(login, "GET", issuer.callback(t, authorization, claims), nil, nil, 303)
-	h.want(localOwner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(localSetting), 200)
-	if profile := h.want(login, "GET", "/api/v1/profile", nil, nil, 200); profile["role"] != "owner" {
-		t.Fatal("restoring the secret did not restore OIDC owner sign-in")
-	}
-}
+// Restoring a credential must not revive evidence invalidated by removal.

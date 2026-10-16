@@ -31,6 +31,9 @@ export default defineConfig({
     allowOnly: false,
     clearMocks: true,
     restoreMocks: true,
+    // Persist Vite transforms across runs; the suite re-transforms the same
+    // dependency graph on every invocation without it.
+    fsModuleCache: true,
     // Local-time conversions are asserted as literal instants, which only means
     // anything if every machine runs the suite in one zone. New York is a zone
     // with a non-zero offset and daylight saving, so a UTC-only assumption

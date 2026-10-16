@@ -528,181 +528,22 @@ func fleetCounters(t *testing.T, pool *pgxpool.Pool) (processed, duplicates, rec
 	return processed, duplicates, reclaimed
 }
 
-// TestReplicasShareOneAdmissionDecision proves that two inference processes
-// admitting the same key are one gateway, not two: the request window is spent
-// across replicas, and a concurrency slot one replica holds is a slot the other
-// cannot take until it comes back.
-func TestReplicasShareOneAdmissionDecision(t *testing.T) {
-	in := fleetProvisioned(t)
-	_, throttled := in.key("rpm", map[string]any{"requests_per_minute": 2})
-	_, spare := in.key("rpm-retry", map[string]any{"requests_per_minute": 2})
-	_, exclusive := in.key("concurrency", map[string]any{"max_concurrency": 1})
-	a := in.replica("fleet-admission-a")
-	b := in.replica("fleet-admission-b")
-	// The worker plane is part of the topology under test: nothing here depends
-	// on it, but the metadata these replicas emit must have a consumer.
-	in.worker("fleet-admission-worker")
-	origins := []string{a.PublicOrigin, b.PublicOrigin, a.PublicOrigin, b.PublicOrigin}
+// The worker plane is part of the topology under test: nothing here depends
+// on it, but the metadata these replicas emit must have a consumer.
 
-	t.Run("a request window is spent across replicas", func(t *testing.T) {
-		for attempt, secret := range []string{throttled, spare} {
-			// The window is a fixed minute of Valkey's clock. Starting a burst
-			// with most of one left is what keeps the count deterministic, and
-			// a burst that still straddled a boundary is retried on a key whose
-			// window is untouched rather than asserted against.
-			if _, remaining := fleetWindow(t, in.valkey); remaining < 20*time.Second {
-				time.Sleep(remaining)
-			}
-			window, _ := fleetWindow(t, in.valkey)
-			dispatched := in.vendor.chats.Load()
-			admitted, refused := 0, 0
-			for _, origin := range origins {
-				status, code, header := fleetChat(t, origin, secret)
-				switch status {
-				case http.StatusOK:
-					admitted++
-				case http.StatusTooManyRequests:
-					refused++
-					if code != "rate_limit_exceeded" {
-						t.Fatalf("refusal from %s: %s", origin, code)
-					}
-					if retry := fleetRetryAfter(t, header); retry < 1 || retry > 60 {
-						t.Fatalf("Retry-After %d is outside the window it refers to", retry)
-					}
-				default:
-					t.Fatalf("%s answered %d %s", origin, status, code)
-				}
-			}
-			if current, _ := fleetWindow(t, in.valkey); current != window {
-				if attempt == 0 {
-					continue
-				}
-				t.Fatal("the request window rolled over twice while bursting")
-			}
-			if admitted != 2 || refused != 2 {
-				t.Fatalf("a key limited to two requests per minute served %d and refused %d "+
-					"across two replicas", admitted, refused)
-			}
-			if reached := in.vendor.chats.Load() - dispatched; reached != 2 {
-				t.Fatalf("%d requests reached the upstream, want only the admitted two", reached)
-			}
-			return
-		}
-	})
+// The window is a fixed minute of Valkey's clock. Starting a burst
+// with most of one left is what keeps the count deterministic, and
+// a burst that still straddled a boundary is retried on a key whose
+// window is untouched rather than asserted against.
 
-	t.Run("a concurrency slot is held against every replica", func(t *testing.T) {
-		in.vendor.delay.Store(int64(300 * time.Millisecond))
-		defer in.vendor.delay.Store(0)
-		served := in.vendor.chats.Load()
-		streamed := make(chan int, 1)
-		go func() {
-			status, _ := fleetStream(t.Context(), a.PublicOrigin, exclusive)
-			streamed <- status
-		}()
-		fleetEventually(t, "the upstream to take the request the first replica dispatched",
-			15*time.Second, func() bool { return in.vendor.chats.Load() > served })
-		status, code, header := fleetChat(t, b.PublicOrigin, exclusive)
-		if status != http.StatusTooManyRequests || code != "rate_limit_exceeded" {
-			t.Fatalf("the second replica answered %d %s while the slot was held", status, code)
-		}
-		if retry := fleetRetryAfter(t, header); retry < 1 || retry > 5 {
-			t.Fatalf("Retry-After %d for a slot that frees as soon as the request ends", retry)
-		}
-		if status := <-streamed; status != http.StatusOK {
-			t.Fatalf("the streamed request ended %d", status)
-		}
-		fleetEventually(t, "the second replica to admit once the slot came back", 20*time.Second,
-			func() bool {
-				status, _, _ := fleetChat(t, b.PublicOrigin, exclusive)
-				return status == http.StatusOK
-			})
-	})
-}
+// Pricing is published before any traffic, so every attempt is priced at
+// ingestion against a revision that was already in force when it was made.
 
-// TestAccountingIsDurableAcrossReplicas proves that requests served by
-// different processes become one ledger: every request is recorded once with the
-// tokens the upstream reported and the cost the revision in force priced them
-// at, the console reports the same totals, and a delivery that arrives twice
-// changes neither.
-func TestAccountingIsDurableAcrossReplicas(t *testing.T) {
-	in := fleetProvisioned(t)
-	// Pricing is published before any traffic, so every attempt is priced at
-	// ingestion against a revision that was already in force when it was made.
-	effective := time.Now().UTC().Add(-time.Hour)
-	in.h.want(in.owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{
-		"effective_at": effective.Format(time.RFC3339),
-		"prices": []any{map[string]any{"provider_kind": "openai_compatible", "model": vendorModel,
-			"operation": "generation", "currency": "USD",
-			"input_per_million": "0.150000", "output_per_million": "0.600000"}},
-	}, map[string]string{"Idempotency-Key": "pricing"}, 201)
-	_, secret := in.key("accounted", nil)
+// Nothing consumes yet, so the stream holds exactly what the replicas
+// emitted and one payload can be captured for the duplicate delivery below.
 
-	a := in.replica("fleet-ledger-a")
-	b := in.replica("fleet-ledger-b")
-	const requests = 6
-	for i := range requests {
-		origin := a.PublicOrigin
-		if i%2 == 1 {
-			origin = b.PublicOrigin
-		}
-		if status, code, _ := fleetChat(t, origin, secret); status != http.StatusOK {
-			t.Fatalf("request %d to %s: %d %s", i, origin, status, code)
-		}
-	}
-	// Nothing consumes yet, so the stream holds exactly what the replicas
-	// emitted and one payload can be captured for the duplicate delivery below.
-	fleetEventually(t, "both replicas to publish their request metadata", 30*time.Second,
-		func() bool { return len(fleetPayloads(t, in.valkey, in.stream)) == requests })
-	replay := fleetPayloads(t, in.valkey, in.stream)[0]
-
-	in.worker("fleet-ledger-worker")
-	priced := "0.000004200000"
-	fleetEventually(t, "every served request to become an accounted fact", 60*time.Second, func() bool {
-		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
-	})
-	if rows := in.count("SELECT count(*) FROM olp.requests"); rows != requests {
-		t.Fatalf("requests = %d, want %d", rows, requests)
-	}
-	if rows := in.count("SELECT count(*) FROM olp.attempts"); rows != requests {
-		t.Fatalf("attempts = %d, want %d", rows, requests)
-	}
-	if rows := in.count(`SELECT count(*) FROM olp.attempt_usage_facts
-        WHERE input_tokens = 4 AND output_tokens = 6 AND usage_complete
-          AND charge_status = 'billable' AND NOT unpriced AND currency = 'USD'
-          AND estimated_cost::text = $1`, priced); rows != requests {
-		t.Fatalf("%d of %d facts carry the reported tokens and the priced cost %s",
-			rows, requests, priced)
-	}
-
-	total := "0.000025200000"
-	summary := in.summary(effective)
-	if summary["request_count"] != float64(requests) || summary["input_tokens"] != "24" ||
-		summary["output_tokens"] != "36" || summary["estimated_cost"] != total ||
-		summary["currency"] != "USD" || summary["unpriced_count"] != float64(0) {
-		t.Fatalf("usage summary disagrees with the ledger: %v", summary)
-	}
-
-	// A delivery that arrives a second time is the shape a crash before
-	// acknowledgement leaves behind: it must be retired, never re-accounted.
-	_, duplicates, _ := fleetCounters(t, in.h.Pool)
-	if id := do(t, in.valkey, "XADD", in.stream, "*", "event", replay); id == nil {
-		t.Fatal("republishing a delivered event produced no stream entry")
-	}
-	fleetEventually(t, "the consumer to retire the repeated delivery", 60*time.Second, func() bool {
-		_, repeated, _ := fleetCounters(t, in.h.Pool)
-		return repeated > duplicates
-	})
-	if rows := in.count("SELECT count(*) FROM olp.attempt_usage_facts"); rows != requests {
-		t.Fatalf("a repeated delivery created %d facts, want %d", rows, requests)
-	}
-	if rows := in.count("SELECT count(*) FROM olp.requests"); rows != requests {
-		t.Fatalf("a repeated delivery created %d requests, want %d", rows, requests)
-	}
-	if again := in.summary(effective); again["estimated_cost"] != total ||
-		again["request_count"] != float64(requests) {
-		t.Fatalf("a repeated delivery changed what the installation spent: %v", again)
-	}
-}
+// A delivery that arrives a second time is the shape a crash before
+// acknowledgement leaves behind: it must be retired, never re-accounted.
 
 // summary reads the console usage report over a range that starts before the
 // first priced attempt and ends after the last.

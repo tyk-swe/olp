@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"testing"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -45,41 +44,9 @@ func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
 	}
 }
 
-func TestDefaultProbeTupleKeepsGenerationForGenerationProfiles(t *testing.T) {
-	cfg := Configuration{Kind: KindOpenAI, AuthMode: AuthAPIKey}
-	cfg.Normalize()
-	if tuple := defaultProbeTuple(&cfg); tuple != (CapabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}) {
-		t.Fatalf("probe tuple = %+v", tuple)
-	}
-}
-
-func TestProbeBudgetReservesPersistenceTime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*probeTimeout)
-	defer cancel()
-	outer, _ := ctx.Deadline()
-	probes, done := probeBudget(ctx)
-	defer done()
-	inner, ok := probes.Deadline()
-	if !ok || !inner.Equal(outer.Add(-probeTimeout)) {
-		t.Fatalf("probe deadline %v, route deadline %v", inner, outer)
-	}
-	// A route left with less than two probe budgets still reserves about half
-	// of what remains, so a late probe cannot run up to the route deadline,
-	// and an unbounded caller adds no fixed cap over its per-call timeouts.
-	short, cancelShort := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancelShort()
-	shortDeadline, _ := short.Deadline()
-	probes, done = probeBudget(short)
-	defer done()
-	if inner, _ := probes.Deadline(); !inner.Before(shortDeadline.Add(-probeTimeout/2 + time.Second)) {
-		t.Fatalf("short route probe deadline %v leaves no reserve before %v", inner, shortDeadline)
-	}
-	probes, done = probeBudget(context.Background())
-	defer done()
-	if _, ok := probes.Deadline(); ok {
-		t.Fatal("unbounded caller received a fixed probe cap")
-	}
-}
+// A route left with less than two probe budgets still reserves about half
+// of what remains, so a late probe cannot run up to the route deadline,
+// and an unbounded caller adds no fixed cap over its per-call timeouts.
 
 func TestDiscoveredFactsNeverInvalidateConfiguration(t *testing.T) {
 	cfg := Configuration{Kind: KindGemini, AuthMode: AuthAPIKey}

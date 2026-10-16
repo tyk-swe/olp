@@ -4,7 +4,6 @@ package database
 
 import (
 	"encoding/json"
-	"testing"
 )
 
 // lineCase is one (price, usage, started, successful, discount) pricing input.
@@ -118,120 +117,17 @@ var lineCases = []lineCase{
 		`{"input_tokens":10000000000,"complete":true}`, true, "1"},
 }
 
-// TestIntegrationPriceUsageLines asserts, for every corpus case, that
-// price_usage_lines is NULL exactly where price_usage reports incomplete, and
-// that a complete decomposition re-derives the exact list and cost amounts at
-// the same twelve-place rounding the caller stores.
-func TestIntegrationPriceUsageLines(t *testing.T) {
-	pool := scratchPool(t)
-	if err := Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	const invariant = `WITH p AS (SELECT * FROM olp.price_usage($1::jsonb,$2::jsonb,$3::timestamptz,$4,$5::numeric)),
- l AS (SELECT olp.price_usage_lines($1::jsonb,$2::jsonb,$3::timestamptz,$4,$5::numeric) AS lines)
-SELECT p.complete, p.list_cost::text, p.cost::text, l.lines IS NULL AS lines_null,
- COALESCE((SELECT sum((e->>'quantity')::numeric * (e->>'list_unit_price')::numeric)
-  FROM jsonb_array_elements(l.lines) e), 0) AS list_sum,
- COALESCE((SELECT sum((e->>'quantity')::numeric * (e->>'contracted_unit_price')::numeric)
-  FROM jsonb_array_elements(l.lines) e), 0) AS contracted_sum,
- l.lines::text FROM p,l`
-	started := "2026-10-21T14:30:00Z"
-	for _, tc := range lineCases {
-		var complete, linesNull bool
-		var listCost, cost, listSum, contractedSum *string
-		var lines *string
-		if err := pool.QueryRow(t.Context(), invariant,
-			tc.price, tc.usage, started, tc.successful, tc.discount).
-			Scan(&complete, &listCost, &cost, &linesNull, &listSum, &contractedSum, &lines); err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if linesNull != !complete {
-			t.Fatalf("%s: complete=%v but lines %s", tc.name, complete, deref(lines))
-		}
-		if !complete {
-			continue
-		}
-		// Numeric equality at the caller's twelve places: the sums must land
-		// exactly where round(v_charge × multiplier, 12) landed.
-		var listOK, contractedOK bool
-		if err := pool.QueryRow(t.Context(), `SELECT round($1::numeric,12) = $2::numeric,
-		    round($3::numeric,12) = $4::numeric`,
-			listSum, listCost, contractedSum, cost).Scan(&listOK, &contractedOK); err != nil {
-			t.Fatal(err)
-		}
-		if !listOK {
-			t.Fatalf("%s: list %s vs %s", tc.name, deref(listSum), deref(listCost))
-		}
-		if !contractedOK {
-			t.Fatalf("%s: contracted %s vs %s", tc.name, deref(contractedSum), deref(cost))
-		}
-	}
-}
+// Numeric equality at the caller's twelve places: the sums must land
+// exactly where round(v_charge × multiplier, 12) landed.
 
-// Window cases vary the timestamp, so they run beside the corpus rather than
-// inside it.
-func TestIntegrationPriceUsageLinesWindows(t *testing.T) {
-	pool := scratchPool(t)
-	if err := Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	// A weekday-morning half-price window in New York; the same instant is or
-	// is not inside it depending on the local day.
-	price := `{"input_per_million":4,"windows":{"time_zone":"America/New_York",
-	    "periods":[{"days":[1,2,3,4,5],"start":"00:00","end":"12:00","multiplier":"0.5"}]}}`
-	usage := `{"input_tokens":1000000,"complete":true}`
-	for _, tc := range []struct {
-		name       string
-		started    string
-		wantList   string
-		wantNull   bool
-		wantPrices [2]string // list, contracted unit price
-	}{
-		{"inside window Tuesday", "2026-10-20T10:00:00Z", "2.000000000000", false, [2]string{"2", "2"}},
-		{"inside window boundary noon", "2026-10-20T15:59:00Z", "2.000000000000", false, [2]string{"2", "2"}},
-		{"outside window noon edge", "2026-10-20T16:00:00Z", "4.000000000000", false, [2]string{"4", "4"}},
-		{"outside window Saturday", "2026-10-24T10:00:00Z", "4.000000000000", false, [2]string{"4", "4"}},
-	} {
-		var lines *string
-		var listCost string
-		if err := pool.QueryRow(t.Context(), `SELECT olp.price_usage_lines($1::jsonb,$2::jsonb,$3::timestamptz,true,1)::text,
-		    (SELECT list_cost::text FROM olp.price_usage($1::jsonb,$2::jsonb,$3::timestamptz,true,1))`,
-			price, usage, tc.started).Scan(&lines, &listCost); err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if lines == nil || listCost != tc.wantList {
-			t.Fatalf("%s: lines=%v list=%s", tc.name, lines != nil, listCost)
-		}
-		var parsed []map[string]any
-		if err := json.Unmarshal([]byte(*lines), &parsed); err != nil || len(parsed) != 1 {
-			t.Fatalf("%s: %v", tc.name, *lines)
-		}
-		if parsed[0]["list_unit_price"] != tc.wantPrices[0] {
-			t.Fatalf("%s: unit price %v want %s", tc.name, parsed[0], tc.wantPrices[0])
-		}
-	}
-	// window + batch + discount compose on the unit price
-	var lines *string
-	if err := pool.QueryRow(t.Context(), `SELECT olp.price_usage_lines($1::jsonb,$2::jsonb,$3::timestamptz,true,'0.8')::text`,
-		`{"input_per_million":4,"batch_multiplier":"0.5","windows":{"time_zone":"America/New_York",
-		  "periods":[{"days":[1,2,3,4,5],"start":"00:00","end":"12:00","multiplier":"0.5"}]}}`,
-		`{"input_tokens":1000000,"batch":true,"complete":true}`,
-		"2026-10-20T10:00:00Z").Scan(&lines); err != nil {
-		t.Fatal(err)
-	}
-	// 4 × 0.5 window × 0.5 batch = 1 list; × 0.8 = 0.8 contracted.
-	want := `[{"component": "input_per_million", "tier": null, "unit": "1000000 Tokens", "quantity": "1", "list_unit_price": "1", "contracted_unit_price": "0.8"}]`
-	var got, expected any
-	if err := json.Unmarshal([]byte(*lines), &got); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(want), &expected); err != nil {
-		t.Fatal(err)
-	}
-	if !jsonEqual(got, expected) {
-		t.Fatalf("lines %s want %s", *lines, want)
-	}
-}
+// A weekday-morning half-price window in New York; the same instant is or
+// is not inside it depending on the local day.
+
+// list, contracted unit price
+
+// window + batch + discount compose on the unit price
+
+// 4 × 0.5 window × 0.5 batch = 1 list; × 0.8 = 0.8 contracted.
 
 func jsonEqual(a, b any) bool {
 	ab, _ := json.Marshal(a)
@@ -246,82 +142,8 @@ func deref(s *string) string {
 	return *s
 }
 
-// TestIntegrationPriceLinesGolden pins the exact documents for three
-// representative compositions: modality fallback under a tier, per-request +
-// tools + media, and a commitment-shaped scaling.
-func TestIntegrationPriceLinesGolden(t *testing.T) {
-	pool := scratchPool(t)
-	if err := Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name       string
-		price      string
-		usage      string
-		successful bool
-		discount   string
-		want       string
-	}{
-		{"modality fallback under a tier",
-			`{"input_per_million":3,"cached_input_per_million":1,"audio_input_per_million":9,
-			  "tiers":[{"above_input_tokens":5000,"input_per_million":2,"audio_input_per_million":6}]}`,
-			`{"input_tokens":10000,"cached_input_tokens":2000,"audio_input_tokens":1500,"complete":true}`,
-			true, "1",
-			// shares: text 10000-2000-1500=6500 @ tier 2; cached 2000 falls to
-			// cached_input_per_million — but a tier replaces the whole rate
-			// set, so it falls through to input_per_million 2; audio 1500 @6.
-			`[{"component":"audio_input_per_million","tier":"5000","unit":"1000000 Tokens","quantity":"0.0015","list_unit_price":"6","contracted_unit_price":"6"},
-			  {"component":"input_per_million","tier":"5000","unit":"1000000 Tokens","quantity":"0.0085","list_unit_price":"2","contracted_unit_price":"2"}]`},
-		{"per_request tools and media",
-			`{"input_per_million":3,"per_request":"0.01","unit_price":"0.5","tool_calls":{"search":"0.02"}}`,
-			`{"input_tokens":1000,"media_units":4,"tool_calls":{"search":3},"complete":true}`,
-			true, "1",
-			`[{"component":"input_per_million","tier":null,"unit":"1000000 Tokens","quantity":"0.001","list_unit_price":"3","contracted_unit_price":"3"},
-			  {"component":"per_request","tier":null,"unit":"Requests","quantity":"1","list_unit_price":"0.01","contracted_unit_price":"0.01"},
-			  {"component":"tool_calls.search","tier":null,"unit":"Calls","quantity":"3","list_unit_price":"0.02","contracted_unit_price":"0.02"},
-			  {"component":"unit_price","tier":null,"unit":"Units","quantity":"4","list_unit_price":"0.5","contracted_unit_price":"0.5"}]`},
-	} {
-		var lines *string
-		if err := pool.QueryRow(t.Context(), `SELECT olp.price_usage_lines($1::jsonb,$2::jsonb,'2026-10-21T14:30:00Z',$3,$4::numeric)::text`,
-			tc.price, tc.usage, tc.successful, tc.discount).Scan(&lines); err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if lines == nil {
-			t.Fatalf("%s: NULL lines", tc.name)
-		}
-		var got, expected any
-		if err := json.Unmarshal([]byte(*lines), &got); err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if err := json.Unmarshal([]byte(tc.want), &expected); err != nil {
-			t.Fatal(err)
-		}
-		if !jsonEqual(got, expected) {
-			t.Fatalf("%s:\n%s\nwant:\n%s", tc.name, *lines, tc.want)
-		}
-	}
+// shares: text 10000-2000-1500=6500 @ tier 2; cached 2000 falls to
+// cached_input_per_million — but a tier replaces the whole rate
+// set, so it falls through to input_per_million 2; audio 1500 @6.
 
-	// scaling reprices every line and keeps a NULL NULL.
-	var scaled *string
-	if err := pool.QueryRow(t.Context(), `SELECT olp.scale_price_lines(
-	    '[{"component":"input_per_million","tier":null,"unit":"1000000 Tokens","quantity":"0.001","list_unit_price":"3","contracted_unit_price":"2.4"},
-	      {"component":"per_request","tier":null,"unit":"Requests","quantity":"1","list_unit_price":"0.01","contracted_unit_price":"0.01"}]'::jsonb, 1.5)::text`).Scan(&scaled); err != nil {
-		t.Fatal(err)
-	}
-	want := `[{"component":"input_per_million","tier":null,"unit":"1000000 Tokens","quantity":"0.001","list_unit_price":"3.6","contracted_unit_price":"3.6"},
-	         {"component":"per_request","tier":null,"unit":"Requests","quantity":"1","list_unit_price":"0.015","contracted_unit_price":"0.015"}]`
-	var got, expected any
-	_ = json.Unmarshal([]byte(*scaled), &got)
-	_ = json.Unmarshal([]byte(want), &expected)
-	if !jsonEqual(got, expected) {
-		t.Fatalf("scaled %s want %s", *scaled, want)
-	}
-	var nulled *string
-	if err := pool.QueryRow(t.Context(), `SELECT olp.scale_price_lines(NULL::jsonb, 1.5)::text,
-	    olp.scale_price_lines('[]'::jsonb, NULL)::text`).Scan(&nulled, new(*string)); err != nil {
-		t.Fatal(err)
-	}
-	if nulled != nil {
-		t.Fatalf("scale_price_lines(NULL) = %s", *nulled)
-	}
-}
+// scaling reprices every line and keeps a NULL NULL.

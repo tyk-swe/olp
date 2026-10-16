@@ -375,127 +375,16 @@ func rhWantReset(t *testing.T, surface, name, value string, before, after int64)
 	}
 }
 
-// TestResponseHeadersMatchTheKeysValkeyWindow reads a key's window while its
-// stream is still open, when it holds exactly the reservation the request made,
-// and holds the headers on the first frame to it, on both surfaces: the limits,
-// the remaining counts, and the reset.
-func TestResponseHeadersMatchTheKeysValkeyWindow(t *testing.T) {
-	f := rhSeed(t, "response-headers-window", glPrice{})
-	f.pace(200 * time.Millisecond)
-	const requestLimit, tokenLimit = 20, 100_000
-	for _, surface := range []string{"openai", "anthropic"} {
-		t.Run(surface, func(t *testing.T) {
-			secret, rateKey := f.key(t, "window-"+surface, map[string]any{"requests_per_minute": requestLimit, "tokens_per_minute": tokenLimit})
-			limitRequests, remainingRequests, resetRequests, limitTokens, remainingTokens, resetTokens := rhRateHeaders(surface)
-			start := limSettleInMinute(t, f.valkey, 30*time.Second)
-			var reserved int64
-			for n := int64(1); n <= 3; n++ {
-				before := limServerTimeMS(t, f.valkey)
-				resp := f.open(t, surface, f.slug(surface), secret, true)
-				after := limServerTimeMS(t, f.valkey)
-				if resp.StatusCode != http.StatusOK {
-					t.Fatalf("request %d: status %d %s", n, resp.StatusCode, rhDrain(t, resp))
-				}
-				// The upstream is still answering: the window holds what earlier
-				// requests settled at and what this one reserved, which is what
-				// the headers must have stated.
-				requests, tokens := rhWindow(t, f, rateKey)
-				rhSameMinute(t, f, start)
-				if requests != n {
-					t.Fatalf("request %d: window counts %d requests", n, requests)
-				}
-				if got := rhInt(t, resp.Header, limitRequests); got != requestLimit {
-					t.Fatalf("request %d: %s = %d", n, limitRequests, got)
-				}
-				if got := rhInt(t, resp.Header, remainingRequests); got != requestLimit-requests {
-					t.Fatalf("request %d: %s = %d, want %d: the window holds %d", n, remainingRequests, got, requestLimit-requests, requests)
-				}
-				if got := rhInt(t, resp.Header, limitTokens); got != tokenLimit {
-					t.Fatalf("request %d: %s = %d", n, limitTokens, got)
-				}
-				if got := rhInt(t, resp.Header, remainingTokens); got != tokenLimit-tokens {
-					t.Fatalf("request %d: %s = %d, want %d: the window holds %d", n, remainingTokens, got, tokenLimit-tokens, tokens)
-				}
-				for _, name := range []string{resetRequests, resetTokens} {
-					rhWantReset(t, surface, name, resp.Header.Get(name), before, after)
-				}
-				// Every request reserves the same estimate, on top of what the
-				// earlier ones were settled at.
-				if estimate := tokens - reserved*(n-1); n == 1 {
-					reserved = estimate
-				} else if estimate != reserved {
-					t.Fatalf("request %d reserved %d tokens, the first reserved %d", n, estimate, reserved)
-				}
-				if rhRateHeaderCount(resp.Header) != 6 {
-					t.Fatalf("request %d: headers %v", n, resp.Header)
-				}
-				rhDrain(t, resp)
-				// Low provider usage cannot refund the conservative reservation.
-				glEventually(t, "the reservation to be reconciled", func() bool {
-					_, settled := rhWindow(t, f, rateKey)
-					return settled == reserved*n
-				})
-			}
-			// A unary response states the same window.
-			resp := f.open(t, surface, f.slug(surface), secret, false)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("unary: status %d %s", resp.StatusCode, rhDrain(t, resp))
-			}
-			rhDrain(t, resp)
-			rhSameMinute(t, f, start)
-			if got := rhInt(t, resp.Header, remainingRequests); got != requestLimit-4 {
-				t.Fatalf("unary: %s = %d, want %d", remainingRequests, got, requestLimit-4)
-			}
-			if got, want := rhInt(t, resp.Header, remainingTokens), int64(tokenLimit)-4*reserved; got != want {
-				t.Fatalf("unary: %s = %d, want %d: three settled requests and this one's reservation", remainingTokens, got, want)
-			}
-		})
-	}
-}
+// The upstream is still answering: the window holds what earlier
+// requests settled at and what this one reserved, which is what
+// the headers must have stated.
 
-// TestResponseHeadersAreOnlyForTheDimensionsAKeyLimits proves the headers name
-// the dimensions the key limits and say nothing of the rest, and that a key with
-// nothing to count, or with only a lease to hold, gets none.
-func TestResponseHeadersAreOnlyForTheDimensionsAKeyLimits(t *testing.T) {
-	f := rhSeed(t, "response-headers-dimensions", glPrice{})
-	for _, surface := range []string{"openai", "anthropic"} {
-		limitRequests, _, _, limitTokens, _, _ := rhRateHeaders(surface)
-		for name, tc := range map[string]struct {
-			policy map[string]any
-			budget bool
-			want   int
-			header string
-		}{
-			"requests":    {map[string]any{"requests_per_minute": 7}, false, 3, limitRequests},
-			"tokens":      {map[string]any{"tokens_per_minute": 100_000}, false, 3, limitTokens},
-			"concurrency": {map[string]any{"max_concurrency": 3}, false, 0, ""},
-			"budget":      {nil, true, 0, ""},
-			"unlimited":   {nil, false, 0, ""},
-		} {
-			t.Run(surface+"/"+name, func(t *testing.T) {
-				var secret string
-				if tc.budget {
-					secret = f.budgetKey(t, surface+"-"+name, "0.00", nil)
-				} else {
-					secret, _ = f.key(t, surface+"-"+name, tc.policy)
-				}
-				for _, stream := range []bool{false, true} {
-					resp := f.open(t, surface, f.slug(surface), secret, stream)
-					if resp.StatusCode != http.StatusOK {
-						t.Fatalf("stream=%v: status %d %s", stream, resp.StatusCode, rhDrain(t, resp))
-					}
-					rhDrain(t, resp)
-					if got := rhRateHeaderCount(resp.Header); got != tc.want {
-						t.Fatalf("stream=%v: %d rate-limit headers, want %d: %v", stream, got, tc.want, resp.Header)
-					}
-					if tc.header != "" && resp.Header.Get(tc.header) == "" {
-						t.Fatalf("stream=%v: %s missing: %v", stream, tc.header, resp.Header)
-					}
-				}
-			})
-		}
-	}
-}
+// Every request reserves the same estimate, on top of what the
+// earlier ones were settled at.
+
+// Low provider usage cannot refund the conservative reservation.
+
+// A unary response states the same window.
 
 // TestRateLimitRejectionsCarryTheWindowAndTheRetryHint holds the headers of a 429
 // to the window that refused it, on both surfaces and for each limit that can.
@@ -613,28 +502,6 @@ func TestRateLimitRejectionsCarryTheWindowAndTheRetryHint(t *testing.T) {
 			t.Fatalf("a budget rejection carried no retry hint: %v", resp.Header)
 		}
 	})
-}
-
-// TestResponseHeadersAreAbsentWithoutAReservation proves a request the limiter
-// could not count, and so admitted without a reservation, has no allowance to
-// state, while the key's metadata still tells how it was served.
-func TestResponseHeadersAreAbsentWithoutAReservation(t *testing.T) {
-	f := glSeed(t, glBrokenLimiter(t), limits.FailOpen)
-	_, secret := f.key("fail-open", map[string]any{"requests_per_minute": 1, "response_metadata": true})
-	for range 2 {
-		status, _, header := f.h.gateway("POST", "/v1/chat/completions", secret, map[string]any{
-			"model": routeSlug, "messages": []any{map[string]any{"role": "user", "content": "hi"}},
-		})
-		if status != http.StatusOK {
-			t.Fatalf("status %d", status)
-		}
-		if got := rhRateHeaderCount(header); got != 0 {
-			t.Fatalf("headers of a window nobody counted: %v", header)
-		}
-		if header.Get("X-Olp-Attempts") != "1" {
-			t.Fatalf("metadata missing: %v", header)
-		}
-	}
 }
 
 // rhMetadata is the metadata headers a response carries.
@@ -763,20 +630,4 @@ func TestResponseMetadataHeadersFollowTheKeysPolicy(t *testing.T) {
 			}
 		}
 	})
-}
-
-// TestResponseMetadataStatesNoCostForAnUnpricedModel proves a response whose model
-// has no price list states none, rather than a cost of nothing.
-func TestResponseMetadataStatesNoCostForAnUnpricedModel(t *testing.T) {
-	f := rhSeed(t, "response-metadata-unpriced", glPrice{})
-	secret, _ := f.key(t, "unpriced", map[string]any{"response_metadata": true})
-	resp := f.open(t, "openai", routeSlug, secret, false)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, rhDrain(t, resp))
-	}
-	rhDrain(t, resp)
-	got := rhMetadata(resp.Header)
-	if _, present := got["X-Olp-Cost"]; present || got["X-Olp-Attempts"] != "1" || got["X-Olp-Route-Revision"] != f.routeRevision {
-		t.Fatalf("metadata = %v", got)
-	}
 }

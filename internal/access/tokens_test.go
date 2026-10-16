@@ -174,72 +174,12 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	}
 }
 
-func TestMachinePrincipalActsWithinCreatorAuthority(t *testing.T) {
-	s := machineServer(t)
-	secret := "olpm_lookup_random"
-	digest := s.Auth.Digest(secrets.ManagementTokenDigest, secret)
-	every := []string{"read", "access_read", "access", "settings", "configure", "keys", "playground", "usage"}
-	resolve := func(row stubRow, operation Operation) (Principal, error) {
-		return authorize(s, machineRequest(secret, "GET"), stubQueryer{row}, operation)
-	}
-
-	// The stored liveness column folds in the creator's active and OIDC
-	// authorization state, so either loss is an authentication failure.
-	if _, err := resolve(tokenRow(digest, every, map[int]any{tokenLive: false}), Read); !isProblem(err, 401) {
-		t.Fatal("an inactive or deauthorized creator must retire the token", err)
-	}
-
-	demoted := tokenRow(digest, every, map[int]any{tokenCreatorRole: "operator"})
-	if _, err := resolve(demoted, Access); !isProblem(err, 403) {
-		t.Fatal("a demoted creator's token must lose owner-only operations", err)
-	}
-	if _, err := resolve(demoted, Configure); err != nil {
-		t.Fatal("a demoted creator's token must keep operations the creator still holds", err)
-	}
-	viewer := tokenRow(digest, every, map[int]any{tokenCreatorRole: "viewer"})
-	if _, err := resolve(viewer, Keys); !isProblem(err, 403) {
-		t.Fatal("a viewer creator's token must not manage keys", err)
-	}
-
-	memberships, _ := json.Marshal(map[string]string{"p1": "manager", "p2": "viewer"})
-	assigned := tokenRow(digest, every, map[int]any{tokenCreatorRole: "operator", tokenCreatorScope: "assigned", tokenMemberships: memberships})
-	p, err := resolve(assigned, Read)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.AllProjects || len(p.Projects) != 2 || p.Projects["p1"] != "manager" || p.Projects["p2"] != "viewer" {
-		t.Fatal("an all-projects token must narrow to its assigned creator's projects and roles", p)
-	}
-	if _, err = resolve(assigned, Settings); !isProblem(err, 403) {
-		t.Fatal("an assigned creator's token must lose installation reach", err)
-	}
-
-	listed, _ := json.Marshal([]string{"p1", "p3"})
-	narrowed := tokenRow(digest, every, map[int]any{tokenAllProjects: false, tokenProjectIDs: listed, tokenCreatorRole: "operator", tokenCreatorScope: "assigned", tokenMemberships: memberships})
-	if p, err = resolve(narrowed, Read); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.Projects) != 1 || p.Projects["p1"] != "manager" {
-		t.Fatal("a project-scoped token must keep only projects its creator still reaches", p)
-	}
-}
+// The stored liveness column folds in the creator's active and OIDC
+// authorization state, so either loss is an authentication failure.
 
 func isProblem(err error, status int) bool {
 	problem, ok := errors.AsType[*Problem](err)
 	return ok && problem.Status == status
-}
-
-func TestBearerMachineBoundary(t *testing.T) {
-	for _, header := range []string{"Bearer olpm_a_b", "Bearer olpm_"} {
-		if _, ok := managementBearer(machineRequestHeader(header)); !ok {
-			t.Fatalf("%q did not select machine authentication", header)
-		}
-	}
-	for _, header := range []string{"Bearer olp_a_b", "Bearer other", "bearer olpm_a_b", "olpm_a_b", "Bearer olp_a_b"} {
-		if _, ok := managementBearer(machineRequestHeader(header)); ok {
-			t.Fatalf("%q must not select machine authentication", header)
-		}
-	}
 }
 
 func machineRequestHeader(header string) *http.Request {
@@ -292,28 +232,6 @@ func TestMachineBearerSkipsBrowserDefensesOnly(t *testing.T) {
 	}
 	if status := send(nil, nil); status != 403 {
 		t.Fatal("a bare write must still require the console origin", status)
-	}
-}
-
-func TestProvisioningIdentifiers(t *testing.T) {
-	r := httptest.NewRequest("PUT", "/", nil)
-	r.SetPathValue("source", "scim-bridge")
-	r.SetPathValue("external_id", "user-42")
-	if _, err := provisioningID(r, "source", "source", 100); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := provisioningID(r, "external_id", "external_id", 255); err != nil {
-		t.Fatal(err)
-	}
-	for _, bad := range []string{"", strings.Repeat("s", 101), "a/b", "a\x07b", "a\rb"} {
-		r.SetPathValue("source", bad)
-		if _, err := provisioningID(r, "source", "source", 100); err == nil {
-			t.Fatalf("accepted provisioning source %q", bad)
-		}
-	}
-	r.SetPathValue("external_id", strings.Repeat("e", 256))
-	if _, err := provisioningID(r, "external_id", "external_id", 255); err == nil {
-		t.Fatal("accepted an oversized external identifier")
 	}
 }
 

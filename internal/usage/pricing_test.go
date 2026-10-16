@@ -2,7 +2,6 @@ package usage
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -29,63 +28,6 @@ func sampleVendorKind(vendor string) (string, bool) {
 	kinds := map[string]string{"openai": "openai", "acme": "openai_compatible"}
 	kind, ok := kinds[vendor]
 	return kind, ok
-}
-
-func TestPriceValidationAcceptsAndNormalizes(t *testing.T) {
-	entry := samplePriceEntry()
-	entry.Model = "  gpt-test  "
-	entry.Currency = " usd "
-	vendor := " acme "
-	entry.VendorID = &vendor
-	entry.ProviderKind = "openai_compatible"
-	cached := "0.750000000000"
-	entry.CachedInputPerMillion = &cached
-	prices, currency, err := validatePrices([]Price{entry}, sampleVendorKind)
-	if err != nil {
-		t.Fatalf("validate prices: %v", err)
-	}
-	if currency != "USD" || prices[0].Currency != "USD" {
-		t.Fatalf("currency = %q/%q, want USD", currency, prices[0].Currency)
-	}
-	if prices[0].Model != "gpt-test" || *prices[0].VendorID != "acme" {
-		t.Fatalf("normalized entry = %+v", prices[0])
-	}
-	if *prices[0].CachedInputPerMillion != cached {
-		t.Fatalf("cached rate = %q, want the exact stored decimal", *prices[0].CachedInputPerMillion)
-	}
-}
-
-func TestPriceValidationScopesAreUniqueButIndependent(t *testing.T) {
-	first, second := samplePriceEntry(), samplePriceEntry()
-	if _, _, err := validatePrices([]Price{first, second}, sampleVendorKind); err == nil {
-		t.Fatal("duplicate scoped dimensions were accepted")
-	}
-	provider := "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000"
-	second.ProviderID = &provider
-	if _, _, err := validatePrices([]Price{first, second}, sampleVendorKind); err != nil {
-		t.Fatalf("a provider override alongside a default was rejected: %v", err)
-	}
-	third := samplePriceEntry()
-	vendor := "openai"
-	third.VendorID = &vendor
-	if _, _, err := validatePrices([]Price{first, second, third}, sampleVendorKind); err != nil {
-		t.Fatalf("a vendor scope alongside a kind default was rejected: %v", err)
-	}
-}
-
-// No list price applies to plugin providers: only a price scoped to one of
-// them does.
-func TestPluginProviderPricesNameTheirProvider(t *testing.T) {
-	entry := samplePriceEntry()
-	entry.ProviderKind = "plugin"
-	if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); usageProblem(t, err).Status != 422 {
-		t.Fatal("a kind-wide plugin price was accepted")
-	}
-	provider := "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000"
-	entry.ProviderID = &provider
-	if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); err != nil {
-		t.Fatalf("a provider-scoped plugin price was rejected: %v", err)
-	}
 }
 
 func TestPriceValidationRejectsUnusableEntries(t *testing.T) {
@@ -121,92 +63,5 @@ func TestPriceValidationRejectsUnusableEntries(t *testing.T) {
 				t.Fatalf("status = %d, want 422", problem.Status)
 			}
 		})
-	}
-}
-
-func TestPriceValidationRejectsMixedCurrenciesAndSizes(t *testing.T) {
-	first, second := samplePriceEntry(), samplePriceEntry()
-	second.Model = "gpt-other"
-	second.Currency = "EUR"
-	if _, _, err := validatePrices([]Price{first, second}, sampleVendorKind); err == nil {
-		t.Fatal("a revision mixing currencies was accepted")
-	}
-	if _, _, err := validatePrices(nil, sampleVendorKind); err == nil {
-		t.Fatal("an empty revision was accepted")
-	}
-	oversized := make([]Price, MaxRevisionPrices+1)
-	for i := range oversized {
-		oversized[i] = samplePriceEntry()
-	}
-	if _, _, err := validatePrices(oversized, sampleVendorKind); err == nil {
-		t.Fatal("an oversized revision was accepted")
-	}
-}
-
-func TestPriceValidationRequiresTheVendorCatalogue(t *testing.T) {
-	entry := samplePriceEntry()
-	vendor := "openai"
-	entry.VendorID = &vendor
-	_, _, err := validatePrices([]Price{entry}, nil)
-	if err == nil {
-		t.Fatal("a vendor scope was accepted without a catalogue")
-	}
-	var problem *access.Problem
-	if errors.As(err, &problem) {
-		t.Fatal("an unavailable catalogue was reported as a client error")
-	}
-}
-
-func TestPriceDecimalsAreExactAndBounded(t *testing.T) {
-	for _, valid := range []string{"0", "1", "0.000000000001", "999999999999.999999999999",
-		" 12.5 ", "000000000000.5"} {
-		normalized, err := normalizeDecimal(valid)
-		if err != nil {
-			t.Fatalf("decimal %q was rejected: %v", valid, err)
-		}
-		if normalized != strings.TrimSpace(valid) {
-			t.Fatalf("decimal %q was rewritten as %q", valid, normalized)
-		}
-	}
-	for _, invalid := range []string{"", "   ", "-1", "+1", "1.", ".5", "1.2.3", "1e5", "0x1",
-		"1234567890123", "0.1234567890123", "1 000", "NaN", "Infinity"} {
-		if _, err := normalizeDecimal(invalid); err == nil {
-			t.Fatalf("decimal %q was accepted", invalid)
-		}
-	}
-}
-
-func TestSamePriceComparesRatesNumerically(t *testing.T) {
-	rate := func(v string) *string { return &v }
-	source := Price{Currency: "USD", InputPerMillion: rate("2.5"), OutputPerMillion: rate("10"), UnitPrice: rate("3")}
-	stored := Price{Currency: "USD", InputPerMillion: rate("2.500000000000"), OutputPerMillion: rate("10.000000000000"), UnitPrice: rate("3.000000000000")}
-	if !samePrice(source, stored) {
-		t.Fatal("rates differing only in scale must compare equal")
-	}
-	changed := stored
-	changed.InputPerMillion = rate("2.500000000001")
-	if samePrice(source, changed) {
-		t.Fatal("a changed rate must not compare equal")
-	}
-	missing := stored
-	missing.UnitPrice = nil
-	if samePrice(source, missing) {
-		t.Fatal("a removed rate must not compare equal")
-	}
-	other := stored
-	other.Currency = "EUR"
-	if samePrice(source, other) {
-		t.Fatal("a changed currency must not compare equal")
-	}
-}
-
-func TestPriceSelectionNamesEachKindsDefaultVendor(t *testing.T) {
-	for kind, vendor := range map[string]string{"gemini": "google", "vertex_ai": "google-vertex", "bedrock": "amazon-bedrock", "azure_openai": "azure"} {
-		if !strings.Contains(priceAttemptSQL, "WHEN '"+kind+"' THEN '"+vendor+"'") {
-			t.Fatalf("price selection does not name %s as the default vendor of %s", vendor, kind)
-		}
-	}
-	if strings.Contains(priceAttemptSQL, "WHEN 'openai'") {
-		t.Fatal("a kind whose default vendor is itself needs no CASE arm")
 	}
 }

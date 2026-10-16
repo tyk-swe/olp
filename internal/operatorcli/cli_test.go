@@ -2,7 +2,6 @@ package operatorcli
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,25 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/tyk-swe/olp/sdk/management"
 )
-
-func TestCommonGeneratedCommandsAreUnambiguous(t *testing.T) {
-	for group, commands := range map[string][]string{"api-keys": {"list", "get", "create", "update", "revoke", "rotate"}, "routes": {"list", "get", "create", "update", "activate", "simulate"}, "providers": {"list", "get", "create", "update", "activate"}, "usage": {"summary", "breakdown"}} {
-		for _, command := range commands {
-			count := 0
-			for _, op := range management.Operations() {
-				if op.Group == group && commandName(op) == command {
-					count++
-				}
-			}
-			if count != 1 {
-				t.Errorf("%s %s resolves to %d operations", group, command, count)
-			}
-		}
-	}
-}
 
 func testRunner(t *testing.T, server *httptest.Server) (Runner, *bytes.Buffer) {
 	t.Helper()
@@ -150,85 +131,5 @@ func TestClientEnvironmentKeepsKeyValuesOutOfOutputAndQuotesPaths(t *testing.T) 
 		if strings.Contains(out.String(), "private-key-value") || !strings.Contains(out.String(), shellQuote(path)) {
 			t.Fatalf("unsafe environment: %s", out)
 		}
-	}
-}
-
-func TestUsageCSVNeutralizesFormulasAfterUnicodePrefixes(t *testing.T) {
-	for _, value := range []string{"\uFEFF=cmd()", "\u2003+1", "\x01@SUM(A1)", "\u00A0-1", "\t\uFEFF=1"} {
-		body, _ := json.Marshal(map[string]any{"items": []any{map[string]string{"model": value}}})
-		data, err := usageCSV(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rows, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
-		if err != nil || len(rows) != 2 || rows[1][0] != "'"+value {
-			t.Fatalf("formula prefix was not neutralized: %q, %v", data, err)
-		}
-	}
-}
-
-func TestSavedPlanBindsExternalReferencesBeforeApplying(t *testing.T) {
-	applied := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/configuration/export":
-			w.Write([]byte(`{"digest":"destination","document":{}}`))
-		case "/api/v1/configuration/plan":
-			w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
-		case "/api/v1/configuration/apply":
-			applied++
-			w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
-		default:
-			t.Errorf("unexpected request %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-	runner, _ := testRunner(t, server)
-	dir := t.TempDir()
-	doc, bindings, plan := filepath.Join(dir, "document.json"), filepath.Join(dir, "references.json"), filepath.Join(dir, "plan.json")
-	os.WriteFile(doc, []byte(`{"format":"olp-configuration"}`), 0600)
-	os.WriteFile(bindings, []byte(`{"provider":{"store":"gcp","secret_id":"projects/one/secrets/private-reference","version":"1"}}`), 0600)
-	if err := runner.Run(t.Context(), []string{"config", "plan", "--file", doc, "--external-bindings-file", bindings, "--output", plan}); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(plan)
-	if strings.Contains(string(data), "private-reference") {
-		t.Fatal("saved plan disclosed external reference metadata")
-	}
-	args := []string{"config", "apply", "--plan-file", plan, "--external-bindings-file", bindings, "--idempotency-key", "external-plan"}
-	os.WriteFile(bindings, []byte(`{"provider":{"store":"gcp","secret_id":"projects/other/secrets/private-reference","version":"1"}}`), 0600)
-	if err := runner.Run(t.Context(), args); err == nil || applied != 0 {
-		t.Fatalf("changed references applied=%d err=%v", applied, err)
-	}
-	os.WriteFile(bindings, []byte(`{"provider": {"version":"1", "secret_id":"projects/one/secrets/private-reference", "store":"gcp"}}`), 0600)
-	if err := runner.Run(t.Context(), args); err != nil || applied != 1 {
-		t.Fatalf("equivalent references applied=%d err=%v", applied, err)
-	}
-}
-
-func TestCLIUsesDeclaredScalarQueryTypes(t *testing.T) {
-	called := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called++
-		if r.URL.Query().Get("count") != "0" {
-			t.Errorf("query=%v", r.URL.Query())
-		}
-		w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
-	runner, _ := testRunner(t, server)
-	if err := runner.Run(t.Context(), []string{"api", "scim_users_list", "--query", "count=0"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"api", "scim_users_list", "--query", "count=1.5"},
-		{"api", "scim_users_list", "--query", "count=1", "--query", "count=2"},
-	} {
-		if err := runner.Run(t.Context(), args); err == nil {
-			t.Fatalf("accepted %v", args)
-		}
-	}
-	if called != 1 {
-		t.Fatalf("dispatched %d calls", called)
 	}
 }

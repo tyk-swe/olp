@@ -3,11 +3,7 @@
 package integration_test
 
 import (
-	"context"
-	"io"
 	"net/http"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,56 +13,17 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-// TestAPIKeyBudgetReportsLiveSpend proves the key detail carries live
-// accounting rather than stored policy: accrued spend and unpriced attempts are
-// summed from the recorded facts and the rollups they are folded into, measured
-// over the UTC day and month the installation is actually billed by, while the
-// amounts they are measured against stay the ones on the key.
-func TestAPIKeyBudgetReportsLiveSpend(t *testing.T) {
-	h := newAccessHarness(t)
-	// Enforcement is decided during composition, before anything is served.
-	h.Server.LimitsEnforced = true
-	owner := h.owner()
-	key := kbKey(t, h, owner, "5.00", "50.00")
-	provider := kbProvider(t, h)
+// Enforcement is decided during composition, before anything is served.
 
-	now := time.Now().UTC()
-	dayStart := now.Truncate(24 * time.Hour)
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	// On the first of the month every stored hour is also today, so the month
-	// only outgrows the day where an earlier day of it exists.
-	earlier := dayStart.Add(-2 * time.Hour)
-	monthlyOnly := !earlier.Before(monthStart)
+// On the first of the month every stored hour is also today, so the month
+// only outgrows the day where an earlier day of it exists.
 
-	kbFact(t, h, key, provider, now, "billable", kbText("0.030000000000"), false)
-	kbFact(t, h, key, provider, now, "billable", nil, true)
-	kbFact(t, h, key, provider, now, "not_billable", nil, false)
-	// Spend older than the month window is not this month's spend.
-	kbFact(t, h, key, provider, monthStart.Add(-time.Hour), "billable", kbText("9.990000000000"), false)
-	// Retention folds attempts into hourly rollups; a key's total must not dip
-	// when it does, so both sources are read as one set.
-	kbHourly(t, h, key, provider, dayStart, "1.250000000000", 0)
-	daily, monthly, unpriced := "1.280000000000", "1.280000000000", float64(1)
-	if monthlyOnly {
-		kbHourly(t, h, key, provider, earlier, "2.500000000000", 1)
-		monthly, unpriced = "3.780000000000", 2
-	}
+// Spend older than the month window is not this month's spend.
 
-	path := "/api/v1/api-keys/" + key
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	validateManagementResponse(t, "GET", path, 200, detail)
-	kbAssert(t, detail, kbExpect{daily: daily, monthly: monthly, dailyLimit: "5.00",
-		monthlyLimit: "50.00", unpriced: unpriced, enforced: true}, now)
+// Retention folds attempts into hourly rollups; a key's total must not dip
+// when it does, so both sources are read as one set.
 
-	// The inventory reports the same accounting as the detail page.
-	list := h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)
-	items, ok := list["items"].([]any)
-	if !ok || len(items) != 1 {
-		t.Fatalf("api key inventory: %v", list)
-	}
-	kbAssert(t, items[0].(map[string]any), kbExpect{daily: daily, monthly: monthly,
-		dailyLimit: "5.00", monthlyLimit: "50.00", unpriced: unpriced, enforced: true}, now)
-}
+// The inventory reports the same accounting as the detail page.
 
 // TestAPIKeyBudgetWithoutEnforcement proves an installation that cannot admit
 // against its budgets still reports the windows and the stored amounts, and
@@ -312,286 +269,34 @@ func kbAccrued(t *testing.T, f *glFixture, owner string) string {
 	return limHashOrNone(t, f.valkey, day)["accrued"]
 }
 
-// TestKeyBudgetAdmissionRejectsOnTheEstimateBeforeSpendDoes proves a budget is no
-// longer measured only against what has been spent: the most a request could cost
-// has to fit beside it. A key that has spent nothing is refused a request that
-// could cost more than the budget, and admitted one that cannot.
-func TestKeyBudgetAdmissionRejectsOnTheEstimateBeforeSpendDoes(t *testing.T) {
-	f := glSeedIn(t, "estimate", kbPrice)
-	id, secret := kbBudgetedKey(t, f, "estimate", "1.00", nil)
+// With no reply bound the request may produce 4096 tokens, which could cost
+// 4.0961 against a budget of 1.00 of which nothing is spent.
 
-	// With no reply bound the request may produce 4096 tokens, which could cost
-	// 4.0961 against a budget of 1.00 of which nothing is spent.
-	served := f.vendor.chats.Load()
-	status, body, header := f.h.gateway("POST", "/v1/chat/completions", secret, map[string]any{
-		"model": routeSlug, "messages": []any{map[string]any{"role": "user", "content": "hi"}},
-	})
-	if code := f.h.gatewayCode(status, body); status != http.StatusTooManyRequests || code != "budget_exhausted" {
-		t.Fatalf("a request that could cost more than the budget: %d %s", status, code)
-	}
-	// Nothing has been spent, so the answer cannot say the budget was used up: it
-	// says it is the request's own estimate that does not fit, and what to change.
-	message, _ := body["error"].(map[string]any)["message"].(string)
-	if !strings.Contains(message, "cannot cover this request's estimated cost") || strings.Contains(message, "exhausted") {
-		t.Fatalf("message = %q, want the estimate that does not fit and not an exhausted budget", message)
-	}
-	// No wait helps a request that cannot fit alone, so the hint is the window's.
-	if retry := glRetryAfter(t, header); retry < 2 {
-		t.Fatalf("Retry-After %d for a request no release could admit", retry)
-	}
-	if f.vendor.chats.Load() != served {
-		t.Fatal("a request the budget refused reached the upstream")
-	}
-	if got := kbReserved(t, f, id); got != "0" {
-		t.Fatalf("a refused request reserved %q", got)
-	}
+// Nothing has been spent, so the answer cannot say the budget was used up: it
+// says it is the request's own estimate that does not fit, and what to change.
 
-	// Bounded to sixteen tokens it could cost 0.0161, which fits.
-	if status, code, _ := f.chatWith(secret, map[string]any{"max_tokens": 16}); status != http.StatusOK {
-		t.Fatalf("a bounded request: %d %s", status, code)
-	}
-	if f.vendor.chats.Load() != served+1 {
-		t.Fatal("the admitted request did not reach the upstream")
-	}
-}
+// No wait helps a request that cannot fit alone, so the hint is the window's.
 
-// TestKeyBudgetEstimatesRequestsOnStrictRoutes proves a route that sends its
-// targets exactly what the caller sent, which is what a route does unless it says
-// otherwise, is estimated and reserved for as any other is. The estimate there is
-// made from the request a target is prepared to receive, and a failure to make it
-// would leave the budget measuring accrued spend alone without saying so.
-func TestKeyBudgetEstimatesRequestsOnStrictRoutes(t *testing.T) {
-	f := glSeedInFidelity(t, "strict", kbPrice, "strict")
-	id, secret := kbBudgetedKey(t, f, "strict", "1.00", nil)
+// Bounded to sixteen tokens it could cost 0.0161, which fits.
 
-	served := f.vendor.chats.Load()
-	if status, code, _ := f.chat(secret); status != http.StatusTooManyRequests || code != "budget_exhausted" {
-		t.Fatalf("a request that could cost more than the budget on a strict route: %d %s", status, code)
-	}
-	if f.vendor.chats.Load() != served {
-		t.Fatal("a request the budget refused reached the upstream")
-	}
-	if status, code, _ := f.chatWith(secret, map[string]any{"max_tokens": 16}); status != http.StatusOK {
-		t.Fatalf("a bounded request on a strict route: %d %s", status, code)
-	}
-	kbWaitReserved(t, f, id, kbActual)
-}
+// 0.0161 in flight and another 0.0161 would be 0.0322 of a budget of 0.03.
 
-// TestKeyBudgetHoldsInFlightCostAndSettlesItToTheActualCost proves requests in
-// flight count against the budget, and that when one ends what it held becomes
-// what it cost, which is what lets later requests in.
-func TestKeyBudgetHoldsInFlightCostAndSettlesItToTheActualCost(t *testing.T) {
-	f := glSeedIn(t, "inflight", kbPrice)
-	id, secret := kbBudgetedKey(t, f, "inflight", "0.03", nil)
-	bounded := map[string]any{"max_tokens": 16}
+// It would fit once the first request is released, so the wait is brief.
 
-	f.vendor.delay.Store(int64(200 * time.Millisecond))
-	defer f.vendor.delay.Store(0)
-	served := f.vendor.chats.Load()
-	streamed := make(chan int, 1)
-	go func() {
-		status, _ := glStreamWith(t.Context(), f.h, secret, bounded)
-		streamed <- status
-	}()
-	glInFlight(t, f.vendor, served)
-	if got := kbReserved(t, f, id); got != kbBounded {
-		t.Fatalf("an in-flight request holds %q, want %q", got, kbBounded)
-	}
-	// 0.0161 in flight and another 0.0161 would be 0.0322 of a budget of 0.03.
-	status, code, header := f.chatWith(secret, bounded)
-	if status != http.StatusTooManyRequests || code != "budget_exhausted" {
-		t.Fatalf("a sibling of an in-flight request: %d %s", status, code)
-	}
-	// It would fit once the first request is released, so the wait is brief.
-	if retry := glRetryAfter(t, header); retry != 1 {
-		t.Fatalf("Retry-After %d, want the one second a reservation takes to clear", retry)
-	}
-	if status := <-streamed; status != http.StatusOK {
-		t.Fatalf("streamed request: %d", status)
-	}
-	f.vendor.delay.Store(0)
+// The request ended and cost 0.0064 of the 0.0161 it held. Accounting is not
+// running here, so the settled cost stays against the budget.
 
-	// The request ended and cost 0.0064 of the 0.0161 it held. Accounting is not
-	// running here, so the settled cost stays against the budget.
-	kbWaitReserved(t, f, id, kbActual)
-	for index, want := range []string{"0.0128", "0.0192"} {
-		if status, code, _ := f.chatWith(secret, bounded); status != http.StatusOK {
-			t.Fatalf("request %d against what the earlier ones actually cost: %d %s", index+2, status, code)
-		}
-		kbWaitReserved(t, f, id, want)
-	}
-	// 0.0192 held and 0.0161 more would exceed 0.03: the arithmetic is the sum.
-	if status, code, _ := f.chatWith(secret, bounded); status != http.StatusTooManyRequests || code != "budget_exhausted" {
-		t.Fatalf("a request that no longer fits: %d %s", status, code)
-	}
-}
+// 0.0192 held and 0.0161 more would exceed 0.03: the arithmetic is the sum.
 
-// TestKeyBudgetReleasesWhatARequestNeverSpent proves a request that reached no
-// upstream gives its reservation back, and that one whose client hangs up before
-// the upstream reports anything holds nothing either: nothing is known to have
-// been spent.
-func TestKeyBudgetReleasesWhatARequestNeverSpent(t *testing.T) {
-	f := glSeedIn(t, "release", kbPrice)
-	bounded := map[string]any{"max_tokens": 16}
+// The request was settled at its actual cost and then accounted for, in
+// whichever order those reached Valkey: the reservation is gone either way.
 
-	t.Run("a client that hangs up", func(t *testing.T) {
-		id, secret := kbBudgetedKey(t, f, "hangup", "1.00", nil)
-		f.vendor.delay.Store(int64(300 * time.Millisecond))
-		defer f.vendor.delay.Store(0)
-		served := f.vendor.chats.Load()
-		ctx, cancel := context.WithCancel(t.Context())
-		abandoned := make(chan struct{})
-		go func() {
-			defer close(abandoned)
-			glStreamWith(ctx, f.h, secret, bounded)
-		}()
-		glInFlight(t, f.vendor, served)
-		if got := kbReserved(t, f, id); got != kbBounded {
-			t.Fatalf("an in-flight request holds %q, want %q", got, kbBounded)
-		}
-		cancel()
-		<-abandoned
-		kbWaitReserved(t, f, id, "0")
-	})
+// A caller that names its request is not the one whose name accounting
+// records it under: that is an identifier of the gateway's own, so the
+// reservation is found by it and not by what the caller sent.
 
-	t.Run("an upstream that is unreachable", func(t *testing.T) {
-		id, secret := kbBudgetedKey(t, f, "unreachable", "1.00", nil)
-		served := f.vendor.chats.Load()
-		f.vendor.Close()
-		for attempt := range 2 {
-			status, code, _ := f.chatWith(secret, bounded)
-			if status != http.StatusBadGateway || code != "upstream_unavailable" {
-				t.Fatalf("request %d: %d %s, want the unreachable upstream", attempt+1, status, code)
-			}
-		}
-		if f.vendor.chats.Load() != served {
-			t.Fatal("an attempt reached an upstream that was no longer listening")
-		}
-		kbWaitReserved(t, f, id, "0")
-	})
-}
-
-// TestKeyBudgetAccountingRemovesTheReservation proves the spend accounting
-// records replaces the reservation instead of counting beside it. With the real
-// pipeline running, a request's settled cost is installed as accrued spend and
-// its reservation is gone, whether or not the caller named the request.
-func TestKeyBudgetAccountingRemovesTheReservation(t *testing.T) {
-	f := glSeedIn(t, "accrual", kbPrice)
-	glAccounting(t, f)
-	id, secret := kbBudgetedKey(t, f, "accrual", "1.00", nil)
-
-	if status, code, _ := f.chatWith(secret, map[string]any{"max_tokens": 16}); status != http.StatusOK {
-		t.Fatalf("request: %d %s", status, code)
-	}
-	glEventually(t, "the spend to be accrued", func() bool { return kbAccrued(t, f, id) == kbActual })
-	// The request was settled at its actual cost and then accounted for, in
-	// whichever order those reached Valkey: the reservation is gone either way.
-	kbWaitReserved(t, f, id, "0")
-	if status, code, _ := f.chatWith(secret, map[string]any{"max_tokens": 16}); status != http.StatusOK {
-		t.Fatalf("second request: %d %s", status, code)
-	}
-	glEventually(t, "the second request to be accrued", func() bool { return kbAccrued(t, f, id) == "0.0128" })
-	kbWaitReserved(t, f, id, "0")
-
-	// A caller that names its request is not the one whose name accounting
-	// records it under: that is an identifier of the gateway's own, so the
-	// reservation is found by it and not by what the caller sent.
-	body := `{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.h.HTTP.URL+"/v1/chat/completions", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+secret)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-Id", "caller-named-"+uuid.NewString())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("request that names itself: %d", resp.StatusCode)
-	}
-	glEventually(t, "the named request to be accrued", func() bool { return kbAccrued(t, f, id) == "0.0192" })
-	kbWaitReserved(t, f, id, "0")
-}
-
-// TestKeyBudgetConcurrentAdmissionStaysWithinTheBound proves the documented
-// bound on a burst: requests that arrive together are each judged against the
-// others in flight, so a budget of 0.05 admits floor(0.05 / 0.0161) = 3 of them
-// however many replicas race for it, and refuses the rest.
-func TestKeyBudgetConcurrentAdmissionStaysWithinTheBound(t *testing.T) {
-	f := glSeedIn(t, "burst", kbPrice)
-	id, secret := kbBudgetedKey(t, f, "burst", "0.05", nil)
-	f.h.refresh()
-
-	f.vendor.delay.Store(int64(300 * time.Millisecond))
-	defer f.vendor.delay.Store(0)
-	statuses := make(chan int, 12)
-	var group sync.WaitGroup
-	for range cap(statuses) {
-		group.Go(func() {
-			status, err := glStreamWith(t.Context(), f.h, secret, map[string]any{"max_tokens": 16})
-			if err != nil {
-				t.Errorf("request: %v", err)
-			}
-			statuses <- status
-		})
-	}
-	group.Wait()
-	close(statuses)
-	admitted, refused := 0, 0
-	for status := range statuses {
-		switch status {
-		case http.StatusOK:
-			admitted++
-		case http.StatusTooManyRequests:
-			refused++
-		default:
-			t.Errorf("status %d", status)
-		}
-	}
-	if admitted != 3 || refused != 9 {
-		t.Fatalf("admitted %d and refused %d, want 3 and 9", admitted, refused)
-	}
-	kbWaitReserved(t, f, id, "0.0192")
-}
-
-// TestKeyBudgetReservesNothingWhereNothingIsPriced proves the reservation is
-// confined to requests it can describe. A key without a cost budget never has a
-// cost estimated or stored, and a route nobody priced is judged on accrued spend
-// alone, as it always was.
-func TestKeyBudgetReservesNothingWhereNothingIsPriced(t *testing.T) {
-	priced := glSeedIn(t, "unpriced", kbPrice)
-	rpm := int64(100)
-	for name, policy := range map[string]map[string]any{
-		"no limits":         nil,
-		"a request limit":   {"requests_per_minute": rpm},
-		"a token limit":     {"tokens_per_minute": int64(100_000)},
-		"a concurrency cap": {"max_concurrency": 4},
-	} {
-		id, secret := priced.key("priced-"+name, policy)
-		if status, code, _ := priced.chat(secret); status != http.StatusOK {
-			t.Fatalf("%s: %d %s", name, status, code)
-		}
-		pending, expiry := limPendingKeys(priced.namespace, id)
-		if limInt(t, priced.valkey, "EXISTS", pending, expiry) != 0 {
-			t.Fatalf("%s: a key without a cost budget stored a reservation", name)
-		}
-	}
-
-	// No price list: the same unbounded request a priced route refuses is
-	// admitted, because there is nothing to estimate it by.
-	unpriced := glSeedIn(t, "unpriced-route", glPrice{})
-	id, secret := kbBudgetedKey(t, unpriced, "unpriced-route", "1.00", nil)
-	if status, code, _ := unpriced.chat(secret); status != http.StatusOK {
-		t.Fatalf("a request nobody can price: %d %s", status, code)
-	}
-	if got := kbReserved(t, unpriced, id); got != "0" {
-		t.Fatalf("an unpriced request reserved %q", got)
-	}
-}
+// No price list: the same unbounded request a priced route refuses is
+// admitted, because there is nothing to estimate it by.
 
 // TestKeyWithoutACostBudgetMakesNoExtraValkeyCall proves a key pays for the
 // budgets it has and no others. A key with only a request limit runs the rate

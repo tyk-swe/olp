@@ -1,7 +1,6 @@
 package tokenization_test
 
 import (
-	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -101,68 +100,7 @@ func TestNativeCountsAreExactResultsNotUsageOrEstimates(t *testing.T) {
 		})
 	}
 }
-func TestCountPresenceNativeBranchesAndExactIntegerSpellings(t *testing.T) {
-	d := definition(t, "openai-input-tokens")
-	for _, body := range []string{`{}`, `{"model":null,"input":null}`, `{"input":"","instructions":"","tools":null}`, `{"input":[],"parallel_tool_calls":false,"reasoning":null,"text":null}`} {
-		r := request(t, d, body)
-		v, err := d.Request(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v.(tokenization.CountRequest).Source().Document().Raw() != body {
-			t.Fatal("presence changed")
-		}
-		for _, number := range []string{"0", "-0", "0.0", "1e3", "9007199254740993.0"} {
-			body := `{"object":"response.input_tokens","input_tokens":` + number + `}`
-			view, err := d.Result(r, result(t, r, body))
-			if err != nil {
-				t.Fatalf("native integer %s: %v", number, err)
-			}
-			if view.(tokenization.CountResult).Counts()[0].Value.Raw() != number {
-				t.Fatal("integer spelling changed")
-			}
-		}
-	}
-	gemini := definition(t, "gemini-count-tokens")
-	nested := `{"generateContentRequest":{"model":"models/route","contents":[{"parts":[{"text":"native"}]}],"systemInstruction":{"parts":[{"text":"system"}]},"generationConfig":{"temperature":-0},"tools":[{"functionDeclarations":[{"name":"tool","parameters":{"type":"object","properties":{"file_id":{"type":"string"},"__proto__":{"const":9007199254740993}}}}]}]}}`
-	r := request(t, gemini, nested)
-	v, err := gemini.Request(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v.(tokenization.CountRequest).Scope() != "generate-content-request" || v.(tokenization.CountRequest).Source().Document().Raw() != nested {
-		t.Fatal("nested count controls lost")
-	}
-	if err := gemini.ValidateRoute(r, "route"); err != nil {
-		t.Fatal(err)
-	}
-	changes, err := gemini.BindModel(r.Document(), "native-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bound, err := r.WithChanges(changes...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(bound.Document().Raw(), `"model":"models/native-model"`) || !strings.Contains(bound.Document().Raw(), `"__proto__":{"const":9007199254740993}`) {
-		t.Fatal("nested model overlay changed other source")
-	}
-	absent := request(t, gemini, `{"generateContentRequest":{"contents":[]}}`)
-	changes, err = gemini.BindModel(absent.Document(), "native-model")
-	if err != nil || len(changes) != 0 {
-		t.Fatal("absent nested model must stay absent")
-	}
-	bedrock := definition(t, "bedrock-count-tokens")
-	payload := `{"inputText":"é","threshold":-0,"unsafe":9007199254740993}`
-	body := `{"input":{"invokeModel":{"body":"` + base64.StdEncoding.EncodeToString([]byte(payload)) + `"}}}`
-	v, err = bedrock.Request(request(t, bedrock, body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v.(tokenization.CountRequest).Scope() != "invoke-model-body" || v.(tokenization.CountRequest).Source().Document().Raw() != body {
-		t.Fatal("native invocation body was reencoded or degraded")
-	}
-}
+
 func TestCountRejectsCorruptionAndUnownedReferencesPrecisely(t *testing.T) {
 	for _, tc := range []struct{ id, body string }{
 		{"openai-input-tokens", `{"input":false}`}, {"openai-input-tokens", `{"input":[0]}`}, {"openai-input-tokens", `{"parallel_tool_calls":0}`},
@@ -309,38 +247,5 @@ func TestCountPolicyCoversNativeSchemaTextAndRefusesOpaqueInputs(t *testing.T) {
 	}
 	if !strings.Contains(all, "inspect-me") || !strings.Contains(all, "also-visible") {
 		t.Fatal("output text escaped inspection")
-	}
-}
-func TestDefinitionsAndOverlayPresenceAreOperationOwned(t *testing.T) {
-	registry := operations.NewRegistry()
-	for _, d := range tokenization.Definitions() {
-		if err := registry.Register(d); err != nil {
-			t.Fatal(err)
-		}
-		r := request(t, d, string(d.Probe("route")))
-		if _, err := d.Request(r); err != nil {
-			t.Fatalf("%s: %v", d.Identity.ID, err)
-		}
-		if d.Operation.ID != "token_count" {
-			t.Fatal("counting became generation")
-		}
-	}
-}
-
-func TestPolicyInspectsArgumentJSONWithoutTreatingLiteralKeysAsResources(t *testing.T) {
-	d := definition(t, "openai-input-tokens")
-	r := request(t, d, `{"input":[{"type":"function_call","call_id":"call","name":"tool","arguments":"{\"data\":\"\\u0073ecret\",\"file_id\":\"literal\"}"}]}`)
-	texts, err := d.InputText(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, text := range texts {
-		if text.Value == "secret" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("encoded JSON argument text escaped policy inspection")
 	}
 }

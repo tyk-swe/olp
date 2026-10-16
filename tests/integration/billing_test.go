@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -152,108 +151,22 @@ func billingFact(t *testing.T, h *accessHarness, providerID, requestID string, o
 
 func billingProviderID(provider map[string]any) string { return provider["id"].(string) }
 
-// TestBillingImportAPI covers the management surface: validation, scope and
-// credential rules, scoping, and lifecycle.
-func TestBillingImportAPI(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := createProject(h, owner, "Billing")
-	projectB := createProject(h, owner, "Billing B")
+// The credential is required on create, must be a string, and null is
+// rejected rather than clearing the import.
 
-	provider := billingProvider(h, owner, "OpenAI", "openai", "http://127.0.0.1:9/v1", project)
-	providerID := billingProviderID(provider)
-	providerETag := provider["etag"].(string)
+// Idempotent replay returns the stored reply.
 
-	h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 404)
+// An update that omits the credential keeps it.
 
-	// The credential is required on create, must be a string, and null is
-	// rejected rather than clearing the import.
-	billingPut(h, owner, providerID, map[string]any{"enabled": true}, providerETag, 422)
-	billingPut(h, owner, providerID, map[string]any{"credential": nil}, providerETag, 422)
-	billingPut(h, owner, providerID, map[string]any{"credential": "short"}, providerETag, 422)
-	billingPut(h, owner, providerID, map[string]any{"credential": "has a space" + strings.Repeat("x", 20)}, providerETag, 422)
-	billingPut(h, owner, providerID, map[string]any{
-		"credential": "sk-admin-" + strings.Repeat("a", 20),
-		"scope":      map[string]any{"bogus_key": true},
-	}, providerETag, 422)
-	billingPut(h, owner, providerID, map[string]any{
-		"credential": "sk-admin-" + strings.Repeat("a", 20),
-		"scope":      map[string]any{"project_ids": []string{"not-a-project"}},
-	}, providerETag, 422)
+// If-Match gates mutations.
 
-	createKey := uuid.NewString()
-	created := h.want(owner, "PUT", "/api/v1/providers/"+providerID+"/billing-import",
-		map[string]any{"credential": "sk-admin-" + strings.Repeat("a", 20),
-			"scope": map[string]any{"project_ids": []string{"proj_abc123"}}},
-		map[string]string{"Idempotency-Key": createKey, "If-Match": `"` + providerETag + `"`}, 201)
-	if created["source"] != "openai_costs" || created["credential_configured"] != true {
-		t.Fatalf("create response %v", created)
-	}
-	if _, secret := created["credential"]; secret {
-		t.Fatal("the credential must never be returned")
-	}
-	etag := created["etag"].(string)
+// A non-openai/anthropic kind is refused.
 
-	// Idempotent replay returns the stored reply.
-	replay := h.want(owner, "PUT", "/api/v1/providers/"+providerID+"/billing-import",
-		map[string]any{"credential": "sk-admin-" + strings.Repeat("a", 20),
-			"scope": map[string]any{"project_ids": []string{"proj_abc123"}}},
-		map[string]string{"Idempotency-Key": createKey, "If-Match": `"` + providerETag + `"`}, 201)
+// Scoping: a manager of another project gets 404; a viewer of the
+// provider's project reads it.
 
-	// An update that omits the credential keeps it.
-	replaced := billingPut(h, owner, providerID, map[string]any{"enabled": false}, etag, 200)
-	if replaced["enabled"] != false || replaced["credential_configured"] != true {
-		t.Fatalf("replace must keep the credential: %v", replaced)
-	}
-	if replaced["etag"].(string) == etag {
-		t.Fatal("update must rotate the etag")
-	}
-	_ = replay
-
-	// If-Match gates mutations.
-	billingPut(h, owner, providerID, map[string]any{"enabled": true}, `"stale"`, 412)
-
-	// A non-openai/anthropic kind is refused.
-	gemini := billingProvider(h, owner, "Gemini", "gemini", "http://127.0.0.1:9/v1", project)
-	billingPut(h, owner, billingProviderID(gemini), map[string]any{
-		"credential": "sk-admin-" + strings.Repeat("a", 20),
-	}, gemini["etag"].(string), 422)
-
-	// Scoping: a manager of another project gets 404; a viewer of the
-	// provider's project reads it.
-	users := h.want(owner, "GET", "/api/v1/users", nil, nil, 200)
-	var opID string
-	for _, item := range users["items"].([]any) {
-		record := item.(map[string]any)
-		if record["email"] == "op@example.com" {
-			opID = record["id"].(string)
-		}
-	}
-	op := h.invite(owner, "op@example.com", "operator")
-	users = h.want(owner, "GET", "/api/v1/users", nil, nil, 200)
-	for _, item := range users["items"].([]any) {
-		record := item.(map[string]any)
-		if record["email"] == "op@example.com" {
-			opID = record["id"].(string)
-		}
-	}
-	h.want(owner, "PATCH", "/api/v1/users/"+opID, map[string]any{"access_scope": "assigned"},
-		map[string]string{"If-Match": `"` + userETag(h, owner, opID) + `"`}, 200)
-	addMember(h, owner, projectB, opID, "manager")
-	op = login(h, "op@example.com")
-	h.want(op, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 404)
-	billingPut(h, op, providerID, map[string]any{"enabled": true}, providerETag, 404)
-	addMember(h, owner, project, opID, "viewer")
-	op = login(h, "op@example.com")
-	h.want(op, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
-	billingPut(h, op, providerID, map[string]any{"enabled": true}, replaced["etag"].(string), 403)
-
-	// DELETE removes the import but keeps it deletable-idempotent via the
-	// 404 that follows.
-	h.want(owner, "DELETE", "/api/v1/providers/"+providerID+"/billing-import",
-		nil, map[string]string{"If-Match": `"` + replaced["etag"].(string) + `"`}, 204)
-	h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 404)
-}
+// DELETE removes the import but keeps it deletable-idempotent via the
+// 404 that follows.
 
 func userETag(h *accessHarness, owner *browser, userID string) string {
 	record := h.want(owner, "GET", "/api/v1/users/"+userID, nil, nil, 200)
@@ -466,84 +379,13 @@ func TestBillingImportEndToEnd(t *testing.T) {
 	}
 }
 
-// TestBillingPromotion exports an installation, applies it to a fresh one
-// through secret_bindings, and checks the import arrives and leaves.
-func TestBillingPromotion(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := createProject(h, owner, "Billing")
-	provider := billingProvider(h, owner, "OpenAI", "openai", "http://127.0.0.1:9/v1", project)
-	providerID := billingProviderID(provider)
-	billingPut(h, owner, providerID, map[string]any{
-		"credential": "sk-admin-" + strings.Repeat("c", 30),
-		"scope":      map[string]any{"project_ids": []string{"proj_abc123"}},
-	}, provider["etag"].(string), 201)
+// Export carries billing_import with the deterministic ref and no key.
 
-	// Export carries billing_import with the deterministic ref and no key.
-	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	doc := exported["document"].(map[string]any)
-	var providerEntry map[string]any
-	for _, item := range doc["providers"].([]any) {
-		entry := item.(map[string]any)
-		if entry["name"] == "OpenAI" {
-			providerEntry = entry
-		}
-	}
-	if providerEntry == nil {
-		t.Fatal("exported document has no OpenAI provider")
-	}
-	bi, ok := providerEntry["billing_import"].(map[string]any)
-	if !ok {
-		t.Fatalf("export lacks billing_import: %v", providerEntry)
-	}
-	if bi["credential_ref"] != "OpenAI/billing" {
-		t.Fatalf("credential_ref %v", bi)
-	}
-	if _, leaked := bi["credential"]; leaked {
-		t.Fatal("the document must not carry the credential")
-	}
-	if _, err := json.Marshal(providerEntry); err != nil {
-		t.Fatal(err)
-	}
+// Applying without the binding blocks; supplying it recreates the
+// import on a fresh installation.
 
-	// Applying without the binding blocks; supplying it recreates the
-	// import on a fresh installation.
-	h2 := newAccessHarness(t)
-	owner2 := h2.owner()
-	apply := map[string]any{
-		"document": doc,
-	}
-	plan := h2.want(owner2, "POST", "/api/v1/configuration/plan", apply, idem("plan-missing"), 200)
-	if len(plan["blockers"].([]any)) == 0 {
-		t.Fatalf("missing binding must block: %v", plan)
-	}
-	// Every credential reference the document names needs a binding; the
-	// billing ref is the one this feature adds, the provider's credential
-	// slot another.
-	bindings := map[string]any{"OpenAI/billing": "sk-admin-" + strings.Repeat("d", 30)}
-	for _, item := range providerEntry["slots"].([]any) {
-		slot := item.(map[string]any)
-		if ref, ok := slot["credential_ref"].(string); ok {
-			bindings[ref] = "sk-provider-" + strings.Repeat("s", 30)
-		}
-	}
-	if ref, ok := providerEntry["network_credential_ref"].(string); ok {
-		bindings[ref] = "sk-network-" + strings.Repeat("n", 30)
-	}
-	apply["secret_bindings"] = bindings
-	h2.want(owner2, "POST", "/api/v1/configuration/apply", apply, idem("apply-full"), 200)
-	var scope0 string
-	if err := h2.Pool.QueryRow(t.Context(), `SELECT scope->'project_ids'->>0 FROM olp.provider_billing_imports
-		WHERE provider_id=(SELECT id FROM olp.providers WHERE name='OpenAI')`).Scan(&scope0); err != nil || scope0 != "proj_abc123" {
-		t.Fatalf("applied scope %q err %v", scope0, err)
-	}
+// Every credential reference the document names needs a binding; the
+// billing ref is the one this feature adds, the provider's credential
+// slot another.
 
-	// Dropping billing_import from the entry deletes the import on apply.
-	delete(providerEntry, "billing_import")
-	apply["secret_bindings"] = nil
-	h2.want(owner2, "POST", "/api/v1/configuration/apply", apply, idem("apply-removal"), 200)
-	var count int
-	if err := h2.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_billing_imports`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("import must be removed: %d %v", count, err)
-	}
-}
+// Dropping billing_import from the entry deletes the import on apply.

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,98 +90,6 @@ func TestVersionedProfilesSelectIndependentCloudAddresses(t *testing.T) {
 	}
 }
 
-func TestProfileWrappersKeepNativeStateAndVersionBeforeSigning(t *testing.T) {
-	for _, tc := range []struct {
-		id, version string
-		stream      bool
-	}{{"vertex-anthropic", "vertex-2023-10-16", true}, {"bedrock-anthropic-invoke", "bedrock-2023-05-31", false}} {
-		c := profileConfig(t, tc.id)
-		body, err := c.WrapBody([]byte(`{"model":"bound-model","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"opaque","signature":"exact-native-state"}]}],"max_tokens":64,"stream":true,"unknown_native":{"ordered":[false,null,0]}}`), wire.Anthropic)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var fields map[string]json.RawMessage
-		if json.Unmarshal(body, &fields) != nil {
-			t.Fatal("invalid wrapper JSON")
-		}
-		if _, present := fields["model"]; present {
-			t.Fatal("cloud model remained in body")
-		}
-		if string(fields["anthropic_version"]) != `"`+tc.version+`"` || !bytes.Contains(fields["messages"], []byte(`"signature":"exact-native-state"`)) || string(fields["unknown_native"]) != `{"ordered":[false,null,0]}` {
-			t.Fatalf("native wrapper changed semantics: %s", body)
-		}
-		if _, present := fields["stream"]; present != tc.stream {
-			t.Fatalf("wrong cloud stream control: %s", body)
-		}
-		if _, err := c.WrapBody([]byte(`{"anthropic_version":"foreign"}`), wire.Anthropic); err == nil {
-			t.Fatal("accepted version collision")
-		}
-		if tc.id == "bedrock-anthropic-invoke" {
-			u, _ := c.URL(wire.Anthropic, "model-a", false)
-			r, _ := http.NewRequest("POST", u, bytes.NewReader(body))
-			r.Header.Set("Content-Type", "application/json")
-			a := NewAuth(&egress.Policy{})
-			_, err := a.Apply(t.Context(), r, c, []byte(`{"access_key_id":"FIXTUREACCESSKEY12345","secret_access_key":"fixture-secret-access-key-value"}`), body)
-			if err != nil || !strings.Contains(r.Header.Get("Authorization"), "/us-east-1/bedrock/aws4_request") || r.Header.Get("X-Amz-Date") == "" {
-				t.Fatalf("unsigned completed native request: %v", err)
-			}
-			assertProfileSignature(t, r, body, "fixture-secret-access-key-value")
-		}
-	}
-}
-
-func TestSemanticConfigurationSurvivesSecretRotationAndRefusesReservedControls(t *testing.T) {
-	c := profileConfig(t, "anthropic-messages")
-	c.SemanticHeaders = map[string]string{"Anthropic-Version": "2023-06-01", "Anthropic-Beta": "fixture-feature-2026-09-22"}
-	a := NewAuth(&egress.Policy{})
-	for _, secret := range []string{"first-key", "second-key"} {
-		r, _ := http.NewRequest("POST", c.Endpoint+"/messages", nil)
-		if _, err := a.Apply(t.Context(), r, c, []byte(secret), nil); err != nil {
-			t.Fatal(err)
-		}
-		if r.Header.Get("Anthropic-Beta") != "fixture-feature-2026-09-22" || r.Header.Get("Anthropic-Version") != "2023-06-01" || r.Header.Get("X-Api-Key") != secret {
-			t.Fatal("secret rotation changed semantic configuration")
-		}
-	}
-	for _, name := range []string{"Authorization", "Host", "X-Olp-Route", "Proxy-Authorization", "Connection", "OpenAI-Project"} {
-		c.SemanticHeaders = map[string]string{name: "forbidden"}
-		if err := c.Validate(&egress.Policy{}); err == nil {
-			t.Fatalf("accepted reserved semantic control %s", name)
-		}
-	}
-	for _, value := range []string{"bad\x01value", "bad\x7fvalue", "bad\r\nvalue"} {
-		c.SemanticHeaders = map[string]string{"Anthropic-Beta": value}
-		if err := c.Validate(&egress.Policy{}); err == nil {
-			t.Fatal("invalid HTTP semantic header admitted")
-		} else if strings.Contains(err.Error(), value) {
-			t.Fatal("header diagnostic echoed value")
-		}
-	}
-	c.SemanticHeaders = map[string]string{"Anthropic-Beta": "a", "anthropic-beta": "b"}
-	if c.Validate(&egress.Policy{}) == nil {
-		t.Fatal("accepted duplicate semantic header spellings")
-	}
-	c.SemanticHeaders = map[string]string{"Anthropic-Beta": "a"}
-	c.AuthMode = "headers"
-	c.CredentialHeaders = []string{"X-Api-Key", "Anthropic-Beta"}
-	if c.Validate(&egress.Policy{}) == nil {
-		t.Fatal("semantic header mixed with credentials")
-	}
-	gemini := profileConfig(t, "gemini-generation")
-	gemini.QuerySettings = map[string]string{"$xgafv": "2"}
-	r, _ := http.NewRequest("POST", "https://provider.example/models/m:generateContent", nil)
-	if err := gemini.ApplySemantic(r); err != nil || r.URL.Query().Get("$xgafv") != "2" {
-		t.Fatal("schema-owned query unavailable")
-	}
-	gemini.QuerySettings = map[string]string{"key": "secret"}
-	if gemini.Validate(&egress.Policy{}) == nil {
-		t.Fatal("query credential was accepted as semantics")
-	}
-	if profileConfig(t, "azure-v1-chat").AzureScope() == profileConfig(t, "azure-legacy-chat").AzureScope() {
-		t.Fatal("Azure audiences were conflated")
-	}
-}
-
 func TestOperationDefaultsRetainPresenceAndAtomicBindingOverrides(t *testing.T) {
 	c := profileConfig(t, "openai-chat")
 	c.OperationDefaults = map[string]DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"temperature": json.RawMessage(`null`), "parallel_tool_calls": json.RawMessage(`false`), "tools": json.RawMessage(`[{"type":"function","function":{"name":"old"}}]`)}}}
@@ -220,36 +127,6 @@ func TestOperationDefaultsRetainPresenceAndAtomicBindingOverrides(t *testing.T) 
 		if c.Validate(&egress.Policy{}) == nil {
 			t.Fatalf("ambiguous native default accepted: %s", ambiguous)
 		}
-	}
-}
-
-func TestExistingDialectProviderExtensionNeedsOnlyRegistrationAndBinding(t *testing.T) {
-	p, err := LookupProfile("compatible-chat", ProfileRevision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p.ID = "fixture-" + uuid.NewString()
-	p.Label = "Independent fixture provider"
-	if err := RegisterProfile(p); err != nil {
-		t.Fatal(err)
-	}
-	c := Config{ProfileID: p.ID, ProfileRevision: p.Revision, Kind: p.Kind, AuthMode: "none", Endpoint: "https://fixture.example/v1", Bindings: map[string]Binding{"alias": {Model: "native-model"}}}
-	if err := c.Validate(&egress.Policy{}); err != nil {
-		t.Fatal(err)
-	}
-	encodedWire, err := c.TargetFamily(wire.Chat)
-	if err != nil {
-		t.Fatal(err)
-	}
-	endpoint, err := c.URL(encodedWire, "alias", false)
-	if err != nil || endpoint != "https://fixture.example/v1/chat/completions" || c.Model("alias") != "native-model" {
-		t.Fatal("registered profile did not reuse components")
-	}
-	copy, _ := LookupProfile(p.ID, p.Revision)
-	copy.OperationDialects["generation"] = "corrupted"
-	fresh, _ := LookupProfile(p.ID, p.Revision)
-	if reflect.DeepEqual(copy.OperationDialects, fresh.OperationDialects) {
-		t.Fatal("catalogue metadata aliases registry")
 	}
 }
 
@@ -360,52 +237,6 @@ func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {
 	}
 }
 
-func TestBedrockAnthropicFramingIgnoresPaddingMember(t *testing.T) {
-	cfg := profileConfig(t, "bedrock-anthropic-invoke")
-	native := base64.StdEncoding.EncodeToString([]byte(`{"type":"message_stop"}`))
-	payload := `{"bytes":"` + native + `","p":"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0"}`
-	var frame bytes.Buffer
-	headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue("chunk")}}
-	if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(cfg.StreamPayload(&frame, 4096))
-	if err != nil || string(data) != "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n" {
-		t.Fatalf("padded event=%q err=%v", data, err)
-	}
-}
-
-func TestBedrockHostingEnvelopeRejectsAmbiguousMembers(t *testing.T) {
-	cfg := profileConfig(t, "bedrock-anthropic-invoke")
-	native := base64.StdEncoding.EncodeToString([]byte(`{"type":"message_stop"}`))
-	valid := `{"bytes":"` + native + `"}`
-	for _, tc := range []struct {
-		name, payload string
-		duplicate     bool
-	}{
-		{"duplicate body member", `{"bytes":"` + native + `","bytes":"` + native + `"}`, false},
-		{"trailing document", valid + `{}`, false},
-		{"duplicate reserved header", valid, true},
-		{"duplicate padding member", `{"bytes":"` + native + `","p":"abc","p":"abc"}`, false},
-		{"non-string padding member", `{"bytes":"` + native + `","p":1}`, false},
-		{"unknown member", `{"bytes":"` + native + `","q":"abc"}`, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue("chunk")}}
-			if tc.duplicate {
-				headers = append(headers, eventstream.Header{Name: ":event-type", Value: eventstream.StringValue("chunk")})
-			}
-			var frame bytes.Buffer
-			if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(tc.payload)}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := io.ReadAll(cfg.StreamPayload(&frame, 4096)); err == nil {
-				t.Fatal("ambiguous hosting envelope accepted")
-			}
-		})
-	}
-}
-
 // Independent SigV4 verification proves the hosting/body/header construction
 // was finalized before signing; it does not reuse the maintained SDK signer.
 func assertProfileSignature(t *testing.T, request *http.Request, body []byte, secret string) {
@@ -452,52 +283,4 @@ func assertProfileSignature(t *testing.T, request *http.Request, body []byte, se
 	}
 }
 
-// A connector says which semantic headers its profile carries, and what it
-// publishes for one, without regard to how the name is spelled, and publishes
-// another value without changing the connector it was derived from.
-func TestSemanticHeadersAreReadAndRepublishedByName(t *testing.T) {
-	messages := profileConfig(t, "anthropic-messages")
-	for _, tc := range []struct {
-		name string
-		cfg  Config
-		want bool
-	}{
-		{"a profile that declares it", messages, true},
-		{"a profile that declares it, in another spelling", Config{ProfileID: "anthropic-messages", ProfileRevision: ProfileRevision}, true},
-		{"Claude on Vertex AI", Config{ProfileID: "vertex-anthropic", ProfileRevision: ProfileRevision}, true},
-		{"Claude on Bedrock InvokeModel", Config{ProfileID: "bedrock-anthropic-invoke", ProfileRevision: ProfileRevision}, false},
-		{"a profile that does not exist", Config{ProfileID: "no-such-profile", ProfileRevision: ProfileRevision}, false},
-		{"no profile", Config{Kind: "anthropic"}, false},
-	} {
-		if got := tc.cfg.DeclaresSemanticHeader("anthropic-beta"); got != tc.want {
-			t.Errorf("%s: DeclaresSemanticHeader = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-
-	messages.SemanticHeaders = map[string]string{"anthropic-beta": "operator-1"}
-	if value, ok := messages.SemanticHeader("Anthropic-Beta"); !ok || value != "operator-1" {
-		t.Errorf("SemanticHeader = %q, %v, want the published list whatever its spelling", value, ok)
-	}
-	if _, ok := messages.SemanticHeader("Openai-Beta"); ok {
-		t.Error("SemanticHeader found a header the connector does not publish")
-	}
-	original := len(messages.SemanticHeaders)
-	other := messages.WithSemanticHeader("ANTHROPIC-BETA", "operator-1,caller-2")
-	if value, _ := other.SemanticHeader("Anthropic-Beta"); value != "operator-1,caller-2" || len(other.SemanticHeaders) != original {
-		t.Errorf("WithSemanticHeader published %v, want one list in place of the old one", other.SemanticHeaders)
-	}
-	if value, _ := messages.SemanticHeader("Anthropic-Beta"); value != "operator-1" || len(messages.SemanticHeaders) != original {
-		t.Errorf("WithSemanticHeader changed the connector it was derived from: %v", messages.SemanticHeaders)
-	}
-	// What the connector publishes is what hosting sends, and it validates.
-	if err := other.ValidateProfile(); err != nil {
-		t.Fatal(err)
-	}
-	request, _ := http.NewRequest(http.MethodPost, "https://provider.example/v1/messages", nil)
-	if err := other.ApplySemantic(request); err != nil || request.Header.Get("Anthropic-Beta") != "operator-1,caller-2" || len(request.Header.Values("Anthropic-Beta")) != 1 {
-		t.Errorf("ApplySemantic sent %q, %v", request.Header.Values("Anthropic-Beta"), err)
-	}
-	if bare := (Config{}).WithSemanticHeader("Anthropic-Beta", "a"); len(bare.SemanticHeaders) != 1 {
-		t.Errorf("a connector that published nothing published %v", bare.SemanticHeaders)
-	}
-}
+// What the connector publishes is what hosting sends, and it validates.

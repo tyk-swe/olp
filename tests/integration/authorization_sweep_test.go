@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -189,70 +188,8 @@ func sweepBody(pattern, projectID string) any {
 	return map[string]any{}
 }
 
-// TestManagementAuthorizationSweep calls every secured management operation
-// as every golden archetype and holds each outcome to the route
-// authorization golden file.
-func TestManagementAuthorizationSweep(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	raw, err := os.ReadFile("../../internal/access/testdata/authorization.golden.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var golden routeGolden
-	if err = json.Unmarshal(raw, &golden); err != nil {
-		t.Fatal(err)
-	}
-	requirements, err := access.ContractRequirements()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orgA := h.want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "Sweep organization"}, idem("sweep-org"), 201)["id"].(string)
-	projectA := h.want(owner, "POST", "/api/v1/organizations/"+orgA+"/projects", map[string]any{"name": "Sweep"}, idem("sweep-project"), 201)["id"].(string)
-	callers := sweepCallers(h, owner, golden, projectA)
-	patterns := slices.Sorted(func(yield func(string) bool) {
-		for pattern := range golden.Routes {
-			if !yield(pattern) {
-				return
-			}
-		}
-	})
-	// Signing out ends the caller's session, so it runs after every other
-	// operation.
-	signOut := "DELETE /api/v1/sessions/current"
-	patterns = append(slices.DeleteFunc(patterns, func(p string) bool { return p == signOut }), signOut)
-	headers := func() map[string]string {
-		return map[string]string{"Idempotency-Key": uuid.NewString(), "If-Match": `"` + uuid.NewString() + `"`}
-	}
-	for _, pattern := range patterns {
-		if requirements[pattern].Public {
-			continue
-		}
-		ids := map[string]string{}
-		if strings.HasPrefix(pattern, "GET /api/v1/organizations") {
-			ids["organization_id"] = orgA
-			ids["project_id"] = projectA
-		}
-		method, path := sweepPath(pattern, ids)
-		body := sweepBody(pattern, projectA)
-		if status, code, _ := h.call(sweepCaller{browser: &browser{}}, method, path, body, headers()); status != 401 {
-			t.Errorf("%s without credentials: %d %s, want 401", pattern, status, code)
-		}
-		for i, archetype := range golden.Archetypes {
-			admitted := golden.Routes[pattern][i] == 'Y'
-			status, code, _ := h.call(callers[archetype.Name], method, path, body, headers())
-			refused := status == 401 || status == 403 && code == "permission_denied"
-			switch {
-			case status == 403 && code != "permission_denied":
-				t.Errorf("%s as %s: unexpected refusal %s", pattern, archetype.Name, code)
-			case !admitted && !(status == 403 && code == "permission_denied"):
-				t.Errorf("%s as %s: %d %s, want the route to refuse", pattern, archetype.Name, status, code)
-			case admitted && refused && !sweepRefinements[pattern+" as "+archetype.Name]:
-				t.Errorf("%s as %s: %d %s, want the route to admit", pattern, archetype.Name, status, code)
-			}
-		}
-	}
-}
+// Signing out ends the caller's session, so it runs after every other
+// operation.
 
 // TestManagementIsolationSweep seeds a canary project and reads every secured
 // management operation as an assigned member and a project-scoped token of

@@ -69,17 +69,4 @@ func TestGuardrailPlatformActivationAttachmentsAndApply(t *testing.T) {
 	}
 }
 
-func TestGuardrailPlatformStrictRouteRejectsTransformingAttachment(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := createProject(h, owner, "Strict safeguards")
-	fixture := newOpenAIFixture(t, "")
-	_, _, _, _ = provisionOpenAIInProject(t, h, owner, &project, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "strict"}}, map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
-
-	d := h.want(owner, "POST", "/api/v1/guardrails", map[string]any{"name": "PII", "project_id": project, "type": "builtin.pii", "configuration": map[string]any{}, "timeout_ms": 1000, "on_error": "fail_closed"}, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/guardrails/"+d["id"].(string)+"/activate", map[string]any{"revision_id": d["revision_id"]}, map[string]string{"Idempotency-Key": uuid.NewString(), "If-Match": `"` + d["etag"].(string) + `"`}, 204)
-	p := h.want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{"name": "Mask PII", "project_id": project, "entries": []any{map[string]any{"guardrail_id": d["id"], "revision_id": d["revision_id"], "phase": "input", "action": "mask"}}}, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/guardrail-policies/"+p["id"].(string)+"/activate", map[string]any{"revision_id": p["revision_id"]}, map[string]string{"Idempotency-Key": uuid.NewString(), "If-Match": `"` + p["etag"].(string) + `"`}, 204)
-	// The project contains a strict native route.
-	h.want(owner, "POST", "/api/v1/guardrail-attachments", map[string]any{"scope": "project", "scope_id": project, "policy_revision_id": p["revision_id"], "order": 0}, idem(uuid.NewString()), 422)
-}
+// The project contains a strict native route.

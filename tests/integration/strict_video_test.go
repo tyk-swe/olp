@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -20,9 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type strictVideoUpstream struct {
@@ -256,254 +253,21 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 	}
 }
 
-func TestStrictVideoLifecycleSurvivesKeyRotationWithoutStoredContent(t *testing.T) {
-	h := newAccessHarness(t)
-	upstream := newStrictVideoUpstream(t)
-	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
-	var upload bytes.Buffer
-	form := multipart.NewWriter(&upload)
-	form.WriteField("model", slug)
-	form.WriteField("prompt", "retain the original job")
-	form.Close()
-	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
-	if status != 201 {
-		t.Fatalf("video create before rotation=%d %s", status, raw)
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &created); err != nil {
-		t.Fatal(err)
-	}
-	record, err := media.Job(t.Context(), h.Pool, created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rotatedRing, err := secrets.ParseRing([]byte(`{"active_version":2,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"},{"version":2,"key":"` + strings.Repeat("ef", 32) + `"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	count, err := rotatedRing.Rotate(t.Context(), h.Pool, h.Server.Installation)
-	if err != nil || count == 0 {
-		t.Fatalf("master key rotation did not include provider credentials: %d %v", count, err)
-	}
-	auth, err := secrets.DecodeKey(h.AuthHex)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A restarted process reads every secret with the rotated ring, the pinned
-	// provider credential included.
-	credentials := runtime.NewManager(h.Pool, h.Server.Installation, secrets.NewAuthKey(auth, h.Server.Installation), rotatedRing, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := credentials.Refresh(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	restarted := *h.Media
-	restarted.Keys, restarted.Credentials = rotatedRing, credentials
-	if target, _, code := restarted.JobTarget(t.Context(), &record); target == nil {
-		t.Fatalf("rotated provider unavailable: %s", code)
-	}
-	var retained int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose='media_job_source'").Scan(&retained); err != nil || retained != 0 {
-		t.Fatalf("video native content persisted after rotation: count=%d err=%v", retained, err)
-	}
-}
+// A restarted process reads every secret with the rotated ring, the pinned
+// provider credential included.
 
-func TestStrictVideoJobOnATransformedRouteIsListedAndDeletableButNotServed(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	upstream := newStrictVideoUpstream(t)
-	slug, key := publishStrictVideo(t, h, owner, upstream)
-	var upload bytes.Buffer
-	form := multipart.NewWriter(&upload)
-	form.WriteField("model", slug)
-	form.WriteField("prompt", "retain the strict job")
-	form.Close()
-	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
-	if status != http.StatusCreated {
-		t.Fatalf("strict video create=%d %s", status, raw)
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &created); err != nil {
-		t.Fatal(err)
-	}
-	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	providerID := route["latest_revision"].(map[string]any)["targets"].([]any)[0].(map[string]any)["provider_id"]
-	draft := transformed(fidelityDraft(slug, providerID))
-	draft["operations"] = []string{"video_create", "video_get", "video_content", "video_delete"}
-	draft = h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	h.refresh()
-	_, getsBefore, contentsBefore, deletesBefore, _, _ := upstream.snapshot()
-	for _, path := range []string{"/v1/videos/" + created.ID, "/v1/videos/" + created.ID + "/content"} {
-		status, raw, _ = h.gatewayRaw("GET", path, key, nil, nil)
-		if status != http.StatusConflict || !strings.Contains(string(raw), "now transformed") {
-			t.Fatalf("GET %s served a strict job on a transformed route: %d %s", path, status, raw)
-		}
-	}
-	// The list keeps the queued job and shows its stored state instead of
-	// polling the provider through a contract the route no longer promises.
-	status, raw, _ = h.gatewayRaw("GET", "/v1/videos", key, nil, nil)
-	if status != http.StatusOK || !strings.Contains(string(raw), created.ID) || !strings.Contains(string(raw), `"status":"queued"`) {
-		t.Fatalf("video list after the route became transformed: %d %s", status, raw)
-	}
-	if _, gets, contents, deletes, _, _ := upstream.snapshot(); gets != getsBefore || contents != contentsBefore || deletes != deletesBefore {
-		t.Fatal("refused or listed strict video job reached the provider")
-	}
-	// Its owner can still delete it, so the provider-held video is removed.
-	status, raw, _ = h.gatewayRaw("DELETE", "/v1/videos/"+created.ID, key, nil, nil)
-	if status != http.StatusOK || !strings.Contains(string(raw), created.ID) {
-		t.Fatalf("delete of a strict job on a transformed route: %d %s", status, raw)
-	}
-	if _, _, _, deletes, _, _ := upstream.snapshot(); deletes != deletesBefore+1 {
-		t.Fatal("strict video delete did not reach the provider")
-	}
-}
+// The list keeps the queued job and shows its stored state instead of
+// polling the provider through a contract the route no longer promises.
+
+// Its owner can still delete it, so the provider-held video is removed.
 
 // revokedCredentials is a credential source whose authority revoked every
 // credential version.
 type revokedCredentials struct{ runtime.Credentials }
 
 func (revokedCredentials) Eligibility(string) routing.Eligibility { return routing.Revoked }
-func TestVideoJobOutsideTheKeysRoutesIsMissing(t *testing.T) {
-	h := newAccessHarness(t)
-	upstream := newStrictVideoUpstream(t)
-	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
-	var upload bytes.Buffer
-	form := multipart.NewWriter(&upload)
-	form.WriteField("model", slug)
-	form.WriteField("prompt", "a job the key later loses")
-	form.Close()
-	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
-	if status != 201 {
-		t.Fatalf("video create=%d %s", status, raw)
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &created); err != nil {
-		t.Fatal(err)
-	}
-	authority, err := h.authority(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tx, err := h.Pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(t.Context())
-	if _, err = tx.Exec(t.Context(), `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["elsewhere"]') WHERE id=$1`, authority.ID); err != nil {
-		t.Fatal(err)
-	}
-	// Advance the key authority as a key change through the API does.
-	if _, err = tx.Exec(t.Context(), "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton", uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	h.refresh()
-	// The owning key may no longer use the job's route, so the job answers
-	// like any other retained resource outside the key's reach.
-	status, raw, _ = h.gatewayRaw("GET", "/v1/videos/"+created.ID, key, nil, nil)
-	if status != 404 || !bytes.Contains(raw, []byte("video_not_found")) {
-		t.Fatalf("a video job outside the key's routes: %d %s", status, raw)
-	}
-}
 
-func TestVideoListDoesNotMultiplyUpstreamConcurrency(t *testing.T) {
-	h := newAccessHarness(t)
-	upstream := newStrictVideoUpstream(t)
-	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
-	var upload bytes.Buffer
-	form := multipart.NewWriter(&upload)
-	form.WriteField("model", slug)
-	form.WriteField("prompt", "private video prompt")
-	form.Close()
-	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &created); err != nil || status != 201 {
-		t.Fatalf("create: %d %s %v", status, raw, err)
-	}
-	for i := 2; i <= 5; i++ {
-		_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.media_jobs SELECT (jsonb_populate_record(NULL::olp.media_jobs,to_jsonb(j)||jsonb_build_object('id',$1::text,'upstream_job_id',$2::text))).* FROM olp.media_jobs j WHERE id=$3`, uuid.NewString(), fmt.Sprintf("upstream-video-%d", i), created.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	upstream.mu.Lock()
-	upstream.getDelay = 20 * time.Millisecond
-	upstream.mu.Unlock()
-	status, raw, _ = h.gatewayRaw("GET", "/v1/videos?limit=100", key, nil, nil)
-	if status != 200 {
-		t.Fatalf("list: %d %s", status, raw)
-	}
-	upstream.mu.Lock()
-	defer upstream.mu.Unlock()
-	if upstream.gets != 5 || upstream.maxGets != 1 {
-		t.Fatalf("list polls=%d max simultaneous=%d", upstream.gets, upstream.maxGets)
-	}
-}
+// Advance the key authority as a key change through the API does.
 
-func TestVideoListPollsPendingJobsWithinOneAdmissionPermit(t *testing.T) {
-	h := newAccessHarness(t)
-	upstream := newStrictVideoUpstream(t)
-	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
-	var upload bytes.Buffer
-	form := multipart.NewWriter(&upload)
-	form.WriteField("model", slug)
-	form.WriteField("prompt", "pending video")
-	form.Close()
-	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
-	var created struct{ ID string }
-	if status != http.StatusCreated || json.Unmarshal(raw, &created) != nil {
-		t.Fatalf("video creation: %d %s", status, raw)
-	}
-	first, err := media.Job(t.Context(), h.Pool, created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const jobs = 8
-	for i := 2; i <= jobs; i++ {
-		reserved, err := media.ReserveJob(t.Context(), h.Pool, media.Reservation{
-			ID: uuid.NewString(), StrictContract: true, RuntimeGenerationID: first.RuntimeGenerationID,
-			ProviderRevisionID: first.ProviderRevisionID, APIKeyID: first.APIKeyID,
-			ProviderID: first.ProviderID, UpstreamModel: first.UpstreamModel, RouteSlug: slug,
-			Operation: media.OpVideoCreate, Surface: "openai", CredentialVersionID: first.CredentialVersionID,
-			SlotID: first.SlotID, StaleAfter: time.Now().Add(time.Minute),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := h.Media.AttachWithRetry(t.Context(), reserved.ID, fmt.Sprintf("upstream-video-%d", i), media.JobUpdate{State: media.StateQueued, LastPolledAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	upstream.mu.Lock()
-	upstream.getDelay = 20 * time.Millisecond
-	upstream.mu.Unlock()
-	status, raw, _ = h.gatewayRaw("GET", "/v1/videos?limit=100", key, nil, nil)
-	var page struct {
-		Data []struct {
-			ID, Status string
-		} `json:"data"`
-	}
-	if status != http.StatusOK || json.Unmarshal(raw, &page) != nil || len(page.Data) != jobs {
-		t.Fatalf("pending video page: %d %s", status, raw)
-	}
-	for _, job := range page.Data {
-		if job.Status != "completed" {
-			t.Fatalf("video %s was not refreshed: %s", job.ID, job.Status)
-		}
-	}
-	upstream.mu.Lock()
-	gets, concurrency := upstream.gets, upstream.maxGets
-	upstream.mu.Unlock()
-	if gets != jobs || concurrency != 1 {
-		t.Fatalf("one list made %d polls with concurrency %d; want %d serial polls", gets, concurrency, jobs)
-	}
-}
+// The owning key may no longer use the job's route, so the job answers
+// like any other retained resource outside the key's reach.

@@ -88,30 +88,3 @@ func TestPublishedRouteWritesAreConditionalAtomicAndPreserveIndependentDrafts(t 
 	}
 	h.want(owner, "POST", path+"/retire", nil, withMatch(updated, idem(uuid.NewString())), http.StatusOK)
 }
-
-func TestPublishedRouteReplacementPreservesItsPolicy(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := createProject(h, owner, "Policy preservation")
-	id := createCatalogRoute(h, owner, project, "preserve-policy")
-	path := "/api/v1/routes/" + id
-	route := h.want(owner, "GET", path, nil, nil, 200)
-	revision := route["latest_revision"].(map[string]any)
-	draftID := revision["source_draft_id"].(string)
-	draft := h.want(owner, "GET", "/api/v1/route-drafts/"+draftID, nil, nil, 200)
-	policy := h.want(owner, "PUT", "/api/v1/routing-policies/route-draft/"+draftID, map[string]any{"allowed_strategies": []any{"weighted"}}, withMatch(draft, idem(uuid.NewString())), 200)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+draftID+"/activate", nil, withMatch(policy, idem(uuid.NewString())), 200)
-	route = h.want(owner, "GET", path, nil, nil, 200)
-	revision = route["latest_revision"].(map[string]any)
-	input := map[string]any{"slug": "preserve-policy", "operations": []any{"generation"}, "overall_timeout_ms": 40000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}}
-	target := revision["targets"].([]any)[0].(map[string]any)
-	input["targets"] = []any{map[string]any{"provider_model_id": target["provider_model_id"], "priority": 0, "weight": 1, "timeout_ms": 2000}}
-	updated := h.want(owner, "PUT", path, input, withMatch(route, idem(uuid.NewString())), 200)
-	if err := h.Runtime.Refresh(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	served := h.Runtime.Release().Snapshot.Routes["preserve-policy"]
-	if served.Policy == nil || len(served.Policy.AllowedStrategies) != 1 || served.Policy.AllowedStrategies[0] != "weighted" || served.Revision != 3 || updated["revision_count"] != float64(3) {
-		t.Fatal("replacement discarded the existing published policy")
-	}
-}

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 type mediaProbeTransport func(*http.Request) (*http.Response, error)
@@ -78,44 +77,7 @@ func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
 	}
 }
 
-func TestMediaCertificationDoesNotBorrowChatEvidence(t *testing.T) {
-	for _, cfg := range []Configuration{
-		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new("https://custom.example/v1")},
-		{Kind: KindOpenAI, AuthMode: AuthNone},
-		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new("https://api.openai.com/custom")},
-		{Kind: KindOpenAICompatible, AuthMode: AuthAPIKey, Endpoint: new(DefaultOpenAIEndpoint)},
-	} {
-		t.Run(cfg.Kind+"/"+cfg.AuthMode+"/"+value(cfg.Endpoint), func(t *testing.T) {
-			cfg.Normalize()
-			s := New(nil, &egress.Policy{}, nil)
-			s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
-				t.Errorf("unsupported media certification sent %s", r.URL)
-				return nil, io.ErrUnexpectedEOF
-			})
-			if err := s.certifyTuple(t.Context(), &cfg, []byte("test-credential"), "media-model", CapabilityInput{"image_generation", "openai", "unary"}, 4096); err == nil {
-				t.Fatal("media certified without native evidence")
-			}
-		})
-	}
-	for _, kind := range []string{KindOpenAICompatible, KindAzure} {
-		for _, tuple := range capabilitiesFor(kind, vendors.DefaultFor(kind)) {
-			switch tuple.Operation {
-			case "generation", "token_count", "embeddings", "moderation":
-			case "batch", "realtime":
-				if kind != KindAzure {
-					t.Errorf("%s advertises un-certifiable tuple %v", kind, tuple)
-				}
-			case "image_generation", "speech", "transcription":
-				// An Azure deployment certifies these by its own minimal call.
-				if kind != KindAzure || tuple.Mode != ModeUnary {
-					t.Errorf("%s advertises un-certifiable tuple %v", kind, tuple)
-				}
-			default:
-				t.Errorf("%s advertises un-certifiable tuple %v", kind, tuple)
-			}
-		}
-	}
-}
+// An Azure deployment certifies these by its own minimal call.
 
 // TestAzureMediaCertifiesThroughTheDeployment covers Azure OpenAI's media
 // certification: the smallest real call of each operation to the

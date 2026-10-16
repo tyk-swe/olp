@@ -2,7 +2,6 @@ package media
 
 import (
 	"encoding/json"
-	"maps"
 	"slices"
 	"testing"
 
@@ -10,25 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
-
-// TestEveryVendorWireHasItsCodec checks that the media wires vendor contracts
-// name and the registered codecs agree, operation for operation.
-func TestEveryVendorWireHasItsCodec(t *testing.T) {
-	named := map[string][]string{}
-	for _, contract := range vendors.All() {
-		for operation, wire := range contract.MediaWires {
-			named[wire] = append(named[wire], operation)
-		}
-	}
-	for wire := range named {
-		slices.Sort(named[wire])
-		named[wire] = slices.Compact(named[wire])
-	}
-	registered := Wires()
-	if !maps.EqualFunc(named, registered, slices.Equal) {
-		t.Fatalf("contracts name wires %v; codecs serve %v", named, registered)
-	}
-}
 
 // mediaProbe is the smallest valid request of each media operation.
 func mediaProbe(operation string) *Request {

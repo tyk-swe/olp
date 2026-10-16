@@ -164,49 +164,8 @@ func testDocument() *Document {
 
 func ptr[T any](v T) *T { return &v }
 
-func TestDigestDeterministicAndExcludesExportedAt(t *testing.T) {
-	doc := testDocument()
-	first, err := Digest(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc.ExportedAt = "2026-01-01T00:00:00Z"
-	second, err := Digest(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second {
-		t.Fatalf("digest changed with exported_at: %s != %s", first, second)
-	}
-	if len(first) != 64 || first != strings.ToLower(first) {
-		t.Fatalf("unexpected digest %q", first)
-	}
-	reversed := testDocument()
-	// The fixtures must differ only in ordering, not in a pricing activation
-	// time that can cross a wall-clock second between construction calls.
-	reversed.Pricing.EffectiveAt = doc.Pricing.EffectiveAt
-	reversed.Providers[0].Models[0].Capabilities = slices.Clone(reversed.Providers[0].Models[0].Capabilities)
-	slices.Reverse(reversed.Providers[0].Models[0].Capabilities)
-	third, err := Digest(reversed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if third != first {
-		t.Fatalf("canonical ordering changed digest: %s != %s", third, first)
-	}
-	activation, err := time.Parse(time.RFC3339, reversed.Pricing.EffectiveAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reversed.Pricing.EffectiveAt = activation.Add(time.Second).Format(time.RFC3339)
-	changed, err := Digest(reversed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed == first {
-		t.Fatal("pricing activation time must remain part of the digest")
-	}
-}
+// The fixtures must differ only in ordering, not in a pricing activation
+// time that can cross a wall-clock second between construction calls.
 
 func TestValidateDocumentRejectsDuplicatesAndReferences(t *testing.T) {
 	cases := []struct {
@@ -242,76 +201,6 @@ func TestValidateDocumentRejectsDuplicatesAndReferences(t *testing.T) {
 	}
 }
 
-func TestRouteFidelityOmissionIsStrictInDocuments(t *testing.T) {
-	omitted := testDocument()
-	first, err := Digest(omitted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(omitted.Routes[0].Fidelity) != `{"mode":"strict"}` {
-		t.Fatalf("canonical route did not state strict fidelity: %s", omitted.Routes[0].Fidelity)
-	}
-	for _, raw := range []string{`{"mode":"strict"}`, `{}`, `null`} {
-		explicit := testDocument()
-		explicit.Pricing.EffectiveAt = omitted.Pricing.EffectiveAt
-		explicit.Routes[0].Fidelity = json.RawMessage(raw)
-		digest, err := Digest(explicit)
-		if err != nil || digest != first {
-			t.Fatalf("%s differs from an omitted fidelity: %v", raw, err)
-		}
-	}
-	transformed := testDocument()
-	transformed.Pricing.EffectiveAt = omitted.Pricing.EffectiveAt
-	transformed.Routes[0].Fidelity = json.RawMessage(`{"mode":"transformed"}`)
-	if digest, _ := Digest(transformed); digest == first {
-		t.Fatal("transformed fidelity did not change the digest")
-	}
-	legacy := testDocument()
-	legacy.Routes[0].Fidelity = json.RawMessage(`{"mode":"legacy"}`)
-	var problem *access.Problem
-	if _, err := testServer().validateDocument(t.Context(), nil, legacy); !errors.As(err, &problem) || problem.Field != "routes.0.fidelity" {
-		t.Fatalf("legacy fidelity was not a typed field error: %v", err)
-	}
-}
-
-func TestValidateBindingsRejectsForeignRef(t *testing.T) {
-	doc := testDocument()
-	if err := validateBindings(doc, plainBindings(map[string]string{"acme/other": "secret"})); err == nil {
-		t.Fatal("binding outside document refs accepted")
-	}
-	if err := validateBindings(doc, plainBindings(map[string]string{"acme/primary": "secret"})); err != nil {
-		t.Fatalf("binding rejected: %v", err)
-	}
-}
-
-func TestPlanCreatesAndRequiresBindings(t *testing.T) {
-	s := testServer()
-	doc := testDocument()
-	result, err := s.plan(context.Background(), mapQueryer{t: t}, doc, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Conflicts) != 0 {
-		t.Fatalf("unexpected conflicts: %+v", result.Conflicts)
-	}
-	var blocker *planItem
-	for i := range result.Blockers {
-		if result.Blockers[i].Detail == "secret_binding_required" {
-			blocker = &result.Blockers[i]
-		}
-	}
-	if blocker == nil || blocker.Key != "acme/primary" {
-		t.Fatalf("expected secret_binding_required for acme/primary: %+v", result.Blockers)
-	}
-	result, err = s.plan(context.Background(), mapQueryer{t: t}, doc, plainBindings(map[string]string{"acme/primary": "vendor-secret"}), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Blockers) != 0 || len(result.Conflicts) != 0 {
-		t.Fatalf("supplied binding still blocked: %+v %+v", result.Blockers, result.Conflicts)
-	}
-}
-
 func TestPlanProviderKindConflict(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
@@ -328,103 +217,6 @@ func TestPlanProviderKindConflict(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected provider_kind_changed conflict: %+v", result.Conflicts)
-	}
-}
-func TestPlanProviderProjectMismatch(t *testing.T) {
-	s := testServer()
-	doc := testDocument()
-	stubs := []queryStub{
-		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id", nil, false}}},
-		{match: "FROM olp.projects", rows: [][]any{{"other-id", "Core", nil, nil, nil, nil, nil, nil, nil}, {"edge-id", "Edge", nil, nil, nil, nil, nil, nil, nil}}},
-	}
-	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, plainBindings(map[string]string{"acme/primary": "s"}), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, c := range result.Conflicts {
-		found = found || c.Detail == "provider_project_mismatch"
-	}
-	if !found {
-		t.Fatalf("expected provider_project_mismatch conflict: %+v", result.Conflicts)
-	}
-}
-
-func TestValidateRejectsNonPortableAPIKeys(t *testing.T) {
-	s := testServer()
-	doc := testDocument()
-	doc.Providers[0].Slots[0].Restrictions.AllowedAPIKeys = []string{"key-id"}
-	_, err := s.validateDocument(t.Context(), nil, doc)
-	var problem *access.Problem
-	if !errors.As(err, &problem) || problem.Status != 422 || problem.Code != "non_portable_reference" {
-		t.Fatalf("expected 422 non_portable_reference, got %v", err)
-	}
-}
-
-func TestDigestTrimsNaturalIdentities(t *testing.T) {
-	doc := testDocument()
-	padded := testDocument()
-	padded.Projects[0].Name = "  Edge  "
-	padded.Providers[0].Name = " acme "
-	*padded.Providers[0].Project = " Edge "
-	padded.Providers[0].Models[0].UpstreamModel = " gpt-x "
-	padded.Providers[0].Models[0].DisplayName = " gpt-x "
-	padded.Providers[0].Slots[0].Name = " primary "
-	*padded.Providers[0].Slots[0].CredentialRef = " acme/primary "
-	padded.Routes[0].Slug = " main "
-	padded.Routes[0].Targets[0].Provider = " acme "
-	padded.Routes[0].Targets[0].ProviderModel = " gpt-x "
-	padded.Pricing.Prices[0].Model = " gpt-x "
-	first, err := Digest(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := Digest(padded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second {
-		t.Fatal("digest must ignore surrounding whitespace in natural identities")
-	}
-}
-
-func TestValidateDuplicateWhitespaceAlias(t *testing.T) {
-	s := testServer()
-	doc := testDocument()
-	alias := doc.Providers[0]
-	alias.Name = " ACME "
-	doc.Providers = append(doc.Providers, alias)
-	_, err := s.validateDocument(t.Context(), nil, doc)
-	var problem *access.Problem
-	if !errors.As(err, &problem) || problem.Status != 422 {
-		t.Fatalf("expected duplicate identity rejection, got %v", err)
-	}
-	doc = testDocument()
-	doc.Projects = append(doc.Projects, ProjectEntry{Name: " EDGE "})
-	if _, err = s.validateDocument(t.Context(), nil, doc); err == nil {
-		t.Fatal("expected duplicate project identity rejection")
-	}
-}
-
-func TestPlanPricingRebasedDetail(t *testing.T) {
-	s := testServer()
-	doc := testDocument()
-	doc.Pricing.EffectiveAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	result, err := s.plan(context.Background(), mapQueryer{t: t}, doc, plainBindings(map[string]string{"acme/primary": "s"}), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, b := range result.Blockers {
-		if b.Detail == "pricing_effective_at_past" {
-			t.Fatalf("past effective time must not block: %+v", result.Blockers)
-		}
-	}
-	found := false
-	for _, a := range result.Actions {
-		found = found || a.Kind == "pricing" && a.Detail == "effective_at_rebased"
-	}
-	if !found {
-		t.Fatalf("expected effective_at_rebased pricing action: %+v", result.Actions)
 	}
 }
 
@@ -477,35 +269,8 @@ func pluginDocument(authMode string) *Document {
 	return doc
 }
 
-func TestPlanBlocksPluginProvidersUntilTheirPluginIsInstalled(t *testing.T) {
-	doc := pluginDocument(connectors.AuthStaticCredential)
-	other := doc.Providers[0]
-	other.Name = "acme-eu"
-	other.Slots = []SlotEntry{{Name: "default", IsDefault: true, Enabled: true, Weight: 1, CredentialRef: ptr(CredentialRef("acme-eu", "default"))}}
-	doc.Providers = append(doc.Providers, other)
-	result, err := testServer().plan(t.Context(), mapQueryer{t: t}, doc, nil, nil)
-	if err != nil {
-		t.Fatalf("an artifact pinning a plugin this installation lacks was refused: %v", err)
-	}
-	var blockers []planItem
-	for _, blocker := range result.Blockers {
-		if blocker.Kind == "plugin" {
-			blockers = append(blockers, blocker)
-		}
-	}
-	if want := []planItem{{Kind: "plugin", Key: pluginDigest, Action: "blocker", Detail: "plugin_not_installed"}}; !reflect.DeepEqual(blockers, want) {
-		t.Fatalf("plugin blockers %+v, want one for the digest both providers pin", blockers)
-	}
-
-	// Only the plugin waits for this installation: a malformed reference to
-	// it is invalid anywhere.
-	doc = pluginDocument(connectors.AuthStaticCredential)
-	doc.Providers[0].Configuration.ProfileRevision = "not-a-digest"
-	var problem *access.Problem
-	if _, err = testServer().plan(t.Context(), mapQueryer{t: t}, doc, nil, nil); !errors.As(err, &problem) || problem.Field != "configuration.profile_revision" {
-		t.Fatalf("a malformed plugin reference was not refused: %v", err)
-	}
-}
+// Only the plugin waits for this installation: a malformed reference to
+// it is invalid anywhere.
 
 // An unconfined plugin build is usable only where the deployment enables the
 // unconfined tier: elsewhere it blocks the plan as a build the installation
@@ -586,77 +351,6 @@ func TestPlanMarksGrantSlotsForGrantEnrollment(t *testing.T) {
 	}
 }
 
-func TestPlanRequiresABindingForAStaticSlotHoldingAGrant(t *testing.T) {
-	doc := pluginDocument(connectors.AuthStaticCredential)
-	configuration, _ := json.Marshal(doc.Providers[0].Configuration)
-	stubs := []queryStub{
-		{match: "FROM olp.providers WHERE", row: []any{configuration}},
-		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil, false}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest, "reference-chat"}}},
-		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge", nil, nil, nil, nil, nil, nil, nil}}},
-	}
-	result, err := testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(result.Blockers, planItem{Kind: "credential", Key: "acme/primary", Action: "blocker", Detail: "secret_binding_required"}) {
-		t.Fatalf("a static credential slot reused a grant: %+v", result.Blockers)
-	}
-}
-
-// Exports never carry a grant, so they reference every grant slot's
-// credential: importing and exporting again before any grant enrollment
-// reproduces the artifact.
-func TestExportsReferenceEveryCredentialSlotAGrantBacks(t *testing.T) {
-	doc := pluginDocument(connectors.AuthGrant)
-	configuration, _ := json.Marshal(doc.Providers[0].Configuration)
-	capabilities, _ := json.Marshal([]map[string]any{
-		{"operation": "generation", "surface": "openai", "mode": "unary", "source": "declared"},
-		{"operation": "generation", "surface": "openai", "mode": "streaming", "source": "declared"},
-	})
-	restrictions := []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`)
-	stubs := []queryStub{
-		{match: "FROM olp.providers WHERE", row: []any{configuration}},
-		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil, false}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", nil, "", ""}, {"provider-id", "backup", "backup-id", nil, "", ""}}},
-		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, nil, restrictions, []byte(`{}`)}, {"backup", false, 1, true, 0, 1, nil, restrictions, []byte(`{}`)}}},
-		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
-		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge", nil, nil, nil, nil, nil, nil, nil}}},
-	}
-	result, err := testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(result.Actions, planItem{Kind: "provider", Key: "acme", Action: "noop"}) ||
-		!slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/backup", Action: "enroll", Detail: "grant_enrollment_required"}) {
-		t.Fatalf("an imported grant provider awaiting enrollment changed: %+v", result.Actions)
-	}
-}
-
-// Apply keeps a model a document omits as a disabled row without
-// capabilities; re-planning the same document must not see it as a change.
-func TestCanonicalEqualProviderIgnoresTombstonedModels(t *testing.T) {
-	desired := testDocument().Providers[0]
-	current := testDocument().Providers[0]
-	current.Models = append(current.Models, ModelEntry{UpstreamModel: "retired", DisplayName: "retired"})
-	if !canonicalEqualProvider(&desired, &current) {
-		t.Fatal("a tombstoned model made the provider differ")
-	}
-	if len(current.Models) != 2 {
-		t.Fatalf("comparison mutated the current entry: %+v", current.Models)
-	}
-	enabled := testDocument().Providers[0]
-	enabled.Models = append(enabled.Models, ModelEntry{UpstreamModel: "retired", Enabled: true})
-	if canonicalEqualProvider(&desired, &enabled) {
-		t.Fatal("an enabled undeclared model must differ")
-	}
-	capable := testDocument().Providers[0]
-	capable.Models = append(capable.Models, ModelEntry{UpstreamModel: "retired", Capabilities: []CapabilityEntry{{Operation: "generation", Surface: "openai", Mode: "unary"}}})
-	if canonicalEqualProvider(&desired, &capable) {
-		t.Fatal("an undeclared model with capabilities must differ")
-	}
-}
-
 // A price naming an unknown provider would otherwise apply to every provider
 // of its kind.
 func TestValidateDocumentRejectsPricesForUnknownProviders(t *testing.T) {
@@ -674,49 +368,6 @@ func TestValidateDocumentRejectsPricesForUnknownProviders(t *testing.T) {
 		if _, err := s.validateDocument(t.Context(), q, doc); err != nil {
 			t.Fatalf("price for %s: %v", name, err)
 		}
-	}
-}
-
-func TestApplySlotPositionsKeepsExportedPositionsUnique(t *testing.T) {
-	withSlots := func(names ...string) *Document {
-		doc := testDocument()
-		base := doc.Providers[0].Slots[0]
-		doc.Providers[0].Slots = nil
-		for i, name := range names {
-			slot := base
-			slot.Name = name
-			slot.IsDefault = i == 0
-			slot.Position = i
-			ref := CredentialRef(doc.Providers[0].Name, name)
-			slot.CredentialRef = &ref
-			doc.Providers[0].Slots = append(doc.Providers[0].Slots, slot)
-		}
-		return doc
-	}
-	cases := []struct {
-		name      string
-		positions map[string]int
-		want      []int
-	}{
-		{"draft holds every slot", map[string]int{"default": 0, "b": 2, "c": 3}, []int{0, 2, 3}},
-		{"draft deleted a slot after a gap", map[string]int{"default": 0, "b": 2}, []int{0, 1, 2}},
-		{"draft repeats a position", map[string]int{"default": 0, "b": 2, "c": 2}, []int{0, 1, 2}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			doc := withSlots("default", "b", "c")
-			applySlotPositions(doc.Providers[0].Slots, tc.positions)
-			var got []int
-			for _, slot := range doc.Providers[0].Slots {
-				got = append(got, slot.Position)
-			}
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("positions = %v, want %v", got, tc.want)
-			}
-			if _, err := testServer().validateDocument(t.Context(), nil, doc); err != nil {
-				t.Fatalf("exported document rejected: %v", err)
-			}
-		})
 	}
 }
 

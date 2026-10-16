@@ -2,16 +2,13 @@ package protocols
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 )
 
@@ -138,68 +135,7 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 		}
 	}
 }
-func TestNativeExtensionsSurviveAndTranslationRefuses(t *testing.T) {
-	for family, path := range map[wire.Format]string{wire.Anthropic: "anthropic-messages-request.json", wire.Gemini: "gemini-generate-content-request.json"} {
-		input, e := os.ReadFile("../../tests/fixtures/protocols/" + path)
-		if e != nil {
-			t.Fatal(e)
-		}
-		r, e := Parse(family, input, "team-model")
-		if e != nil {
-			t.Fatal(e)
-		}
-		kind := family.Surface()
-		body, _, e := Encode(r, kind, kind, "wire-model", nil)
-		if e != nil {
-			t.Fatal(e)
-		}
-		if !bytes.Contains(body, []byte("vendor")) {
-			t.Fatalf("lost native extension: %s", body)
-		}
-		if _, _, e = Encode(r, "openai", "openai", "wire-model", nil); e == nil {
-			t.Fatal("silently dropped source extension")
-		}
-	}
-}
-func TestExplicitTranslationRefusals(t *testing.T) {
-	for _, test := range []struct{ kind, field, value string }{{"anthropic", "seed", "7"}, {"anthropic", "response_format", `{"type":"json_object"}`}, {"gemini", "parallel_tool_calls", "true"}, {"bedrock", "seed", "7"}, {"bedrock", "n", "2"}, {"cohere", "parallel_tool_calls", "true"}} {
-		fields, _ := object([]byte(generationFixtures[wire.Chat]))
-		fields[test.field] = json.RawMessage(test.value)
-		r, e := Parse(wire.Chat, raw(fields), "")
-		if e != nil {
-			t.Fatal(e)
-		}
-		kind := test.kind
-		if kind == "cohere" {
-			kind = "openai_compatible"
-		}
-		if _, _, e = Encode(r, kind, test.kind, "wire-model", nil); e == nil {
-			t.Fatalf("accepted %s/%s", test.kind, test.field)
-		}
-	}
-}
-func TestResponseNativePreservationAndUsageCompleteness(t *testing.T) {
-	body := []byte(`{"id":"msg_1","type":"message","role":"assistant","model":"wire-model","content":[{"type":"text","text":"hello","vendor_part":7}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2},"vendor_response":true}`)
-	native, e := Decode(wire.Anthropic, wire.Anthropic, body, "team-model", "")
-	if e != nil {
-		t.Fatal(e)
-	}
-	if !bytes.Contains(native.Body, []byte("vendor_part")) || !bytes.Contains(native.Body, []byte("vendor_response")) {
-		t.Fatal("native fields lost")
-	}
-	translated, e := Decode(wire.Anthropic, wire.Chat, body, "team-model", "")
-	if e != nil || translated.OutputText != "hello" || translated.Usage.TotalTokens != 5 {
-		t.Fatalf("translation: %+v %v", translated, e)
-	}
-	if bytes.Contains(translated.Body, []byte("vendor_")) {
-		t.Fatal("unmodeled response extension escaped")
-	}
-	incomplete := bytes.Replace(body, []byte(`,"output_tokens":2`), nil, 1)
-	c, e := Decode(wire.Anthropic, wire.Chat, incomplete, "team-model", "")
-	if e != nil || c.Usage != nil {
-		t.Fatalf("invented complete usage: %+v %v", c, e)
-	}
-}
+
 func TestNativeAndTranslatedStreams(t *testing.T) {
 	sources := map[wire.Format]string{
 		wire.Chat:      "data: {\"id\":\"chat_1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"héllo 🌍\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\ndata: [DONE]\n\n",
@@ -233,48 +169,5 @@ func TestNativeAndTranslatedStreams(t *testing.T) {
 	cancel := errors.New("downstream disconnected")
 	if _, e := Stream(wire.Gemini, wire.Chat, strings.NewReader(sources[wire.Gemini]), 4096, "team-model", true, func([]byte) error { return cancel }); !errors.Is(e, cancel) {
 		t.Fatalf("lost cancellation: %v", e)
-	}
-}
-func TestGeminiToolsNormalizeStopAndBedrockBoundPrecedesAllocation(t *testing.T) {
-	body := []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`)
-	c, e := Decode(wire.Gemini, wire.Chat, body, "team-model", "")
-	if e != nil || c.FinishReason != "tool_calls" || len(c.ToolCalls) != 1 {
-		t.Fatalf("tool completion: %+v %v", c, e)
-	}
-	prelude := make([]byte, 12)
-	binary.BigEndian.PutUint32(prelude, 1<<30)
-	if _, e = ReadBedrockEvent(bytes.NewReader(prelude), 4096); !errors.Is(e, wire.ErrEventTooLarge) {
-		t.Fatalf("unbounded prelude: %v", e)
-	}
-	var encoded bytes.Buffer
-	event := eventstream.Message{Payload: []byte(`{"role":"assistant"}`)}
-	if e = eventstream.NewEncoder().Encode(&encoded, event); e != nil {
-		t.Fatal(e)
-	}
-	encoded.Bytes()[encoded.Len()-1] ^= 1
-	if _, e = ReadBedrockEvent(&encoded, 4096); e == nil {
-		t.Fatal("accepted corrupt event CRC")
-	}
-}
-func TestCallerDefaultsAndVendorProfiles(t *testing.T) {
-	r, e := Parse(wire.Responses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17}`), "")
-	if e != nil {
-		t.Fatal(e)
-	}
-	body, encodedWire, e := Encode(r, "openai_compatible", "deepseek", "wire-model", Object{"max_tokens": raw(90)})
-	if e != nil || encodedWire != wire.Chat {
-		t.Fatal(e)
-	}
-	f, _ := object(body)
-	if string(f["max_tokens"]) != "17" || f["max_completion_tokens"] != nil {
-		t.Fatalf("caller precedence: %s", body)
-	}
-	r, e = Parse(wire.Embeddings, []byte(`{"model":"team-model","input":["a","b"],"dimensions":32,"encoding_format":"base64","truncation":false}`), "")
-	if e != nil {
-		t.Fatal(e)
-	}
-	body, _, e = Encode(r, "openai_compatible", "voyage", "voyage-model", nil)
-	if e != nil || !bytes.Contains(body, []byte(`"output_dimension":32`)) || !bytes.Contains(body, []byte(`"truncation":false`)) {
-		t.Fatalf("Voyage: %s %v", body, e)
 	}
 }

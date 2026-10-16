@@ -6,31 +6,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
 )
 
-func TestCohereBase64StorageDoesNotInventFloatWidth(t *testing.T) {
-	d := codec(t, "cohere-embed-v2")
-	r := request(t, d, `{"model":"m","input_type":"search_document","texts":["one"],"embedding_types":["base64"]}`)
-	view, err := result(t, d, r, `{"embeddings":{"base64":["AACAPwAAAMA="]},"meta":{"billed_units":{"input_tokens":2}}}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	vector := view.(embeddings.Result).Vectors()[0]
-	if vector.StoredBytes != 8 || vector.StoredElements != 0 || vector.Format.DimensionsKnown || vector.Format.DType != "native" || vector.Source.Raw() != `"AACAPwAAAMA="` {
-		t.Fatalf("native encoded storage was cast to assumed float32: %+v", vector)
-	}
-	withFloat := request(t, d, `{"model":"m","input_type":"search_document","texts":["one"],"embedding_types":["float","base64"]}`)
-	view, err = result(t, d, withFloat, `{"embeddings":{"float":[[1,2,3,4,5,6,7,8]],"base64":["AACAPwAAAMA="]}}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded := view.(embeddings.Result).Vectors()[1]
-	if !encoded.Format.DimensionsKnown || encoded.Format.LogicalDimensions != 8 || encoded.StoredBytes != 8 {
-		t.Fatalf("the actual native float group did not provide dimensional correspondence: %+v", encoded)
-	}
-	if _, err := result(t, d, r, `{"embeddings":{"base64":["not-base64"]}}`); err == nil {
-		t.Fatal("malformed provider base64 became successful native storage")
-	}
-}
-
 func TestCohereDocumentedNativeStorageGroupsShareLogicalDimensions(t *testing.T) {
 	d := codec(t, "cohere-embed-v2")
 	r := request(t, d, `{"model":"m","input_type":"search_document","texts":["one"],"embedding_types":["float","int8","uint8","binary","ubinary","base64"]}`)

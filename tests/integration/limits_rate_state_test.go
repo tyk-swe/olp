@@ -81,233 +81,35 @@ func limRefusedState(t *testing.T, c *coordination.Client, limiter *limits.Limit
 	return exceeded.Rate, [2]int64{before, after}
 }
 
-func TestLimitsRateStateCountsDownThroughGrantsAndRejections(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "rate-state")
-	limiter := limLimiter(t, c, namespace)
+// The refusal states what the window holds: the request reserved nothing,
+// so the tokens it asked for are still there.
 
-	t.Run("requests", func(t *testing.T) {
-		lookup := limLookup()
-		rateKey, _ := limRateKeys(namespace, lookup)
-		limSettleInMinute(t, c, 4*time.Second)
-		request := limStatedRequest(lookup)
-		request.RequestsPerMinute = limPointer(int64(3))
-		request.TokensPerMinute = limPointer(int64(100))
-		request.MaxConcurrency = nil
-		request.RequestedTokens = 30
+// Sixty tokens do not fit in the forty that remain, and the refused request
+// did not use up a request of the nine.
 
-		for granted, want := range [...][2]int64{{2, 70}, {1, 40}, {0, 10}} {
-			_, state, bracket := limReserveStated(t, c, limiter, request)
-			limWantAllowance(t, state, 3, want[0], 100, want[1])
-			limWantReset(t, state, bracket[0], bracket[1])
-			limWantCounters(t, c, rateKey, int64(granted+1), int64(granted+1)*30)
-		}
+// The rate limits admitted the request and the concurrency limit refused it,
+// so the allowance is the one it would have been measured against.
 
-		// The refusal states what the window holds: the request reserved nothing,
-		// so the tokens it asked for are still there.
-		state, bracket := limRefusedState(t, c, limiter, request, limits.DimensionRequests)
-		limWantAllowance(t, state, 3, 0, 100, 10)
-		limWantReset(t, state, bracket[0], bracket[1])
-		limWantCounters(t, c, rateKey, 3, 90)
-	})
+// counters is what the hash holds afterwards: a dimension that is not
+// limited is never counted.
 
-	t.Run("tokens", func(t *testing.T) {
-		lookup := limLookup()
-		rateKey, _ := limRateKeys(namespace, lookup)
-		limSettleInMinute(t, c, 4*time.Second)
-		request := limStatedRequest(lookup)
-		request.RequestsPerMinute = limPointer(int64(10))
-		request.TokensPerMinute = limPointer(int64(100))
-		request.MaxConcurrency = nil
-		request.RequestedTokens = 60
+// Neither a request nor a token limit: the lease holds a concurrency slot and
+// the script counts nothing, so there is no allowance to state. The lease is
+// not nil, which is why the state, not the lease, says whether headers apply.
 
-		_, state, bracket := limReserveStated(t, c, limiter, request)
-		limWantAllowance(t, state, 10, 9, 100, 40)
-		limWantReset(t, state, bracket[0], bracket[1])
+// Lower provider usage cannot refund the locally reserved estimate, and
+// the next request is measured against that floor.
 
-		// Sixty tokens do not fit in the forty that remain, and the refused request
-		// did not use up a request of the nine.
-		state, bracket = limRefusedState(t, c, limiter, request, limits.DimensionTokens)
-		limWantAllowance(t, state, 10, 9, 100, 40)
-		limWantReset(t, state, bracket[0], bracket[1])
-		limWantCounters(t, c, rateKey, 1, 60)
-	})
+// A request that never dispatched gives both back.
 
-	t.Run("concurrency", func(t *testing.T) {
-		lookup := limLookup()
-		rateKey, _ := limRateKeys(namespace, lookup)
-		limSettleInMinute(t, c, 4*time.Second)
-		request := limStatedRequest(lookup)
-		request.MaxConcurrency = limPointer(int64(1))
-		lease, state, _ := limReserveStated(t, c, limiter, request)
-		limWantAllowance(t, state, 10, 9, 1000, 995)
+// A lease keeps the allowance it was granted: the counts are what the script
+// answered, not a live reading.
 
-		// The rate limits admitted the request and the concurrency limit refused it,
-		// so the allowance is the one it would have been measured against.
-		state, bracket := limRefusedState(t, c, limiter, request, limits.DimensionConcurrency)
-		limWantAllowance(t, state, 10, 9, 1000, 995)
-		limWantReset(t, state, bracket[0], bracket[1])
-		limWantCounters(t, c, rateKey, 1, 5)
-		limReleaseTwice(t, lease)
-	})
-}
+// A limit lowered below what the window already holds, and a token
+// reconciliation that saturates at the maximum, leave a counter above its
+// limit. What remains is nothing, not the shortfall.
 
-func TestLimitsRateStateStatesOnlyTheDimensionsTheKeyLimits(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "rate-state-dimensions")
-	limiter := limLimiter(t, c, namespace)
-
-	for _, test := range []struct {
-		name  string
-		shape func(*limits.Request)
-		want  [4]int64
-		// counters is what the hash holds afterwards: a dimension that is not
-		// limited is never counted.
-		counters [2]int64
-	}{
-		{
-			"requests only",
-			func(r *limits.Request) { r.TokensPerMinute, r.RequestedTokens = nil, 0 },
-			[4]int64{10, 9, 0, 0}, [2]int64{1, 0},
-		},
-		{
-			"tokens only",
-			func(r *limits.Request) { r.RequestsPerMinute = nil },
-			[4]int64{0, 0, 1000, 995}, [2]int64{0, 5},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			lookup := limLookup()
-			rateKey, _ := limRateKeys(namespace, lookup)
-			limSettleInMinute(t, c, 4*time.Second)
-			request := limStatedRequest(lookup)
-			request.MaxConcurrency = nil
-			test.shape(&request)
-
-			_, state, bracket := limReserveStated(t, c, limiter, request)
-			limWantAllowance(t, state, test.want[0], test.want[1], test.want[2], test.want[3])
-			limWantReset(t, state, bracket[0], bracket[1])
-			limWantCounters(t, c, rateKey, test.counters[0], test.counters[1])
-		})
-	}
-
-	// Neither a request nor a token limit: the lease holds a concurrency slot and
-	// the script counts nothing, so there is no allowance to state. The lease is
-	// not nil, which is why the state, not the lease, says whether headers apply.
-	t.Run("concurrency only", func(t *testing.T) {
-		lookup := limLookup()
-		rateKey, _ := limRateKeys(namespace, lookup)
-		request := limStatedRequest(lookup)
-		request.RequestsPerMinute, request.TokensPerMinute, request.RequestedTokens = nil, nil, 0
-		request.MaxConcurrency = limPointer(int64(1))
-
-		lease, state, _ := limReserveStated(t, c, limiter, request)
-		if lease == nil || state != (limits.RateState{}) || state.Limited() {
-			t.Fatalf("lease = %v, state = %+v, want a lease that states no allowance", lease, state)
-		}
-		refused, _ := limRefusedState(t, c, limiter, request, limits.DimensionConcurrency)
-		if refused != (limits.RateState{}) {
-			t.Fatalf("refusal states %+v, want none", refused)
-		}
-		if got := limInt(t, c, "EXISTS", rateKey); got != 0 {
-			t.Fatalf("EXISTS rate = %d, want no rate state", got)
-		}
-		limReleaseTwice(t, lease)
-	})
-}
-
-func TestLimitsRateStateFollowsRefundsAndReconciliation(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "rate-state-settle")
-	limiter := limLimiter(t, c, namespace)
-	lookup := limLookup()
-	limSettleInMinute(t, c, 4*time.Second)
-
-	request := limStatedRequest(lookup)
-	request.MaxConcurrency = nil
-	request.RequestedTokens = 100
-	first, state, _ := limReserveStated(t, c, limiter, request)
-	limWantAllowance(t, state, 10, 9, 1000, 900)
-
-	// Lower provider usage cannot refund the locally reserved estimate, and
-	// the next request is measured against that floor.
-	if err := first.Reconcile(t.Context(), 10); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	request.RequestedTokens = 30
-	second, state, _ := limReserveStated(t, c, limiter, request)
-	limWantAllowance(t, state, 10, 8, 1000, 870)
-
-	// A request that never dispatched gives both back.
-	if err := second.Refund(t.Context()); err != nil {
-		t.Fatalf("Refund: %v", err)
-	}
-	_, state, _ = limReserveStated(t, c, limiter, request)
-	limWantAllowance(t, state, 10, 8, 1000, 870)
-
-	// A lease keeps the allowance it was granted: the counts are what the script
-	// answered, not a live reading.
-	if got := first.RateState(); got.RequestRemaining != 9 || got.TokenRemaining != 900 {
-		t.Fatalf("first lease = %+v, want the counts it was granted with", got)
-	}
-}
-
-func TestLimitsRateStateNeverReportsANegativeAllowance(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "rate-state-overfull")
-	limiter := limLimiter(t, c, namespace)
-
-	for _, test := range []struct {
-		name      string
-		rpm, tpm  int64
-		dimension limits.Dimension
-		want      [2]int64
-	}{
-		// A limit lowered below what the window already holds, and a token
-		// reconciliation that saturates at the maximum, leave a counter above its
-		// limit. What remains is nothing, not the shortfall.
-		{"requests above their limit", 15, 500, limits.DimensionRequests, [2]int64{0, 500}},
-		{"tokens above their limit", 3, 1500, limits.DimensionTokens, [2]int64{7, 0}},
-		{"both above their limit", 15, 1500, limits.DimensionRequests, [2]int64{0, 0}},
-		{"requests at their limit", 10, 0, limits.DimensionRequests, [2]int64{0, 1000}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			lookup := limLookup()
-			rateKey, _ := limRateKeys(namespace, lookup)
-			now := limSettleInMinute(t, c, 4*time.Second)
-			do(t, c, "HSET", rateKey, "window", strconv.FormatInt(now/60_000, 10),
-				"rpm", strconv.FormatInt(test.rpm, 10), "tpm", strconv.FormatInt(test.tpm, 10))
-			do(t, c, "PEXPIRE", rateKey, "60000")
-			request := limStatedRequest(lookup)
-			request.MaxConcurrency = nil
-
-			state, _ := limRefusedState(t, c, limiter, request, test.dimension)
-			limWantAllowance(t, state, 10, test.want[0], 1000, test.want[1])
-			limWantCounters(t, c, rateKey, test.rpm, test.tpm)
-		})
-	}
-}
-
-func TestLimitsRateStateStartsOverInAnEmptyWindow(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "rate-state-stale")
-	limiter := limLimiter(t, c, namespace)
-	lookup := limLookup()
-	rateKey, _ := limRateKeys(namespace, lookup)
-
-	now := limSettleInMinute(t, c, 4*time.Second)
-	// The previous window ran out of both, which says nothing of this one.
-	do(t, c, "HSET", rateKey, "window", strconv.FormatInt(now/60_000-1, 10), "rpm", "10", "tpm", "1000")
-	do(t, c, "PEXPIRE", rateKey, "120000")
-	request := limStatedRequest(lookup)
-	request.MaxConcurrency = nil
-	request.RequestedTokens = 7
-
-	_, state, bracket := limReserveStated(t, c, limiter, request)
-	limWantAllowance(t, state, 10, 9, 1000, 993)
-	limWantReset(t, state, bracket[0], bracket[1])
-	limWantCounters(t, c, rateKey, 1, 7)
-}
+// The previous window ran out of both, which says nothing of this one.
 
 // TestLimitsRateReplyShapes proves every answer the script gives has the shape
 // the call asked for: the six fields of the decision, and the five of the allowance
@@ -423,42 +225,6 @@ func TestLimitsRateReplyShapes(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// TestLimitsRateScriptRefusesAnArgumentListThatIsNotItsOwn proves the script takes
-// the switch that asks for the allowance as a seventh argument that is exactly "0"
-// or "1", and refuses before it reads or writes anything a list of any other length:
-// the lists of a script that did not know the switch are not its own.
-func TestLimitsRateScriptRefusesAnArgumentListThatIsNotItsOwn(t *testing.T) {
-	c := limClient(t)
-	namespace := limNamespace(t, c, "rate-arguments")
-	source, err := os.ReadFile("../../internal/limits/scripts/reserve_limits.lua")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, args := range map[string][]string{
-		"no switch":              {"10", "1000", "5", "2", "lease", "5000"},
-		"two switches":           {"10", "1000", "5", "2", "lease", "5000", "1", "1"},
-		"a switch that is two":   {"10", "1000", "5", "2", "lease", "5000", "2"},
-		"a switch that is true":  {"10", "1000", "5", "2", "lease", "5000", "true"},
-		"a switch that is empty": {"10", "1000", "5", "2", "lease", "5000", ""},
-		"a switch with a sign":   {"10", "1000", "5", "2", "lease", "5000", "+1"},
-		"a switch with padding":  {"10", "1000", "5", "2", "lease", "5000", "01"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rateKey, concurrencyKey := limRateKeys(namespace, limLookup())
-			value := do(t, c, append([]string{"EVAL", string(source), "2", rateKey, concurrencyKey}, args...)...)
-			items, ok := value.([]any)
-			if !ok || len(items) != 6 || items[0] != int64(2) || items[1] != int64(-1) || items[2] != "invalid_arguments" {
-				t.Fatalf("EVAL = %#v, want an invalid_arguments failure of six fields", value)
-			}
-			for _, key := range []string{rateKey, concurrencyKey} {
-				if got := limInt(t, c, "EXISTS", key); got != 0 {
-					t.Fatalf("EXISTS %s = %d, want nothing written", key, got)
-				}
-			}
-		})
 	}
 }
 

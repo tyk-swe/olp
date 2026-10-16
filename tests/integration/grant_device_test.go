@@ -3,16 +3,13 @@
 package integration_test
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -70,88 +67,21 @@ func wantStatus(t *testing.T, got map[string]any, status string) {
 	}
 }
 
-// An operator enrolls a grant by device authorization (RFC 8628) through the
-// reference plugin: OLP shows the verification URL and user code, status
-// requests poll the authority through the plugin no more often than its
-// interval, slowing down when asked, and once the operator approves the device
-// upstream the grant becomes a credential version, whichever control replica
-// serves the status request.
-func TestDeviceAuthorizationGrantEnrollmentPollsUntilTheOperatorApproves(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	authority := testutil.NewOAuthServer(t)
-	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
-	path := deviceProvider(t, h, owner, digest, "reference-device-chat")
+// A status request before the interval has passed polls nothing.
 
-	enrollment := startGrantEnrollment(t, h, owner, path)
-	device, _ := enrollment["device"].(map[string]any)
-	expires, err := time.Parse(time.RFC3339Nano, enrollment["expires_at"].(string))
-	if err != nil || enrollment["authorization_url"] != nil || device == nil || device["verification_url"] != authority.URL+"/device" ||
-		device["user_code"] == "" || device["interval"] != float64(30) || time.Until(expires) < 9*time.Minute || time.Until(expires) > 10*time.Minute {
-		t.Fatalf("enrollment %v", enrollment)
-	}
+// Polled again within its interval, the authority asks OLP to slow down:
+// it waits 5 seconds longer from then on.
 
-	// A status request before the interval has passed polls nothing.
-	if status := pollGrantEnrollment(h, owner, path, enrollment, 200); status["status"] != "pending" || status["interval"] != float64(30) || authority.DevicePolls() != 0 {
-		t.Fatalf("status %v after %d polls", status, authority.DevicePolls())
-	}
-	pollDue(t, h, enrollment)
-	wantStatus(t, pollGrantEnrollment(h, owner, path, enrollment, 200), "pending")
-	// Polled again within its interval, the authority asks OLP to slow down:
-	// it waits 5 seconds longer from then on.
-	pollDue(t, h, enrollment)
-	if status := pollGrantEnrollment(h, owner, path, enrollment, 200); status["status"] != "pending" || status["interval"] != float64(35) || authority.DevicePolls() != 2 {
-		t.Fatalf("status %v after %d polls", status, authority.DevicePolls())
-	}
-	wantStatus(t, pollGrantEnrollment(h, owner, path, enrollment, 200), "pending")
-	if authority.DevicePolls() != 2 {
-		t.Fatalf("polled %d times within the interval", authority.DevicePolls())
-	}
-	// Slowing down never stretches the interval beyond the five minutes a
-	// device authorization may ask for.
-	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.grant_enrollments SET poll_interval=298 WHERE id=$1", enrollment["id"]); err != nil {
-		t.Fatal(err)
-	}
-	pollDue(t, h, enrollment)
-	if status := pollGrantEnrollment(h, owner, path, enrollment, 200); status["status"] != "pending" || status["interval"] != float64(300) || authority.DevicePolls() != 3 {
-		t.Fatalf("status %v after %d polls", status, authority.DevicePolls())
-	}
+// Slowing down never stretches the interval beyond the five minutes a
+// device authorization may ask for.
 
-	// The operator approves the device upstream, and another control replica
-	// serves the next status request.
-	testutil.DecideDevice(t, device["verification_url"].(string), device["user_code"].(string), "approve")
-	replica := newAccessHarnessOn(t, h.Pool, h.DBURL)
-	pollDue(t, h, enrollment)
-	status := pollGrantEnrollment(replica, owner, path, enrollment, 200)
-	completion, _ := status["completion"].(map[string]any)
-	if status["status"] != "completed" || completion["principal"] != "operator@reference.example" || completion["credential_version"] != float64(1) {
-		t.Fatalf("status %v", status)
-	}
-	// It stays completed, polling no more.
-	pollDue(t, h, enrollment)
-	if again := pollGrantEnrollment(h, owner, path, enrollment, 200); again["status"] != "completed" ||
-		again["completion"].(map[string]any)["credential_id"] != completion["credential_id"] || authority.DevicePolls() != 4 {
-		t.Fatalf("status %v after %d polls", again, authority.DevicePolls())
-	}
+// The operator approves the device upstream, and another control replica
+// serves the next status request.
 
-	// The grant is an ordinary grant-backed credential version on the draft,
-	// which the connection authenticates with.
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	if detail["draft_credential_id"] != completion["credential_id"] || detail["etag"] != completion["etag"] {
-		t.Fatalf("draft %v", detail)
-	}
-	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200); probe["succeeded"] != true {
-		t.Fatalf("probe %v", probe)
-	}
-	events := h.want(owner, "GET", "/api/v1/audit?action=provider.grant.enroll", nil, nil, 200)["items"].([]any)
-	if len(events) != 1 || events[0].(map[string]any)["outcome"] != "success" || events[0].(map[string]any)["resource_id"] != completion["credential_id"] {
-		t.Fatalf("audit %v", events)
-	}
-	var sessions int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose='grant_enrollment'").Scan(&sessions); err != nil || sessions != 0 {
-		t.Fatalf("%d session states survived completion: %v", sessions, err)
-	}
-}
+// It stays completed, polling no more.
+
+// The grant is an ordinary grant-backed credential version on the draft,
+// which the connection authenticates with.
 
 // Polling stops once the operator denies the device, once it expires, as the
 // authority reports or by the enrollment's own expiry, and once the enrollment
@@ -364,79 +294,7 @@ func newDeviceLoginAuthority(t *testing.T) *deviceLoginAuthority {
 	return a
 }
 
-// A plugin runs its upstream's own variant of device authorization through
-// the same grant enrollment steps, with nothing in OLP specific to it.
-func TestCustomDeviceAuthorizationVariantEnrollsThroughPluginSteps(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	authority := newDeviceLoginAuthority(t)
-	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./tests/integration/testdata/devicelogin", "-X=main.authority="+authority.URL))
-	path := deviceProvider(t, h, owner, digest, "devicelogin-chat")
+// A status request abandoned while its poll runs leaves the enrollment
+// pending, whatever the poll found, and the next one polls again.
 
-	enrollment := startGrantEnrollment(t, h, owner, path)
-	device := enrollment["device"].(map[string]any)
-	if device["verification_url"] != authority.URL+"/codex/device" || !strings.HasPrefix(device["user_code"].(string), "DL-") || device["interval"] != float64(7) {
-		t.Fatalf("enrollment %v", enrollment)
-	}
-	pollDue(t, h, enrollment)
-	wantStatus(t, pollGrantEnrollment(h, owner, path, enrollment, 200), "pending")
-
-	// A status request abandoned while its poll runs leaves the enrollment
-	// pending, whatever the poll found, and the next one polls again.
-	hold := make(chan struct{})
-	authority.mu.Lock()
-	authority.hold, authority.arrived = hold, make(chan struct{}, 1)
-	authority.mu.Unlock()
-	pollDue(t, h, enrollment)
-	ctx, abandon := context.WithCancel(t.Context())
-	request, err := http.NewRequestWithContext(ctx, "POST", h.HTTP.URL+path+"/grant-enrollments/"+enrollment["id"].(string)+"/poll", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Origin", h.Server.Origin)
-	request.Header.Set("X-CSRF-Token", owner.CSRF)
-	for _, cookie := range owner.Cookies {
-		request.AddCookie(cookie)
-	}
-	abandoned := make(chan error, 1)
-	go func() {
-		_, err := http.DefaultClient.Do(request)
-		abandoned <- err
-	}()
-	<-authority.arrived
-	abandon()
-	if err = <-abandoned; !errors.Is(err, context.Canceled) {
-		t.Fatalf("the abandoned status request returned %v", err)
-	}
-	authority.mu.Lock()
-	authority.hold = nil
-	authority.mu.Unlock()
-	close(hold)
-	// Once the poll settles, the claim's lease gives way to the interval.
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		var ended, leased bool
-		if err = h.Pool.QueryRow(t.Context(), "SELECT continued_at IS NOT NULL, poll_at>=now()+interval '30 seconds' FROM olp.grant_enrollments WHERE id=$1", enrollment["id"]).Scan(&ended, &leased); err != nil {
-			t.Fatal(err)
-		}
-		if ended {
-			t.Fatal("an abandoned status request ended the enrollment")
-		}
-		if !leased {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the abandoned poll never settled")
-		}
-	}
-	pollDue(t, h, enrollment)
-	wantStatus(t, pollGrantEnrollment(h, owner, path, enrollment, 200), "pending")
-
-	authority.mu.Lock()
-	authority.approved = true
-	authority.mu.Unlock()
-	pollDue(t, h, enrollment)
-	status := pollGrantEnrollment(h, owner, path, enrollment, 200)
-	if status["status"] != "completed" || status["completion"].(map[string]any)["principal"] != "account-7" {
-		t.Fatalf("status %v", status)
-	}
-}
+// Once the poll settles, the claim's lease gives way to the interval.

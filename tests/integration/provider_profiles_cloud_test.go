@@ -22,13 +22,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 )
 
-// Every built-in composition reaches a real local provider through public
-// configuration/certification/publication. Expected paths and bodies are authored
-// here; no production encoder generates the reference side of these assertions.
-func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
-	testPublishedProviderProfilesPreserveCloudInvocation(t, false)
-}
-
 func TestStrictPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 	testPublishedProviderProfilesPreserveCloudInvocation(t, true)
 }

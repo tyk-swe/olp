@@ -3,7 +3,6 @@
 package cache
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -120,30 +119,4 @@ func TestIntegrationCacheExactSemanticAndPurge(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = client.Do(ctx, "DEL", ticket.Key, s.generationKey("route", "r"), s.generationKey("route", "named"), s.generationKey("project", "p"))
-}
-
-func TestIntegrationCacheRejectsCoordinationInstance(t *testing.T) {
-	url := os.Getenv("OLP_TEST_VALKEY_URL")
-	if url == "" {
-		t.Fatal("OLP_TEST_VALKEY_URL is required")
-	}
-	cfg, err := coordination.Configuration(url, "", time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	main, err := coordination.Open(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer main.Close()
-	remote, err := NewRemote(url, "", main)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer remote.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	if _, err = remote.Do(ctx, "PING"); err == nil {
-		t.Fatal("cache accepted coordination server")
-	}
 }

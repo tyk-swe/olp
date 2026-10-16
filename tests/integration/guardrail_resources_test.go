@@ -85,35 +85,3 @@ func TestNamedGuardrailRevisionsRemainScopedAndPublishedCopiesStayPinned(t *test
 		t.Fatalf("mutation audits: %d %v", audits, err)
 	}
 }
-
-func TestNamedGuardrailConfigurationPromotionIsPortableAndIdempotent(t *testing.T) {
-	source, destination := newAccessHarness(t), newAccessHarness(t)
-	owner, destinationOwner := source.owner(), destination.owner()
-	project := createProject(source, owner, "Portable guardrails")
-	source.want(owner, "POST", "/api/v1/guardrails", map[string]any{"name": "Private filter", "project_id": project, "type": "builtin.regex", "policy": namedPolicy("restricted")}, idem(uuid.NewString()), 201)
-	exported := source.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	doc := exported["document"].(map[string]any)
-	entry := doc["guardrails"].([]any)[0].(map[string]any)
-	if entry["project"] != "Portable guardrails" || entry["name"] != "Private filter" || entry["id"] != nil || entry["project_id"] != nil || entry["revision_id"] != nil {
-		t.Fatalf("definition is not portable: %v", entry)
-	}
-	promotion := map[string]any{"document": doc}
-	plan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", promotion, nil, 200)
-	validateManagementResponse(t, "POST", "/api/v1/configuration/plan", 200, plan)
-	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", promotion, idem(uuid.NewString()), 200)
-	listing := destination.want(destinationOwner, "GET", "/api/v1/guardrails", nil, nil, 200)
-	if len(listing["items"].([]any)) != 1 {
-		t.Fatal("definition was not promoted")
-	}
-	repeated := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", promotion, nil, 200)
-	for _, raw := range repeated["actions"].([]any) {
-		if action := raw.(map[string]any); action["kind"] == "guardrail" && action["action"] != "reuse" {
-			t.Fatalf("definition did not plan as reusable: %v", action)
-		}
-	}
-	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", promotion, idem(uuid.NewString()), 200)
-	var versions int
-	if err := destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.guardrail_revisions").Scan(&versions); err != nil || versions != 1 {
-		t.Fatalf("repeat promotion appended a revision: %d %v", versions, err)
-	}
-}

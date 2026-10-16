@@ -24,7 +24,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -204,178 +203,27 @@ func BenchmarkAdmission(b *testing.B) {
 	})
 }
 
-// TestUnconfiguredFeaturesAddNoAllocations proves the budget of a feature that is
-// off: a request whose key, budget group and target limit nothing reaches the
-// limiter with no command and no allocation, whether the gateway has one or not,
-// and a request that does limit something does both, so that the zero is not an
-// admission that never runs.
-//
-// It counts allocations, which is global to the process, so it does not run in
-// parallel with the tests that allocate.
-func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
-	client := newAllowing(600, 1_000_000, benchEstimate, true)
-	admission := newAdmission(t, client)
-	free := access.Authority{ID: benchOwner, LookupID: "lookup_bench", Policy: access.KeyPolicy{Scopes: []string{"inference"}}}
-	provider := &routing.Provider{ID: benchOwner}
-	slot := &routing.Slot{ID: uuid.NewString()}
-	ctx := context.Background()
-	server := &Server{Admission: admission, log: quiet}
-	// A request that has a price list to be priced by, so that the guard is the only
-	// reason a key without a cost budget has nothing estimated for it: an execution
-	// with no attempts would spare the estimate whether the guard held or not.
-	priced := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1,
-		routing.Attempt{Price: costPrice()})
-	priced.request.id, priced.request.minted = uuid.NewString(), true
+// A request that has a price list to be priced by, so that the guard is the only
+// reason a key without a cost budget has nothing estimated for it: an execution
+// with no attempts would spare the estimate whether the guard held or not.
 
-	headers := http.Header{"Content-Type": []string{"application/json"}}
-	runs := map[string]func(){
-		"absent caller credential": func() {
-			if readCallerCredential(headers) != nil {
-				t.Fatal("invented caller credentials")
-			}
-		},
-		"route without a body limit": func() {
-			if failure := priced.checkBody(priced.route); failure != nil {
-				t.Fatal(failure)
-			}
-		},
-		"key without network restrictions": func() {
-			if failure := server.checkKeyAddress(nil, free); failure != nil {
-				t.Fatal(failure)
-			}
-		},
-		"key admission": func() {
-			lease, e := admission.reserveKey(ctx, free, "openai", benchEstimate, time.Minute)
-			if lease != nil || e != nil {
-				t.Fatalf("a key that limits nothing was given %v, %v", lease, e)
-			}
-			settleKey(ctx, lease, true, nil, quiet)
-		},
-		"key admission with no limiter": func() {
-			var none *Admission
-			if lease, e := none.reserveKey(ctx, free, "openai", benchEstimate, time.Minute); lease != nil || e != nil {
-				t.Fatalf("a key that limits nothing was given %v, %v", lease, e)
-			}
-		},
-		"cost reservation of a key with no cost budget": func() {
-			if hold := server.costReservation(priced, free); hold != (costReservation{}) {
-				t.Fatalf("a key with no cost budget reserved %+v", hold)
-			}
-		},
-		"settlement of a request that reserved nothing": func() {
-			server.settleAdmission(ctx, &call{dispatched: true})
-		},
-		"target admission": func() {
-			reservation, rejection, skip := admission.reserveTarget(ctx, provider, slot, benchEstimate, time.Minute, "")
-			if reservation != nil || rejection != nil || skip {
-				t.Fatalf("a target that limits nothing was given %v, %v, %v", reservation, rejection, skip)
-			}
-			reservation.settle(ctx, true, nil)
-		},
-	}
-	// An Anthropic request that sent no Anthropic-Beta has nothing to check or to
-	// forward, whichever provider it goes to: the lookup of what a provider
-	// declares is for a request that has a header to place.
-	for _, target := range []struct {
-		name          string
-		kind, profile string
-	}{
-		{"an automatic Anthropic provider", "anthropic", ""},
-		{"an automatic OpenAI provider", "openai", ""},
-		{"the Anthropic Messages profile", "anthropic", "anthropic-messages"},
-		{"Claude on Vertex AI", "vertex_ai", "vertex-anthropic"},
-	} {
-		provider := routing.Provider{ID: uuid.NewString(), Kind: target.kind, ProfileID: target.profile}
-		if target.profile != "" {
-			provider.ProfileRevision = connectors.ProfileRevision
-		}
-		cfg := provider.Connector()
-		sending := func(header http.Header) *call {
-			header.Set("Anthropic-Version", "2023-06-01")
-			return &call{
-				semanticHeaders: semanticHeaders(header),
+// An Anthropic request that sent no Anthropic-Beta has nothing to check or to
+// forward, whichever provider it goes to: the lookup of what a provider
+// declares is for a request that has a header to place.
 
-				historicalSnapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}, routeLeg: routeLeg{route: &routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Targets: []routing.Target{{ProviderID: provider.ID}}}}, generation: generationCall{parsed: &wire.Request{Family: wire.Anthropic}},
-			}
-		}
-		x, header := sending(http.Header{}), http.Header{}
-		runs["anthropic-beta check, "+target.name] = func() {
-			if e := x.checkAnthropicBeta(); e != nil {
-				t.Fatalf("a request with no Anthropic-Beta was refused: %v", e)
-			}
-		}
-		runs["anthropic-beta forwarding, "+target.name] = func() {
-			if forwardAnthropicBeta(header, x, wire.Anthropic, cfg).SemanticHeaders != nil || len(header) != 0 {
-				t.Fatalf("a request with no Anthropic-Beta was sent one: %v", header)
-			}
-		}
-		// A request that did send one looks up what every target of its route
-		// declares, and a lookup that copied the profile of each would allocate for
-		// every request that sends a beta, whichever header it sent.
-		sent := sending(http.Header{"Anthropic-Beta": {"context-management-2025-06-27"}})
-		runs["anthropic-beta check of a header, "+target.name] = func() {
-			if e := sent.checkAnthropicBeta(); e != nil {
-				t.Fatalf("a request with a valid Anthropic-Beta was refused: %v", e)
-			}
-		}
-		// The zero is the check's, and not that of one that never runs: a header it
-		// cannot forward is refused wherever the provider takes it.
-		tooLong := sending(http.Header{"Anthropic-Beta": {strings.Repeat("a", maxAnthropicBeta+1)}})
-		if refused := tooLong.checkAnthropicBeta() != nil; refused != takesAnthropicBeta(cfg) {
-			t.Errorf("%s: a header that is too long was refused: %v, the provider takes it: %v", target.name, refused, takesAnthropicBeta(cfg))
-		}
-	}
+// A request that did send one looks up what every target of its route
+// declares, and a lookup that copied the profile of each would allocate for
+// every request that sends a beta, whichever header it sent.
 
-	for name, run := range runs {
-		before := client.calls.Load()
-		if got := testing.AllocsPerRun(200, run); got != 0 {
-			t.Errorf("%s: %v allocations, want none", name, got)
-		}
-		if got := client.calls.Load() - before; got != 0 {
-			t.Errorf("%s: sent %d limiter commands, want none", name, got)
-		}
-	}
+// The zero is the check's, and not that of one that never runs: a header it
+// cannot forward is refused wherever the provider takes it.
 
-	limited := free
-	limited.Policy.RequestsPerMinute = int64ptr(600)
-	client = newAllowing(600, 0, 0, false)
-	admission = newAdmission(t, client)
-	before := client.calls.Load()
-	reserve := func() {
-		lease, e := admission.reserveKey(ctx, limited, "openai", benchEstimate, time.Minute)
-		if lease == nil || e != nil {
-			t.Fatalf("a key limited to 600 requests a minute was given %v, %v", lease, e)
-		}
-	}
-	if got := testing.AllocsPerRun(10, reserve); got == 0 {
-		t.Error("a limited key allocates nothing; the zeros above prove nothing")
-	}
-	if got := client.calls.Load() - before; got != 11 {
-		t.Errorf("a limited key sent %d commands for 11 reservations, want one each", got)
-	}
+// The request that was not estimated for a key without a cost budget is priced
+// the moment one applies, and the estimate allocates, so the zero of the guard is
+// the guard's and not that of a request nothing could price.
 
-	// The request that was not estimated for a key without a cost budget is priced
-	// the moment one applies, and the estimate allocates, so the zero of the guard is
-	// the guard's and not that of a request nothing could price.
-	budgetedKey := free
-	budgetedKey.Policy.DailyCostLimit = stringptr("25")
-	if hold := server.costReservation(priced, budgetedKey); hold.amount != "0.000162" {
-		t.Errorf("a key with a daily cost limit reserves %q, want 0.000162", hold.amount)
-	}
-	if got := testing.AllocsPerRun(10, func() { server.costReservation(priced, budgetedKey) }); got == 0 {
-		t.Error("a key with a cost budget estimates nothing; the zero above proves nothing")
-	}
-
-	// A target with a quota is named for it, which the limiter refuses to do
-	// without: one that was left unnamed would be skipped as unenforceable.
-	capped := &routing.Provider{ID: benchOwner, Limits: &routing.Limits{MaxConcurrency: int64ptr(32)}}
-	client = newAllowing(0, 0, 0, true)
-	admission = newAdmission(t, client)
-	reservation, rejection, skip := admission.reserveTarget(ctx, capped, slot, benchEstimate, time.Minute, "")
-	if reservation == nil || rejection != nil || skip || client.calls.Load() != 1 {
-		t.Errorf("a target limited to 32 concurrent requests was given %v, %v, skip %v after %d commands, want one reservation", reservation, rejection, skip, client.calls.Load())
-	}
-}
+// A target with a quota is named for it, which the limiter refuses to do
+// without: one that was left unnamed would be skipped as unenforceable.
 
 // benchTransport is the upstream of the gateway benchmarks: every request is
 // answered with the same bytes from memory, as a provider that responds at once

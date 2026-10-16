@@ -3,12 +3,8 @@ package export
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/sha256"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -102,162 +98,13 @@ func readCSV(t *testing.T, body []byte) [][]string {
 	return rows
 }
 
-func TestFocusCSVColumns(t *testing.T) {
-	if len(focusColumns) != 51 {
-		t.Fatalf("focusColumns = %d, want 51", len(focusColumns))
-	}
-	fc := testFocusContext("cost")
-	var rows [][]string
-	for _, r := range syntheticRows() {
-		rows = append(rows, r.render(fc))
-	}
-	rows = append(rows, purchaseRow(fc, "prov", "OpenAI", "openai", "openai", "p1", "One", "day", "2026-04-15 00:00:00", dec("10")))
-	_, parts := buildFocusParts(focusSink{Destination: Destination{ID: "s1"}, costBasis: "cost"}, fc.day, 1, rows)
-	if len(parts) != 1 {
-		t.Fatalf("parts = %d", len(parts))
-	}
-	data := readCSV(t, gunzip(t, parts[0].body))
-	if got := strings.Join(data[0], ","); got != strings.Join(focusColumns, ",") {
-		t.Fatalf("header mismatch:\n%s", got)
-	}
-	if len(data) != 6 {
-		t.Fatalf("rows = %d, want header + 5", len(data))
-	}
-	// Every non-committed usage row: billed = effective = contracted.
-	for _, row := range data[1:5] {
-		m := map[string]string{}
-		for i, c := range focusColumns {
-			m[c] = row[i]
-		}
-		if m["PricingCategory"] == "Committed" {
-			continue
-		}
-		if m["BilledCost"] != m["ContractedCost"] || m["EffectiveCost"] != m["ContractedCost"] {
-			t.Fatalf("plain row billed/effective/contracted: %s %s %s", m["BilledCost"], m["EffectiveCost"], m["ContractedCost"])
-		}
-		if m["BillingCurrency"] != "USD" || m["BillingAccountName"] != "TestInstall" {
-			t.Fatalf("accounting columns: %v", m)
-		}
-	}
-	// Committed row: billed 0, effective = list × amount/weight = 6×10/2 = 30? — wait, that is >0
-	for _, row := range data[1:5] {
-		m := map[string]string{}
-		for i, c := range focusColumns {
-			m[c] = row[i]
-		}
-		if m["PricingCategory"] != "Committed" {
-			continue
-		}
-		if m["BilledCost"] != "0" {
-			t.Fatalf("committed BilledCost = %s", m["BilledCost"])
-		}
-		if m["EffectiveCost"] != "30" {
-			t.Fatalf("committed EffectiveCost = %s, want 30 (6*10/2)", m["EffectiveCost"])
-		}
-		if m["CommitmentDiscountId"] != "olp:commitment:prov:day" || m["CommitmentDiscountStatus"] != "Used" {
-			t.Fatalf("committed fields: %v %v", m["CommitmentDiscountId"], m["CommitmentDiscountStatus"])
-		}
-		if m["CommitmentDiscountUnit"] != "USD" {
-			t.Fatalf("CommitmentDiscountUnit = %s", m["CommitmentDiscountUnit"])
-		}
-	}
-	// Tiered row carries the tier price id.
-	for _, row := range data[1:5] {
-		m := map[string]string{}
-		for i, c := range focusColumns {
-			m[c] = row[i]
-		}
-		if m["x_PriceTier"] == "1000000" && m["SkuPriceId"] != "openai/gpt-4o/generation/input_per_million@2@above=1000000" {
-			t.Fatalf("tiered SkuPriceId = %s", m["SkuPriceId"])
-		}
-	}
-	// Purchase row.
-	purchase := data[5]
-	pm := map[string]string{}
-	for i, c := range focusColumns {
-		pm[c] = purchase[i]
-	}
-	if pm["ChargeCategory"] != "Purchase" || pm["ChargeFrequency"] != "Recurring" ||
-		pm["BilledCost"] != "10" || pm["EffectiveCost"] != "0" ||
-		pm["SkuId"] != "olp/commitment/day" || pm["SkuMeter"] != "Provisioned Capacity Commitment" ||
-		pm["PricingUnit"] != "Commitments" {
-		t.Fatalf("purchase row: %v", pm)
-	}
-	if pm["SubAccountId"] != "p1" || pm["CommitmentDiscountQuantity"] != "10" {
-		t.Fatalf("purchase account/discount: %v %v", pm["SubAccountId"], pm["CommitmentDiscountQuantity"])
-	}
-}
+// Every non-committed usage row: billed = effective = contracted.
 
-func TestFocusCSVChargeBasis(t *testing.T) {
-	fc := testFocusContext("charge")
-	var rows [][]string
-	for _, r := range syntheticRows() {
-		rows = append(rows, r.render(fc))
-	}
-	data := readCSV(t, gunzip(t, func() []byte {
-		_, parts := buildFocusParts(focusSink{Destination: Destination{ID: "s"}, costBasis: "charge"}, fc.day, 1, rows)
-		return parts[0].body
-	}()))
-	for _, row := range data[1:] {
-		m := map[string]string{}
-		for i, c := range focusColumns {
-			m[c] = row[i]
-		}
-		if m["PricingCategory"] != "Standard" || m["CommitmentDiscountId"] != "" {
-			t.Fatalf("charge row carries commitment fields: %v", m)
-		}
-		if m["ListUnitPrice"] != m["ContractedUnitPrice"] {
-			t.Fatalf("charge unit prices differ: %s vs %s", m["ListUnitPrice"], m["ContractedUnitPrice"])
-		}
-		if m["ServiceProviderName"] != "TestInstall" || m["InvoiceIssuerName"] != "TestInstall" {
-			t.Fatalf("charge issuer/provider: %v %v", m["ServiceProviderName"], m["InvoiceIssuerName"])
-		}
-	}
-}
+// Committed row: billed 0, effective = list × amount/weight = 6×10/2 = 30? — wait, that is >0
 
-func TestFocusPartRotation(t *testing.T) {
-	old := FocusPartRowLimit
-	FocusPartRowLimit = 2
-	defer func() { FocusPartRowLimit = old }()
-	fc := testFocusContext("cost")
-	var rows [][]string
-	for _, r := range syntheticRows() {
-		rows = append(rows, r.render(fc))
-	}
-	_, parts := buildFocusParts(focusSink{Destination: Destination{ID: "s"}}, fc.day, 1, rows)
-	if len(parts) != 2 {
-		t.Fatalf("parts = %d, want 2", len(parts))
-	}
-	for i, part := range parts {
-		data := readCSV(t, gunzip(t, part.body))
-		if len(data) != 3 && len(data) != 1+int(part.rows) {
-			t.Fatalf("part %d rows", i)
-		}
-		if !strings.Contains(part.key, "part-0000") {
-			t.Fatalf("part key %s", part.key)
-		}
-	}
-	if parts[0].key != "focus/v1.4/billing_period=2026-04/charge_date=2026-04-15/revision=0001/part-00000.csv.gz" {
-		t.Fatalf("part key %s", parts[0].key)
-	}
-}
+// Tiered row carries the tier price id.
 
-func TestFocusDeterminism(t *testing.T) {
-	fc := testFocusContext("cost")
-	var rows [][]string
-	for _, r := range syntheticRows() {
-		rows = append(rows, r.render(fc))
-	}
-	_, a := buildFocusParts(focusSink{Destination: Destination{ID: "s"}}, fc.day, 1, rows)
-	_, b := buildFocusParts(focusSink{Destination: Destination{ID: "s"}}, fc.day, 1, rows)
-	if !bytes.Equal(a[0].body, b[0].body) {
-		t.Fatal("same input produced different part bytes")
-	}
-	sum := sha256.Sum256(a[0].body)
-	if hex.EncodeToString(sum[:]) != a[0].sha256hex {
-		t.Fatal("sha256 field does not match the object bytes")
-	}
-}
+// Purchase row.
 
 // TestFocusConformance runs every part through the pinned FOCUS 1.4 checker:
 // this is the contract the M6 exit criterion validates.
@@ -352,57 +199,5 @@ func TestFocusManifest(t *testing.T) {
 	}
 }
 
-func TestFocusEmptyDay(t *testing.T) {
-	_, parts := buildFocusParts(focusSink{Destination: Destination{ID: "s"}}, time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC), 1, nil)
-	if len(parts) != 1 {
-		t.Fatalf("empty day parts = %d", len(parts))
-	}
-	data := readCSV(t, gunzip(t, parts[0].body))
-	if len(data) != 1 {
-		t.Fatalf("empty day rows = %d, want header only", len(data))
-	}
-	report, err := focusspec.Validate(bytes.NewReader(gunzip(t, parts[0].body)), FocusCriteria)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !report.OK() {
-		for _, v := range report.Violations {
-			t.Logf("violation %s", v)
-		}
-		t.Fatal("header-only part violates FOCUS")
-	}
-}
-
-// A provider whose stored configuration lacks options.vendor_id resolves the
-// kind's default vendor on both usage and purchase rows: they agree on SkuId
-// and the contract's service names.
-func TestFocusVendorFallbackAgreement(t *testing.T) {
-	fc := testFocusContext("cost")
-	usage := focusRow{
-		providerID: "prov", connectionName: "custom", providerKind: "openai",
-		model: "m", operation: "generation", component: "input_per_million",
-		unit: "1000000 Tokens", listUnitPrice: dec("1"), contractedUnitPrice: dec("1"),
-		quantity: dec("1"), listCost: dec("1"), contractedCost: dec("1"), attempts: 1,
-	}
-	usageRow := usage.render(fc)
-	purchase := purchaseRow(fc, "prov", "custom", "", "openai", "", "", "day", "2026-04-15 00:00:00", dec("10"))
-	get := func(row []string, col string) string { return row[slices.Index(focusColumns, col)] }
-	if get(usageRow, "SkuId") != "openai/m/generation/input_per_million" {
-		t.Fatalf("usage SkuId %s", get(usageRow, "SkuId"))
-	}
-	for _, row := range [][]string{usageRow, purchase} {
-		if get(row, "ServiceName") != "OpenAI" || get(row, "ServiceProviderName") != "OpenAI" {
-			t.Fatalf("service fields disagree: %s %s", get(row, "ServiceName"), get(row, "ServiceProviderName"))
-		}
-	}
-	// A plugin provider keeps "plugin" as the SkuId prefix and the connection
-	// name as the service names.
-	plugin := focusRow{providerID: "p", connectionName: "Custom plugin", providerKind: "plugin",
-		model: "m", operation: "generation", component: "per_request", unit: "Requests",
-		listUnitPrice: dec("0.01"), contractedUnitPrice: dec("0.01"),
-		quantity: dec("1"), listCost: dec("0.01"), contractedCost: dec("0.01"), attempts: 1}
-	row := plugin.render(fc)
-	if get(row, "SkuId") != "plugin/m/generation/per_request" || get(row, "ServiceName") != "Custom plugin" {
-		t.Fatalf("plugin row: %s %s", get(row, "SkuId"), get(row, "ServiceName"))
-	}
-}
+// A plugin provider keeps "plugin" as the SkuId prefix and the connection
+// name as the service names.

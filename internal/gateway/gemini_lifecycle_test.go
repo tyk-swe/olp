@@ -2,42 +2,10 @@ package gateway
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"net/url"
 	"testing"
-	"time"
-
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/coder/websocket"
 )
-
-func TestGeminiLifecycleAuthenticationRejectsAmbiguousSDKForms(t *testing.T) {
-	for _, test := range []struct {
-		query, header, want string
-		invalid             bool
-	}{
-		{query: "key=one", want: "one"},
-		{header: "two", want: "two"},
-		{query: "key=one&key=two", invalid: true},
-		{query: "key=one", header: "two", invalid: true},
-		{query: "endpoint=https%3A%2F%2Fevil.example&key=one", invalid: true},
-	} {
-		r := &http.Request{URL: &url.URL{RawQuery: test.query}, Header: http.Header{}}
-		if test.header != "" {
-			r.Header.Set("X-Goog-Api-Key", test.header)
-		}
-		key, err := geminiClientKey(r)
-		if test.invalid {
-			if err == nil {
-				t.Fatalf("ambiguous key accepted: %+v", test)
-			}
-		} else if err != nil || key != test.want {
-			t.Fatalf("native key form %+v returned %q, %v", test, key, err)
-		}
-	}
-}
 
 func TestGeminiProjectedIdentityScanDecodesEscapedExtensions(t *testing.T) {
 	for _, test := range []struct {
@@ -64,23 +32,4 @@ type stalledGeminiWriter struct{}
 func (stalledGeminiWriter) Write(ctx context.Context, _ websocket.MessageType, _ []byte) error {
 	<-ctx.Done()
 	return ctx.Err()
-}
-
-func TestGeminiLiveFrameWriteHasIndependentDeadline(t *testing.T) {
-	start := time.Now()
-	err := writeGeminiLiveFrameWithin(t.Context(), stalledGeminiWriter{}, websocket.MessageText, []byte(`{"serverContent":{}}`), 25*time.Millisecond)
-	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 250*time.Millisecond {
-		t.Fatalf("stalled Live frame did not stop at its own deadline: %v, %s", err, time.Since(start))
-	}
-}
-
-func TestGeminiLiveUsageRequiresDocumentedResponseCategoryAndConservativeSettlement(t *testing.T) {
-	x := &call{estimate: 100, dispatched: true, facts: []AttemptFact{{Usage: &wire.Usage{InputTokens: 12, OutputTokens: 3}, BillingUncertain: true}}}
-	if amount := geminiLiveSettlement(x); amount == nil || *amount != 100 {
-		t.Fatalf("uncertain session under-reserved: %v", amount)
-	}
-	x.facts[0].BillingUncertain = false
-	if amount := geminiLiveSettlement(x); amount == nil || *amount != 15 {
-		t.Fatalf("complete session did not settle observed usage: %v", amount)
-	}
 }

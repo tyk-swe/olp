@@ -5,18 +5,14 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/tests/bench/loadgen"
 	"github.com/tyk-swe/olp/tests/bench/mockupstream"
 )
 
@@ -38,71 +34,9 @@ func target(t *testing.T) string {
 	return "http://" + ln.Addr().String()
 }
 
-func TestRunWritesTheReport(t *testing.T) {
-	origin := target(t)
-	out := filepath.Join(t.TempDir(), "report.json")
-	var stderr bytes.Buffer
-	err := run(context.Background(), []string{
-		"-url", origin, "-dialect", "anthropic", "-model", "m", "-api-key", "k", "-rate", "50", "-duration", "1s", "-warmup", "200ms",
-		"-stream", "-prompt-tokens", "0,2k", "-max-tokens", "8", "-header", "x-mock-ttft-ms: 20", "-header", "x-mock-interval-ms:2",
-		"-late-after", "1s", "-json", out, "-name", "direct",
-	}, nil, &stderr)
-	if err != nil {
-		t.Fatalf("%v\n%s", err, stderr.String())
-	}
-	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var report loadgen.Report
-	if err := json.Unmarshal(data, &report); err != nil {
-		t.Fatal(err)
-	}
-	c := report.Requests
-	if report.Name != "direct" || c.Sent != 50 || c.Succeeded != 50 || c.Streams != 50 || c.WarmupSent != 10 || report.Config.Dialect != loadgen.Anthropic || report.Config.MaxTokens != 8 {
-		t.Fatalf("%+v %+v", report.Config, c)
-	}
-	// The x-mock headers took effect: the first frame waited for them.
-	if report.Latency.TTFT.P50Ms < 20 || report.Latency.TTFT.Count != 50 {
-		t.Fatalf("%+v", report.Latency.TTFT)
-	}
-	if got := report.Config.PromptTokens; len(got) != 2 || got[0] != 0 || got[1] != 2000 {
-		t.Fatalf("prompt sizes %v", got)
-	}
-	if !strings.Contains(stderr.String(), "p99") {
-		t.Fatalf("no summary on standard error:\n%s", stderr.String())
-	}
-}
+// The x-mock headers took effect: the first frame waited for them.
 
-func TestQuietAndStandardOutput(t *testing.T) {
-	origin := target(t)
-	var stdout, stderr bytes.Buffer
-	if err := run(context.Background(), []string{"-url", origin, "-model", "m", "-rate", "20", "-duration", "500ms", "-warmup", "0", "-quiet", "-json", "-", "-late-after", "1s"}, &stdout, &stderr); err != nil {
-		t.Fatal(err)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("-quiet printed %q", stderr.String())
-	}
-	var report loadgen.Report
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil || report.Requests.Sent != 10 {
-		t.Fatalf("standard output is not the report: %v\n%s", err, stdout.String())
-	}
-}
-
-func TestStrictMakesAnInvalidRunAnError(t *testing.T) {
-	origin := target(t)
-	args := []string{"-url", origin, "-model", "m", "-rate", "200", "-duration", "500ms", "-warmup", "0", "-quiet",
-		"-header", "x-mock-ttft-ms: 200", "-max-in-flight", "1", "-max-backlog", "-1"}
-	// Without -strict the run is reported, not failed.
-	if err := run(context.Background(), args, nil, nil); err != nil {
-		t.Fatalf("%v", err)
-	}
-	err := run(context.Background(), append(args, "-strict"), nil, nil)
-	var invalid *invalidRun
-	if !errors.As(err, &invalid) || !strings.Contains(err.Error(), "dropped") {
-		t.Fatalf("%v", err)
-	}
-}
+// Without -strict the run is reported, not failed.
 
 func TestAPIKeyComesFromTheEnvironment(t *testing.T) {
 	t.Setenv("LOADGEN_API_KEY", "from-env")

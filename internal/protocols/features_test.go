@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
-
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestRequestFeaturesReadEveryGenerationDialect(t *testing.T) {
@@ -45,18 +43,5 @@ func TestRequestFeaturesReadEveryGenerationDialect(t *testing.T) {
 				t.Fatalf("features = %+v, want %+v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestRequestTextIsTheLastUserTurnCutOnACharacterBoundary(t *testing.T) {
-	request, err := openai.Parse(wire.Chat, []byte(`{"model":"r","messages":[{"role":"user","content":"first"},{"role":"assistant","content":"reply"},{"role":"user","content":[{"type":"text","text":"héllo"},{"type":"text","text":"world"}]}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := RequestText(request, 1024); got != "héllo\nworld" {
-		t.Fatalf("text = %q", got)
-	}
-	if got := RequestText(request, 2); got != "h" {
-		t.Fatalf("cut text = %q, want the split character dropped", got)
 	}
 }

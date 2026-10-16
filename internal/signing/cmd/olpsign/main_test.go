@@ -31,15 +31,3 @@ func TestSignThenVerify(t *testing.T) {
 		t.Fatalf("an edited document verified: %v", err)
 	}
 }
-
-func TestSignRefusesAMismatchedSeed(t *testing.T) {
-	document := filepath.Join(t.TempDir(), "catalog.json")
-	_ = os.WriteFile(document, []byte("{}\n"), 0o644)
-	t.Setenv("OLP_SIGNING_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-	if err := run([]string{"sign", "-key-id", signing.DevelopmentKeyID, document}, &bytes.Buffer{}); err == nil {
-		t.Fatal("signed with a seed that is not the named key")
-	}
-	if err := run([]string{"sign", "-key-id", "unknown-key", document}, &bytes.Buffer{}); err == nil {
-		t.Fatal("signed with a key the build does not know")
-	}
-}

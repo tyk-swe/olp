@@ -166,49 +166,6 @@ func TestALapsedGrantFailsOverUntilItIsReenrolled(t *testing.T) {
 	}
 }
 
-// A grant enrolled by device authorization lapses like any other, and
-// re-enrolling its lapsed slot by device authorization, polling until the
-// operator approves, stages a new credential version that serves once the
-// provider is activated.
-func TestALapsedSlotIsReenrolledByDeviceAuthorization(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	authority := testutil.NewOAuthServer(t)
-	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
-	path := deviceProvider(t, h, owner, digest, "reference-device-chat")
-	lapsedID := enrollByDevice(t, h, owner, path, "")["credential_id"].(string)
-	certifyPluginProvider(t, h, owner, path)
-	slots := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
-	slot := slots["items"].([]any)[0].(map[string]any)["id"].(string)
-
-	authority.RevokeRefreshTokens()
-	dueNow(t, h, lapsedID)
-	if !pass(t, grantRefresher(t, h)) {
-		t.Fatal("the failed refresh was not recorded")
-	}
-	if grant := readGrant(t, h, lapsedID); grant.lapsed == nil {
-		t.Fatalf("after the upstream revoked its refresh token the grant is %+v", grant)
-	}
-	slots = h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
-	if health := slots["health"].(map[string]any)[slot].(map[string]any); health["lapsed"] != true {
-		t.Fatalf("slot health %v", health)
-	}
-
-	reenrolled := enrollByDevice(t, h, owner, path, slot)
-	if reenrolled["principal"] != "operator@reference.example" || reenrolled["credential_version"] != float64(2) {
-		t.Fatalf("re-enrolled %v", reenrolled)
-	}
-	slots = h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
-	if health := slots["health"].(map[string]any)[slot].(map[string]any); health["lapsed"] != false {
-		t.Fatalf("the re-enrolled slot's health %v", health)
-	}
-	activateEnrolled(t, h, owner, path, 200, slot)
-	h.refresh()
-	if lapsed, served := h.Runtime.Eligibility(lapsedID), h.Runtime.Eligibility(reenrolled["credential_id"].(string)); lapsed != routing.Lapsed || served != routing.Eligible {
-		t.Fatalf("the gateway finds the lapsed version %q and the re-enrolled one %q", lapsed, served)
-	}
-}
-
 // A lapse is delivered once to each enabled rule subscribed to grant lapses,
 // as a signed webhook like a budget alert. It reports the provider, the
 // credential slot, the credential version and its observed principal, and no

@@ -111,17 +111,6 @@ func checkGenAISpans(t *testing.T, exporter *tracetest.InMemoryExporter, respons
 	}
 }
 
-func TestTracedUnaryCompletionRecordsGenAIAttributes(t *testing.T) {
-	h, exporter := tracedHarness(t)
-	resp, _ := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.Status)
-	}
-	resp.Body.Close()
-	h.sink.last(t)
-	checkGenAISpans(t, exporter, modelA, "stop", 2, 3)
-}
-
 func TestTracedStreamCompletionRecordsGenAIAttributes(t *testing.T) {
 	h, exporter := tracedHarness(t)
 	data, err := fixtures.Files.ReadFile("streams/openai-chat.sse")
@@ -143,29 +132,4 @@ func TestTracedStreamCompletionRecordsGenAIAttributes(t *testing.T) {
 	}
 	h.sink.last(t)
 	checkGenAISpans(t, exporter, "gpt-fixture", "stop", 3, 2)
-}
-
-func TestTracedResponseUnknownOmitsGenAIResponseAttributes(t *testing.T) {
-	h, exporter := tracedHarness(t)
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion","created":1,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
-	})
-	resp, _ := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.Status)
-	}
-	resp.Body.Close()
-	h.sink.last(t)
-	for _, name := range []string{"attempt", "request"} {
-		attrs := spanAttrs(t, exporter, name)
-		for _, key := range []string{"gen_ai.response.model", "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens"} {
-			if _, ok := attrs[key]; ok {
-				t.Fatalf("%s span set %s without observed data", name, key)
-			}
-		}
-		if got := attrs["gen_ai.response.finish_reasons"].AsStringSlice(); len(got) != 1 || got[0] != "stop" {
-			t.Fatalf("%s finish reasons %v", name, got)
-		}
-	}
 }

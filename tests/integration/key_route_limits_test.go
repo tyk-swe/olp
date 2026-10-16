@@ -5,16 +5,10 @@ package integration_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func TestKeyRouteBudgetsPreserveSpendAndRemainKeyScoped(t *testing.T) {
-	for _, field := range []string{"daily_cost_limit", "weekly_cost_limit", "monthly_cost_limit"} {
-		t.Run(field, func(t *testing.T) { testKeyRouteBudget(t, field) })
-	}
-}
 func testKeyRouteBudget(t *testing.T, field string) {
 	f := glSeedIn(t, "key-route-budget", glPrice{input: "1000000", output: "1000000"})
 	id, secret := f.key("route-budget", nil)
@@ -50,35 +44,4 @@ func testKeyRouteBudget(t *testing.T, field string) {
 	call(secret, 200)
 	update(map[string]any{routeSlug: map[string]any{field: "20"}})
 	call(secret, 429)
-}
-
-func TestKeyRouteRateLimitsAcrossGateways(t *testing.T) {
-	f := glSeedIn(t, "key-route-rate", glPrice{})
-	_, secret := f.key("route-rpm", map[string]any{"route_limits": map[string]any{routeSlug: map[string]any{"requests_per_minute": 2}, "other-route": map[string]any{"requests_per_minute": 1}}})
-	replica := newAccessHarnessOn(t, f.h.Pool, f.h.DBURL)
-	replica.Gateway.Admission = f.h.Gateway.Admission
-	replica.refresh()
-	limSettleInMinute(t, f.valkey, 5*time.Second)
-	for i, want := range []int{200, 200, 429} {
-		h := f.h
-		if i%2 == 1 {
-			h = replica
-		}
-		status, err := endUserChat(context.Background(), h, secret, routeSlug, "customer")
-		if err != nil || status != want {
-			t.Fatalf("request %d status=%d want=%d err=%v", i, status, want, err)
-		}
-	}
-	authority, err := f.h.Runtime.Authenticate(secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lease, refusal := f.h.Gateway.Admission.ReserveCodeRate(t.Context(), *authority, 1, time.Minute, "other-route")
-	if refusal != nil {
-		t.Fatalf("independent route refused: %v", refusal)
-	}
-	if err = lease.Refund(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
 }

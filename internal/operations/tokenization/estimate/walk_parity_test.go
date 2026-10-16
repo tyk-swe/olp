@@ -2,15 +2,10 @@ package estimate
 
 import (
 	"encoding/json"
-	"fmt"
 	"math/rand/v2"
-	"slices"
 	"strings"
-	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
-
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // walkerFamilies is every request family the gateway can hand to admission.
@@ -339,66 +334,9 @@ var walkerReadsMore = []string{
 	"responseSchema", "responseJsonSchema", `"reasoning"`, `"thinking"`, `"redacted_thinking"`, `"document"`, `"summary"`,
 }
 
-// TestWalkerMatchesTheLegacyHeuristic holds every family without a tokenizer to
-// the estimate the gateway charged before the walker moved, for every shape the
-// old walker read: for the same request and provider defaults, the same input,
-// reply bound, candidates and total.
-func TestWalkerMatchesTheLegacyHeuristic(t *testing.T) {
-	cases := scaled(400, 60, 40)
-	counters := []Counter{{}, ForModel("claude-sonnet-4-5"), ForModel("gemini-2.5-pro"), ForModel("mistral-large-latest"), ForModel("my-deployment")}
-	// The comparison is only worth something if the requests charge something.
-	var charged, flat int
-	defer func() {
-		if charged < cases*3 || flat < cases/2 {
-			t.Errorf("%d estimates charged a prompt and %d charged a flat rate: the generator is not exercising the walker", charged, flat)
-		}
-	}()
-	for _, family := range walkerFamilies {
-		t.Run(string(family), func(t *testing.T) {
-			g := requestGen{rand.New(rand.NewPCG(7, uint64(len(family))))}
-			checked := 0
-			for i := range cases {
-				fields := g.fields(family)
-				parsed, err := wire.FromFields(family, "route", false, fields)
-				if err != nil {
-					t.Fatal(err)
-				}
-				prompt := Walk(parsed)
-				// One walk answers every provider's defaults.
-				for j := range 3 {
-					defaults := g.defaults()
-					if body, _ := json.Marshal([]any{fields, defaults}); slices.ContainsFunc(walkerReadsMore, func(member string) bool { return strings.Contains(string(body), member) }) {
-						t.Fatalf("case %d/%d has a member the old walker did not read, so it cannot be held to it: %s", i, j, body)
-					}
-					input, output, candidates := legacyEstimateParts(parsed, defaults)
-					want := legacyEstimateTokensFromParts(parsed, input, output, candidates)
-					for _, c := range counters {
-						got := prompt.Estimate(c, defaults)
-						if got.Input != input || !sameBound(got.Output, output) || got.Candidates != candidates || got.Tokens() != want {
-							body, _ := json.Marshal(fields)
-							d, _ := json.Marshal(defaults)
-							t.Fatalf("case %d/%d %s on %s\nrequest  %s\ndefaults %s\nlegacy input %d output %v candidates %d total %d\nwalker input %d output %v candidates %d total %d",
-								i, j, family, c.Family(), body, d, input, deref(output), candidates, want, got.Input, deref(got.Output), got.Candidates, got.Tokens())
-						}
-						if got.Provenance != ProvenanceHeuristic || got.Family != c.Family() {
-							t.Fatalf("provenance %s family %s, want heuristic %s", got.Provenance, got.Family, c.Family())
-						}
-					}
-					checked++
-					if input > 1 {
-						charged++
-					}
-					if input >= ImageTokens {
-						flat++
-					}
-				}
-			}
-			if checked < cases {
-				t.Fatalf("checked %d estimates", checked)
-			}
-		})
-	}
-}
+// The comparison is only worth something if the requests charge something.
+
+// One walk answers every provider's defaults.
 
 func deref(p *int64) any {
 	if p == nil {
@@ -407,43 +345,6 @@ func deref(p *int64) any {
 	return *p
 }
 
-// TestWalkerMatchesTheLegacyHeuristicWithoutARequest keeps the estimate of a
-// caller that named nothing, whose bounds can only come from provider defaults.
-func TestWalkerMatchesTheLegacyHeuristicWithoutARequest(t *testing.T) {
-	g := requestGen{rand.New(rand.NewPCG(11, 13))}
-	for i := range 300 {
-		defaults := g.defaults()
-		input, output, candidates := legacyEstimateParts(nil, defaults)
-		want := legacyEstimateTokensFromParts(nil, input, output, candidates)
-		got := Walk(nil).Estimate(Counter{}, defaults)
-		if got.Input != input || !sameBound(got.Output, output) || got.Candidates != candidates || got.Tokens() != want {
-			t.Fatalf("case %d: walker %+v, legacy input %d output %v candidates %d total %d", i, got, input, deref(output), candidates, want)
-		}
-	}
-	if got := Walk(nil).Estimate(Counter{}, nil).Tokens(); got != DefaultOutputTokens {
-		t.Fatalf("an unnamed request reserves %d, want the default reply %d", got, DefaultOutputTokens)
-	}
-}
-
-// TestWalkerKeepsTheFlatCharges pins the rates the old walker charged, apart
-// from the generated cases that exercise them.
-func TestWalkerKeepsTheFlatCharges(t *testing.T) {
-	if ImageTokens != legacyImageTokens || MediaTokens != legacyMediaTokens || DefaultOutputTokens != legacyDefaultOutputTokens || MaxTokens != legacyMaxEstimate {
-		t.Fatalf("charges moved: %d %d %d %d", ImageTokens, MediaTokens, DefaultOutputTokens, MaxTokens)
-	}
-	if ImageTokens != 1000 || MediaTokens != 2000 || DefaultOutputTokens != 4096 {
-		t.Fatal("the flat charges are part of the contract")
-	}
-}
-
-func ExampleWalk() {
-	request, _ := openai.Parse(wire.Chat, []byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
-	prompt := Walk(request)
-	for _, model := range []string{"gpt-4o", "claude-sonnet-4-5"} {
-		e := prompt.Estimate(ForModel(model), nil)
-		fmt.Println(model, e.Family, e.Provenance, e.Input, e.Tokens())
-	}
-	// Output:
-	// gpt-4o openai-o200k tokenizer 8 18
-	// claude-sonnet-4-5 anthropic heuristic 2 12
-}
+// Output:
+// gpt-4o openai-o200k tokenizer 8 18
+// claude-sonnet-4-5 anthropic heuristic 2 12

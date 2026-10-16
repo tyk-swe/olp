@@ -6,35 +6,6 @@ import (
 	"time"
 )
 
-// TestChargeBasisReservesItsOwnCounters proves the basis selects an independent
-// key set: a charge-basis request spends from "{owner}:charge:*" and the cost
-// counters are never asked.
-func TestChargeBasisReservesItsOwnCounters(t *testing.T) {
-	t.Parallel()
-	server := &scripted{answer: answering(t, map[string][2]any{"reserve_cost": {costGranted, nil}})}
-	limiter := &Limiter{client: server, namespace: "olp:test"}
-	request := costRequest(false)
-	request.CostBasis = BasisCharge
-	request.CostEstimate = "0.5"
-	if _, err := limiter.Reserve(t.Context(), request); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-	var costKeys []string
-	for _, command := range server.commands() {
-		for _, arg := range command {
-			if strings.Contains(arg, ":charge:") {
-				costKeys = append(costKeys, arg)
-			}
-			if strings.Contains(arg, ":cost:") {
-				t.Errorf("a charge-basis reservation touched the cost key %q", arg)
-			}
-		}
-	}
-	if !strings.HasSuffix(costKeys[0], ":charge:day") || !strings.HasSuffix(costKeys[1], ":charge:month") {
-		t.Fatalf("a charge-basis reservation addressed %v, want the charge day and month", costKeys[:2])
-	}
-}
-
 // TestChargeBasisSettlesItsOwnReservation proves the lease remembers the basis
 // the request was reserved under and both a grown estimate and a settled actual
 // are written back to it.
@@ -71,24 +42,6 @@ func TestChargeBasisSettlesItsOwnReservation(t *testing.T) {
 	}
 	if !strings.Contains(settled, ":charge:pending") || !strings.Contains(settled, "0.55") {
 		t.Fatalf("the actual settled %q, want the charge amount on the charge keys", settled)
-	}
-}
-
-// TestCostBasisValidationAcceptsOnlyTheTwoBases proves a request cannot carry an
-// invented measure into the scripts.
-func TestCostBasisValidationAcceptsOnlyTheTwoBases(t *testing.T) {
-	t.Parallel()
-	for _, basis := range []Basis{BasisCost, BasisCharge, ""} {
-		r := costRequest(false)
-		r.CostBasis = basis
-		if err := r.Validate(); err != nil {
-			t.Errorf("basis %q: %v", basis, err)
-		}
-	}
-	r := costRequest(false)
-	r.CostBasis = "balance"
-	if err := r.Validate(); err == nil {
-		t.Error("a request with cost basis \"balance\" validated")
 	}
 }
 

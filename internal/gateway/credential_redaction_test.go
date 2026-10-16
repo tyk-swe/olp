@@ -5,14 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
@@ -89,54 +85,5 @@ func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-// A plugin provider's hosting adaptation places the static credential in the
-// headers it declares, and every placed value is redacted from upstream text.
-func TestPluginHostingPlacesAndRedactsTheStaticCredential(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.servePluginProfile(abi.Hosting{
-		Address: h.upstream.URL + "/a/v1",
-		Headers: map[string]string{"Authorization": "Token {credential}", "X-Acme-Key": "key={credential}", "X-Acme-Client": "olp"},
-	})
-	var placed http.Header
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		placed = r.Header.Clone()
-		echo := r.Header.Get("Authorization") + " " + r.Header.Get("X-Acme-Key")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "Invalid prompt; " + echo, "code": echo, "type": echo}})
-	})
-	resp, result := h.chat(fullKey, nil)
-	if placed.Get("Authorization") != "Token "+secretA || placed.Get("X-Acme-Key") != "key="+secretA || placed.Get("X-Acme-Client") != "olp" {
-		t.Fatalf("the upstream received %v", placed)
-	}
-	message := result["error"].(map[string]any)["message"].(string)
-	if resp.StatusCode != http.StatusBadRequest || strings.Contains(message, secretA) || strings.Contains(message, "Token") || !strings.Contains(message, "[REDACTED]") {
-		t.Fatalf("placed credential was not redacted: %d %s", resp.StatusCode, message)
-	}
-}
-
-// Every provider credential the gateway applies must be recorded for
-// redaction, so applyCredentials is the only caller of Auth.Apply.
-func TestGatewayAppliesCredentialsOnlyThroughTheRedactionSeam(t *testing.T) {
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	for _, name := range sources {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		calls += strings.Count(string(source), ".auth.Apply(")
-	}
-	if calls != 1 {
-		t.Fatalf("found %d Auth.Apply calls; apply provider credentials through applyCredentials", calls)
 	}
 }

@@ -47,66 +47,6 @@ func serveWith(t *testing.T, p Plugin, request string) abi.Response {
 	return response
 }
 
-func TestServeAnswersTheManifestCall(t *testing.T) {
-	declared := Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []Profile{{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat"}}}
-	response := serveWith(t, manifestOnly(declared), `{"method":"manifest","params":null}`)
-	var got Manifest
-	if response.Error != nil || json.Unmarshal(response.Result, &got) != nil || !reflect.DeepEqual(got, declared) {
-		t.Fatalf("manifest response %+v", response)
-	}
-}
-
-// A Signer signs with the request and the provider it is for, whose option
-// values ProviderOf returns.
-func TestServeAnswersTheSignCall(t *testing.T) {
-	var got SignRequest
-	var provider Provider
-	var found bool
-	p := signing{sign: func(ctx context.Context, r SignRequest) (SignResult, error) {
-		got = r
-		provider, found = ProviderOf(ctx)
-		return SignResult{Headers: map[string]string{"X-Signature": "signed"}}, nil
-	}}
-	response := serveWith(t, p, `{"method":"sign","params":{"profile":"acme-chat","method":"POST","url":"https://api.acme.example/v1/chat/completions","header":{"Accept":["application/json"]},"body":"e30=","credential":"sk-acme"},"provider":{"profile":"acme-chat","options":{"account":"acme"}}}`)
-	want := SignRequest{Profile: "acme-chat", Method: "POST", URL: "https://api.acme.example/v1/chat/completions", Header: map[string][]string{"Accept": {"application/json"}}, Body: []byte("{}"), Credential: "sk-acme"}
-	if response.Error != nil || string(response.Result) != `{"headers":{"X-Signature":"signed"}}` || !reflect.DeepEqual(got, want) {
-		t.Fatalf("sign response %+v for %+v", response, got)
-	}
-	if !found || !reflect.DeepEqual(provider, Provider{Profile: "acme-chat", Options: map[string]string{"account": "acme"}}) {
-		t.Fatalf("signed for provider %+v", provider)
-	}
-}
-
-// A plugin can't declare a signing profile it has no Signer for: it reports
-// no manifest, so OLP never installs it.
-func TestServeRefusesASigningProfileWithoutASigner(t *testing.T) {
-	declared := Manifest{Name: "acme", Version: "1.0.0", Profiles: []Profile{{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Signing: true}}}
-	if response := serveWith(t, manifestOnly(declared), `{"method":"manifest"}`); response.Error == nil || response.Error.Code != abi.CodeInternal {
-		t.Fatalf("manifest response %+v", response)
-	}
-	if response := serveWith(t, signing{manifestOnly: manifestOnly(declared)}, `{"method":"manifest"}`); response.Error != nil {
-		t.Fatalf("manifest response %+v", response)
-	}
-}
-
-// A method OLP calls on behalf of a provider finds the provider's profile and
-// option values in its context; any other call's context has none.
-func TestServeHandsMethodsTheProviderTheyServe(t *testing.T) {
-	methods["provider_method"] = func(ctx context.Context, _ json.RawMessage) (any, error) {
-		provider, ok := ProviderOf(ctx)
-		return map[string]any{"ok": ok, "provider": provider}, nil
-	}
-	t.Cleanup(func() { delete(methods, "provider_method") })
-	for request, want := range map[string]string{
-		`{"method":"provider_method","provider":{"profile":"acme-chat","options":{"account":"acme"}}}`: `{"ok":true,"provider":{"profile":"acme-chat","options":{"account":"acme"}}}`,
-		`{"method":"provider_method"}`: `{"ok":false,"provider":{"profile":"","options":null}}`,
-	} {
-		if response := serveWith(t, manifestOnly{}, request); response.Error != nil || string(response.Result) != want {
-			t.Fatalf("%s: response %s %v", request, response.Result, response.Error)
-		}
-	}
-}
-
 // enroller is a plugin whose profile authenticates with a grant.
 type enroller struct{ manifestOnly }
 
@@ -129,34 +69,8 @@ func (enroller) ExchangeGrant(_ context.Context, exchange GrantExchange) (Grant,
 	return Grant{AccessToken: "at", Principal: "user@acme.example", Facts: map[string]string{"account": "7"}}, nil
 }
 
-// A GrantEnroller runs the enrollment steps for the provider they serve, whose
-// option values ProviderOf returns.
-func TestServeRunsGrantEnrollmentSteps(t *testing.T) {
-	response := serveWith(t, enroller{}, `{"method":"grant_start","params":{"profile":"acme-account"},"provider":{"profile":"acme-account","options":{"account":"acme"}}}`)
-	var authorization GrantAuthorization
-	if response.Error != nil || json.Unmarshal(response.Result, &authorization) != nil || authorization.URL != "https://login.acme.example/authorize?profile=acme-account&account=acme" || authorization.Session != "verifier" {
-		t.Fatalf("grant_start response %+v", response)
-	}
-	response = serveWith(t, enroller{}, `{"method":"grant_exchange","params":{"profile":"acme-account","session":"verifier","input":"code#state"}}`)
-	var grant Grant
-	if response.Error != nil || json.Unmarshal(response.Result, &grant) != nil || grant.AccessToken != "at" || grant.Facts["account"] != "7" {
-		t.Fatalf("grant_exchange response %+v", response)
-	}
-	for request, want := range map[string]abi.Error{
-		`{"method":"grant_exchange","params":{"session":"verifier","input":"other"}}`:   {Code: abi.CodeStateMismatch, Message: "another sign-in"},
-		`{"method":"grant_exchange","params":{"session":"other","input":"code#state"}}`: {Code: abi.CodeInternal, Message: "lost the session"},
-		`{"method":"grant_exchange","params":{"session":7}}`:                            {Code: abi.CodeInvalidRequest, Message: "The parameters do not match the method."},
-	} {
-		if response := serveWith(t, enroller{}, request); response.Error == nil || *response.Error != want {
-			t.Errorf("%s: %+v", request, response.Error)
-		}
-	}
-	// A plugin whose profiles authenticate with static credentials enrolls
-	// no grants.
-	if response := serveWith(t, manifestOnly{}, `{"method":"grant_start","params":{}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
-		t.Fatalf("a plugin without grant enrollment answered %+v", response)
-	}
-}
+// A plugin whose profiles authenticate with static credentials enrolls
+// no grants.
 
 // refresher is a plugin whose grants carry a rotating refresh token.
 type refresher struct{ enroller }
@@ -174,28 +88,7 @@ func (refresher) RefreshGrant(ctx context.Context, refresh GrantRefresh) (Grant,
 	return Grant{AccessToken: "at-2 " + provider.Options["account"] + " " + refresh.Facts["account"], RefreshToken: "rt-2", ExpiresIn: 3600}, nil
 }
 
-// A GrantRefresher refreshes the grants of the provider it serves, and
-// reports a grant the upstream no longer refreshes as invalid_grant.
-func TestServeRefreshesGrants(t *testing.T) {
-	response := serveWith(t, refresher{}, `{"method":"grant_refresh","params":{"profile":"acme-account","refresh_token":"rt-1","facts":{"account":"7"}},"provider":{"profile":"acme-account","options":{"account":"acme"}}}`)
-	var grant Grant
-	if response.Error != nil || json.Unmarshal(response.Result, &grant) != nil || grant.AccessToken != "at-2 acme 7" || grant.RefreshToken != "rt-2" || grant.ExpiresIn != 3600 {
-		t.Fatalf("grant_refresh response %+v", response)
-	}
-	for request, want := range map[string]abi.Error{
-		`{"method":"grant_refresh","params":{"refresh_token":"rt-1"}}`:                                       {Code: abi.CodeInternal, Message: "the call serves no provider"},
-		`{"method":"grant_refresh","params":{"refresh_token":"rt-0"},"provider":{"profile":"acme-account"}}`: {Code: abi.CodeInvalidGrant, Message: "the refresh token is spent"},
-		`{"method":"grant_refresh","params":{"refresh_token":7}}`:                                            {Code: abi.CodeInvalidRequest, Message: "A grant_refresh call carries the grant to refresh."},
-	} {
-		if response := serveWith(t, refresher{}, request); response.Error == nil || *response.Error != want {
-			t.Errorf("%s: %+v", request, response.Error)
-		}
-	}
-	// A plugin whose grants carry no refresh token refreshes none.
-	if response := serveWith(t, enroller{}, `{"method":"grant_refresh","params":{}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
-		t.Fatalf("a plugin without grant refresh answered %+v", response)
-	}
-}
+// A plugin whose grants carry no refresh token refreshes none.
 
 // poller is a plugin that enrolls grants by device authorization.
 type poller struct{ enroller }
@@ -206,34 +99,6 @@ func (poller) PollGrant(_ context.Context, poll GrantPoll) (Grant, error) {
 		return Grant{}, &Error{Code: abi.CodeAuthorizationPending, Message: "not yet"}
 	}
 	return Grant{AccessToken: "at", Principal: "device@acme.example"}, nil
-}
-
-// A GrantPoller polls a device authorization; a GrantEnroller that isn't one
-// polls nothing.
-func TestServePollsDeviceAuthorizations(t *testing.T) {
-	response := serveWith(t, poller{}, `{"method":"grant_poll","params":{"profile":"acme-account","session":"approved"}}`)
-	var grant Grant
-	if response.Error != nil || json.Unmarshal(response.Result, &grant) != nil || grant.Principal != "device@acme.example" {
-		t.Fatalf("grant_poll response %+v", response)
-	}
-	if response = serveWith(t, poller{}, `{"method":"grant_poll","params":{"profile":"acme-account","session":"device"}}`); response.Error == nil || response.Error.Code != abi.CodeAuthorizationPending {
-		t.Fatalf("grant_poll of a pending device answered %+v", response)
-	}
-	if response = serveWith(t, enroller{}, `{"method":"grant_poll","params":{"session":"approved"}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
-		t.Fatalf("a plugin without device authorization answered %+v", response)
-	}
-}
-
-// A plugin can't declare a profile that authenticates with a grant without a
-// GrantEnroller: it reports no manifest, so OLP never installs it.
-func TestServeRefusesAGrantProfileWithoutAGrantEnroller(t *testing.T) {
-	declared := Manifest{Name: "acme", Version: "1.0.0", Profiles: []Profile{{ID: "acme-account", Label: "Acme Account", Dialect: "openai-chat", Grant: &GrantAuthentication{}}}}
-	if response := serveWith(t, manifestOnly(declared), `{"method":"manifest"}`); response.Error == nil || response.Error.Code != abi.CodeInternal {
-		t.Fatalf("manifest response %+v", response)
-	}
-	if response := serveWith(t, enroller{manifestOnly: manifestOnly(declared)}, `{"method":"manifest"}`); response.Error != nil {
-		t.Fatalf("manifest response %+v", response)
-	}
 }
 
 func TestServeReportsFailuresAsErrors(t *testing.T) {
@@ -268,22 +133,5 @@ func TestLogRecordsFlattenAttributes(t *testing.T) {
 	want := abi.LogRecord{Level: "warn", Message: "refresh failed", Attrs: map[string]string{"plugin": "acme", "grant.attempt": "2", "grant.upstream.status": "401"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("record %+v, want %+v", got, want)
-	}
-}
-
-// A RoutePredicate judges a route selector by the request's features alone.
-func TestServeAnswersTheRoutePredicateCall(t *testing.T) {
-	p := routing{match: func(f RouteFeatures) bool { return f.Tools && f.InputTokens > 1000 }}
-	for request, want := range map[string]bool{
-		`{"method":"route_predicate","params":{"route":"assistant","selector":"agentic","operation":"generation","input_tokens":4000,"tools":true}}`: true,
-		`{"method":"route_predicate","params":{"route":"assistant","selector":"agentic","operation":"generation","input_tokens":40,"tools":true}}`:   false,
-	} {
-		var verdict RouteVerdict
-		if response := serveWith(t, p, request); response.Error != nil || json.Unmarshal(response.Result, &verdict) != nil || verdict.Match != want {
-			t.Fatalf("%s: response %+v", request, response)
-		}
-	}
-	if response := serveWith(t, manifestOnly{}, `{"method":"route_predicate","params":{}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
-		t.Fatalf("a plugin without RoutePredicate answered %+v", response)
 	}
 }

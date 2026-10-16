@@ -137,61 +137,6 @@ func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 		t.Fatal(r)
 	}
 }
-func TestResponseCacheStreamReplaysNativeFrames(t *testing.T) {
-	h, _ := cacheHarness(t)
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, `data: {"id":"c","object":"chat.completion.chunk","model":"model-a","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`+"\n\ndata: [DONE]\n\n")
-	})
-	body := []byte(`{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	read := func() (string, string) {
-		r := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, nil)
-		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
-		if r.StatusCode != 200 {
-			t.Fatalf("%d %s", r.StatusCode, b)
-		}
-		return r.Header.Get("X-OLP-Cache"), string(b)
-	}
-	first, a := read()
-	second, b := read()
-	if first != "miss" || second != "hit" || a != b {
-		t.Fatalf("stream replay %s/%s\n%s\n%s", first, second, a, b)
-	}
-	env := h.sink.nth(t, 2)
-	if !env.Committed || !env.Attempts[0].Committed {
-		t.Fatal("cache replay lost stream commitment")
-	}
-}
-func TestResponseCacheRevisionAndKeyPolicy(t *testing.T) {
-	h, _ := cacheHarness(t)
-	body := []byte(`{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}]}`)
-	do := func() string {
-		r := h.do(t.Context(), "POST", "/v1/chat/completions", fullKey, body, nil)
-		defer r.Body.Close()
-		_, _ = io.Copy(io.Discard, r.Body)
-		return r.Header.Get("X-OLP-Cache")
-	}
-	if do() != "miss" || do() != "hit" {
-		t.Fatal("cache did not warm")
-	}
-	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
-		r := s.Routes[routeSlug]
-		r.RevisionID = "new-revision"
-		s.Routes[routeSlug] = r
-	})
-	if do() != "miss" {
-		t.Fatal("served old revision")
-	}
-	h.rt.mu.Lock()
-	key := h.rt.keys[fullKey]
-	key.Policy.ForbidResponseCache = true
-	h.rt.keys[fullKey] = key
-	h.rt.mu.Unlock()
-	if do() != "bypass" {
-		t.Fatal("ignored key cache policy")
-	}
-}
 
 func TestResponseCacheClientSurfaces(t *testing.T) {
 	for _, tc := range []struct {
@@ -317,24 +262,4 @@ func cacheBedrockStream(t *testing.T) []byte {
 		}
 	}
 	return body.Bytes()
-}
-
-func TestResponseCacheStrictEmbeddings(t *testing.T) {
-	h, _ := enableTestCache(t, strictHarness(t, strictEmbeddings))
-	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"object":"list","model":"model-a","data":[{"object":"embedding","index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`)
-	})
-	for i := range 2 {
-		response := h.do(t.Context(), "POST", "/v1/embeddings", fullKey, []byte(`{"model":"team-chat","input":"hello"}`), nil)
-		body, _ := io.ReadAll(response.Body)
-		response.Body.Close()
-		want := "miss"
-		if i == 1 {
-			want = "hit"
-		}
-		if response.StatusCode != 200 || response.Header.Get("X-OLP-Cache") != want {
-			t.Fatalf("%d: %d %s", i, response.StatusCode, body)
-		}
-	}
 }

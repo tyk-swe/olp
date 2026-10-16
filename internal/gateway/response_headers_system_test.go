@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -302,237 +300,27 @@ func resetWithin(t *testing.T, header, value string) {
 	}
 }
 
-func TestOpenAIRateLimitHeadersCountDownTheKeysWindow(t *testing.T) {
-	f := newHeaderFixture(t)
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)})
-	for n := int64(1); n <= 3; n++ {
-		resp, body := f.send("openai", key, false)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("request %d: status %d %s", n, resp.StatusCode, body)
-		}
-		// The tokens the window holds are what earlier requests settled at and
-		// what this one reserved: the headers state exactly that.
-		remaining := 100_000 - f.window.lastReserved()*n
-		wantHeaders(t, resp, "x-ratelimit-", map[string]string{
-			"X-Ratelimit-Limit-Requests":     "5",
-			"X-Ratelimit-Remaining-Requests": strconv.FormatInt(5-n, 10),
-			"X-Ratelimit-Reset-Requests":     resp.Header.Get("X-Ratelimit-Reset-Requests"),
-			"X-Ratelimit-Limit-Tokens":       "100000",
-			"X-Ratelimit-Remaining-Tokens":   strconv.FormatInt(remaining, 10),
-			"X-Ratelimit-Reset-Tokens":       resp.Header.Get("X-Ratelimit-Reset-Tokens"),
-		})
-		resetWithin(t, "x-ratelimit-reset-requests", resp.Header.Get("X-Ratelimit-Reset-Requests"))
-		resetWithin(t, "x-ratelimit-reset-tokens", resp.Header.Get("X-Ratelimit-Reset-Tokens"))
-		wantHeaders(t, resp, "anthropic-", nil)
-		wantHeaders(t, resp, "x-olp-attempts", nil)
-		f.window.settled(t, int(n))
-	}
-}
+// The tokens the window holds are what earlier requests settled at and
+// what this one reserved: the headers state exactly that.
 
-// TestResetCountsDownToTheMomentTheResponseIsWritten proves the reset a response
-// states is what is left of the minute when it is committed, not when the request
-// was admitted: an upstream that takes a while to answer leaves the key's window
-// shorter by that while, for a unary response and for a stream's first frame.
-func TestResetCountsDownToTheMomentTheResponseIsWritten(t *testing.T) {
-	f := newHeaderFixture(t)
-	const wait = 700 * time.Millisecond
-	answer := f.mock.handlers["a"]
-	f.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-time.After(wait):
-		case <-r.Context().Done():
-			return
-		}
-		answer(w, r)
-	})
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)})
-	for n, stream := range []bool{false, true} {
-		resp, body := f.send("openai", key, stream)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("stream=%v: status %d %s", stream, resp.StatusCode, body)
-		}
-		for _, header := range []string{headerOpenAIResetRequests, headerOpenAIResetTokens} {
-			// The script measured 37.5s and the upstream took 0.7s of it.
-			left := resetOf(t, header, resp.Header.Get(header))
-			if left > minuteReset-wait || left < minuteReset-10*time.Second {
-				t.Errorf("stream=%v: %s = %s, want what is left of the %s the script measured less the %s the upstream took", stream, header, left, minuteReset, wait)
-			}
-		}
-		f.window.settled(t, n+1)
-	}
-}
+// The script measured 37.5s and the upstream took 0.7s of it.
 
-func TestAnthropicRateLimitHeadersStateTheEndOfTheWindow(t *testing.T) {
-	f := newHeaderFixture(t)
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)})
-	resp, body := f.send("anthropic", key, false)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	end := time.UnixMilli((minute + 1) * 60_000).UTC().Format(time.RFC3339)
-	wantHeaders(t, resp, "anthropic-", map[string]string{
-		"Anthropic-Ratelimit-Requests-Limit":     "5",
-		"Anthropic-Ratelimit-Requests-Remaining": "4",
-		"Anthropic-Ratelimit-Requests-Reset":     end,
-		"Anthropic-Ratelimit-Tokens-Limit":       "100000",
-		"Anthropic-Ratelimit-Tokens-Remaining":   strconv.FormatInt(100_000-f.window.lastReserved(), 10),
-		"Anthropic-Ratelimit-Tokens-Reset":       end,
-	})
-	wantHeaders(t, resp, "x-ratelimit-", nil)
-}
+// A key bounded only by its concurrency holds a lease, and has no allowance.
 
-func TestRateLimitHeadersAreSentOnlyForTheDimensionsTheKeyLimits(t *testing.T) {
-	f := newHeaderFixture(t)
-	for name, tc := range map[string]struct {
-		policy access.KeyPolicy
-		want   []string
-	}{
-		"requests": {access.KeyPolicy{RequestsPerMinute: perMinute(7)}, []string{"X-Ratelimit-Limit-Requests", "X-Ratelimit-Remaining-Requests", "X-Ratelimit-Reset-Requests"}},
-		"tokens":   {access.KeyPolicy{TokensPerMinute: perMinute(100_000)}, []string{"X-Ratelimit-Limit-Tokens", "X-Ratelimit-Remaining-Tokens", "X-Ratelimit-Reset-Tokens"}},
-		// A key bounded only by its concurrency holds a lease, and has no allowance.
-		"concurrency": {access.KeyPolicy{MaxConcurrency: perMinute(3)}, nil},
-		"unlimited":   {access.KeyPolicy{}, nil},
-	} {
-		t.Run(name, func(t *testing.T) {
-			resp, body := f.send("openai", f.key(tc.policy), false)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d %s", resp.StatusCode, body)
-			}
-			got := map[string]bool{}
-			for header := range resp.Header {
-				if strings.HasPrefix(strings.ToLower(header), "x-ratelimit-") {
-					got[header] = true
-				}
-			}
-			if len(got) != len(tc.want) {
-				t.Fatalf("rate-limit headers = %v, want %v", got, tc.want)
-			}
-			for _, header := range tc.want {
-				if !got[header] {
-					t.Fatalf("rate-limit headers = %v, want %v", got, tc.want)
-				}
-			}
-		})
-	}
-}
+// The request was counted all the same.
 
-func TestGeminiResponsesCarryNoRateLimitHeaders(t *testing.T) {
-	f := newHeaderFixture(t)
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)})
-	resp, body := f.send("gemini", key, false)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	wantHeaders(t, resp, "x-ratelimit-", nil)
-	wantHeaders(t, resp, "anthropic-", nil)
-	// The request was counted all the same.
-	f.window.mu.Lock()
-	defer f.window.mu.Unlock()
-	if len(f.window.reserved) != 1 {
-		t.Fatalf("limiter reserved %d requests, want 1", len(f.window.reserved))
-	}
-}
+// The refusal reserved nothing: what the window holds is the first request's
+// settled tokens, which the refused one did not add to.
 
-func TestRateLimitedRequestsCarryTheWindowWithTheRetryHint(t *testing.T) {
-	f := newHeaderFixture(t)
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(1), TokensPerMinute: perMinute(100_000)})
-	if resp, body := f.send("openai", key, false); resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	f.window.settled(t, 1)
-	reserved := f.window.lastReserved()
+// The Anthropic surface states the same refusal in its own headers and error.
 
-	resp, body := f.send("openai", key, false)
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	if got := resp.Header.Get("Retry-After"); got != "38" {
-		t.Fatalf("Retry-After = %q, want the 37.5s the window has left rounded up", got)
-	}
-	// The refusal reserved nothing: what the window holds is the first request's
-	// settled tokens, which the refused one did not add to.
-	wantHeaders(t, resp, "x-ratelimit-", map[string]string{
-		"X-Ratelimit-Limit-Requests":     "1",
-		"X-Ratelimit-Remaining-Requests": "0",
-		"X-Ratelimit-Reset-Requests":     resp.Header.Get("X-Ratelimit-Reset-Requests"),
-		"X-Ratelimit-Limit-Tokens":       "100000",
-		"X-Ratelimit-Remaining-Tokens":   strconv.FormatInt(100_000-reserved, 10),
-		"X-Ratelimit-Reset-Tokens":       resp.Header.Get("X-Ratelimit-Reset-Tokens"),
-	})
-	if reserved <= headerFixtureTokens {
-		t.Fatalf("the first request reserved %d tokens, which does not tell reserved and settled apart", reserved)
-	}
+// Gemini has no such headers, even on a refusal.
 
-	// The Anthropic surface states the same refusal in its own headers and error.
-	resp, body = f.send("anthropic", key, false)
-	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") != "38" {
-		t.Fatalf("anthropic: status %d, Retry-After %q", resp.StatusCode, resp.Header.Get("Retry-After"))
-	}
-	if !bytes.Contains(body, []byte(`"type":"rate_limit_error"`)) {
-		t.Fatalf("anthropic: body %s", body)
-	}
-	wantHeaders(t, resp, "anthropic-", map[string]string{
-		"Anthropic-Ratelimit-Requests-Limit":     "1",
-		"Anthropic-Ratelimit-Requests-Remaining": "0",
-		"Anthropic-Ratelimit-Requests-Reset":     time.UnixMilli((minute + 1) * 60_000).UTC().Format(time.RFC3339),
-		"Anthropic-Ratelimit-Tokens-Limit":       "100000",
-		"Anthropic-Ratelimit-Tokens-Remaining":   strconv.FormatInt(100_000-reserved, 10),
-		"Anthropic-Ratelimit-Tokens-Reset":       time.UnixMilli((minute + 1) * 60_000).UTC().Format(time.RFC3339),
-	})
+// A first request, on a key of its own, tells how much one reserves.
 
-	// Gemini has no such headers, even on a refusal.
-	resp, _ = f.send("gemini", key, false)
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("gemini: status %d", resp.StatusCode)
-	}
-	wantHeaders(t, resp, "x-ratelimit-", nil)
-	wantHeaders(t, resp, "anthropic-", nil)
-}
-
-func TestTokenLimitedRequestsStateTheTokensTheWindowHolds(t *testing.T) {
-	f := newHeaderFixture(t)
-	// A first request, on a key of its own, tells how much one reserves.
-	if resp, body := f.send("openai", f.key(access.KeyPolicy{TokensPerMinute: perMinute(1_000_000)}), false); resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	reserved := f.window.lastReserved()
-	f.window.settled(t, 1)
-
-	// A window that holds one such request and two tokens over: the second is
-	// refused by the token limit, with what the window holds then, which is what
-	// the first settled at. The refused request reserved nothing.
-	limit := reserved + 2
-	key := f.key(access.KeyPolicy{TokensPerMinute: perMinute(limit)})
-	if resp, body := f.send("openai", key, false); resp.StatusCode != http.StatusOK {
-		t.Fatalf("first request: status %d %s", resp.StatusCode, body)
-	}
-	f.window.settled(t, 2)
-	resp, _ := f.send("openai", key, false)
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("second request: status %d", resp.StatusCode)
-	}
-	wantHeaders(t, resp, "x-ratelimit-", map[string]string{
-		"X-Ratelimit-Limit-Tokens":     strconv.FormatInt(limit, 10),
-		"X-Ratelimit-Remaining-Tokens": strconv.FormatInt(limit-reserved, 10),
-		"X-Ratelimit-Reset-Tokens":     resp.Header.Get("X-Ratelimit-Reset-Tokens"),
-	})
-}
-
-func TestStreamsCarryTheAllowanceBeforeTheirFirstFrame(t *testing.T) {
-	f := newHeaderFixture(t)
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)})
-	resp, body := f.send("openai", key, true)
-	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") || !bytes.Contains(body, []byte("[DONE]")) {
-		t.Fatalf("status %d type %q body %s", resp.StatusCode, resp.Header.Get("Content-Type"), body)
-	}
-	if got := resp.Header.Get("X-Ratelimit-Remaining-Requests"); got != "4" {
-		t.Fatalf("remaining requests = %q, want 4", got)
-	}
-	if want := strconv.FormatInt(100_000-f.window.lastReserved(), 10); resp.Header.Get("X-Ratelimit-Remaining-Tokens") != want {
-		t.Fatalf("remaining tokens = %q, want %s", resp.Header.Get("X-Ratelimit-Remaining-Tokens"), want)
-	}
-	resetWithin(t, "x-ratelimit-reset-requests", resp.Header.Get("X-Ratelimit-Reset-Requests"))
-}
+// A window that holds one such request and two tokens over: the second is
+// refused by the token limit, with what the window holds then, which is what
+// the first settled at. The refused request reserved nothing.
 
 func TestNoLeaseMeansNoRateLimitHeaders(t *testing.T) {
 	f := newHeaderFixture(t)
@@ -562,288 +350,27 @@ func metadataOf(resp *http.Response) map[string]string {
 	return got
 }
 
-func TestMetadataHeadersAppearOnlyWhenTheKeyOptsIn(t *testing.T) {
-	f := newHeaderFixture(t)
-	route := f.rt.release.Snapshot.Routes[routeSlug]
-	for _, surface := range []string{"openai", "anthropic", "gemini"} {
-		t.Run(surface, func(t *testing.T) {
-			resp, body := f.send(surface, f.key(access.KeyPolicy{}), false)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d %s", resp.StatusCode, body)
-			}
-			if got := metadataOf(resp); len(got) != 0 {
-				t.Fatalf("a key that did not opt in saw %v", got)
-			}
-			resp, body = f.send(surface, f.key(access.KeyPolicy{ResponseMetadata: true}), false)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d %s", resp.StatusCode, body)
-			}
-			// Two input tokens at one unit per million and three output tokens at ten.
-			want := map[string]string{
-				"X-Olp-Attempts": "1", "X-Olp-Route-Revision": route.RevisionID, "X-Olp-Provider": "vendor-a", "X-Olp-Cost": "0.000032",
-			}
-			if got := metadataOf(resp); len(got) != len(want) {
-				t.Fatalf("metadata = %v, want %v", got, want)
-			}
-			for name, value := range want {
-				if got := resp.Header.Get(name); got != value {
-					t.Fatalf("%s = %q, want %q (headers %v)", name, got, value, metadataOf(resp))
-				}
-			}
-		})
-	}
-}
+// Two input tokens at one unit per million and three output tokens at ten.
 
-// The headers are the one place the gateway itself names a provider, and a key
-// that did not opt in gets none. What an upstream says of itself is not the
-// gateway's to scrub: the message of an upstream rejection is relayed with
-// credential values redacted, whatever the key's policy, and the documentation
-// says so.
-func TestAnUpstreamRejectionIsRelayedWhateverTheKeysPolicy(t *testing.T) {
-	f := newHeaderFixture(t)
-	f.mock.set("a", status(http.StatusBadRequest, `{"error":{"message":"vendor-a rejected the request: model gpt-upstream-secret is overloaded","type":"invalid_request_error"}}`))
-	for _, opted := range []bool{false, true} {
-		resp, body := f.send("openai", f.key(access.KeyPolicy{ResponseMetadata: opted}), false)
-		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), `"upstream_rejected"`) ||
-			!strings.Contains(string(body), "vendor-a rejected the request: model gpt-upstream-secret is overloaded") {
-			t.Fatalf("opted in %v: status %d body %s, want the upstream's message relayed", opted, resp.StatusCode, body)
-		}
-		// Metadata belongs to the successful responses of a key that opted in.
-		if got := metadataOf(resp); len(got) != 0 {
-			t.Fatalf("opted in %v: the rejection carries %v", opted, got)
-		}
-	}
-}
+// Metadata belongs to the successful responses of a key that opted in.
 
-func TestMetadataStatesTheAttemptsAFailoverMade(t *testing.T) {
-	f := newHeaderFixture(t)
-	route := f.rt.release.Snapshot.Routes[routeSlug]
-	down := status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`)
-	f.mock.set("a", down)
-	key := f.key(access.KeyPolicy{ResponseMetadata: true, RequestsPerMinute: perMinute(5)})
+// The first attempt failed after it was sent, so the request made two, and b
+// answered. Its cost is b's alone: nothing was reported for a.
 
-	resp, body := f.send("openai", key, false)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	// The first attempt failed after it was sent, so the request made two, and b
-	// answered. Its cost is b's alone: nothing was reported for a.
-	wantMetadata := map[string]string{
-		"X-Olp-Attempts": "2", "X-Olp-Route-Revision": route.RevisionID, "X-Olp-Provider": "vendor-b", "X-Olp-Cost": "0.000032",
-	}
-	got := metadataOf(resp)
-	if len(got) != len(wantMetadata) {
-		t.Fatalf("metadata = %v, want %v", got, wantMetadata)
-	}
-	for name, value := range wantMetadata {
-		if got[name] != value {
-			t.Fatalf("%s = %q, want %q", name, got[name], value)
-		}
-	}
+// A stream commits before its attempt's fact exists, and still reports the
+// attempts made so far and the vendor that is streaming. It has no cost yet.
 
-	// A stream commits before its attempt's fact exists, and still reports the
-	// attempts made so far and the vendor that is streaming. It has no cost yet.
-	resp, body = f.send("openai", key, true)
-	if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("[DONE]")) {
-		t.Fatalf("stream: status %d %s", resp.StatusCode, body)
-	}
-	got = metadataOf(resp)
-	if got["X-Olp-Attempts"] != "2" || got["X-Olp-Provider"] != "vendor-b" || got["X-Olp-Route-Revision"] != route.RevisionID {
-		t.Fatalf("stream metadata = %v", got)
-	}
-	if _, present := got["X-Olp-Cost"]; present || len(got) != 3 {
-		t.Fatalf("a stream states a cost it cannot know yet: %v", got)
-	}
-	// The envelope agrees with what the headers said.
-	if env := f.sink.last(t); len(env.Attempts) != 2 || env.Attempts[1].VendorID != "vendor-b" {
-		t.Fatalf("attempts %+v", env.Attempts)
-	}
-}
+// The envelope agrees with what the headers said.
 
-func TestMetadataOmitsWhatTheGatewayCannotState(t *testing.T) {
-	f := newHeaderFixture(t)
-	// No price list at all: nothing a request does is priced, and a cost is not
-	// invented for it.
-	f.rt.inputs = nil
-	key := f.key(access.KeyPolicy{ResponseMetadata: true})
-	resp, body := f.send("openai", key, false)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	if _, present := metadataOf(resp)["X-Olp-Cost"]; present || resp.Header.Get("X-Olp-Attempts") != "1" {
-		t.Fatalf("unpriced response carried %v", metadataOf(resp))
-	}
+// No price list at all: nothing a request does is priced, and a cost is not
+// invented for it.
 
-	// A provider with no vendor names none.
-	snapshot := f.rt.release.Snapshot
-	for id, provider := range snapshot.Providers {
-		provider.VendorID = ""
-		snapshot.Providers[id] = provider
-	}
-	resp, _ = f.send("openai", key, false)
-	if _, present := metadataOf(resp)["X-Olp-Provider"]; present || resp.Header.Get("X-Olp-Attempts") != "1" {
-		t.Fatalf("a provider without a vendor was named: %v", metadataOf(resp))
-	}
-}
+// A provider with no vendor names none.
 
-// TestMediaResponsesCarryTheAllowanceAndMetadata proves the media endpoints, which
-// commit their responses on paths of their own, write the headers too: a buffered
-// body, and a stream on its first frame. A key that did not opt in is told its
-// allowance on both, and nothing of how it was served.
-func TestMediaResponsesCarryTheAllowanceAndMetadata(t *testing.T) {
-	h := newMediaHarness(t)
-	window := admitThrough(t, h)
-	snapshot := h.rt.release.Snapshot
-	for id, provider := range snapshot.Providers {
-		provider.VendorID = "vendor-" + provider.Name
-		snapshot.Providers[id] = provider
-	}
-	route := snapshot.Routes[routeSlug]
-	key := addKey(h, access.KeyPolicy{RequestsPerMinute: perMinute(10), TokensPerMinute: perMinute(1_000_000), ResponseMetadata: true})
-	plain := addKey(h, access.KeyPolicy{RequestsPerMinute: perMinute(10), TokensPerMinute: perMinute(1_000_000)})
-	metadata := map[string]string{"X-Olp-Attempts": "1", "X-Olp-Route-Revision": route.RevisionID, "X-Olp-Provider": "vendor-a"}
+// The speech reported no usage, so nothing is known to have cost anything.
 
-	speech := func(key string) *http.Response {
-		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "audio/mpeg")
-			io.WriteString(w, "audio-payload")
-		})
-		resp := h.do(t.Context(), "POST", "/v1/audio/speech", key, []byte(`{"model":"team-chat","input":"hello","voice":"alloy"}`), nil)
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("speech: status %d", resp.StatusCode)
-		}
-		return resp
-	}
-	image := func(key string) *http.Response {
-		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/event-stream")
-			io.WriteString(w, "data: {\"type\":\"image_generation.completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n")
-		})
-		resp := h.do(t.Context(), "POST", "/v1/images/generations", key, []byte(`{"model":"team-chat","prompt":"photo","stream":true}`), nil)
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "image_generation.completed") {
-			t.Fatalf("stream: status %d %s", resp.StatusCode, body)
-		}
-		return resp
-	}
-
-	// The speech reported no usage, so nothing is known to have cost anything.
-	resp := speech(key)
-	wantHeaders(t, resp, "x-olp-", metadata)
-	if got := resp.Header.Get("X-Ratelimit-Remaining-Requests"); got != "9" {
-		t.Fatalf("speech: remaining requests = %q, want 9", got)
-	}
-	if got := resp.Header.Get("X-Ratelimit-Limit-Tokens"); got != "1000000" {
-		t.Fatalf("speech: token limit = %q", got)
-	}
-	resp = image(key)
-	wantHeaders(t, resp, "x-olp-", metadata)
-	if got := resp.Header.Get("X-Ratelimit-Remaining-Requests"); got != "8" {
-		t.Fatalf("stream: remaining requests = %q, want 8", got)
-	}
-
-	// A key that did not opt in has the allowance of the same responses, which
-	// proves they went through the writer, and none of the provider's identity.
-	for name, send := range map[string]func(string) *http.Response{"speech": speech, "stream": image} {
-		resp := send(plain)
-		wantHeaders(t, resp, "x-olp-", nil)
-		if got := resp.Header.Get("X-Ratelimit-Limit-Requests"); got != "10" {
-			t.Fatalf("%s: request limit = %q, want 10 (headers %v)", name, got, resp.Header)
-		}
-	}
-	if len(window.reserved) != 4 {
-		t.Fatalf("limiter reserved %d requests, want 4", len(window.reserved))
-	}
-}
-
-// TestEveryHeaderOfAResponseFitsTogether proves the most a response can carry, the
-// six rate-limit headers of a key limited on both dimensions beside the four
-// metadata headers of one that opted in, are all written.
-func TestEveryHeaderOfAResponseFitsTogether(t *testing.T) {
-	f := newHeaderFixture(t)
-	key := f.key(access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000), ResponseMetadata: true})
-	resp, body := f.send("openai", key, false)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d %s", resp.StatusCode, body)
-	}
-	for _, name := range []string{
-		headerOpenAILimitRequests, headerOpenAIRemainingRequests, headerOpenAIResetRequests,
-		headerOpenAILimitTokens, headerOpenAIRemainingTokens, headerOpenAIResetTokens,
-		headerAttempts, headerRouteRevision, headerProvider, headerCost,
-	} {
-		if resp.Header.Get(name) == "" {
-			t.Errorf("%s is missing from %v", name, resp.Header)
-		}
-	}
-}
-
-// TestOnlyTheKeysReservationAsksForTheAllowance proves a request through
-// providers that have quotas of their own asks the rate script to state an
-// allowance for the key's reservation alone, and only where the key limits
-// requests or tokens: nothing reports on a provider's connection or credential
-// quota, or on a key that is bound by its concurrency only, and a reply that
-// stated one would be decoded for nothing on every attempt.
-func TestOnlyTheKeysReservationAsksForTheAllowance(t *testing.T) {
-	f := newHeaderFixture(t)
-	for id, provider := range f.rt.release.Snapshot.Providers {
-		provider.Limits = &routing.Limits{RequestsPerMinute: perMinute(1000), TokensPerMinute: perMinute(10_000_000), MaxConcurrency: perMinute(10)}
-		for index := range provider.Slots {
-			provider.Slots[index].RequestsPerMinute = perMinute(1000)
-			provider.Slots[index].TokensPerMinute = perMinute(10_000_000)
-		}
-		f.rt.release.Snapshot.Providers[id] = provider
-	}
-	for name, tc := range map[string]struct {
-		policy     access.KeyPolicy
-		wantStated bool
-	}{
-		"requests and tokens": {access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)}, true},
-		"requests":            {access.KeyPolicy{RequestsPerMinute: perMinute(5)}, true},
-		"tokens":              {access.KeyPolicy{TokensPerMinute: perMinute(100_000)}, true},
-		"concurrency":         {access.KeyPolicy{MaxConcurrency: perMinute(3)}, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f.window.mu.Lock()
-			f.window.asked = nil
-			f.window.mu.Unlock()
-			resp, body := f.send("openai", f.key(tc.policy), false)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d %s", resp.StatusCode, body)
-			}
-			if got := resp.Header.Get("X-Ratelimit-Limit-Requests") != "" || resp.Header.Get("X-Ratelimit-Limit-Tokens") != ""; got != tc.wantStated {
-				t.Fatalf("rate-limit headers present = %t, want %t (headers %v)", got, tc.wantStated, resp.Header)
-			}
-			f.window.mu.Lock()
-			defer f.window.mu.Unlock()
-			seen := map[string]int{}
-			for rateKey, asks := range f.window.asked {
-				var scope string
-				switch {
-				case strings.Contains(rateKey, "{lookup_"):
-					scope = "key"
-				case strings.Contains(rateKey, "{pc_"):
-					scope = "connection"
-				case strings.Contains(rateKey, "{ps_"):
-					scope = "credential"
-				default:
-					t.Fatalf("a reservation of the unexpected rate key %q", rateKey)
-				}
-				for _, stated := range asks {
-					seen[scope]++
-					if want := scope == "key" && tc.wantStated; stated != want {
-						t.Errorf("the %s reservation asked for the allowance = %t, want %t", scope, stated, want)
-					}
-				}
-			}
-			if seen["key"] != 1 || seen["connection"] != 1 || seen["credential"] != 1 {
-				t.Fatalf("reservations by scope = %v, want one of the key, the connection and the credential", seen)
-			}
-		})
-	}
-}
+// A key that did not opt in has the allowance of the same responses, which
+// proves they went through the writer, and none of the provider's identity.
 
 // keyAsks is what the key's own reservations asked of the limiter: whether each
 // stated the allowance. The reservations of a provider's connection and
@@ -951,35 +478,4 @@ func metadataOfPrefix(resp *http.Response, prefix string) map[string]string {
 	return got
 }
 
-// A job call on a video has no prompt, and reserves what a call on any other
-// resource does. A key with a token limit refuses a reservation of nothing, as
-// invalid, and the refusal read as an outage, so such a key could create a job and
-// never read it back, list its jobs, download or delete one.
-func TestVideoJobCallsAreAdmittedForAKeyWithATokenLimit(t *testing.T) {
-	policy := access.KeyPolicy{RequestsPerMinute: perMinute(10), TokensPerMinute: perMinute(1_000_000)}
-	for _, family := range []wire.Format{wire.VideoList, wire.VideoGet, wire.VideoContent, wire.VideoDelete} {
-		t.Run(string(family), func(t *testing.T) {
-			w := &window{}
-			limiter, err := limits.New(w, "olp:test")
-			if err != nil {
-				t.Fatal(err)
-			}
-			s := &Server{Admission: NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, quiet), log: quiet}
-			x := &call{family: family}
-			_, complete, e := s.admitVideoRequest(t.Context(), x, admissionAuthority(policy))
-			if e != nil {
-				t.Fatalf("a job call was refused for a key with a token limit: %+v", e)
-			}
-			defer complete()
-			if got := w.lastReserved(); got != resourceEstimate {
-				t.Errorf("the call reserved %d tokens, want the %d of a call on a resource", got, resourceEstimate)
-			}
-			// The call reports the key's allowance as every other response does.
-			header := http.Header{}
-			x.responseHeaders(header, false)
-			if header.Get("X-Ratelimit-Limit-Requests") != "10" || header.Get("X-Ratelimit-Limit-Tokens") != "1000000" || header.Get("X-Ratelimit-Remaining-Requests") != "9" {
-				t.Errorf("the response carries %v, want the allowance of the key", header)
-			}
-		})
-	}
-}
+// The call reports the key's allowance as every other response does.

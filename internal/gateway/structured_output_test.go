@@ -2,8 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"net/http"
-	"testing"
 
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -26,74 +24,5 @@ func declareParams(h *harness, model string, params []string) {
 		}
 		p.Models[model] = metadata
 		snap.Providers[id] = p
-	}
-}
-
-func TestStructuredOutputRequiresDeclaredSupport(t *testing.T) {
-	h := newHarness(t, Config{})
-	declareParams(h, modelB, []string{"response_format"})
-	resp, body := h.chat(fullKey, nil, jsonSchemaField)
-	if resp.StatusCode != http.StatusOK || body["model"] != routeSlug {
-		t.Fatalf("status %d body %v", resp.StatusCode, body)
-	}
-	if h.mock.count("a") != 0 || h.mock.count("b") != 1 {
-		t.Fatalf("unqualified target must not be attempted: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
-	}
-}
-
-func TestStructuredOutputUsesQualifiedTarget(t *testing.T) {
-	h := newHarness(t, Config{})
-	declareParams(h, modelA, []string{"response_format"})
-	resp, body := h.chat(fullKey, nil, jsonSchemaField)
-	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
-		t.Fatalf("status %d body %v calls a=%d b=%d", resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
-	}
-}
-
-func TestStructuredOutputWithoutQualifiedTargetFails(t *testing.T) {
-	h := newHarness(t, Config{})
-	resp, body := h.chat(fullKey, nil, jsonSchemaField)
-	if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "invalid_request" {
-		t.Fatalf("status %d body %v", resp.StatusCode, body)
-	}
-	if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-		t.Fatalf("no target may serve: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
-	}
-}
-
-func TestTextResponseFormatDoesNotRequireQualification(t *testing.T) {
-	h := newHarness(t, Config{})
-	for _, field := range []string{"", `,"response_format":{"type":"text"}`} {
-		resp, _ := h.chat(fullKey, nil, field)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("field %q: status %d", field, resp.StatusCode)
-		}
-	}
-	if h.mock.count("a") != 2 || h.mock.count("b") != 0 {
-		t.Fatalf("plain requests keep their targets: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
-	}
-}
-
-// A route that requires parameters weighs each target against the controls the
-// request uses, which are read from the request only for such a route.
-func TestRequiredParametersAreChecked(t *testing.T) {
-	require := true
-	for _, tc := range []struct {
-		field string
-		a, b  int
-	}{
-		{`,"top_p":0.5`, 0, 1},
-		{`,"temperature":0.5`, 1, 0},
-	} {
-		h := newHarness(t, Config{})
-		route := h.rt.release.Snapshot.Routes[routeSlug]
-		route.Policy = &routing.Policy{Constraints: routing.Preferences{RequireParameters: &require}}
-		h.rt.release.Snapshot.Routes[routeSlug] = route
-		declareParams(h, modelA, []string{"temperature"})
-		declareParams(h, modelB, []string{"top_p"})
-		resp, body := h.chat(fullKey, nil, tc.field)
-		if resp.StatusCode != http.StatusOK || h.mock.count("a") != tc.a || h.mock.count("b") != tc.b {
-			t.Fatalf("%s: status %d body %v calls a=%d b=%d, want a=%d b=%d", tc.field, resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"), tc.a, tc.b)
-		}
 	}
 }

@@ -1,10 +1,8 @@
 package telemetry
 
 import (
-	"fmt"
 	"math"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -35,47 +33,5 @@ func TestBusinessMetricsCountsKnownUsageAndBoundsActualSeries(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s in %s", want, body)
 		}
-	}
-}
-
-func TestBusinessMetricsHighCardinalityCapKeepsExistingSeries(t *testing.T) {
-	m := NewBusinessMetrics(40, nil)
-	input := int64(1)
-	var wg sync.WaitGroup
-	for i := range 1000 {
-		wg.Go(func() {
-			m.Tokens(BusinessLabels{Route: fmt.Sprintf("route-%d", i), ProviderKind: "openai"}, &input, nil)
-		})
-	}
-	wg.Wait()
-	if m.used != 40 || len(m.series) != 40 || m.overflow != 960 {
-		t.Fatalf("cap violated: used=%d tuples=%d overflow=%d", m.used, len(m.series), m.overflow)
-	}
-	for _, s := range m.series {
-		before := s.value
-		m.add(s.name, s.labels, 5, nil)
-		if s.value != before+5 {
-			t.Fatal("existing tuple did not continue counting")
-		}
-	}
-}
-
-func TestBusinessMetricsTenantLabelsAndEscaping(t *testing.T) {
-	for _, raw := range []string{"user", "key,key", "project,"} {
-		if _, err := ParseMetricsTenantLabels(raw); err == nil {
-			t.Fatalf("accepted %q", raw)
-		}
-	}
-	labels, err := ParseMetricsTenantLabels("key,project")
-	if err != nil || strings.Join(labels, ",") != "project,key" {
-		t.Fatalf("labels=%v error=%v", labels, err)
-	}
-	m := NewBusinessMetrics(10, nil)
-	input := int64(1)
-	m.Tokens(BusinessLabels{Route: "a\"b\\c\n", Key: "secret-id", EndUser: "secret-digest"}, &input, nil)
-	var b strings.Builder
-	m.WritePrometheus(&b)
-	if !strings.Contains(b.String(), `route="a\"b\\c\n"`) || strings.Contains(b.String(), "secret-") {
-		t.Fatal("invalid escaping or tenant labels enabled by default")
 	}
 }

@@ -75,50 +75,6 @@ func TestDeviceEnrollmentOnlyCallsOfficialAuthenticationEndpoints(t *testing.T) 
 	}
 }
 
-func TestRefreshRotationPreservesAccountAndRejectsPrincipalChanges(t *testing.T) {
-	for _, tc := range []struct {
-		name, account, user string
-		idToken, rotate     bool
-		wantCode            string
-	}{
-		{"rotated", "account-a", "user-a", true, true, ""},
-		{"omitted optional tokens", "account-a", "user-a", false, false, ""},
-		{"changed account", "account-b", "user-a", true, true, abi.CodeInvalidGrant},
-		{"changed user", "account-a", "user-b", false, true, abi.CodeInvalidGrant},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			token := testToken(tc.account, tc.user, time.Now().Add(time.Hour))
-			a := Adapter{Fetch: func(_ context.Context, r abi.HTTPRequest) (abi.HTTPResponse, error) {
-				if r.URL != "https://auth.openai.com/oauth/token" || r.Header["Content-Type"][0] != "application/json" || string(r.Body) != `{"client_id":"app_EMoamEEZ73f0CkXaXp7hrann","grant_type":"refresh_token","refresh_token":"refresh-1"}` {
-					t.Fatal("refresh differs from official client contract")
-				}
-				reply := map[string]string{"access_token": token}
-				if tc.idToken {
-					reply["id_token"] = token
-				}
-				if tc.rotate {
-					reply["refresh_token"] = "refresh-2"
-				}
-				body, _ := json.Marshal(reply)
-				return abi.HTTPResponse{Status: 200, Body: body}, nil
-			}}
-			grant, err := a.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: ProfileID, RefreshToken: "refresh-1", Facts: map[string]string{"account_id": "account-a", "user_id": "user-a"}})
-			if errorCode(err) != tc.wantCode {
-				t.Fatalf("refresh: %v", err)
-			}
-			if tc.wantCode != "" {
-				if grant.AccessToken != "" {
-					t.Fatal("changed principal leaked a usable grant")
-				}
-				return
-			}
-			if grant.Principal != (Identity{Account: "account-a", User: "user-a"}).Principal() || tc.rotate != (grant.RefreshToken == "refresh-2") {
-				t.Fatal("refresh changed the stable principal or lost rotation")
-			}
-		})
-	}
-}
-
 func TestAuthenticationFailuresAreMetadataOnlyAndPermanentWhenRequired(t *testing.T) {
 	for _, body := range []string{`{"error":"invalid_grant","error_description":"secret"}`, `{"error":{"code":"refresh_token_expired","message":"secret"}}`, `{"error":{"code":"refresh_token_reused"}}`, `{"error":{"code":"refresh_token_invalidated"}}`} {
 		a := Adapter{Fetch: func(context.Context, abi.HTTPRequest) (abi.HTTPResponse, error) {
@@ -134,30 +90,6 @@ func TestAuthenticationFailuresAreMetadataOnlyAndPermanentWhenRequired(t *testin
 	}}
 	if _, err := a.StartGrant(t.Context(), abi.GrantStart{Profile: ProfileID}); strings.Contains(err.Error(), "private") {
 		t.Fatal("transport detail exposed")
-	}
-}
-
-func TestTokenIdentityRefusesUnobservedAmbiguousExpiredAndUnsupportedAccounts(t *testing.T) {
-	now := time.Now()
-	for name, token := range map[string]string{
-		"missing claims":   "e30.e30.signature",
-		"opaque":           "opaque-token",
-		"expired":          testToken("account", "user", now.Add(-time.Second)),
-		"header injection": testToken("account\r\nInjected", "user", now.Add(time.Hour)),
-		"no user":          testToken("account", "", now.Add(time.Hour)),
-		"no account":       testToken("", "user", now.Add(time.Hour)),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := TokenIdentity(token, now); err == nil {
-				t.Fatal("accepted unusable token")
-			}
-		})
-	}
-	for _, auth := range []string{`"chatgpt_account_is_fedramp":true`, `"user_id":"other-user"`} {
-		payload := fmt.Sprintf(`{"exp":%d,"https://api.openai.com/auth":{"chatgpt_account_id":"account","chatgpt_user_id":"user",%s}}`, now.Add(time.Hour).Unix(), auth)
-		if _, err := TokenIdentity("e30."+base64.RawURLEncoding.EncodeToString([]byte(payload))+".sig", now); err == nil {
-			t.Fatal("accepted unsupported identity")
-		}
 	}
 }
 

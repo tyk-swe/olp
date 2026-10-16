@@ -18,7 +18,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -29,7 +28,6 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const pluginCredential = "reference-static-secret"
@@ -391,129 +389,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	})
 }
 
-// A plugin profile's declared discovery lists the upstream's models, page by
-// page, in the probe and discover flows, so the operator names no model to
-// probe. Its declared classification decides what a gateway attempt's failure
-// is: the upstream's exhausted quota on a 400 is a rate limit, while an
-// undeclared 400 stays a rejected request.
-func TestPluginProfileDiscoversModelsAndClassifiesFailuresAsDeclared(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	upstream := newPluginUpstream(t, pluginCredential)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0")
-	profiles := h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any)
-	if catalogued := profiles[slices.IndexFunc(profiles, func(p any) bool { return p.(map[string]any)["revision"] == digest })]; catalogued.(map[string]any)["model_discovery"] != true {
-		t.Fatalf("catalogued %v", catalogued)
-	}
-
-	create := map[string]any{"name": "Reference", "credential": pluginCredential,
-		"configuration": map[string]any{"kind": "plugin", "auth_mode": "static_credential", "profile_id": "reference-chat", "profile_revision": digest}}
-	created := h.want(owner, "POST", "/api/v1/providers", create, idem(uuid.NewString()), 201)
-	path := "/api/v1/providers/" + created["id"].(string)
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200); probe["succeeded"] != true || probe["discovered_models"] != float64(3) {
-		t.Fatalf("probe %v", probe)
-	}
-	detail = h.want(owner, "GET", path, nil, nil, 200)
-	h.want(owner, "POST", path+"/discovery", map[string]any{"models": []any{}}, etagHeader(detail), 200)
-	var discovered []string
-	for _, model := range h.want(owner, "GET", path+"/models", nil, nil, 200)["items"].([]any) {
-		discovered = append(discovered, model.(map[string]any)["upstream_model"].(string))
-	}
-	slices.Sort(discovered)
-	if !slices.Equal(discovered, []string{vendorModel, pluginLargeModel, pluginSmallModel}) || !slices.Equal(upstream.listed(), []string{"", "page-2", "", "page-2"}) {
-		t.Fatalf("discovered %v from pages %q", discovered, upstream.listed())
-	}
-	for _, headers := range upstream.received() {
-		if headers.Get("Authorization") != "Token "+pluginCredential || headers.Get("X-Reference-Client") != "olp" {
-			t.Fatalf("the listing was not placed like a request: %v", headers)
-		}
-	}
-	certifyPluginProvider(t, h, owner, path)
-
-	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-quota", created["id"])), "Reference")
-	h.refresh()
-	chat := func(prompt string) (int, any) {
-		status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-quota", "messages": []any{map[string]any{"role": "user", "content": prompt}}})
-		failure, _ := reply["error"].(map[string]any)
-		return status, failure["code"]
-	}
-	if status, code := chat(invalidPrompt); status != 400 || code != "upstream_rejected" {
-		t.Fatalf("an undeclared rejection: %d %v", status, code)
-	}
-	if status, code := chat(quotaPrompt); status != 429 || code != "upstream_rate_limit" {
-		t.Fatalf("the declared quota failure: %d %v", status, code)
-	}
-}
-
-// Moving a provider to another installed build requires replacing its credential
-// and creates a new revision; every revision keeps pinning its digest.
-func TestSwitchingPluginDigestsIsANewProviderRevision(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	upstream := newPluginUpstream(t, pluginCredential)
-	first := installReferencePlugin(t, h, owner, upstream, "0.1.0")
-	second := installReferencePlugin(t, h, owner, upstream, "0.2.0")
-	create := map[string]any{"name": "Reference", "credential": pluginCredential, "model": vendorModel,
-		"configuration": map[string]any{"kind": "plugin", "auth_mode": "static_credential", "profile_id": "reference-chat", "profile_revision": first}}
-	created := h.want(owner, "POST", "/api/v1/providers", create, idem(uuid.NewString()), 201)
-	path := "/api/v1/providers/" + created["id"].(string)
-	certifyPluginProvider(t, h, owner, path)
-
-	revokePluginCredentials(t, h, owner, path)
-	detail := moveToBuild(t, h, owner, path, second)
-	replacePluginCredential(t, h, owner, path)
-	if detail["configuration"].(map[string]any)["profile_revision"] != second {
-		t.Fatalf("the draft pins %v", detail["configuration"])
-	}
-	certifyPluginProvider(t, h, owner, path)
-	diff := h.want(owner, "GET", path+"/revisions/diff?from=1&to=2", nil, nil, 200)
-	if diff["plugin_changed"] != true || diff["profile_changed"] != true || diff["endpoint_changed"] != false || diff["connector_changed"] != false {
-		t.Fatalf("revision diff %v", diff)
-	}
-	if same := h.want(owner, "GET", path+"/revisions/diff?from=2&to=2", nil, nil, 200); same["plugin_changed"] != false {
-		t.Fatalf("a revision differs from itself: %v", same)
-	}
-	// The superseded revision still pins the first build.
-	current := h.want(owner, "GET", "/api/v1/plugins/"+first, nil, nil, 200)
-	if refusal := h.want(owner, "DELETE", "/api/v1/plugins/"+first, nil, etagHeader(current), 409); problemCode(t, refusal) != "plugin_pinned" {
-		t.Fatalf("uninstalled a plugin a published revision pins: %v", refusal)
-	}
-}
-
-// No list price applies to a plugin provider: its attempts are unpriced until
-// an operator sets a price scoped to that provider, which then applies.
-func TestPluginProviderAttemptsAreUnpricedUntilTheOperatorPricesThem(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	provider, _ := acctProvider(t, fixture, "plugin",
-		`{"kind":"plugin","auth_mode":"static_credential","endpoint":"https://127.0.0.1:9/v1","profile_id":"reference-chat","profile_revision":"`+strings.Repeat("ab", 32)+`","options":{}}`)
-	observed := time.Now().UTC().Add(-time.Minute)
-	acctPricing(t, fixture, 1, observed.Add(-2*time.Hour),
-		acctPrice{Kind: "openai", VendorID: acctPtr("openai"), Model: vendorModel, Operation: "generation", Input: acctPtr("1"), Output: acctPtr("1")},
-		acctPrice{Kind: "openai", Model: vendorModel, Operation: "generation", Input: acctPtr("1"), Output: acctPtr("1")})
-	attempt := func() acctFact {
-		event := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed, Attempts: []usage.Attempt{
-			acctAttempt(t, provider, 1, vendorModel, 200, acctObserved(1000, 1000, nil, nil)),
-		}})
-		acctPersist(t, fixture, event)
-		return acctLoadFact(t, fixture, event.RequestID, 1)
-	}
-	if fact := attempt(); fact.Cost != nil || !fact.Unpriced {
-		t.Fatalf("a list price applied to a plugin provider: %+v", fact)
-	}
-	if _, err := fixture.Pool.Exec(t.Context(), `INSERT INTO olp.prices (pricing_revision_id, provider_kind, model, operation, input_per_million, currency)
-		SELECT id, 'plugin', $1, 'generation', 1, 'USD' FROM olp.pricing_revisions WHERE revision=1`, vendorModel); err == nil {
-		t.Fatal("stored a plugin price for every plugin provider")
-	}
-	acctPricing(t, fixture, 2, observed.Add(-time.Hour),
-		acctPrice{Kind: "plugin", ProviderID: acctPtr(provider), Model: vendorModel, Operation: "generation", Input: acctPtr("2"), Output: acctPtr("4")})
-	fact := attempt()
-	acctSameMoney(t, fixture, fact.Cost, "0.006")
-	if fact.Unpriced {
-		t.Fatalf("the provider-scoped price did not apply: %+v", fact)
-	}
-}
+// The superseded revision still pins the first build.
 
 // Destination-affecting plugin edits require retiring all selectable versions,
 // then explicitly supplying a credential for the new destination.

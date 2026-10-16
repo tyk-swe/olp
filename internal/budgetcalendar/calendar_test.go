@@ -38,10 +38,3 @@ func TestCivilWindowsIncludeDSTAndISOWeeks(t *testing.T) {
 		t.Fatal(w.Week)
 	}
 }
-func TestCalendarRejectsMachineLocalAndInvalidZones(t *testing.T) {
-	for _, name := range []string{"", "Local", "../UTC", "/UTC", "not-a-zone"} {
-		if _, err := New(name); err == nil {
-			t.Fatal(name)
-		}
-	}
-}

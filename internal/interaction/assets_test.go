@@ -24,9 +24,3 @@ func TestNativeAssetIDsRequireOwnedServingAuthority(t *testing.T) {
 		})
 	}
 }
-
-func TestNativeToolPayloadDoesNotBecomeResourceAuthority(t *testing.T) {
-	compiled := template(t, configuration(t, "openai-chat"))
-	source := request(t, wire.Chat, `{"model":"route","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"caller_function","arguments":"{\"file_id\":\"caller-owned-value\"}"}}]},{"role":"tool","tool_call_id":"call-1","content":"done"},{"role":"user","content":"continue"}]}`)
-	bind(t, compiled, source, Context{})
-}

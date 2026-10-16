@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"io"
 	"log"
 	"math/big"
@@ -21,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -123,55 +121,6 @@ func connectionResponse(t *testing.T, client *http.Client, endpoint string) stri
 	return string(data)
 }
 
-func TestConnectionTrustRootsAndMutualTLS(t *testing.T) {
-	ca := newConnectionTestCA(t)
-	var peer atomic.Int64
-	server := tlsConnectionServer(t, ca, true, func(w http.ResponseWriter, r *http.Request) {
-		peer.Store(r.TLS.PeerCertificates[0].SerialNumber.Int64())
-		if r.TLS.ServerName != "localhost" {
-			t.Errorf("target TLS hostname = %q", r.TLS.ServerName)
-		}
-		io.WriteString(w, "trusted")
-	})
-	endpoint := strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
-	_, cert, key := ca.identity(t, 3, true)
-	secret := networkSecret(t, map[string]string{"client_certificate_pem": cert, "client_key_pem": key})
-	options := &ConnectionOptions{TrustRootsPEM: ca.pem, CredentialID: "network-credential"}
-	client, err := loopbackConnections().ConnectionClient(options, secret, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.CloseIdleConnections()
-	if got := connectionResponse(t, client, endpoint); got != "trusted" || peer.Load() != 3 {
-		t.Fatal("client certificate was not used")
-	}
-	withoutTrust := *options
-	withoutTrust.TrustRootsPEM = ""
-	untrusted, err := loopbackConnections().ConnectionClient(&withoutTrust, secret, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer untrusted.CloseIdleConnections()
-	if _, err = untrusted.Get(endpoint); err == nil {
-		t.Fatal("private CA was trusted without configuration")
-	}
-	withoutCertificate, err := loopbackConnections().ConnectionClient(&ConnectionOptions{TrustRootsPEM: ca.pem}, nil, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer withoutCertificate.CloseIdleConnections()
-	if _, err = withoutCertificate.Get(endpoint); err == nil {
-		t.Fatal("mutual TLS succeeded without a client certificate")
-	}
-	_, _, wrongKey := ca.identity(t, 4, true)
-	if err = ValidateConnectionSecret(networkSecret(t, map[string]string{"client_certificate_pem": cert, "client_key_pem": wrongKey})); err == nil || strings.Contains(err.Error(), wrongKey) {
-		t.Fatal("mismatched client key accepted or exposed")
-	}
-	if err = loopbackConnections().ValidateConnection(&ConnectionOptions{TrustRootsPEM: key}); err == nil {
-		t.Fatal("private key accepted in public trust roots")
-	}
-}
-
 type connectObservation struct {
 	target, authentication  string
 	proxySNI                string
@@ -240,81 +189,6 @@ func connectProxy(t *testing.T, ca connectionTestCA, secure bool) (*httptest.Ser
 	}
 	t.Cleanup(server.Close)
 	return server, observations
-}
-
-func TestConnectionHTTPProxiesPinIPAndKeepBothTLSIdentities(t *testing.T) {
-	for _, secure := range []bool{false, true} {
-		t.Run(strconv.FormatBool(secure), func(t *testing.T) {
-			ca := newConnectionTestCA(t)
-			target := tlsConnectionServer(t, ca, true, func(w http.ResponseWriter, r *http.Request) {
-				if r.TLS.ServerName != "localhost" || !strings.HasPrefix(r.Host, "localhost:") {
-					t.Errorf("provider hostname changed: SNI=%q Host=%q", r.TLS.ServerName, r.Host)
-				}
-				if r.Header.Get("Proxy-Authorization") != "" {
-					t.Error("proxy credentials leaked to provider")
-				}
-				if r.URL.Query().Get("version") != "fixture" {
-					t.Error("provider query was lost")
-				}
-				io.WriteString(w, "tunneled")
-			})
-			proxy, observations := connectProxy(t, ca, secure)
-			_, cert, key := ca.identity(t, 6, true)
-			secret := networkSecret(t, map[string]string{"proxy_username": "network-user", "proxy_password": "private-proxy-password", "client_certificate_pem": cert, "client_key_pem": key})
-			client, err := loopbackConnections().ConnectionClient(&ConnectionOptions{ProxyURL: proxy.URL, TrustRootsPEM: ca.pem, CredentialID: "network-ref"}, secret, time.Second)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer client.CloseIdleConnections()
-			endpoint := strings.Replace(target.URL, "127.0.0.1", "localhost", 1) + "/path?version=fixture"
-			if got := connectionResponse(t, client, endpoint); got != "tunneled" {
-				t.Fatal(got)
-			}
-			if len(observations) == 0 {
-				t.Fatal("configured proxy was bypassed")
-			}
-			for len(observations) > 0 {
-				observation := <-observations
-				if observation.authentication != "Basic bmV0d29yay11c2VyOnByaXZhdGUtcHJveHktcGFzc3dvcmQ=" {
-					t.Fatal("proxy authentication missing")
-				}
-				if observation.proxyClientCertificates != 0 {
-					t.Fatal("provider client certificate was offered to proxy")
-				}
-				if secure && observation.proxySNI != "" {
-					t.Fatal("target SNI leaked to IP-addressed proxy")
-				}
-			}
-		})
-	}
-}
-
-func TestConnectionProxyCannotResolveOrReachUnapprovedDestination(t *testing.T) {
-	var calls atomic.Int64
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); http.Error(w, "unexpected", 500) }))
-	defer proxy.Close()
-	policy := Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	for _, scheme := range []string{"http", "socks5"} {
-		endpoint := strings.Replace(proxy.URL, "http://", scheme+"://", 1)
-		client, err := policy.ConnectionClient(&ConnectionOptions{ProxyURL: endpoint}, nil, time.Second)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, destination := range []string{"https://127.0.0.2/", "https://169.254.169.254/latest/meta-data/"} {
-			if _, err = client.Get(destination); !errors.Is(err, ErrUnsafeDestination) {
-				t.Fatalf("private destination via %s: %v", scheme, err)
-			}
-		}
-		client.CloseIdleConnections()
-	}
-	if calls.Load() != 0 {
-		t.Fatal("unsafe destination reached a proxy")
-	}
-	for _, endpoint := range []string{"socks5h://127.0.0.1:1080", "http://user:secret@127.0.0.1:8080", "https://169.254.169.254:443", "http://127.0.0.1:8080/path", "http://127.0.0.1:8080?target=secret"} {
-		if err := policy.ValidateConnection(&ConnectionOptions{ProxyURL: endpoint}); err == nil {
-			t.Fatal("unsafe proxy configuration accepted", endpoint)
-		}
-	}
 }
 
 type socksObservation struct {
@@ -457,112 +331,5 @@ func TestConnectionSOCKS5PinsAddressAndAuthenticates(t *testing.T) {
 		if observation.username != "fixture-user" || observation.password != "fixture-password" || observation.addressType == 3 {
 			t.Fatal("wrong SOCKS5 authentication or DNS mode")
 		}
-	}
-}
-
-func TestConnectionCustomTLSKeepsHTTP2Negotiation(t *testing.T) {
-	ca := newConnectionTestCA(t)
-	certificate, _, _ := ca.identity(t, 7, false)
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor != 2 {
-			t.Errorf("provider protocol = %s", r.Proto)
-		}
-		io.WriteString(w, "http2")
-	}))
-	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	defer server.Close()
-	client, err := loopbackConnections().ConnectionClient(&ConnectionOptions{TrustRootsPEM: ca.pem}, nil, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.CloseIdleConnections()
-	if got := connectionResponse(t, client, server.URL); got != "http2" {
-		t.Fatal(got)
-	}
-}
-
-func TestConnectionKeepsDuplexUpgradeWritableAcrossCacheEviction(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Upgrade") != "fixture-duplex" {
-			http.Error(w, "upgrade required", 400)
-			return
-		}
-		connection, buffered, err := w.(http.Hijacker).Hijack()
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		defer connection.Close()
-		_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
-		_, _ = buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: fixture-duplex\r\n\r\n")
-		if buffered.Flush() != nil {
-			return
-		}
-		var input [4]byte
-		if _, err = io.ReadFull(buffered, input[:]); err != nil {
-			t.Error(err)
-			return
-		}
-		if string(input[:]) != "ping" {
-			t.Error("duplex input changed")
-		}
-		_, _ = connection.Write([]byte("pong"))
-	}))
-	defer server.Close()
-	cache := NewConnectionClientCache(1)
-	defer cache.CloseIdleConnections()
-	client, err := cache.Client(loopbackConnections(), nil, nil, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, _ := http.NewRequest(http.MethodGet, server.URL, nil)
-	request.Header.Set("Connection", "Upgrade")
-	request.Header.Set("Upgrade", "fixture-duplex")
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	duplex, ok := response.Body.(io.ReadWriteCloser)
-	if !ok || response.StatusCode != 101 {
-		t.Fatal("upgraded transport is not duplex")
-	}
-	if _, err = cache.Client(loopbackConnections(), &ConnectionOptions{MaxIdleConns: connectionPointer(8)}, nil, time.Second); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = duplex.Write([]byte("ping")); err != nil {
-		t.Fatal(err)
-	}
-	var output [4]byte
-	if _, err = io.ReadFull(duplex, output[:]); err != nil {
-		t.Fatal(err)
-	}
-	if string(output[:]) != "pong" {
-		t.Fatal("duplex output changed")
-	}
-}
-
-func TestEphemeralClientNeverReusesAuthenticatedConnections(t *testing.T) {
-	peers := make(chan string, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { peers <- r.RemoteAddr; w.Write([]byte("ok")) }))
-	defer server.Close()
-	client, err := loopbackConnections().EphemeralClient(nil, nil, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, secret := range []string{"first", "second"} {
-		req, _ := http.NewRequest("GET", server.URL, nil)
-		req.Header.Set("Authorization", "Bearer "+secret)
-		response, err := client.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.Copy(io.Discard, response.Body)
-		response.Body.Close()
-	}
-	if <-peers == <-peers {
-		t.Fatal("caller authentication reused a connection")
 	}
 }

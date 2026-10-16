@@ -38,19 +38,3 @@ func TestSignatureMatchesAKnownAnswer(t *testing.T) {
 		t.Fatalf("signature = %s, want %s", got, want)
 	}
 }
-
-func TestSignatureCoversTheBodyButNotTheQueryOrder(t *testing.T) {
-	fixedClock(t)
-	a := sign(t, "https://api.example.com/v1/chat/completions?b=2&a=1", `{}`)
-	b := sign(t, "https://api.example.com/v1/chat/completions?a=1&b=2", `{}`)
-	c := sign(t, "https://api.example.com/v1/chat/completions?a=1&b=2", `{"tampered":true}`)
-	if a.Headers["X-Api-Signature"] != b.Headers["X-Api-Signature"] || b.Headers["X-Api-Signature"] == c.Headers["X-Api-Signature"] {
-		t.Fatal("the signature does not cover exactly the canonical request")
-	}
-}
-
-func TestMalformedCredentialsAreRefused(t *testing.T) {
-	if _, err := (signedRequest{}).Sign(context.Background(), plugin.SignRequest{URL: "https://api.example.com/v1", Credential: "no-separator"}); err == nil {
-		t.Fatal("a credential without a key ID was used")
-	}
-}

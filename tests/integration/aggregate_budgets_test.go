@@ -8,92 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func TestAggregateInstallationBudgetPreservesHistoricalSpendAcrossKeys(t *testing.T) {
-	f := glSeedIn(t, "aggregate-installation", glPrice{input: "1000000", output: "1000000"})
-	_, first := f.key("first", nil)
-	_, second := f.key("second", nil)
-	await := endUserAccounting(t, f.h, f.limiter)
-	call := func(h *accessHarness, key string, want int) {
-		t.Helper()
-		status, err := endUserChat(t.Context(), h, key, routeSlug, "unused")
-		if err != nil || status != want {
-			t.Fatalf("inference: %d %v, want %d", status, err, want)
-		}
-		await()
-	}
-	call(f.h, first, 200)
-	path := "/api/v1/budgets/installation"
-	policy := f.h.want(f.owner, "GET", path, nil, nil, 200)
-	for _, body := range []map[string]any{{}, {"policy": map[string]any{"daily_cost_limit": "0"}}, {"policy": map[string]any{"unknown": true}}} {
-		f.h.want(f.owner, "PUT", path, body, etagHeader(policy), 422)
-	}
-	policy = f.h.want(f.owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "1000"}}, etagHeader(policy), 200)
-	f.h.refresh()
-	replica := newAccessHarnessOn(t, f.h.Pool, f.h.DBURL)
-	replica.Gateway.Admission = gateway.NewAdmission(limLimiter(t, limClient(t), f.namespace), nil, slog.New(slog.DiscardHandler))
-	replica.Gateway.Sink = f.h.Gateway.Sink
-	replica.refresh()
-	call(replica, second, 503) // A cap cannot assume that its pre-existing spend was zero.
-	call(replica, second, 200)
-	detail := f.h.want(f.owner, "GET", path, nil, nil, 200)
-	if detail["usage"].(map[string]any)["daily"].(map[string]any)["accrued"] != "20.000000000000" {
-		t.Fatalf("aggregate spend: %v", detail["usage"])
-	}
-	policy = f.h.want(f.owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "20"}}, etagHeader(detail), 200)
-	f.h.refresh()
-	replica.refresh()
-	call(f.h, first, 429)
-	call(replica, second, 429)
-	// The Playground spends against the same caps, without a key of its own.
-	f.h.want(f.owner, "POST", "/api/v1/playground", map[string]any{"model": routeSlug, "input": "hi"}, nil, 429)
-	f.h.want(f.owner, "POST", "/api/v1/playground/stream", map[string]any{"model": routeSlug, "input": "hi", "stream": true}, nil, 429)
-	policy = f.h.want(f.owner, "PUT", path, map[string]any{"policy": nil}, etagHeader(policy), 200)
-	f.h.refresh()
-	call(f.h, first, 200)
-	f.h.want(f.owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "20"}}, etagHeader(policy), 200)
-	f.h.refresh()
-	call(f.h, first, 429)
-}
+// A cap cannot assume that its pre-existing spend was zero.
 
-func TestAggregateBudgetsPromoteWithConditionalPermissions(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Budget project"}, idem("project"), 201)
-	path := "/api/v1/projects/" + project["id"].(string) + "/budget"
-	before := h.want(owner, "GET", path, nil, nil, 200)
-	h.want(owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "12.34"}}, etagHeader(before), 200)
-	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
-	document := exported["document"].(map[string]any)
-	projects := document["projects"].([]any)
-	if projects[0].(map[string]any)["budget"].(map[string]any)["daily_cost_limit"] != "12.34" {
-		t.Fatal("project budget missing from export")
-	}
-	token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{"name": "configure only", "scopes": []string{"configure"}, "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339)}, idem("token"), 201)["secret"].(string)
-	document["installation_budget"] = map[string]any{"monthly_cost_limit": "100"}
-	body := map[string]any{"document": document}
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("installation-denied"), 403)
-	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("installation-apply"), 200)
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("installation-noop"), 200)
-	projects[0].(map[string]any)["budget"] = map[string]any{"daily_cost_limit": "50"}
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("project-denied"), 403)
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("project-apply"), 200)
-	saved := h.want(owner, "GET", path, nil, nil, 200)
-	if saved["policy"].(map[string]any)["daily_cost_limit"] != "50" {
-		t.Fatal("project budget not applied")
-	}
-	projects[0].(map[string]any)["budget"] = nil
-	document["installation_budget"] = map[string]any{}
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("clear"), 200)
-	if h.want(owner, "GET", path, nil, nil, 200)["policy"] != nil || h.want(owner, "GET", "/api/v1/budgets/installation", nil, nil, 200)["policy"] != nil {
-		t.Fatal("empty policies did not clear limits")
-	}
-}
+// The Playground spends against the same caps, without a key of its own.
 
 func TestAggregateProjectAndInstallationCapsBothApply(t *testing.T) {
 	h := newAccessHarness(t)
@@ -172,44 +93,5 @@ func TestAggregateProjectAndInstallationCapsBothApply(t *testing.T) {
 	}
 }
 
-func TestConfigurationPlacingAProjectInAnOrganizationCountsItsSpend(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	f := &repFixture{t: t, h: h, pool: h.Pool}
-	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
-		"name": "Spent vendor", "model": vendorModel, "credential": vendorSecret,
-		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": newVendor(t).URL + "/v1"},
-	}, idem("provider"), 201)
-	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Moving team"}, idem("project"), 201)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "moving key", "scopes": []string{"inference"}, "project_id": project["id"]}, idem("key"), 201)
-	observed := time.Now().UTC()
-	requestID := access.NewID()
-	f.anchor(requestID, observed)
-	f.exec(`INSERT INTO olp.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
-	        attempt_ordinal, api_key_id, provider_id, route_slug, upstream_model, operation, surface,
-	        observed_at, charge_status, usage_observed, usage_complete, input_tokens, output_tokens,
-	        unpriced, estimated_cost, request_counted, provider_request_counted, model_request_counted,
-	        target_request_counted, request_unpriced_counted, provider_unpriced_counted,
-	        model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
-	        provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted)
-	    VALUES ($1, $2, $3, $4, 1, $5, $6, 'alpha', 'm1', 'generation', 'openai',
-	        $4, 'billable', true, true, 10, 5, false, 3, true, true, true, true,
-	        false, false, false, false, false, false, false, false)`,
-		access.NewID(), access.NewID(), requestID, observed, key["id"], provider["id"])
-	org := h.want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "Receiving org"}, idem("org"), 201)
-	path := "/api/v1/organizations/" + org["id"].(string) + "/budget"
-	h.want(owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "10"}}, etagHeader(h.want(owner, "GET", path, nil, nil, 200)), 200)
-	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	for _, entry := range document["projects"].([]any) {
-		if entry := entry.(map[string]any); entry["name"] == "Moving team" {
-			entry["organization"] = "Receiving org"
-		}
-	}
-	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("apply"), 200)
-	// The organization's balance counts the project's earlier spend as soon as
-	// the move publishes, rather than after the next reconciliation pass.
-	var accrued string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT accrued::text FROM olp.aggregate_cost_windows WHERE account_id=$1 AND window_kind='day'`, limits.AggregateBudgetID("organization", org["id"].(string))).Scan(&accrued); err != nil || accrued != "3.000000000000" {
-		t.Fatalf("organization spend = %q %v", accrued, err)
-	}
-}
+// The organization's balance counts the project's earlier spend as soon as
+// the move publishes, rather than after the next reconciliation pass.

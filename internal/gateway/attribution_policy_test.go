@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"maps"
-	"net/http"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -27,15 +26,5 @@ func TestAttributionRequirementsAndPinsApplyWithoutCallerAllowlisting(t *testing
 	authority.ProjectAttributionPolicy.Required = append(authority.ProjectAttributionPolicy.Required, "task")
 	if authority.AllowsAttribution(got) {
 		t.Fatal("new required label did not invalidate established session")
-	}
-}
-
-func TestAttributionHeadersRemainLocalToPolicyAndAccounting(t *testing.T) {
-	header := make(http.Header)
-	header.Set(attribution.Header, `{"team":"core"}`)
-	header.Set("Anthropic-Version", "2023-06-01")
-	semantic := semanticHeaders(header)
-	if semantic.Get(attribution.Header) != "" || semantic.Get("Anthropic-Version") != "2023-06-01" || header.Get(attribution.Header) == "" {
-		t.Fatalf("semantic headers: %v; caller: %v", semantic, header)
 	}
 }

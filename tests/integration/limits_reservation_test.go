@@ -167,384 +167,81 @@ func limHas(t *testing.T, c *coordination.Client, key, field string) bool {
 	}
 }
 
-func TestLimitsCostReservationsCountAgainstTheBalance(t *testing.T) {
-	f := limCostSeed(t, "reserve-cost", "0.1")
-	pending, expiry := f.keys()
+// A cost-only request never asks the rate script for anything.
 
-	first, second := f.request("0.4"), f.request("0.4")
-	limReserve(t, f.limiter, first)
-	limReserve(t, f.limiter, second)
-	f.wantReserved(t, "0.8")
-	hash := limHash(t, f.c, pending)
-	if hash["sum"] != "0.8" || hash[first.RequestID] != "0.4" || hash[second.RequestID] != "0.4" || len(hash) != 3 {
-		t.Fatalf("pending = %v, want a field per request and their sum", hash)
-	}
-	if got := limInt(t, f.c, "ZCARD", expiry); got != 2 {
-		t.Fatalf("expiry members = %d, want one per reservation", got)
-	}
-	// A cost-only request never asks the rate script for anything.
-	rate, _ := limRateKeys(f.namespace, first.LookupID)
-	if got := limInt(t, f.c, "EXISTS", rate); got != 0 {
-		t.Fatal("a cost-only reservation touched the rate counters")
-	}
-	// Both keys outlive the newest reservation, which lasts its lease and the
-	// default grace, and not by more than a second.
-	for _, key := range []string{pending, expiry} {
-		ttl := limInt(t, f.c, "PTTL", key)
-		longest := (5*time.Second + limits.DefaultCostGrace + time.Second).Milliseconds()
-		if ttl < 5_000 || ttl > longest {
-			t.Fatalf("PTTL %s = %d, want it to cover the lease and its grace", key, ttl)
-		}
-	}
+// Both keys outlive the newest reservation, which lasts its lease and the
+// default grace, and not by more than a second.
 
-	// 0.1 accrued and 0.8 in flight leave room for 0.1 and nothing more.
-	rejected := f.request("0.4")
-	_, err := f.limiter.Reserve(t.Context(), rejected)
-	// In-flight reservations are what stands in the way, so waiting helps.
-	if retry := limExceeded(t, err, limits.DimensionDailyCost); retry != time.Second {
-		t.Fatalf("retry = %v, want the transient hint of one second", retry)
-	}
-	f.wantReserved(t, "0.8")
-	exact := f.request("0.1")
-	limReserve(t, f.limiter, exact)
-	f.wantReserved(t, "0.9")
-	// The balance is spent to the unit, and one more unit is refused.
-	_, err = f.limiter.Reserve(t.Context(), f.request("0.000000000001"))
-	limExceeded(t, err, limits.DimensionDailyCost)
+// 0.1 accrued and 0.8 in flight leave room for 0.1 and nothing more.
 
-	// A request that could never fit, however much is released, waits for the
-	// window and not for the second.
-	_, err = f.limiter.Reserve(t.Context(), f.request("1"))
-	retry := limExceeded(t, err, limits.DimensionDailyCost)
-	if remaining := time.Until(f.windows.DailyEnd); retry > remaining+time.Second || retry < remaining-5*time.Second {
-		t.Fatalf("retry = %v for a request no release can admit, want the %v the day has left", retry, remaining)
-	}
-}
+// In-flight reservations are what stands in the way, so waiting helps.
 
-// TestLimitsRefusalSaysWhetherTheBudgetIsSpentOrTheEstimateDoesNotFit proves a
-// refusal tells a budget that has been used up from one that has room and cannot
-// hold this request's estimate beside what is spent and in flight, in either
-// window: the first is a fact about the budget, the second about the request.
-func TestLimitsRefusalSaysWhetherTheBudgetIsSpentOrTheEstimateDoesNotFit(t *testing.T) {
-	f := limCostSeed(t, "refusal-kind", "0.5")
-	// 0.5 of 1 is spent, so 0.6 does not fit although the budget is not used up.
-	_, err := f.limiter.Reserve(t.Context(), f.request("0.6"))
-	if refusal := limRefused(t, err, limits.DimensionDailyCost); !refusal.Estimate {
-		t.Fatalf("daily refusal = %+v, want the estimate that does not fit", refusal)
-	}
-	monthly := f.request("0.6")
-	monthly.DailyCostLimit, monthly.MonthlyCostLimit = nil, limPointer("1")
-	_, err = f.limiter.Reserve(t.Context(), monthly)
-	if refusal := limRefused(t, err, limits.DimensionMonthlyCost); !refusal.Estimate {
-		t.Fatalf("monthly refusal = %+v, want the estimate that does not fit", refusal)
-	}
-	// Once the day's spend reaches its limit the budget is used up, whatever the
-	// request would cost, and an unpriced request is refused the same way.
-	f.accrue(t, "", "1")
-	for _, estimate := range []string{"0.000001", ""} {
-		request := f.request(estimate)
-		if estimate == "" {
-			request.RequestID = ""
-		}
-		_, err = f.limiter.Reserve(t.Context(), request)
-		if refusal := limRefused(t, err, limits.DimensionDailyCost); refusal.Estimate {
-			t.Fatalf("refusal of %q against a spent budget = %+v, want the budget exhausted", estimate, refusal)
-		}
-	}
-}
+// The balance is spent to the unit, and one more unit is refused.
 
-func TestLimitsCostReservationsCountAgainstBothWindows(t *testing.T) {
-	f := limCostSeed(t, "reserve-windows", "0")
-	request := func(amount string, daily, monthly string) limits.Request {
-		r := f.request(amount)
-		r.DailyCostLimit, r.MonthlyCostLimit = limPointer(daily), limPointer(monthly)
-		return r
-	}
-	limReserve(t, f.limiter, request("3", "100", "5"))
-	// The day has room for plenty; the month, holding 3 of 5, has room for 2.
-	_, err := f.limiter.Reserve(t.Context(), request("3", "100", "5"))
-	if retry := limExceeded(t, err, limits.DimensionMonthlyCost); retry != time.Second {
-		t.Fatalf("retry = %v, want the transient hint", retry)
-	}
-	limReserve(t, f.limiter, request("2", "100", "5"))
-	f.wantReserved(t, "5")
-	// A key limited by one window ignores the other window's limit.
-	onlyDaily := request("2", "100", "5")
-	onlyDaily.MonthlyCostLimit = nil
-	limReserve(t, f.limiter, onlyDaily)
-}
+// A request that could never fit, however much is released, waits for the
+// window and not for the second.
 
-func TestLimitsCostReservationIncreasesOnlyWhenTheNewTotalFits(t *testing.T) {
-	f := limCostSeed(t, "grow-cost", "0")
-	request := f.request("0.2")
-	lease := limReserve(t, f.limiter, request)
-	limReserve(t, f.limiter, f.request("0.3"))
+// 0.5 of 1 is spent, so 0.6 does not fit although the budget is not used up.
 
-	request.CostEstimate, request.RetainCostReservation = "0.6", true
-	limReserve(t, f.limiter, request)
-	f.wantReserved(t, "0.9")
-	// Replays and smaller estimates retain the larger bound without adding it.
-	limReserve(t, f.limiter, request)
-	request.CostEstimate = "0.4"
-	limReserve(t, f.limiter, request)
-	f.wantReserved(t, "0.9")
+// Once the day's spend reaches its limit the budget is used up, whatever the
+// request would cost, and an unpriced request is refused the same way.
 
-	request.CostEstimate = "0.8"
-	_, err := f.limiter.Reserve(t.Context(), request)
-	limExceeded(t, err, limits.DimensionDailyCost)
-	f.wantReserved(t, "0.9")
-	// The original handle settles the grown reservation under the same identity.
-	lease.SetActualCost("0.1", "0.1")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	f.wantReserved(t, "0.4")
-}
+// The day has room for plenty; the month, holding 3 of 5, has room for 2.
 
-func TestLimitsCostReservationsAreGivenBackAndSettled(t *testing.T) {
-	f := limCostSeed(t, "settle-cost", "0")
-	pending, expiry := f.keys()
+// A key limited by one window ignores the other window's limit.
 
-	released := f.request("0.4")
-	lease := limReserve(t, f.limiter, released)
-	if !lease.HasCostReservation() {
-		t.Fatal("a granted estimate is not reported")
-	}
-	f.wantReserved(t, "0.4")
-	// A request that never dispatched owes nothing.
-	for range 2 {
-		if err := lease.Refund(t.Context()); err != nil {
-			t.Fatalf("Refund: %v", err)
-		}
-	}
-	f.wantReserved(t, "0")
-	if limInt(t, f.c, "EXISTS", pending, expiry) != 0 {
-		t.Fatal("releasing the last reservation left state behind")
-	}
+// Replays and smaller estimates retain the larger bound without adding it.
 
-	// Settlement replaces the estimate with what the request cost.
-	settled := f.request("0.4")
-	lease = limReserve(t, f.limiter, settled)
-	lease.SetActualCost("0.15", "0.15")
-	for range 2 {
-		if err := lease.SettleCost(t.Context()); err != nil {
-			t.Fatalf("SettleCost: %v", err)
-		}
-	}
-	f.wantReserved(t, "0.15")
-	if hash := limHash(t, f.c, pending); hash[settled.RequestID] != "0.15" {
-		t.Fatalf("pending = %v, want the actual cost", hash)
-	}
-	// Spending nothing releases the reservation.
-	lease.SetActualCost("0", "0")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	f.wantReserved(t, "0")
+// The original handle settles the grown reservation under the same identity.
 
-	// Settling a reservation that is gone does nothing and creates nothing, which
-	// is what keeps a late settlement from counting spend that accounting has.
-	lease.SetActualCost("0.3", "0.3")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost on a released reservation: %v", err)
-	}
-	f.wantReserved(t, "0")
-	if limInt(t, f.c, "EXISTS", pending, expiry) != 0 {
-		t.Fatal("settling an absent reservation created one")
-	}
-	// A lease with no actual cost recorded settles nothing.
-	kept := f.request("0.2")
-	lease = limReserve(t, f.limiter, kept)
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	f.wantReserved(t, "0.2")
-}
+// A request that never dispatched owes nothing.
 
-func TestLimitsSettlementShortensAReservationAndNeverExtendsIt(t *testing.T) {
-	f := limCostSeed(t, "settle-expiry", "0")
-	_, expiry := f.keys()
+// Settlement replaces the estimate with what the request cost.
 
-	// Granted for the lease and its grace, which together outlast the settlement,
-	// whose own grace begins when it is made.
-	long := f.request("0.1")
-	long.LeaseTTL, long.CostGrace = time.Minute, 30*time.Second
-	lease := limReserve(t, f.limiter, long)
-	granted := limExpiryScore(t, f.c, expiry, long.RequestID)
-	lease.SetActualCost("0.1", "0.1")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	settled := limExpiryScore(t, f.c, expiry, long.RequestID)
-	if settled > granted-50_000 {
-		t.Fatalf("settled expiry %d, granted %d: settlement did not shorten the reservation", settled, granted)
-	}
+// Spending nothing releases the reservation.
 
-	// Granted for a moment and a long grace: settling later would put the expiry
-	// after the one admission set, which is the backstop and must stand.
-	short := f.request("0.1")
-	short.LeaseTTL, short.CostGrace = time.Millisecond, 30*time.Second
-	lease = limReserve(t, f.limiter, short)
-	granted = limExpiryScore(t, f.c, expiry, short.RequestID)
-	time.Sleep(50 * time.Millisecond)
-	lease.SetActualCost("0.1", "0.1")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	if after := limExpiryScore(t, f.c, expiry, short.RequestID); after != granted {
-		t.Fatalf("expiry %d after settlement, want the granted %d", after, granted)
-	}
-}
+// Settling a reservation that is gone does nothing and creates nothing, which
+// is what keeps a late settlement from counting spend that accounting has.
 
-func TestLimitsAccrualRemovesTheReservationItAccountsFor(t *testing.T) {
-	f := limCostSeed(t, "accrual", "0")
-	pending, expiry := f.keys()
-	first, second := f.request("0.4"), f.request("0.3")
-	firstLease := limReserve(t, f.limiter, first)
-	limReserve(t, f.limiter, second)
-	f.wantReserved(t, "0.7")
+// A lease with no actual cost recorded settles nothing.
 
-	// The spend and the removal of what held its place arrive as one step, so
-	// the budget never counts the request twice, and the other request stays.
-	f.accrue(t, first.RequestID, "0.35")
-	f.wantReserved(t, "0.3")
-	if day := limHash(t, f.c, f.day()); day["accrued"] != "0.35" {
-		t.Fatalf("day = %v, want the accrued spend installed", day)
-	}
-	// Delivered again, which accounting does, it removes nothing more.
-	f.accrue(t, first.RequestID, "0.35")
-	f.wantReserved(t, "0.3")
-	// A settlement that arrives after accrual cannot bring the request back.
-	firstLease.SetActualCost("0.2", "0.2")
-	if err := firstLease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost after accrual: %v", err)
-	}
-	f.wantReserved(t, "0.3")
-	if limHas(t, f.c, pending, first.RequestID) {
-		t.Fatal("a late settlement recreated an accounted reservation")
-	}
+// Granted for the lease and its grace, which together outlast the settlement,
+// whose own grace begins when it is made.
 
-	// An accrual that names no request removes none.
-	f.accrue(t, "", "0.36")
-	f.wantReserved(t, "0.3")
-	f.accrue(t, second.RequestID, "0.4")
-	f.wantReserved(t, "0")
-	if limInt(t, f.c, "EXISTS", pending, expiry) != 0 {
-		t.Fatal("removing the last reservation left state behind")
-	}
-	// Accrual never lowers a balance, replayed or not.
-	f.accrue(t, second.RequestID, "0.1")
-	if day := limHash(t, f.c, f.day()); day["accrued"] != "0.4" {
-		t.Fatalf("day = %v, want the higher balance kept", day)
-	}
-}
+// Granted for a moment and a long grace: settling later would put the expiry
+// after the one admission set, which is the backstop and must stand.
 
-func TestLimitsExpiredReservationsStopCounting(t *testing.T) {
-	f := limCostSeed(t, "expiry", "0")
-	pending, expiry := f.keys()
+// The spend and the removal of what held its place arrive as one step, so
+// the budget never counts the request twice, and the other request stays.
 
-	lapsing := f.request("0.9")
-	lapsing.LeaseTTL, lapsing.CostGrace = time.Millisecond, time.Millisecond
-	limReserve(t, f.limiter, lapsing)
-	f.wantReserved(t, "0.9")
-	time.Sleep(60 * time.Millisecond)
-	// Reading the total retires nothing; the next reservation does.
-	f.wantReserved(t, "0.9")
-	next := f.request("0.9")
-	limReserve(t, f.limiter, next)
-	f.wantReserved(t, "0.9")
-	if hash := limHash(t, f.c, pending); len(hash) != 2 || hash[next.RequestID] != "0.9" {
-		t.Fatalf("pending = %v, want only the live reservation", hash)
-	}
-	if got := limInt(t, f.c, "ZCARD", expiry); got != 1 {
-		t.Fatalf("expiry members = %d, want the lapsed one retired", got)
-	}
+// Delivered again, which accounting does, it removes nothing more.
 
-	// Accounting that arrives after a reservation lapsed finds nothing and may
-	// not drive the total below what is still reserved.
-	f.accrue(t, lapsing.RequestID, "0")
-	f.wantReserved(t, "0.9")
+// A settlement that arrives after accrual cannot bring the request back.
 
-	// A lapsed reservation is not revived by a settlement either.
-	stale := f.request("0.05")
-	stale.LeaseTTL, stale.CostGrace = time.Millisecond, time.Millisecond
-	lease := limReserve(t, f.limiter, stale)
-	time.Sleep(60 * time.Millisecond)
-	lease.SetActualCost("0.05", "0.05")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	f.wantReserved(t, "0.9")
-	if limHas(t, f.c, pending, stale.RequestID) {
-		t.Fatal("a settlement revived a reservation that had lapsed")
-	}
-}
+// An accrual that names no request removes none.
 
-func TestLimitsDamagedReservationStateHealsAndNeverBlocksAccrual(t *testing.T) {
-	f := limCostSeed(t, "pending-damage", "0")
-	pending, expiry := f.keys()
+// Accrual never lowers a balance, replayed or not.
 
-	// Reservations are advisory and derived, so damage to them is discarded and
-	// the request that found it is judged as if none were held.
-	do(t, f.c, "SET", pending, "junk")
-	do(t, f.c, "SET", expiry, "junk")
-	healed := f.request("0.1")
-	limReserve(t, f.limiter, healed)
-	f.wantReserved(t, "0.1")
-	do(t, f.c, "HSET", pending, "stray", "0.5")
-	do(t, f.c, "HDEL", pending, "sum")
-	limReserve(t, f.limiter, f.request("0.2"))
-	f.wantReserved(t, "0.2")
-	// A total that is not a number cannot be trusted to describe the leases beside
-	// it, and is not read as zero: they go with it, or what they hold would stop
-	// counting while still being kept.
-	do(t, f.c, "HSET", pending, "sum", "abc")
-	limReserve(t, f.limiter, f.request("0.3"))
-	f.wantReserved(t, "0.3")
-	if hash := limHash(t, f.c, pending); len(hash) != 2 || limHas(t, f.c, pending, healed.RequestID) {
-		t.Fatalf("pending = %v, want only the reservation made after the damage", hash)
-	}
+// Reading the total retires nothing; the next reservation does.
 
-	// Whatever the reservations look like, accrued spend is installed: it is the
-	// authority, and a damaged advisory key must not stop PostgreSQL's totals.
-	do(t, f.c, "DEL", pending, expiry)
-	do(t, f.c, "SET", pending, "junk")
-	do(t, f.c, "SET", expiry, "junk")
-	f.accrue(t, uuid.NewString(), "0.7")
-	if hash := limHash(t, f.c, f.day()); hash["accrued"] != "0.7" {
-		t.Fatalf("day = %v, want the accrued spend installed", hash)
-	}
-	if limInt(t, f.c, "EXISTS", pending, expiry) != 0 {
-		t.Fatal("damaged reservation state was kept")
-	}
-	// Accrued state keeps the fail-closed rule: the balances are never guessed.
-	do(t, f.c, "SET", f.day(), "not-a-hash")
-	if _, err := f.limiter.Reserve(t.Context(), f.request("0.1")); err == nil {
-		t.Fatal("a damaged balance admitted a request")
-	}
-}
+// Accounting that arrives after a reservation lapsed finds nothing and may
+// not drive the total below what is still reserved.
 
-// TestLimitsReservationKeysOutliveTheirNewestReservation proves a reservation that
-// ends sooner than one already held does not shorten how long the keys stay: the
-// newest one sets it, whichever request made it. A key that expired early would
-// take the longer request's reservation with it while that request was running.
-func TestLimitsReservationKeysOutliveTheirNewestReservation(t *testing.T) {
-	f := limCostSeed(t, "outlive", "0")
-	pending, expiry := f.keys()
-	long := f.request("0.1")
-	long.LeaseTTL, long.CostGrace = 10*time.Minute, 5*time.Minute
-	limReserve(t, f.limiter, long)
-	short := f.request("0.1")
-	short.LeaseTTL, short.CostGrace = time.Second, time.Second
-	limReserve(t, f.limiter, short)
-	fifteenMinutes := (15 * time.Minute).Milliseconds()
-	for _, key := range []string{pending, expiry} {
-		// The long reservation lasts fifteen minutes, and the keys a second more.
-		if ttl := limInt(t, f.c, "PTTL", key); ttl < fifteenMinutes-5_000 || ttl > fifteenMinutes+1_000 {
-			t.Fatalf("PTTL %s = %d, want it to outlast the longer reservation", key, ttl)
-		}
-	}
-}
+// A lapsed reservation is not revived by a settlement either.
+
+// Reservations are advisory and derived, so damage to them is discarded and
+// the request that found it is judged as if none were held.
+
+// A total that is not a number cannot be trusted to describe the leases beside
+// it, and is not read as zero: they go with it, or what they hold would stop
+// counting while still being kept.
+
+// Whatever the reservations look like, accrued spend is installed: it is the
+// authority, and a damaged advisory key must not stop PostgreSQL's totals.
+
+// Accrued state keeps the fail-closed rule: the balances are never guessed.
+
+// The long reservation lasts fifteen minutes, and the keys a second more.
 
 // TestLimitsEveryScriptSurvivesDamagedReservationKeys proves a reservation key of
 // the wrong type, alone or beside a sound one, never raises an error in the
@@ -638,80 +335,16 @@ func TestLimitsEveryScriptSurvivesDamagedReservationKeys(t *testing.T) {
 	}
 }
 
-func TestLimitsUnpricedRequestsReserveNothing(t *testing.T) {
-	f := limCostSeed(t, "unpriced", "0")
-	pending, expiry := f.keys()
-	request := f.request("")
-	request.RequestID = ""
-	lease := limReserve(t, f.limiter, request)
-	if lease.HasCostReservation() {
-		t.Fatal("a request without an estimate reports a reservation")
-	}
-	lease.SetActualCost("0.4", "0.4")
-	if err := errors.Join(lease.SettleCost(t.Context()), lease.Refund(t.Context())); err != nil {
-		t.Fatalf("finishing an unpriced lease: %v", err)
-	}
-	if limInt(t, f.c, "EXISTS", pending, expiry) != 0 {
-		t.Fatal("an unpriced request created reservation state")
-	}
-	// It is still judged on what has accrued.
-	f.accrue(t, "", "1")
-	_, err := f.limiter.Reserve(t.Context(), request)
-	limExceeded(t, err, limits.DimensionDailyCost)
-}
+// It is still judged on what has accrued.
 
-func TestLimitsRateRejectionGivesBackTheCostReservation(t *testing.T) {
-	f := limCostSeed(t, "compensation", "0")
-	lookup := limLookup()
-	request := func(amount string) limits.Request {
-		r := f.request(amount)
-		r.LookupID = lookup
-		r.RequestsPerMinute = limPointer(int64(1))
-		return r
-	}
-	first := limReserve(t, f.limiter, request("0.1"))
-	f.wantReserved(t, "0.1")
-	// The request window is spent, so the rate script refuses the second request
-	// after the cost script has already reserved for it.
-	_, err := f.limiter.Reserve(t.Context(), request("0.2"))
-	limExceeded(t, err, limits.DimensionRequests)
-	f.wantReserved(t, "0.1")
-	if err := first.Refund(t.Context()); err != nil {
-		t.Fatalf("Refund: %v", err)
-	}
-	f.wantReserved(t, "0")
-	// Both halves of the lease are given back together.
-	limReserve(t, f.limiter, request("0.3"))
-	f.wantReserved(t, "0.3")
-}
+// The request window is spent, so the rate script refuses the second request
+// after the cost script has already reserved for it.
 
-func TestLimitsConcurrentReservationsCannotOvershootTheBalance(t *testing.T) {
-	// Sixty-four replicas admit at once against a balance of 0.25 spent and a
-	// limit of 1: the script decides each one against the others, so exactly
-	// floor((1 - 0.25) / 0.3) = 2 are admitted and the rest are refused.
-	f := limCostSeed(t, "overshoot", "0.25")
-	var granted, refused atomic.Int64
-	var group sync.WaitGroup
-	for range 64 {
-		group.Go(func() {
-			_, err := f.limiter.Reserve(t.Context(), f.request("0.3"))
-			var exceeded *limits.ExceededError
-			switch {
-			case err == nil:
-				granted.Add(1)
-			case errors.As(err, &exceeded) && exceeded.Dimension == limits.DimensionDailyCost:
-				refused.Add(1)
-			default:
-				t.Errorf("Reserve: %v", err)
-			}
-		})
-	}
-	group.Wait()
-	if granted.Load() != 2 || refused.Load() != 62 {
-		t.Fatalf("admitted %d and refused %d, want 2 and 62", granted.Load(), refused.Load())
-	}
-	f.wantReserved(t, "0.6")
-}
+// Both halves of the lease are given back together.
+
+// Sixty-four replicas admit at once against a balance of 0.25 spent and a
+// limit of 1: the script decides each one against the others, so exactly
+// floor((1 - 0.25) / 0.3) = 2 are admitted and the rest are refused.
 
 // TestLimitsReservationsStayConsistentUnderConcurrentChanges runs reservations,
 // settlements, releases and accruals against one owner from many goroutines.
@@ -942,271 +575,46 @@ func (f *limCostFixture) wantConsistent(t *testing.T) {
 // of it.
 const limBacklog = 3000
 
-// TestLimitsReservationSweepIsBoundedPerCall proves a backlog of lapsed
-// reservations is retired a page at a time and not all at once: one call holds
-// the one thread that serves every client of the Valkey for as long as it works,
-// so what it may retire is bounded and not left to the size of the backlog. What
-// is left keeps counting until later calls retire it, which holds a budget back
-// for a while and never lets it overspend.
-func TestLimitsReservationSweepIsBoundedPerCall(t *testing.T) {
-	f := limCostSeed(t, "sweep-bounded", "0")
-	live := f.request("0.2")
-	limReserve(t, f.limiter, live)
-	f.lapse(t, limBacklog, "0.0001")
-	f.wantReserved(t, "0.5")
+// Retired, the backlog leaves room for 0.6 beside the 0.2 in flight; counted,
+// it does not. The refusal is the transient kind: this request would fit.
 
-	// Retired, the backlog leaves room for 0.6 beside the 0.2 in flight; counted,
-	// it does not. The refusal is the transient kind: this request would fit.
-	before := f.expiries(t)
-	_, err := f.limiter.Reserve(t.Context(), f.request("0.6"))
-	refusal := limRefused(t, err, limits.DimensionDailyCost)
-	if !refusal.Estimate || refusal.RetryAfter != time.Second {
-		t.Fatalf("refusal = %+v, want the estimate's transient hint of a second", refusal)
-	}
-	page := before - f.expiries(t)
-	if page < 1 || page > 1000 || page >= limBacklog {
-		t.Fatalf("one call retired %d of %d lapsed reservations, want a bounded page", page, limBacklog)
-	}
-	f.wantConsistent(t)
-	want := new(big.Rat).Sub(limMoney(t, "0.5"), new(big.Rat).Mul(limMoney(t, "0.0001"), new(big.Rat).SetInt64(page)))
-	if got := limMoney(t, f.reserved(t)); got.Cmp(want) != 0 {
-		t.Fatalf("reserved = %s after retiring %d, want the rest still counted: %s", got.FloatString(12), page, want.FloatString(12))
-	}
+// Later calls retire the same page each, never more, and the balance is never
+// read as less than the live reservation holds.
 
-	// Later calls retire the same page each, never more, and the balance is never
-	// read as less than the live reservation holds.
-	admitted := false
-	for call := 2; call <= limBacklog/int(page)+2; call++ {
-		before = f.expiries(t)
-		_, err = f.limiter.Reserve(t.Context(), f.request("0.6"))
-		if err == nil {
-			admitted = true
-			break
-		}
-		limRefused(t, err, limits.DimensionDailyCost)
-		if retired := before - f.expiries(t); retired > page {
-			t.Fatalf("call %d retired %d, more than the %d a call may", call, retired, page)
-		}
-		if limMoney(t, f.reserved(t)).Cmp(limMoney(t, "0.2")) < 0 {
-			t.Fatalf("call %d left less than the live reservation counted", call)
-		}
-		f.wantConsistent(t)
-	}
-	if !admitted {
-		t.Fatal("the request was never admitted although every call retired a page")
-	}
+// Calls that follow drain the rest, and the total is then what is live.
 
-	// Calls that follow drain the rest, and the total is then what is live.
-	for call := 0; f.expiries(t) > 2; call++ {
-		if call > limBacklog/int(page)+2 {
-			t.Fatalf("%d lapsed reservations remain after %d more calls", f.expiries(t)-2, call)
-		}
-		small := f.request("0.000001")
-		lease := limReserve(t, f.limiter, small)
-		if err := lease.Refund(t.Context()); err != nil {
-			t.Fatalf("Refund: %v", err)
-		}
-		f.wantConsistent(t)
-	}
-	f.wantReserved(t, "0.8")
-}
+// Another request still in flight keeps the keys alive, as one does on a busy
+// owner, so that what a settlement does to the lapsed one can be read.
 
-// TestLimitsSettlementSweepIsBoundedToo proves the settlement a request makes as
-// it ends retires no more than a reservation does, since it can be the call that
-// finds the backlog.
-func TestLimitsSettlementSweepIsBoundedToo(t *testing.T) {
-	f := limCostSeed(t, "settle-bounded", "0")
-	pending, _ := f.keys()
-	live := f.request("0.2")
-	lease := limReserve(t, f.limiter, live)
-	f.lapse(t, limBacklog, "0.0001")
+// More lapsed reservations than one page retires, all older than the request's.
 
-	before := f.expiries(t)
-	lease.SetActualCost("0.1", "0.1")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	page := before - f.expiries(t)
-	if page < 1 || page > 1000 || page >= limBacklog {
-		t.Fatalf("one settlement retired %d of %d lapsed reservations, want a bounded page", page, limBacklog)
-	}
-	if got := limHash(t, f.c, pending)[live.RequestID]; got != "0.1" {
-		t.Fatalf("the settled reservation holds %q, want what the request cost", got)
-	}
-	f.wantConsistent(t)
-}
+// A cost of nothing releases the reservation whether or not it had lapsed, and
+// so would not tell the settlement apart from a release: this one costs 0.1.
 
-// TestLimitsSettlementReleasesALapsedReservationTheSweepDidNotReach proves a
-// settlement does not give a reservation that has lapsed a new amount to count: the
-// bounded sweep retires the lapsed ones that expired first, so one that expired
-// later is still there, past its expiry, when its request settles, and what it
-// would be held at no longer matters because it no longer counts.
-func TestLimitsSettlementReleasesALapsedReservationTheSweepDidNotReach(t *testing.T) {
-	f := limCostSeed(t, "settle-lapsed", "0")
-	pending, expiry := f.keys()
-	// Another request still in flight keeps the keys alive, as one does on a busy
-	// owner, so that what a settlement does to the lapsed one can be read.
-	live := f.request("0.3")
-	limReserve(t, f.limiter, live)
-	request := f.request("0.2")
-	lease := limReserve(t, f.limiter, request)
-	// More lapsed reservations than one page retires, all older than the request's.
-	f.lapse(t, 600, "0.0001")
-	do(t, f.c, "ZADD", expiry, "XX", strconv.FormatInt(limServerTimeMS(t, f.c)-1000, 10), request.RequestID)
+// The sweep retired a page of the older ones, and not the request's own; the
+// request in flight is untouched.
 
-	// A cost of nothing releases the reservation whether or not it had lapsed, and
-	// so would not tell the settlement apart from a release: this one costs 0.1.
-	lease.SetActualCost("0.1", "0.1")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
-	}
-	hash := limHashOrNone(t, f.c, pending)
-	if _, kept := hash[request.RequestID]; kept || do(t, f.c, "ZSCORE", expiry, request.RequestID) != nil {
-		t.Fatalf("a settlement kept a reservation that had lapsed, at %q", hash[request.RequestID])
-	}
-	// The sweep retired a page of the older ones, and not the request's own; the
-	// request in flight is untouched.
-	if left := f.expiries(t); left != 600-256+1 {
-		t.Fatalf("%d reservations are left, want the 344 a page of 256 leaves and the one in flight", left)
-	}
-	if hash[live.RequestID] != "0.3" {
-		t.Fatalf("the request in flight holds %q, want its estimate", hash[live.RequestID])
-	}
-	f.wantConsistent(t)
-}
+// The day's limit is 1, so the lapsed reservation counted beside the new one
+// would refuse it.
 
-// TestLimitsALapsedReservationOfTheSameRequestIsReservedAfresh proves a request
-// reserved again after its first reservation lapsed is not answered as if that one
-// still stood. The bounded sweep may not have reached it, so it is retired here.
-func TestLimitsALapsedReservationOfTheSameRequestIsReservedAfresh(t *testing.T) {
-	f := limCostSeed(t, "lapsed-redelivery", "0")
-	pending, _ := f.keys()
-	// The day's limit is 1, so the lapsed reservation counted beside the new one
-	// would refuse it.
-	request := f.request("0.6")
-	// The backlog is older than the request's own reservation and fills the page
-	// one call retires, so that one is still there, lapsed, when it is asked for.
-	f.lapse(t, 600, "0.0001")
-	now := limServerTimeMS(t, f.c)
-	f.seed(t, now-1000, "0.6", request.RequestID)
+// The backlog is older than the request's own reservation and fills the page
+// one call retires, so that one is still there, lapsed, when it is asked for.
 
-	limReserve(t, f.limiter, request)
-	if expires := limExpiryScore(t, f.c, f.expiryKey(), request.RequestID); expires <= now {
-		t.Fatalf("expires at %d, which has passed: the lapsed reservation was granted again as it stood", expires)
-	}
-	// Retiring the request's own lapsed reservation is no reason to sweep a second
-	// page: more than half of the backlog is left, which one page leaves and two do
-	// not.
-	if left := f.expiries(t) - 1; left <= 300 {
-		t.Fatalf("%d of 600 lapsed reservations are left, want one page of them retired and no more", left)
-	}
-	if got := limHash(t, f.c, pending)[request.RequestID]; got != "0.6" {
-		t.Fatalf("holds %q, want the estimate once", got)
-	}
-	f.wantConsistent(t)
+// Retiring the request's own lapsed reservation is no reason to sweep a second
+// page: more than half of the backlog is left, which one page leaves and two do
+// not.
 
-	// Live again, a second delivery holds it once: the reservation is the same and
-	// only what was left of the backlog has been retired meanwhile.
-	granted := limExpiryScore(t, f.c, f.expiryKey(), request.RequestID)
-	held := limMoney(t, f.reserved(t))
-	limReserve(t, f.limiter, request)
-	if again := limExpiryScore(t, f.c, f.expiryKey(), request.RequestID); again != granted {
-		t.Fatalf("expires at %d after a second delivery, want the granted %d", again, granted)
-	}
-	if after := limMoney(t, f.reserved(t)); after.Cmp(held) > 0 || after.Cmp(limMoney(t, "0.6")) < 0 {
-		t.Fatalf("reserved %s after a second delivery of a reservation held at %s", after.FloatString(12), held.FloatString(12))
-	}
-	f.wantConsistent(t)
-}
+// Live again, a second delivery holds it once: the reservation is the same and
+// only what was left of the backlog has been retired meanwhile.
 
 func (f *limCostFixture) expiryKey() string {
 	_, expiry := f.keys()
 	return expiry
 }
 
-// TestLimitsReservationKeysThatDisagreeAreDiscarded proves reservations whose two
-// keys no longer describe the same leases stop counting. Each is cut off from what
-// it needs to lapse or to be released, so it would hold the budget for as long as
-// traffic kept its keys alive. Reservations are advisory, so what is lost is the
-// protection of the requests in flight and nothing the accrued spend relies on.
-func TestLimitsReservationKeysThatDisagreeAreDiscarded(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		seed func(t *testing.T, f *limCostFixture, live int64)
-	}{
-		{"the set of expiries is gone", func(t *testing.T, f *limCostFixture, live int64) {
-			pending, _ := f.keys()
-			do(t, f.c, "HSET", pending, "sum", "0.5", uuid.NewString(), "0.5")
-			do(t, f.c, "PEXPIRE", pending, "60000")
-		}},
-		{"one reservation has no expiry", func(t *testing.T, f *limCostFixture, live int64) {
-			a, b := uuid.NewString(), uuid.NewString()
-			f.seed(t, live, "0.4", a, b)
-			do(t, f.c, "ZREM", f.expiryKey(), b)
-		}},
-		{"the set holds a reservation the hash does not", func(t *testing.T, f *limCostFixture, live int64) {
-			f.seed(t, live, "0.5", uuid.NewString())
-			do(t, f.c, "ZADD", f.expiryKey(), strconv.FormatInt(live, 10), uuid.NewString())
-		}},
-		{"only a total remains", func(t *testing.T, f *limCostFixture, live int64) {
-			pending, _ := f.keys()
-			do(t, f.c, "HSET", pending, "sum", "0.5")
-			do(t, f.c, "PEXPIRE", pending, "60000")
-		}},
-		{"the hash is gone", func(t *testing.T, f *limCostFixture, live int64) {
-			f.seed(t, live, "0.5", uuid.NewString())
-			pending, _ := f.keys()
-			do(t, f.c, "DEL", pending)
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			f := limCostSeed(t, "disagree", "0")
-			test.seed(t, f, limServerTimeMS(t, f.c)+60_000)
-			// The day's limit is 1, so 0.5 or more still counted would refuse this.
-			limReserve(t, f.limiter, f.request("0.6"))
-			f.wantReserved(t, "0.6")
-			f.wantConsistent(t)
-		})
-	}
-}
+// The day's limit is 1, so 0.5 or more still counted would refuse this.
 
-// TestLimitsReservingTheSameRequestTwiceHoldsItOnce proves a reservation that is
-// delivered again is not counted beside itself, which would refuse a request for
-// the estimate it already holds.
-func TestLimitsReservingTheSameRequestTwiceHoldsItOnce(t *testing.T) {
-	f := limCostSeed(t, "redelivery", "0")
-	request := f.request("0.6") // the day's limit is 1, so counting it twice would refuse it
-	limReserve(t, f.limiter, request)
-	if _, err := f.limiter.Reserve(t.Context(), request); err != nil {
-		t.Fatalf("redelivery of a granted reservation: %v", err)
-	}
-	f.wantReserved(t, "0.6")
-}
-
-// TestLimitsAccrualOfAnEarlierWindowStillRemovesTheReservation proves the request
-// an accrual accounts for stops being reserved even when the spend it installs
-// belongs to a window that is no longer the current one, which is what a snapshot
-// applied after midnight UTC for a request observed before it is.
-func TestLimitsAccrualOfAnEarlierWindowStillRemovesTheReservation(t *testing.T) {
-	f := limCostSeed(t, "stale-accrual", "0")
-	request := f.request("0.4")
-	limReserve(t, f.limiter, request)
-	f.wantReserved(t, "0.4")
-	reconciled, _, err := f.limiter.ApplyCostSnapshot(t.Context(), limits.CostSnapshot{
-		CostOwnerID: f.owner, DailyWindowID: f.windows.DailyID - 1, DailyAccrued: "0.4",
-		MonthlyWindowID: f.windows.MonthlyID - 1, MonthlyAccrued: "0.4", RequestID: request.RequestID,
-	})
-	if err != nil {
-		t.Fatalf("ApplyCostSnapshot: %v", err)
-	}
-	if reconciled {
-		t.Fatal("a snapshot of an earlier window was installed as the current balance")
-	}
-	f.wantReserved(t, "0")
-	if day := limHash(t, f.c, f.day()); day["accrued"] != "0" {
-		t.Fatalf("day = %v, want the current balance untouched", day)
-	}
-}
+// the day's limit is 1, so counting it twice would refuse it
 
 // limFaulty runs every command against Valkey and then lets a test change what
 // the caller hears of it, which is how a command that ran and whose reply was
@@ -1250,67 +658,6 @@ func limLostReply(match func(keys []string) bool, lost func(value any) (any, err
 
 func limKeysEndWith(count int, suffix string) func([]string) bool {
 	return func(keys []string) bool { return len(keys) == count && strings.HasSuffix(keys[0], suffix) }
-}
-
-// TestLimitsReservationWhoseReplyIsLostIsGivenBack proves an estimate that was
-// reserved, and whose reply never arrived or could not be read, is released: the
-// request is refused as unknown, nothing will settle the reservation, and it would
-// otherwise hold the budget until it lapsed.
-func TestLimitsReservationWhoseReplyIsLostIsGivenBack(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		lose func(value any) (any, error)
-		want func(error) bool
-	}{
-		{"the reply is lost", func(any) (any, error) {
-			return nil, &coordination.CommandError{Cause: context.DeadlineExceeded, Ambiguous: true}
-		}, func(err error) bool { var service *limits.ServiceError; return errors.As(err, &service) }},
-		{"the reply is unreadable", func(any) (any, error) { return "garbage", nil },
-			func(err error) bool { return errors.Is(err, limits.ErrUnexpectedResponse) }},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			f := limCostSeed(t, "lost-reply", "0")
-			faulty, ran := limLostReply(limKeysEndWith(4, ":cost:day"), test.lose)
-			faulty.Commander = f.c
-			limiter, err := limits.New(faulty, f.namespace)
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := f.request("0.4")
-			if lease, err := limiter.Reserve(t.Context(), request); lease != nil || !test.want(err) {
-				t.Fatalf("Reserve = %v, %v", lease, err)
-			}
-			if !ran.Load() {
-				t.Fatal("the reservation never ran, so its reply was not lost")
-			}
-			f.wantReserved(t, "0")
-			f.wantConsistent(t)
-		})
-	}
-}
-
-// TestLimitsRateReplyLostAfterTheCostWasReservedGivesTheCostBack proves the same
-// of a request the rate script then fails: the cost it reserved is not kept for a
-// request that was never admitted.
-func TestLimitsRateReplyLostAfterTheCostWasReservedGivesTheCostBack(t *testing.T) {
-	f := limCostSeed(t, "lost-rate", "0")
-	faulty, ran := limLostReply(limKeysEndWith(2, ":rate"), func(any) (any, error) {
-		return nil, &coordination.CommandError{Cause: context.DeadlineExceeded, Ambiguous: true}
-	})
-	faulty.Commander = f.c
-	limiter, err := limits.New(faulty, f.namespace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := f.request("0.4")
-	request.RequestsPerMinute = limPointer(int64(5))
-	if lease, err := limiter.Reserve(t.Context(), request); lease != nil || err == nil {
-		t.Fatalf("Reserve = %v, %v, want a failure", lease, err)
-	}
-	if !ran.Load() {
-		t.Fatal("the rate script never ran, so its reply was not lost")
-	}
-	f.wantReserved(t, "0")
 }
 
 // limSlow answers every command after latency, and gives up on one whose
@@ -1428,26 +775,7 @@ func limScriptCalls(t *testing.T, c *coordination.Client) (byDigest, bySource in
 	return byDigest, bySource
 }
 
-// TestLimitsScriptsAreSentByDigestAndReloadedWhenTheServerForgetsThem proves a
-// script is run by its digest, which is what spares the server parsing it again
-// for every call, and that a server that has lost its scripts is given them again
-// without the caller seeing an error.
-func TestLimitsScriptsAreSentByDigestAndReloadedWhenTheServerForgetsThem(t *testing.T) {
-	f := limCostSeed(t, "script-cache", "0")
-	do(t, f.c, "SCRIPT", "FLUSH")
+// The server holds nothing, so the first call is refused by digest and then
+// carries the source, which runs it.
 
-	// The server holds nothing, so the first call is refused by digest and then
-	// carries the source, which runs it.
-	digest, source := limScriptCalls(t, f.c)
-	limReserve(t, f.limiter, f.request("0.1"))
-	if d, s := limScriptCalls(t, f.c); d > digest+1 || s != source+1 {
-		t.Fatalf("after a flush the first call ran %d by digest and %d by source, want it sent by source once", d-digest, s-source)
-	}
-	// It holds the script now: the same call names it and carries no source.
-	digest, source = limScriptCalls(t, f.c)
-	limReserve(t, f.limiter, f.request("0.1"))
-	if d, s := limScriptCalls(t, f.c); d != digest+1 || s != source {
-		t.Fatalf("a cached script ran %d by digest and %d by source, want one by digest", d-digest, s-source)
-	}
-	f.wantReserved(t, "0.2")
-}
+// It holds the script now: the same call names it and carries no source.

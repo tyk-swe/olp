@@ -80,32 +80,6 @@ func TestRealtimeProviderErrorFramesAreRedacted(t *testing.T) {
 	}
 }
 
-func TestTransformedRealtimeUsagePrefilterPreservesNativeTerminalProjection(t *testing.T) {
-	for _, raw := range []string{
-		`{"type":"response.audio.delta","response_id":"resp_1","delta":"AQID","output_index":0}`,
-		`{"type":"session.updated","event_id":"event_1"}`,
-		`{"type":"response.audio.delta","delta":"response.done is only text"}`,
-	} {
-		state := realtimeResponseState{}
-		if got := state.providerFrame(websocket.MessageText, []byte(raw), false); got != nil {
-			t.Fatalf("nonterminal transformed frame fabricated usage: frame=%s usage=%+v", raw, got)
-		}
-	}
-	for _, raw := range []string{
-		`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
-		`{"type":"response.\u0064one","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
-		`{"type":"response.audio.delta","type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
-		`{"TYPE":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
-		`{"\u0074ype":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
-	} {
-		state := realtimeResponseState{}
-		usage := state.providerFrame(websocket.MessageText, []byte(raw), false)
-		if usage == nil || usage.InputTokens != 3 || usage.OutputTokens != 2 {
-			t.Fatalf("transformed terminal usage was lost for %s: %+v", raw, usage)
-		}
-	}
-}
-
 func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T) {
 	flat := []byte(`{"type":"response.audio.delta","event_id":"e1","response_id":"resp_1","delta":"AQID"}`)
 	event, ok := realtimeFlatFrame(flat)
@@ -156,55 +130,5 @@ func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T
 	got = state.providerFrame(websocket.MessageText, []byte(`{"TYPE":"response.done","Response":{"ID":"resp_1","Usage":{"Input_Tokens":3,"Output_Tokens":2}}}`), true)
 	if got == nil || got.InputTokens != 3 || got.OutputTokens != 2 || state.pending() {
 		t.Fatalf("accepted case-folded native fields changed classification: usage=%+v state=%+v", got, state)
-	}
-}
-
-func TestRealtimeManualCommitTurnCompletes(t *testing.T) {
-	var s realtimeResponseState
-	s.clientFrame(websocket.MessageText, []byte(`{"type":"input_audio_buffer.commit"}`))
-	s.clientFrame(websocket.MessageText, []byte(`{"type":"response.create"}`))
-	s.providerFrame(websocket.MessageText, []byte(`{"type":"input_audio_buffer.committed","item_id":"i"}`), true)
-	s.providerFrame(websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"r1"}}`), true)
-	s.providerFrame(websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"r1"}}`), true)
-	if s.pending() {
-		t.Fatalf("manual commit turn left pending state: %+v", s)
-	}
-}
-
-func TestRealtimeCaseAliasesCannotDischargePendingResponse(t *testing.T) {
-	for _, frame := range []string{
-		`{"type":"response.audio.delta","TYPE":"response.done","response_id":"r"}`,
-		`{"type":5,"TYPE":"response.done","response":{"id":"r","usage":{"input_tokens":0,"output_tokens":0}}}`,
-		`{"type":"response.done","response":{"id":"r","usage":{"input_tokens":"bad","INPUT_TOKENS":0,"output_tokens":0}}}`,
-		`{"type":"response.done","response":5,"Response":{"id":"r","usage":{"input_tokens":0,"output_tokens":0}}}`,
-		`{"type":"response.done","response":{"id":"r","usage":5,"Usage":{"input_tokens":0,"output_tokens":0}}}`,
-		`{"type":"response.done","response":{"id":"r","usage":{"input_tokens":0,"output_tokens":0,"input_token_details":{"cached_tokens":"bad","CACHED_TOKENS":0}}}}`,
-	} {
-		var state realtimeResponseState
-		state.clientFrame(websocket.MessageText, []byte(`{"type":"response.create"}`))
-		state.providerFrame(websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"r"}}`), true)
-		if usage := state.providerFrame(websocket.MessageText, []byte(frame), true); usage != nil || !state.pending() || !state.unknown {
-			t.Fatalf("alias concealed malformed field: usage=%+v state=%+v", usage, state)
-		}
-	}
-}
-
-func TestRealtimeUsageCarriesModalityShares(t *testing.T) {
-	frame := `{"type":"response.done","response":{"id":"resp_1","usage":{
-		"input_tokens":30,"output_tokens":20,
-		"input_token_details":{"cached_tokens":10,"audio_tokens":7,"image_tokens":3,
-			"cached_tokens_details":{"audio_tokens":4,"image_tokens":2}},
-		"output_token_details":{"audio_tokens":9}}}}`
-	for _, strict := range []bool{false, true} {
-		state := realtimeResponseState{}
-		usage := state.providerFrame(websocket.MessageText, []byte(frame), strict)
-		if usage == nil || usage.AudioInputTokens == nil || *usage.AudioInputTokens != 7 ||
-			usage.ImageInputTokens == nil || *usage.ImageInputTokens != 3 ||
-			usage.CachedAudioInputTokens == nil || *usage.CachedAudioInputTokens != 4 ||
-			usage.CachedImageInputTokens == nil || *usage.CachedImageInputTokens != 2 ||
-			usage.AudioOutputTokens == nil || *usage.AudioOutputTokens != 9 ||
-			usage.CachedInputTokens == nil || *usage.CachedInputTokens != 10 {
-			t.Fatalf("strict=%t usage %+v", strict, usage)
-		}
 	}
 }

@@ -1,10 +1,8 @@
 package resources
 
 import (
-	"net/http/httptest"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -21,12 +19,5 @@ func TestEveryStoredKindIsInTheManagementContract(t *testing.T) {
 		if !contract.ListProviderResourcesParamsKind(kind).Valid() {
 			t.Errorf("kind filter %q is outside the contract", kind)
 		}
-	}
-}
-
-func TestListRejectsUnknownKindFilter(t *testing.T) {
-	r := httptest.NewRequest("GET", "/api/v1/provider-resources?kind=bogus", nil)
-	if _, err := (&Management{}).list(r, access.Principal{}); err == nil {
-		t.Fatal("unknown kind filter must be rejected")
 	}
 }

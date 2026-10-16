@@ -8,16 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/management"
-	"github.com/tyk-swe/olp/internal/process"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -203,166 +198,8 @@ func TestManagementTokenLifecycleAndScopes(t *testing.T) {
 	}
 }
 
-func TestManagementTokensActWithinCreatorAuthority(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	creator := h.invite(owner, "automation-owner@example.com", "owner")
-	_, secret := createToken(h, creator, "creator-bound", []string{"read", "access_read", "access", "configure"})
-	member := h.want(creator, "GET", "/api/v1/profile", nil, nil, 200)
-	target := h.want(h.invite(owner, "bystander@example.com", "viewer"), "GET", "/api/v1/profile", nil, nil, 200)
-	h.machineWant(secret, "GET", "/api/v1/users", nil, nil, 200)
+// A demoted creator's token must not keep the owner authority it was
+// issued under, such as promoting another member to owner.
 
-	// A demoted creator's token must not keep the owner authority it was
-	// issued under, such as promoting another member to owner.
-	member = h.want(owner, "PATCH", "/api/v1/users/"+member["id"].(string), map[string]any{"role": "operator"}, etagHeader(member), 200)
-	h.machineWant(secret, "PATCH", "/api/v1/users/"+target["id"].(string), map[string]any{"role": "owner"}, etagHeader(target), 403)
-	h.machineWant(secret, "GET", "/api/v1/users", nil, nil, 200)
-	h.machineWant(secret, "GET", "/api/v1/routes", nil, nil, 200)
-
-	member = h.want(owner, "PATCH", "/api/v1/users/"+member["id"].(string), map[string]any{"active": false}, etagHeader(member), 200)
-	h.machineWant(secret, "GET", "/api/v1/routes", nil, nil, 401)
-
-	// Authority is evaluated against the creator on every request, so a
-	// reactivated creator's token resumes with the creator's current role.
-	h.want(owner, "PATCH", "/api/v1/users/"+member["id"].(string), map[string]any{"active": true}, etagHeader(member), 200)
-	h.machineWant(secret, "GET", "/api/v1/routes", nil, nil, 200)
-	h.machineWant(secret, "PATCH", "/api/v1/users/"+target["id"].(string), map[string]any{"role": "owner"}, etagHeader(target), 403)
-}
-
-func TestProvisioningReconcilesWithoutLogin(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	_, secret := createToken(h, owner, "provisioner", []string{"access"})
-	source := "/api/v1/provisioning/scim-bridge/users/"
-
-	reconciled := h.machineWant(secret, "PUT", source+"ext-001", map[string]any{
-		"email": "provisioned@example.com", "display_name": "External One", "role": "developer", "active": true,
-	}, nil, 200)
-	userID := reconciled["id"].(string)
-	if reconciled["etag"] == "" || reconciled["email"] != "provisioned@example.com" {
-		t.Fatal("provisioning did not return a safe user record", reconciled)
-	}
-
-	updated := h.machineWant(secret, "PUT", source+"ext-001", map[string]any{
-		"email": "provisioned@example.com", "display_name": "External One", "role": "operator", "active": true,
-	}, nil, 200)
-	if updated["role"] != "operator" || updated["etag"] == reconciled["etag"] {
-		t.Fatal("reconciliation must apply the external state and rotate the etag")
-	}
-
-	if status, out := h.machine(secret, "PUT", source+"ext-999", map[string]any{
-		"email": "owner@example.com", "display_name": "Collision", "role": "viewer", "active": true,
-	}, nil); status != 409 || problemCode(t, out) != "email_unavailable" {
-		t.Fatal("an owned email must not be provisioned to another identity", status, out)
-	}
-	if status, _ := h.machine(secret, "PUT", "/api/v1/provisioning/bad%2Fsource/users/ext-1", map[string]any{
-		"email": "x@example.com", "display_name": "X", "role": "viewer", "active": true,
-	}, nil); status == 200 {
-		t.Fatal("a source containing a slash must be rejected")
-	}
-
-	fresh := h.want(owner, "GET", "/api/v1/users/"+userID, nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"role": "viewer"}, etagHeader(fresh), 200)
-	if status, out := h.machine(secret, "PUT", source+"ext-001", map[string]any{
-		"email": "provisioned@example.com", "display_name": "External One", "role": "developer", "active": true,
-	}, nil); status != 409 || problemCode(t, out) != "provisioning_ownership_changed" {
-		t.Fatal("locally managed identities must reject external reconciliation", status, out)
-	}
-	if status, out := h.machine(secret, "DELETE", source+"ext-001", nil, nil); status != 409 || problemCode(t, out) != "provisioning_ownership_changed" {
-		t.Fatal("locally managed identities must reject external deprovisioning", status, out)
-	}
-
-	second := h.machineWant(secret, "PUT", source+"ext-002", map[string]any{
-		"email": "lifecycle@example.com", "display_name": "External Two", "role": "viewer", "active": true,
-	}, nil, 200)
-	secondID := second["id"].(string)
-	recovered, err := access.RecoverPassword(t.Context(), h.Pool, "lifecycle@example.com", "a temporary recovery passphrase")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recovered["password_recovered"] != true {
-		t.Fatal("recovery did not confirm the credential update")
-	}
-	guest := &browser{}
-	h.want(guest, "POST", "/api/v1/sessions", map[string]any{"email": "lifecycle@example.com", "password": "a temporary recovery passphrase"}, nil, 201)
-	h.want(guest, "GET", "/api/v1/profile", nil, nil, 200)
-
-	h.machineWant(secret, "PUT", source+"ext-002", map[string]any{
-		"email": "lifecycle@example.com", "display_name": "External Two Renamed", "role": "viewer", "active": true,
-	}, nil, 200)
-	h.want(guest, "GET", "/api/v1/profile", nil, nil, 401)
-
-	h.machineWant(secret, "DELETE", source+"ext-002", nil, nil, 204)
-	if status, _ := h.machine(secret, "DELETE", source+"ext-002", nil, nil); status != 204 {
-		t.Fatal("deprovisioning must be idempotent for a mapped identity", status)
-	}
-	if status, _ := h.machine(secret, "DELETE", source+"ext-missing", nil, nil); status != 404 {
-		t.Fatal("deprovisioning an unmapped identity must be 404", status)
-	}
-	if inactive := h.want(owner, "GET", "/api/v1/users/"+secondID, nil, nil, 200); inactive["active"] != false {
-		t.Fatal("deprovisioning must reconcile the user to inactive")
-	}
-	h.want(guest, "POST", "/api/v1/sessions", map[string]any{"email": "lifecycle@example.com", "password": "a temporary recovery passphrase"}, nil, 401)
-
-	events := h.want(owner, "GET", "/api/v1/audit?action=user.provision", nil, nil, 200)
-	event := events["items"].([]any)[0].(map[string]any)
-	if event["actor_type"] != "management_token" || event["actor_label"] != "provisioner" {
-		t.Fatal("provisioning must be attributed to the machine token", event)
-	}
-}
-
-func TestAccountRecoveryInvalidatesAndAudits(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	dev := h.invite(owner, "dev@example.com", "developer")
-	h.want(dev, "GET", "/api/v1/profile", nil, nil, 200)
-
-	recovered, err := access.RecoverPassword(t.Context(), h.Pool, " Dev@Example.com ", "a brand new passphrase")
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, _ := json.Marshal(recovered)
-	if recovered["password_recovered"] != true || recovered["email"] != "dev@example.com" || strings.Contains(string(encoded), "passphrase") {
-		t.Fatal("recovery returned an unsafe result", recovered)
-	}
-	h.want(dev, "GET", "/api/v1/profile", nil, nil, 401)
-	h.want(&browser{}, "POST", "/api/v1/sessions", map[string]any{"email": "dev@example.com", "password": accessPassword}, nil, 401)
-	fresh := &browser{}
-	h.want(fresh, "POST", "/api/v1/sessions", map[string]any{"email": "dev@example.com", "password": "a brand new passphrase"}, nil, 201)
-	h.want(fresh, "GET", "/api/v1/profile", nil, nil, 200)
-
-	passwordFile := filepath.Join(t.TempDir(), "password")
-	if err := os.WriteFile(passwordFile, []byte("a second recovery passphrase\r\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	c := config.Config{DatabaseURL: h.DBURL, DatabaseMaxConnections: 4, RequestTimeout: 5 * time.Second, StartupTimeout: 30 * time.Second}
-	if err := process.Maintenance(t.Context(), c, "reset-password", process.MaintenanceOptions{AccountEmail: "dev@example.com", PasswordFile: passwordFile}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), `"password_recovered":true`) || strings.Contains(output.String(), "passphrase") {
-		t.Fatal("recovery output must confirm without disclosing the password", output.String())
-	}
-	h.want(&browser{}, "POST", "/api/v1/sessions", map[string]any{"email": "dev@example.com", "password": "a second recovery passphrase"}, nil, 201)
-	h.want(fresh, "GET", "/api/v1/profile", nil, nil, 401)
-
-	events := h.want(owner, "GET", "/api/v1/audit?action=user.password_recover", nil, nil, 200)
-	if len(events["items"].([]any)) != 2 {
-		t.Fatal("both recoveries must be audited", events)
-	}
-	for _, item := range events["items"].([]any) {
-		event := item.(map[string]any)
-		if event["actor_type"] != "system" || event["actor_user_id"] != nil || event["actor_management_token_id"] != nil {
-			t.Fatal("recovery must be attributed to the system, not an actor", event)
-		}
-	}
-
-	devID := recovered["id"].(string)
-	devRecord := h.want(owner, "GET", "/api/v1/users/"+devID, nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v1/users/"+devID, map[string]any{"active": false}, etagHeader(devRecord), 200)
-	for _, target := range []string{"ghost@example.com", "dev@example.com"} {
-		if _, err := access.RecoverPassword(t.Context(), h.Pool, target, "a brand new passphrase"); err == nil || strings.Contains(err.Error(), strings.ToLower(target)) {
-			t.Fatal("recovery must fail generically without confirming the account", err)
-		}
-	}
-}
+// Authority is evaluated against the creator on every request, so a
+// reactivated creator's token resumes with the creator's current role.

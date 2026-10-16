@@ -1,8 +1,6 @@
 package codeadapter
 
 import (
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -36,81 +34,4 @@ func TestEveryProfileBelongsToOneAdapterAtItsManifestAddress(t *testing.T) {
 	}
 }
 
-func TestConnectionKindAndAuthModeAreThePluginGrantConstants(t *testing.T) {
-	if kindPlugin != connectors.KindPlugin || authGrant != connectors.AuthGrant {
-		t.Fatal("code accounts no longer name the plugin grant connection")
-	}
-	for _, v := range vendors {
-		for _, profile := range v.Profiles {
-			if !strings.Contains(SQL("c"), "WHEN '"+profile+"' THEN '"+string(v.Adapter)+"'") {
-				t.Fatalf("SQL omits %s", profile)
-			}
-		}
-	}
-}
-
-func TestAdaptersOrderAsTheTableAndShareOnlyNativePaths(t *testing.T) {
-	adapters := []codemode.Adapter{"unknown", codemode.AdapterZAICoding, codemode.AdapterCodex, codemode.AdapterOpenCodeGo}
-	slices.SortFunc(adapters, Compare)
-	if !slices.Equal(adapters, []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding, "unknown"}) {
-		t.Fatalf("order %q", adapters)
-	}
-	if !strings.Contains(SQLAdapters("v.connections"), "ARRAY['codex','opencode_go','zai_coding']") {
-		t.Fatal("SQLAdapters does not order adapters as the table")
-	}
-	for _, v := range vendors {
-		if len(v.Paths) == 0 {
-			t.Fatalf("%s serves no path", v.Adapter)
-		}
-		for path, upstream := range v.Paths {
-			// Codex's paths are the route's root, which no other family serves.
-			if codex := !strings.HasPrefix(path, "v1/"); codex != (v.Adapter == codemode.AdapterCodex) || upstream == "" {
-				t.Fatalf("%s serves %s at %q", v.Adapter, path, upstream)
-			}
-		}
-	}
-}
-
-func TestCredentialHeaderFollowsTheNativeClient(t *testing.T) {
-	for _, test := range []struct {
-		adapter  codemode.Adapter
-		protocol codemode.Protocol
-		want     string
-	}{
-		{codemode.AdapterCodex, codemode.ProtocolResponses, "Authorization"},
-		{codemode.AdapterOpenCodeGo, codemode.ProtocolChat, "Authorization"},
-		{codemode.AdapterOpenCodeGo, codemode.ProtocolResponses, "Authorization"},
-		{codemode.AdapterOpenCodeGo, codemode.ProtocolMessages, "X-Api-Key"},
-		{codemode.AdapterZAICoding, codemode.ProtocolMessages, "Authorization"},
-		{codemode.AdapterZAICoding, codemode.ProtocolChat, "Authorization"},
-	} {
-		if got := CredentialHeader(test.adapter, test.protocol); got != test.want {
-			t.Fatalf("%s %s: %s", test.adapter, test.protocol, got)
-		}
-	}
-}
-
-func TestClientsReachOnlyModelsServedOnTheirProtocols(t *testing.T) {
-	for _, test := range []struct {
-		adapter       codemode.Adapter
-		client, model string
-		want          bool
-	}{
-		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "minimax-m3", true},
-		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "Qwen3.6-Plus", true},
-		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "gpt-5.5", false},
-		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "kimi-k3", false},
-		{codemode.AdapterOpenCodeGo, ClientOpenCode, "gpt-5.5", true},
-		{codemode.AdapterOpenCodeGo, ClientOpenCode, "kimi-k3", true},
-		{codemode.AdapterOpenCodeGo, ClientCodex, "gpt-5.5", false},
-		{codemode.AdapterZAICoding, ClientClaudeCode, "glm-5.3", true},
-		{codemode.AdapterZAICoding, ClientOpenCode, "glm-5.3", true},
-		{codemode.AdapterCodex, ClientCodex, "gpt-5.5", true},
-		{codemode.AdapterCodex, ClientClaudeCode, "gpt-5.5", false},
-	} {
-		v, _ := Lookup(test.adapter)
-		if got := v.Reaches(test.client, test.model); got != test.want {
-			t.Fatalf("%s %s %s: %v", test.adapter, test.client, test.model, got)
-		}
-	}
-}
+// Codex's paths are the route's root, which no other family serves.

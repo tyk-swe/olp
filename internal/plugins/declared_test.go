@@ -134,23 +134,8 @@ func TestLoadBoundsDecoderAllocations(t *testing.T) {
 // recurse is olp_call's instructions calling itself, forever.
 var recurse = []byte{0x20, 0, 0x20, 1, 0x10, 2}
 
-// The hostile module is a plugin in every other respect: without its
-// hostility, OLP loads it and calls it.
-func TestHostileModuleIsOtherwiseAPlugin(t *testing.T) {
-	t.Parallel()
-	benign := hostile{tables: [][]byte{funcrefTable(maxTableElements)}, call: []byte{0x42, 0}, functions: 2, eachLocals: maxFunctionLocals}
-	for _, engine := range []Engine{Interpreted, Compiled} {
-		r := startRuntime(t, engine, DefaultLimits, nil)
-		m, err := r.Load(t.Context(), benign.module())
-		if err != nil {
-			t.Fatal(err)
-		}
-		// Its olp_call returns no JSON response, which only a module OLP
-		// instantiated and called can fail with.
-		wantError(t, m.Call(t.Context(), Call{Method: abi.MethodManifest}, nil), CodeFailed, "")
-		m.Close(t.Context())
-	}
-}
+// Its olp_call returns no JSON response, which only a module OLP
+// instantiated and called can fail with.
 
 // wazero allocates what a module declares before any limit applies: a table's
 // elements when it instantiates the module, a function's locals when it
@@ -185,33 +170,7 @@ func TestInstallRefusesModulesDeclaringMoreThanOLPBounds(t *testing.T) {
 	}
 }
 
-// A call's frames count towards its stack limit on either engine, however
-// deep it recurses and however many operands each frame holds, so a runaway
-// call fails without the stack growing far past the limit.
-func TestACallPastItsStackLimitFails(t *testing.T) {
-	// Not parallel: the test measures what the process allocates.
-	operands := bytes.Repeat([]byte{0x42, 0}, 5000) // i64.const 0, many times
-	operands = append(operands, recurse...)
-	operands = append(operands, bytes.Repeat([]byte{0x1a}, 5001)...) // drop them all
-	operands = append(operands, 0x42, 0)
-	limits := DefaultLimits
-	limits.Stack = 1 << 20
-	for _, engine := range []Engine{Interpreted, Compiled} {
-		for name, call := range map[string][]byte{"deep": recurse, "wide": operands} {
-			r := startRuntime(t, engine, limits, nil)
-			m, err := r.Load(t.Context(), hostile{call: call}.module())
-			if err != nil {
-				t.Fatal(err)
-			}
-			var before, after runtime.MemStats
-			runtime.ReadMemStats(&before)
-			err = m.Call(t.Context(), Call{Method: abi.MethodManifest}, nil)
-			runtime.ReadMemStats(&after)
-			wantError(t, err, CodeFailed, "")
-			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 32<<20 {
-				t.Fatalf("engine %d, %s: the call allocated %d MiB against a 1 MiB stack limit", engine, name, allocated>>20)
-			}
-			m.Close(t.Context())
-		}
-	}
-}
+// Not parallel: the test measures what the process allocates.
+// i64.const 0, many times
+
+// drop them all

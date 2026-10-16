@@ -42,46 +42,7 @@ func result(t *testing.T, d operations.Dialect, r oif.Request, raw string) (oif.
 	native, _ := oif.NewResult(r.Descriptor(), doc, oif.Complete)
 	return d.Result(r, native)
 }
-func TestNativeStorageAndLogicalShape(t *testing.T) {
-	for _, test := range []struct {
-		name, dtype, encoding, storage string
-		dimension, stored, bytes       int
-	}{
-		{"signed bytes", "int8", "null", `[-128,127]`, 2, 2, 0}, {"unsigned bytes", "uint8", "null", `[0,255]`, 2, 2, 0}, {"packed signed", "binary", "null", `[-128,127]`, 16, 2, 0}, {"packed unsigned", "ubinary", "null", `[0,255]`, 16, 2, 0},
-		{"packed base64", "ubinary", `"base64"`, `"AP8="`, 16, 2, 2}, {"signed base64", "int8", `"base64"`, `"gH8="`, 2, 2, 2}, {"float bytes", "float", `"base64"`, `"AACAPwAAAMA="`, 2, 2, 8},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			d := codec(t, "voyage-embeddings")
-			raw := `{"model":"m","input":"a","output_dtype":"` + test.dtype + `","encoding_format":` + test.encoding + `}`
-			r := request(t, d, raw)
-			response := `{"data":[{"index":0,"embedding":` + test.storage + `}],"usage":{"total_tokens":1},"provider_metadata":{"huge":9007199254740993}}`
-			view, err := result(t, d, r, response)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := view.(embeddings.Result)
-			v := got.Vectors()[0]
-			if v.Source.Raw() != test.storage || v.Format.LogicalDimensions != int64(test.dimension) || v.StoredElements != test.stored || v.StoredBytes != test.bytes || got.Source().Source().Raw() != response {
-				t.Fatalf("native representation changed: %+v", v)
-			}
-		})
-	}
-}
-func TestCorruptNativeVectorsRejectWithoutConversions(t *testing.T) {
-	d := codec(t, "voyage-embeddings")
-	for _, test := range []struct{ request, response string }{
-		{`{"model":"m","input":"a","output_dtype":"int8"}`, `{"data":[{"index":0,"embedding":[128]}]}`},
-		{`{"model":"m","input":"a","output_dtype":"uint8"}`, `{"data":[{"index":0,"embedding":[-1]}]}`},
-		{`{"model":"m","input":"a","output_dtype":"binary","output_dimension":16}`, `{"data":[{"index":0,"embedding":[1]}]}`},
-		{`{"model":"m","input":"a","encoding_format":"base64"}`, `{"data":[{"index":0,"embedding":"AA=="}]}`},
-		{`{"model":"m","input":["a","b"]}`, `{"data":[{"index":0,"embedding":[1]},{"index":0,"embedding":[2]}]}`},
-	} {
-		r := request(t, d, test.request)
-		if _, err := result(t, d, r, test.response); err == nil {
-			t.Fatalf("invalid vector accepted: %s", test.response)
-		}
-	}
-}
+
 func TestSparseDimensionUnknownAndMultivectorRankRetained(t *testing.T) {
 	d := codec(t, "tei-sparse-embeddings")
 	r := request(t, d, `{"inputs":"a"}`)

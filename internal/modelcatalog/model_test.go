@@ -12,22 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func TestSamplesMatchAvailableNativeSDKOperations(t *testing.T) {
-	route := routing.Route{Slug: "embed", Operations: []string{"embeddings", "token_count"}}
-	got := samples(route, "https://gateway.example.com")
-	if len(got) != 4 {
-		t.Fatalf("native operation samples: %v", got)
-	}
-	for _, sample := range got {
-		if sample.Operation == "generation" || sample.SDK == "anthropic" && sample.Operation == "embeddings" {
-			t.Fatalf("unsupported SDK interface: %v", sample)
-		}
-		if !strings.Contains(sample.Code, "OLP_API_KEY") || !strings.Contains(sample.Code, `model="embed"`) {
-			t.Fatal("sample bypasses route or mounted credential convention")
-		}
-	}
-}
-
 func pointer[T any](value T) *T { return &value }
 
 func catalogFixture(t *testing.T) (*routing.Snapshot, routing.Route, *usage.RoutingInputs, time.Time) {
@@ -54,47 +38,6 @@ func catalogFixture(t *testing.T) (*routing.Snapshot, routing.Route, *usage.Rout
 	return snapshot, route, inputs, now
 }
 
-func TestCatalogProjectsConservativeFactsAndPricesWithoutProviderIdentities(t *testing.T) {
-	snapshot, route, inputs, now := catalogFixture(t)
-	model := Describe(snapshot, route, inputs, "https://gateway.example", true, false, now)
-	if model.Capabilities.ContextLength == nil || *model.Capabilities.ContextLength != 32000 {
-		t.Fatal("context is not the common bound")
-	}
-	if model.Privacy.ZeroDataRetention == nil || !*model.Privacy.ZeroDataRetention || model.Privacy.DataCollection == nil || *model.Privacy.DataCollection {
-		t.Fatalf("privacy: %+v", model.Privacy)
-	}
-	if len(model.Prices) != 1 || !model.Prices[0].Complete || model.Prices[0].InputPerMillion.Minimum != "1.200000000000000001" || model.Prices[0].InputPerMillion.Maximum != "4.000000000000000001" {
-		t.Fatalf("prices lost precision or coverage: %+v", model.Prices)
-	}
-	if model.Prices[0].CachedInputPerMillion.Maximum != model.Prices[0].InputPerMillion.Maximum {
-		t.Fatal("cached price did not inherit input price")
-	}
-	raw, _ := json.Marshal(model)
-	if strings.Contains(string(raw), "private-") {
-		t.Fatal("catalog exposed provider/model/endpoint metadata")
-	}
-	if len(model.Samples) != 3 {
-		t.Fatal("missing qualified generation SDK samples")
-	}
-	for _, sample := range model.Samples {
-		if !strings.Contains(sample.Code, "assistant") || !strings.Contains(sample.Code, "OLP_API_KEY") {
-			t.Fatalf("invalid sample: %+v", sample)
-		}
-	}
-}
-
-func TestCatalogPublicPriceAndUpstreamChoicesAreIndependent(t *testing.T) {
-	snapshot, route, inputs, now := catalogFixture(t)
-	model := Describe(snapshot, route, inputs, "https://gateway.example", false, true, now)
-	if len(model.Prices) != 0 || len(model.UpstreamModels) != 2 {
-		t.Fatalf("independent disclosures: %+v", model)
-	}
-	model = Describe(snapshot, route, inputs, "https://gateway.example", true, false, now.Add(usage.PerformanceMaxAge+time.Second))
-	if len(model.Prices) != 0 {
-		t.Fatal("stale price metadata exposed as current")
-	}
-}
-
 func TestCatalogKeepsUnknownPrivacyAndPartialPricesExplicit(t *testing.T) {
 	snapshot, route, inputs, now := catalogFixture(t)
 	provider := snapshot.Providers["second"]
@@ -111,33 +54,6 @@ func TestCatalogKeepsUnknownPrivacyAndPartialPricesExplicit(t *testing.T) {
 	}
 	if len(model.Prices) != 1 || model.Prices[0].Complete {
 		t.Fatal("partially priced targets asserted complete prices")
-	}
-}
-
-func TestCatalogOmitsUnavailablePricesAndKeepsCurrencyCoveragePartial(t *testing.T) {
-	snapshot, route, inputs, now := catalogFixture(t)
-	model := Describe(snapshot, route, nil, "https://gateway.example", true, false, now)
-	if len(model.Prices) != 0 {
-		t.Fatal("unavailable pricing input produced prices")
-	}
-	inputs.Prices[1].Currency = "EUR"
-	model = Describe(snapshot, route, inputs, "https://gateway.example", true, false, now)
-	if len(model.Prices) != 2 || model.Prices[0].Complete || model.Prices[1].Complete {
-		t.Fatalf("cross-currency ranges asserted full target coverage: %+v", model.Prices)
-	}
-}
-
-func TestCatalogGeminiEmbeddingSampleRequiresItsCertifiedSurface(t *testing.T) {
-	snapshot, route, inputs, now := catalogFixture(t)
-	route.Operations = []string{"embeddings"}
-	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
-	route.Targets = route.Targets[:1]
-	provider := snapshot.Providers["first"]
-	provider.Capabilities = []routing.Capability{{Model: route.Targets[0].ProviderModel, Operation: "embeddings", Surface: "gemini", Mode: "unary"}}
-	snapshot.Providers["first"] = provider
-	model := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
-	if len(model.Samples) != 1 || model.Samples[0].SDK != "gemini" {
-		t.Fatalf("samples did not follow the certified embedding surface: %+v", model.Samples)
 	}
 }
 

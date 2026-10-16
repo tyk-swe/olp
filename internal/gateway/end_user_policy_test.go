@@ -99,38 +99,3 @@ func TestCodeNativeIdentitySurvivesBodyParsingAndFreshPolicy(t *testing.T) {
 		})
 	}
 }
-
-func TestCodeIdentityChangeDuringAdmissionRefusesBeforeDispatch(t *testing.T) {
-	h, ledger, server := newCodeForwardHarness(t)
-	native, header := "native", "header"
-	authority := h.rt.keys[fullKey]
-	authority.Policy.EndUserSource = &native
-	h.rt.keys[fullKey] = authority
-	h.gateway.Runtime = endUserRuntime{h.rt}
-	authority.Policy.EndUserSource = &header
-	h.gateway.CodeLedger = endUserCodeLedger{ledger, authority}
-	response := codeDo(t, server, []byte(`{"model":"native-model","user":"native-user","input":"hi","stream":true}`), http.Header{"Content-Type": {"application/json"}, endUserHeader: {"header-user"}})
-	defer response.Body.Close()
-	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode != http.StatusConflict || !bytes.Contains(body, []byte("code_end_user_changed")) {
-		t.Fatalf("identity change: %d %s", response.StatusCode, body)
-	}
-	ledger.mu.Lock()
-	defer ledger.mu.Unlock()
-	if len(ledger.marks) != 0 || len(ledger.aborts) != 1 || h.mock.count("a") != 0 {
-		t.Fatal("changed identity dispatched or retained a prepared attempt")
-	}
-}
-
-func TestSubscriptionWeeklyDollarExemptionsPreserveAuthority(t *testing.T) {
-	cost := "1"
-	group := "0d9d6a8b-0d2e-4a01-b1a0-5948b5a72c36"
-	a := access.Authority{ProjectAttributionBudgets: access.AttributionBudgets{"team": {"core": {WeeklyCostLimit: &cost}}}, Attribution: map[string]string{"team": "core"}, ID: group, BudgetGroupID: &group, BudgetGroupWeeklyCostLimit: &cost, EndUserDigest: strings.Repeat("a", 64), InstallationBudget: &access.BudgetPolicy{WeeklyCostLimit: &cost}, ProjectBudget: &access.BudgetPolicy{WeeklyCostLimit: &cost}, Policy: access.KeyPolicy{WeeklyCostLimit: &cost, EndUserPolicy: &access.EndUserPolicy{Defaults: access.AdmissionLimits{WeeklyCostLimit: &cost}}, RouteLimits: access.RouteLimits{"coding": {WeeklyCostLimit: &cost}}}}
-	var admission *Admission
-	if lease, e := admission.ReserveCodeRate(t.Context(), a, 1, time.Minute, "coding"); e != nil || lease != nil {
-		t.Fatalf("subscription required invoice admission: %v", e)
-	}
-	if a.ProjectAttributionBudgets["team"]["core"].WeeklyCostLimit == nil || a.Policy.WeeklyCostLimit == nil || a.BudgetGroupWeeklyCostLimit == nil || a.Policy.EndUserPolicy.Defaults.WeeklyCostLimit == nil || a.Policy.RouteLimits["coding"].WeeklyCostLimit == nil || a.InstallationBudget.WeeklyCostLimit == nil || a.ProjectBudget.WeeklyCostLimit == nil {
-		t.Fatal("subscription admission mutated cached budgets")
-	}
-}

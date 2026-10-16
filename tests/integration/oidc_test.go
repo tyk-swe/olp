@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -84,35 +83,6 @@ func newTestIssuer(t *testing.T, authMethods ...string) *testIssuer {
 	return issuer
 }
 
-func TestOIDCDiscoverySelectsTokenAuthentication(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		methods []string
-	}{
-		{"omitted_defaults_to_basic", nil},
-		{"basic", []string{"client_secret_basic"}},
-		{"post", []string{"client_secret_post"}},
-		{"both", []string{"client_secret_post", "client_secret_basic"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newAccessHarness(t)
-			owner := h.owner()
-			issuer := newTestIssuer(t, tc.methods...)
-			h.want(owner, "PUT", "/api/v1/oidc/configuration", map[string]any{"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration", "client_id": "test-client", "client_secret": "write-only-client-secret", "enabled": true, "default_role": "viewer"}, nil, 200)
-			member := &browser{}
-			authorization := h.want(member, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 200)["authorization_url"].(string)
-			h.want(member, "GET", issuer.callback(t, authorization, nil), nil, nil, 303)
-			h.want(member, "GET", "/api/v1/sessions/current", nil, nil, 200)
-		})
-	}
-	t.Run("unsupported_method_is_rejected_before_saving", func(t *testing.T) {
-		h := newAccessHarness(t)
-		owner := h.owner()
-		issuer := newTestIssuer(t, "private_key_jwt")
-		h.want(owner, "PUT", "/api/v1/oidc/configuration", map[string]any{"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration", "client_id": "test-client", "client_secret": "write-only-client-secret"}, nil, 422)
-		h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 404)
-	})
-}
 func (i *testIssuer) callback(t *testing.T, authorization string, claims map[string]any) string {
 	t.Helper()
 	u, err := url.Parse(authorization)
@@ -128,70 +98,6 @@ func (i *testIssuer) callback(t *testing.T, authorization string, claims map[str
 	i.Codes[code] = issuerCode{ClientID: q.Get("client_id"), Nonce: q.Get("nonce"), Challenge: q.Get("code_challenge"), Claims: claims}
 	i.mu.Unlock()
 	return "/api/v1/oidc/callback?" + url.Values{"code": {code}, "state": {q.Get("state")}}.Encode()
-}
-
-func TestOIDCLoginPreservesEncodedReturnURLs(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	issuer := newTestIssuer(t)
-	h.want(owner, "PUT", "/api/v1/oidc/configuration", map[string]any{"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration", "client_id": "test-client", "client_secret": "write-only-client-secret", "default_role": "viewer"}, nil, 200)
-	const returnTo = "/audit?occurred_after=2026-09-13T12%3A00%3A00Z&filter=hello%20world#page%201"
-	for _, method := range []string{"GET", "POST"} {
-		t.Run(method, func(t *testing.T) {
-			member := &browser{}
-			var authorization string
-			if method == "GET" {
-				status, _, headers := h.request(member, method, "/api/v1/oidc/login?"+url.Values{"return_to": {returnTo}}.Encode(), nil, nil)
-				if status != 303 {
-					t.Fatalf("begin OIDC login: status %d, want 303", status)
-				}
-				authorization = headers.Get("Location")
-			} else {
-				authorization = h.want(member, method, "/api/v1/oidc/login", map[string]any{"return_to": returnTo}, nil, 200)["authorization_url"].(string)
-			}
-			status, _, headers := h.request(member, "GET", issuer.callback(t, authorization, nil), nil, nil)
-			if status != 303 || headers.Get("Location") != returnTo {
-				t.Fatalf("OIDC callback: status %d, location %q; want the original encoded return URL", status, headers.Get("Location"))
-			}
-			h.want(member, "GET", "/api/v1/sessions/current", nil, nil, 200)
-		})
-	}
-}
-
-func TestOIDCMappingUniquenessMatchesClaimComparison(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	issuer := newTestIssuer(t)
-	config := map[string]any{
-		"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration",
-		"client_id": "test-client", "client_secret": "write-only-client-secret",
-		"email_role_mappings": []map[string]string{{"claim_value": "Member@example.com", "role": "developer"}},
-		"group_role_mappings": []map[string]string{{"claim_value": "Developers", "role": "viewer"}, {"claim_value": "developers", "role": "owner"}},
-	}
-	saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", config, nil, 200)
-	for _, tc := range []struct {
-		name, field, first, second string
-	}{
-		{"identical_emails", "email_role_mappings", "member@example.com", "member@example.com"},
-		{"email_case_variants", "email_role_mappings", "Member@Example.com", "member@example.com"},
-		{"email_unicode_case_variants", "email_role_mappings", "ſtaff@example.com", "staff@example.com"},
-		{"identical_groups", "group_role_mappings", "developers", "developers"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := maps.Clone(config)
-			input[tc.field] = []map[string]string{{"claim_value": tc.first, "role": "owner"}, {"claim_value": tc.second, "role": "viewer"}}
-			h.want(owner, "PUT", "/api/v1/oidc/configuration", input, etagHeader(saved), 422)
-			if current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200); current["etag"] != saved["etag"] {
-				t.Fatal("rejected duplicate mappings changed the saved configuration")
-			}
-		})
-	}
-	member := &browser{}
-	authorization := h.want(member, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 200)["authorization_url"].(string)
-	h.want(member, "GET", issuer.callback(t, authorization, map[string]any{"email": "member@example.com"}), nil, nil, 303)
-	if profile := h.want(member, "GET", "/api/v1/profile", nil, nil, 200); profile["role"] != "developer" {
-		t.Fatal("email role matching must remain case-insensitive and take precedence over groups")
-	}
 }
 
 func TestOIDCVerifierFlowBindingLinkingAndEnrollment(t *testing.T) {

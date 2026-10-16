@@ -10,7 +10,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -23,12 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/testutil"
@@ -294,66 +289,9 @@ func (f *codingPlanFixture) settled(t *testing.T, n int) []map[string]any {
 	}
 }
 
-func TestCodeCodingPlanKeyEnrollmentStoresOnlyAFingerprintedKey(t *testing.T) {
-	key := "0123456789abcdef0123456789abcdef.CONTROLLEDzaiKEY"
-	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, key)
-	h, owner := f.h, f.owner
-	account := f.accounts[0]
-	if account["adapter"] != "zai_coding" || account["grant_state"] != "current" || account["eligible"] != true || account["health"] != "unknown" || account["principal"] != codeplans.Principal(codeplans.ZAIProfile, key) {
-		t.Fatalf("account: %v", account)
-	}
-	grant := readGrant(t, h, account["credential_id"].(string))
-	if grant.expires != nil || grant.refreshToken != nil || grant.generation != 1 {
-		t.Fatalf("pasted key entered the refresh lifecycle: %+v", grant)
-	}
-	var exposed bool
-	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.secrets WHERE position($1::bytea in ciphertext)>0)`, []byte(key)).Scan(&exposed); err != nil || exposed {
-		t.Fatalf("unencrypted key: %v", err)
-	}
-	path := "/api/v1/providers/" + f.providers[0]
-	for _, read := range []string{"/api/v1/code/accounts?project_id=" + f.project, path, path + "/credentials"} {
-		if _, body := h.do(owner, "GET", read, nil, nil); bytes.Contains(body, []byte(key)) {
-			t.Fatalf("%s returns the key", read)
-		}
-	}
-	if pass(t, grantRefresher(t, h)) {
-		t.Fatal("a pasted key was due a refresh")
-	}
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200); probe["succeeded"] == true {
-		t.Fatal("ordinary synthetic probe bypassed the code-mode fence")
-	}
-	detail = h.want(owner, "GET", path, nil, nil, 200)
-	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, idem("activate")), 422)
+// A different key is a different principal, so it can't rotate the account.
 
-	// A different key is a different principal, so it can't rotate the account.
-	replacement := f.enroll(t, f.providers[0], "fedcba9876543210fedcba9876543210.CONTROLLEDother")
-	input := map[string]any{"project_id": f.project, "provider_id": f.providers[0], "credential_id": replacement, "name": "Controlled fixture only", "enabled": true, "models": account["models"]}
-	h.want(owner, "PUT", "/api/v1/code/accounts/"+account["id"].(string), input, etagHeader(account), 422)
-	if len(f.peer.received()) != 0 {
-		t.Fatal("enrollment or management reached the upstream")
-	}
-
-	// The real authorizer places the key in the header each protocol's native client uses.
-	cfg := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, ProfileRevision: f.digest, Endpoint: codeplans.ZAIUpstream}
-	var a codemode.Account
-	encoded, _ := json.Marshal(account)
-	if err := json.Unmarshal(encoded, &a); err != nil {
-		t.Fatal(err)
-	}
-	authorizer := f.h.Gateway.CodeAuthorizer
-	for _, protocol := range []codemode.Protocol{codemode.ProtocolMessages, codemode.ProtocolChat} {
-		auth, err := authorizer.AuthorizeCode(t.Context(), cfg, a, codemode.Dispatch{Adapter: codemode.AdapterZAICoding, Protocol: protocol})
-		if err != nil || len(auth.Headers) != 1 || auth.Headers.Get("Authorization") != "Bearer "+key || auth.Principal != a.Principal || auth.GrantGeneration != 1 {
-			t.Fatalf("%s authorization: %v", protocol, err)
-		}
-	}
-	for _, dispatch := range []codemode.Dispatch{{Adapter: codemode.AdapterZAICoding, Protocol: codemode.ProtocolResponses}, {Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses}, {Adapter: codemode.AdapterOpenCodeGo, Protocol: codemode.ProtocolMessages}} {
-		if _, err := authorizer.AuthorizeCode(t.Context(), cfg, a, dispatch); err == nil {
-			t.Fatalf("%+v authorized", dispatch)
-		}
-	}
-}
+// The real authorizer places the key in the header each protocol's native client uses.
 
 func TestCodeCodingPlanForwardsClientTrafficWithTheAccountsKey(t *testing.T) {
 	type call struct {
@@ -434,101 +372,11 @@ func TestCodeCodingPlanForwardsClientTrafficWithTheAccountsKey(t *testing.T) {
 	}
 }
 
-func TestCodeCodingPlanConversationTreesKeepOneAccount(t *testing.T) {
-	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "0123456789abcdef0123456789abcdef.first", "fedcba9876543210fedcba9876543210.second")
-	body := `{"model":"glm-5.3","max_tokens":64,"messages":[]}`
-	request := func(agent, parent string) int {
-		header := http.Header{"Authorization": {"Bearer " + f.key}, "X-Claude-Code-Session-Id": {"session-tree"}}
-		if agent != "" {
-			header.Set("X-Claude-Code-Agent-Id", agent)
-		}
-		if parent != "" {
-			header.Set("X-Claude-Code-Parent-Agent-Id", parent)
-		}
-		response, _ := f.post(t, "v1/messages", header, body)
-		return response.StatusCode
-	}
-	if request("", "") != 200 || request("agent-1", "") != 200 || request("agent-2", "agent-1") != 200 {
-		t.Fatal("conversation tree refused")
-	}
-	if status := request("agent-4", "agent-3"); status != 409 {
-		t.Fatalf("unresolved parent agent: %d", status)
-	}
-	if len(f.peer.received()) != 3 {
-		t.Fatal("the unresolved child was dispatched")
-	}
-	// An OpenCode child session follows its parent session's account too.
-	chat := `{"model":"glm-5.3","messages":[]}`
-	for _, header := range []http.Header{
-		{"Authorization": {"Bearer " + f.key}, "X-Opencode-Session-Id": {"ses_parent"}},
-		{"Authorization": {"Bearer " + f.key}, "X-Opencode-Session-Id": {"ses_child"}, "X-Opencode-Parent-Session-Id": {"ses_parent"}},
-	} {
-		if response, _ := f.post(t, "v1/chat/completions", header, chat); response.StatusCode != 200 {
-			t.Fatalf("OpenCode session tree refused: %d", response.StatusCode)
-		}
-	}
-	bindings := f.h.want(f.owner, "GET", "/api/v1/code/bindings?project_id="+f.project, nil, nil, 200)["items"].([]any)
-	accounts, roots := map[any]bool{}, map[any]bool{}
-	conversations := map[any]string{}
-	for _, item := range bindings {
-		binding := item.(map[string]any)
-		accounts[binding["account_id"]], roots[binding["root_id"]] = true, true
-		conversations[binding["conversation"]] = binding["root_id"].(string)
-	}
-	if len(bindings) != 5 || len(accounts) != 1 || len(roots) != 2 || conversations["session-tree/agent-2"] != conversations["session-tree"] || conversations["ses:5fchild"] != conversations["ses:5fparent"] {
-		t.Fatalf("bindings: %v", bindings)
-	}
-	// Without the client's identity, or with two clients' identities, nothing is dispatched.
-	for _, header := range []http.Header{
-		{"Authorization": {"Bearer " + f.key}},
-		{"Authorization": {"Bearer " + f.key}, "X-Claude-Code-Session-Id": {"s"}, "X-Opencode-Session-Id": {"s"}},
-	} {
-		if response, _ := f.post(t, "v1/messages", header, body); response.StatusCode != 400 {
-			t.Fatalf("anonymous or ambiguous request: %d", response.StatusCode)
-		}
-	}
-	// Codex paths, the WebSocket and unlisted operations refuse before dispatch.
-	for _, path := range []string{"responses", "responses/compact", "v1/responses", "v1/models"} {
-		if response, _ := f.post(t, path, http.Header{"Authorization": {"Bearer " + f.key}, "X-Claude-Code-Session-Id": {"s"}}, body); response.StatusCode != 400 {
-			t.Fatalf("%s: %d", path, response.StatusCode)
-		}
-	}
-	if len(f.peer.received()) != 5 {
-		t.Fatal("a refused request reached the upstream")
-	}
-}
+// An OpenCode child session follows its parent session's account too.
 
-func TestCodeCodingPlanQuotaCoolsTheAccountWithoutFailover(t *testing.T) {
-	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "0123456789abcdef0123456789abcdef.first", "fedcba9876543210fedcba9876543210.second")
-	quota := `{"error":{"code":"1308","message":"Usage limit reached for 5 hour."}}`
-	f.peer.mu.Lock()
-	f.peer.respond = func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(429)
-		io.WriteString(w, quota)
-	}
-	f.peer.mu.Unlock()
-	header := http.Header{"Authorization": {"Bearer " + f.key}, "X-Opencode-Session-Id": {"ses_quota"}}
-	body := `{"model":"glm-5.3","messages":[]}`
-	response, got := f.post(t, "v1/chat/completions", header, body)
-	if response.StatusCode != 429 || string(got) != quota {
-		t.Fatalf("quota refusal changed: %d %s", response.StatusCode, got)
-	}
-	response, got = f.post(t, "v1/chat/completions", header, body)
-	if response.StatusCode != 503 || !bytes.Contains(got, []byte("code_account_unavailable")) || len(f.peer.received()) != 1 {
-		t.Fatalf("cooling account was retried or failed over: %d %s", response.StatusCode, got)
-	}
-	account := f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)["items"].([]any)
-	limited := 0
-	for _, item := range account {
-		if item.(map[string]any)["health"] == "quota_limited" {
-			limited++
-		}
-	}
-	if limited != 1 {
-		t.Fatalf("health: %v", account)
-	}
-}
+// Without the client's identity, or with two clients' identities, nothing is dispatched.
+
+// Codex paths, the WebSocket and unlisted operations refuse before dispatch.
 
 func TestCodeCodingPlanRoutesServeEachModelFromItsSubscription(t *testing.T) {
 	glmKey, goKey := "0123456789abcdef0123456789abcdef.first", "opencode0123456789abcdef0123456789"

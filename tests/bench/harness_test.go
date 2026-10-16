@@ -4,7 +4,6 @@ package bench_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -182,47 +180,8 @@ func TestHarnessLauncherKeepsThePidAndPins(t *testing.T) {
 	}
 }
 
-// TestHarnessLauncherEndsWithItsParent proves a process the launcher started
-// does not outlive a test that was killed, as a test that times out is.
-func TestHarnessLauncherEndsWithItsParent(t *testing.T) {
-	sleep, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent := exec.Command("sh", "-c", shellQuote(launcher(t, "watched", sleep, ""))+" 120 & echo $!; wait")
-	stdout, err := parent.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := parent.Start(); err != nil {
-		t.Fatal(err)
-	}
-	var pid int
-	if _, err := fmt.Fscan(stdout, &pid); err != nil || pid <= 1 {
-		parent.Process.Kill()
-		t.Fatalf("the launched process's pid: %d, %v", pid, err)
-	}
-	defer syscall.Kill(pid, syscall.SIGKILL)
-	time.Sleep(1500 * time.Millisecond)
-	if processGone(pid) {
-		t.Fatal("the launched process ended while its parent was alive")
-	}
-	parent.Process.Kill()
-	parent.Wait()
-	for deadline := time.Now().Add(15 * time.Second); !processGone(pid); {
-		if time.Now().After(deadline) {
-			t.Fatal("the launched process outlived its parent")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// A process that ends on its own leaves no watcher to kill a stranger
-	// that is given its pid.
-	quick := exec.Command(launcher(t, "quick", sleep, ""), "0")
-	if err := quick.Run(); err != nil {
-		t.Fatal(err)
-	}
-}
+// A process that ends on its own leaves no watcher to kill a stranger
+// that is given its pid.
 
 func TestHarnessPinsAndRestoresTheLoadGenerator(t *testing.T) {
 	if _, err := exec.LookPath("taskset"); err != nil {

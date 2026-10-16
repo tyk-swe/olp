@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/anthropics/anthropic-sdk-go"
 )
 
 var anthropicWeather = anthropic.ToolUnionParam{OfTool: &anthropic.ToolParam{

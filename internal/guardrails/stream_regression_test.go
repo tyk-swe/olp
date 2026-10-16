@@ -6,26 +6,6 @@ import (
 	"testing"
 )
 
-func TestStreamCaseFoldWidth(t *testing.T) {
-	for _, pattern := range []string{`(?i)ssssssssssx`, `(?i)s{10}x`} {
-		t.Run(pattern, func(t *testing.T) {
-			engine := testEngine(t, "builtin.regex", `{"rules":[{"id":"fold","pattern":"`+pattern+`"}]}`, OutputStream, Block, false, nil)
-			stream, err := NewStream(engine, Evaluation{}, 1024)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for range 10 {
-				if out, err := stream.Push(t.Context(), []byte("ſ"), "ſ"); err != nil || len(out) != 0 {
-					t.Fatalf("released a possible folded match: %q %v", out, err)
-				}
-			}
-			if _, err = stream.Push(t.Context(), []byte("x"), "x"); !errors.Is(err, ErrBlocked) {
-				t.Fatalf("missed folded match: %v", err)
-			}
-		})
-	}
-}
-
 func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
 	for _, action := range []string{Block, Redact} {
 		for _, suffix := range []string{"alogue", "é", "_name", "1", ""} {

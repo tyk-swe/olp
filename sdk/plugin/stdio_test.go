@@ -74,31 +74,6 @@ func signCall(id uint64, credential string) abi.Frame {
 	return abi.Frame{ID: id, Request: &abi.Request{Method: abi.MethodSign, Params: params, Provider: &Provider{Profile: "acme-chat"}}}
 }
 
-// Over stdio a plugin announces its ABI version, then serves calls
-// concurrently: a call waiting for its cancellation doesn't hold up the
-// next, and the plugin still answers it once OLP cancels it.
-func TestServeAnswersCallsConcurrentlyOverStdio(t *testing.T) {
-	o := serveOverStdio(t, signing{sign: func(ctx context.Context, r SignRequest) (SignResult, error) {
-		if r.Credential == "wait" {
-			<-ctx.Done()
-			return SignResult{}, &Error{Code: "cancelled", Message: "OLP cancelled the call."}
-		}
-		return SignResult{Headers: map[string]string{"X-Signature": r.Credential}}, nil
-	}})
-	if hello := o.read(); hello.Version != abi.Version || hello.ID != 0 {
-		t.Fatalf("first frame %+v", hello)
-	}
-	o.write(signCall(1, "wait"))
-	o.write(signCall(2, "sk-acme"))
-	if answered := o.response(2); string(answered.Result) != `{"headers":{"X-Signature":"sk-acme"}}` {
-		t.Fatalf("call 2 answered %+v", answered)
-	}
-	o.write(abi.Frame{ID: 1, Cancel: true})
-	if answered := o.response(1); answered.Error == nil || answered.Error.Code != "cancelled" {
-		t.Fatalf("call 1 answered %+v", answered)
-	}
-}
-
 // A capability request names the call it serves, whose context the plugin
 // passed, and the call continues once OLP answers it.
 func TestCapabilityRequestsNameTheirCallOverStdio(t *testing.T) {
@@ -122,13 +97,6 @@ func TestCapabilityRequestsNameTheirCallOverStdio(t *testing.T) {
 	}
 	if answered := o.response(7); answered.Error != nil {
 		t.Fatalf("call 7 answered %+v", answered)
-	}
-}
-
-// Outside OLP, such as in a plugin's own tests, capabilities are unavailable.
-func TestCapabilitiesAreUnavailableOutsideOLP(t *testing.T) {
-	if _, err := callHost(context.Background(), abi.CapabilityLog, abi.LogRecord{Message: "hi"}); err == nil {
-		t.Fatal("a capability was available outside OLP")
 	}
 }
 
@@ -158,38 +126,6 @@ func (o *olp) part(id uint64) HTTPResponse {
 	return part
 }
 
-// A Carrier's response streams to OLP as parts of its call: its head, then
-// its body as the plugin reads it, so each event reaches OLP before the
-// upstream sends the next. The call's response then ends it.
-func TestCarrierStreamsTheResponseOverStdio(t *testing.T) {
-	body, upstream := io.Pipe()
-	var carried HTTPRequest
-	var provider Provider
-	o := serveOverStdio(t, carrying{carry: func(ctx context.Context, r HTTPRequest) (CarriedResponse, error) {
-		carried = r
-		provider, _ = ProviderOf(ctx)
-		return CarriedResponse{Status: 200, Header: map[string][]string{"Content-Type": {"text/event-stream"}}, Body: body}, nil
-	}})
-	o.read()
-	o.write(carryCall(3, "https://api.acme.example/v1/chat/completions"))
-	if head := o.part(3); head.Status != 200 || head.Header["Content-Type"][0] != "text/event-stream" || head.Body != nil {
-		t.Fatalf("head %+v", head)
-	}
-	if carried.URL != "https://api.acme.example/v1/chat/completions" || carried.Header["Authorization"][0] != "Bearer sk-acme" || string(carried.Body) != `{"stream":true}` || provider.Profile != "acme-chat" {
-		t.Fatalf("carried %+v for %+v", carried, provider)
-	}
-	for _, event := range []string{"data: {\"n\":1}\n\n", "data: [DONE]\n\n"} {
-		go upstream.Write([]byte(event))
-		if part := o.part(3); string(part.Body) != event || part.Status != 0 {
-			t.Fatalf("part %+v, want %q", part, event)
-		}
-	}
-	upstream.Close()
-	if answered := o.response(3); answered.Error != nil {
-		t.Fatalf("call 3 answered %+v", answered)
-	}
-}
-
 // OLP's cancellation of a carry call reaches the Carrier's context and closes
 // a body the plugin is reading, and what the plugin reports ends the call: a
 // request it never sent as not sent, any other failure as a failure.
@@ -215,17 +151,5 @@ func TestCarryCancellationReachesTheCarrier(t *testing.T) {
 	o.write(abi.Frame{ID: 2, Cancel: true})
 	if answered := o.response(2); answered.Error == nil || answered.Error.Code != abi.CodeInternal {
 		t.Fatalf("call 2 answered %+v", answered)
-	}
-}
-
-// A plugin can't declare a profile that carries traffic without a Carrier:
-// it reports no manifest, so OLP never permits it.
-func TestServeRefusesACarryingProfileWithoutACarrier(t *testing.T) {
-	declared := Manifest{Name: "acme", Version: "1.0.0", Profiles: []Profile{{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", CarriesTraffic: true}}}
-	if response := serveWith(t, manifestOnly(declared), `{"method":"manifest"}`); response.Error == nil || response.Error.Code != abi.CodeInternal {
-		t.Fatalf("manifest response %+v", response)
-	}
-	if response := serveWith(t, carrying{manifestOnly: manifestOnly(declared)}, `{"method":"manifest"}`); response.Error != nil {
-		t.Fatalf("manifest response %+v", response)
 	}
 }

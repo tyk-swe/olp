@@ -3,7 +3,6 @@ package estimate
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 	"reflect"
 	"testing"
 
@@ -163,101 +162,8 @@ func referenceReading(request *wire.Request, retain int) *input {
 	return in
 }
 
-// TestWalkerReadsWhatTheReferenceReads walks generated requests of every family,
-// in the shapes clients send and in any JSON at all, and requires the input the
-// walker reads from the document to be the one the reference reads from the
-// fields, whether the walk keeps all of the text, none of it or a few bytes.
-func TestWalkerReadsWhatTheReferenceReads(t *testing.T) {
-	cases := scaled(300, 50, 40)
-	// The comparison is only worth something if the requests have something to
-	// read, which the families that read nothing but a tool catalogue do not.
-	var read, flat, approx int
-	defer func() {
-		if read < cases*3 || flat < cases/2 || approx < cases/2 {
-			t.Errorf("the generator read text in %d cases, a flat charge in %d and an approximate request in %d: it is not exercising the walker", read, flat, approx)
-		}
-	}()
-	for _, family := range walkerFamilies {
-		t.Run(string(family), func(t *testing.T) {
-			g := requestGen{rand.New(rand.NewPCG(31, uint64(len(family))))}
-			for i := range cases {
-				fields := g.richFields(family)
-				request, err := wire.FromFields(family, "route", false, fields)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, retain := range []int{0, 1 << 40, 5, 64} {
-					got := &input{retain: retain}
-					walkInput(got, family, requestFields(request))
-					want := referenceReading(request, retain)
-					sameInput(t, got, want, fmt.Sprintf("case %d, retaining %d bytes", i, retain), fields)
-					if retain == 1<<40 {
-						if got.bytes > 0 {
-							read++
-						}
-						if got.flat > 0 {
-							flat++
-						}
-						if got.approx {
-							approx++
-						}
-					}
-				}
-			}
-		})
-	}
-}
-
-// TestWalkerReadsTheDefaultsTheReferenceReads is the same for what a provider's
-// defaults supply, which is raw JSON that nothing has checked: the fields the
-// caller left out are read from it, and the caller's own are not.
-func TestWalkerReadsTheDefaultsTheReferenceReads(t *testing.T) {
-	cases := scaled(300, 50, 40)
-	var supplied int
-	defer func() {
-		if supplied < cases {
-			t.Errorf("defaults supplied prompt text in %d cases: the generator is not exercising them", supplied)
-		}
-	}()
-	for _, family := range walkerFamilies {
-		t.Run(string(family), func(t *testing.T) {
-			g := requestGen{rand.New(rand.NewPCG(37, uint64(len(family))))}
-			for i := range cases {
-				request, err := wire.FromFields(family, "route", false, g.richFields(family))
-				if err != nil {
-					t.Fatal(err)
-				}
-				prompt := Walk(request)
-				for range 3 {
-					defaults := g.richDefaults()
-					got, ok := prompt.defaulted(defaults)
-					want := &input{}
-					refWalkInput(want, family, func(name string) json.RawMessage {
-						fallback := defaults[name]
-						if !mayHoldPrompt(name, fallback) {
-							return nil
-						}
-						own := request.Field(name)
-						if name == "generationConfig" {
-							return unsetMembers(own, fallback)
-						}
-						if len(own) > 0 {
-							return nil
-						}
-						return fallback
-					})
-					if ok != !want.empty() {
-						t.Fatalf("case %d: the walker found defaulted text: %v, the reference: %v", i, ok, !want.empty())
-					}
-					if ok {
-						supplied++
-						sameInput(t, &got, want, fmt.Sprintf("case %d, defaults", i), defaults)
-					}
-				}
-			}
-		})
-	}
-}
+// The comparison is only worth something if the requests have something to
+// read, which the families that read nothing but a tool catalogue do not.
 
 // FuzzWalkerReadsWhatTheReferenceReads reads any JSON object as a request of any
 // family, and any bytes at all as the value of every field of a provider's

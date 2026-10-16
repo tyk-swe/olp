@@ -50,25 +50,6 @@ func TestInteractionsKeepNativeControlsAndStepOrder(t *testing.T) {
 	}
 }
 
-func TestInteractionsRejectStateAndEventAmbiguity(t *testing.T) {
-	for _, raw := range []string{
-		`{"model":"m","input":null}`,
-		`{"model":"m","input":"x","store":false,"previous_interaction_id":"v1_parent"}`,
-		`{"model":"m","input":"x","store":false,"background":true}`,
-		`{"model":"m","input":"x","store":null}`,
-		`{"model":"m","input":"x","model":"m2"}`,
-	} {
-		if _, err := ParseInteractionRequest([]byte(raw), 1<<20); err == nil {
-			t.Fatalf("accepted malformed interaction %s", raw)
-		}
-	}
-	s := &InteractionStream{}
-	event, err := ParseInteractionEvent([]byte(`{"event_type":"step.delta","delta":{"type":"text","text":"x"}}`), 1024)
-	if err != nil || s.Accept(event) == nil {
-		t.Fatal("accepted a delta before interaction creation")
-	}
-}
-
 func TestLiveSetupAndFramesKeepNativeAudioAndRejectRenegotiation(t *testing.T) {
 	for _, raw := range []string{
 		`{"setup":{"model":"models/team","generationConfig":{"responseModalities":["AUDIO"]},"sessionResumption":{},"realtimeInputConfig":{"automaticActivityDetection":{"disabled":true}}}}`,

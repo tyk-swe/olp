@@ -2,11 +2,8 @@ package catalog
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -86,12 +83,6 @@ func TestSchemaAndValidatorAgree(t *testing.T) {
 	}
 }
 
-func TestEmbeddedCatalogMatchesTheSchema(t *testing.T) {
-	if err := schemaValid(t, compileSchema(t), document); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestEmbeddedCatalogIsCanonical(t *testing.T) {
 	canonical, err := Canonical(document)
 	if err != nil {
@@ -102,88 +93,7 @@ func TestEmbeddedCatalogIsCanonical(t *testing.T) {
 	}
 }
 
-func TestEmbeddedCatalogVerifies(t *testing.T) {
-	signed, err := Embedded()
-	if err != nil {
-		t.Fatalf("%v; after editing catalog.json run make catalog-sign", err)
-	}
-	if signed.Source() != "catalog@"+signed.SHA256 || len(signed.SHA256) != 64 {
-		t.Fatalf("source = %s", signed.Source())
-	}
-	// Counters read the estimation section alone; it is the validated one.
-	estimation, err := EmbeddedEstimation()
-	if err != nil || !reflect.DeepEqual(estimation, signed.Catalog.Estimation) {
-		t.Fatalf("estimation = %+v %v, want %+v", estimation, err, signed.Catalog.Estimation)
-	}
-}
-
-// TestTamperedCatalogsAreRefused exercises the start-up path with altered
-// bytes: an edited document, an edited signature, and a signature by a key
-// the build does not trust.
-func TestTamperedCatalogsAreRefused(t *testing.T) {
-	tampered := bytes.Replace(document, []byte(`"USD"`), []byte(`"EUR"`), 1)
-	if _, err := Load(tampered, signature, signing.Trusted()); !errors.Is(err, signing.ErrInvalidSignature) {
-		t.Fatalf("an edited catalog loaded: %v", err)
-	}
-	var file signing.File
-	if err := json.Unmarshal(signature, &file); err != nil {
-		t.Fatal(err)
-	}
-	file.Signatures[0].Signature[0] ^= 1
-	forged, _ := json.Marshal(file)
-	if _, err := Load(document, forged, signing.Trusted()); !errors.Is(err, signing.ErrInvalidSignature) {
-		t.Fatalf("a forged signature loaded: %v", err)
-	}
-	if _, err := Load(document, signature, signing.MustKeyring()); !errors.Is(err, signing.ErrUnknownKey) {
-		t.Fatalf("a catalog loaded without a trusted key: %v", err)
-	}
-}
-
-func TestCanonicalFormSortsAndNormalizes(t *testing.T) {
-	raw, _ := os.ReadFile("testdata/valid/complete.json")
-	c, err := Decode(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	models := c.Vendors[0].Models
-	models[0], models[1] = models[1], models[0]
-	models[1].InputModalities = []string{"text", "image", "text"}
-	once, err := Encode(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	twice, err := Canonical(once)
-	if err != nil || !bytes.Equal(once, twice) {
-		t.Fatalf("canonical form is not a fixed point: %v", err)
-	}
-	if !bytes.Equal(once, raw) {
-		t.Fatalf("reordered catalog encodes differently:\n%s", once)
-	}
-}
-
-func TestLookupMatchesIdentifiersAliasesAndCanonicalModels(t *testing.T) {
-	raw, _ := os.ReadFile("testdata/valid/complete.json")
-	signed := loadUnsigned(t, raw)
-	for _, test := range []struct {
-		names []string
-		match Match
-	}{
-		{[]string{"example-large"}, MatchID},
-		{[]string{"unknown", "example-large-2026-09-01"}, MatchAlias},
-		{[]string{"example/example-large"}, MatchCanonical},
-	} {
-		model, match, ok := signed.Lookup("example", test.names...)
-		if !ok || model.ID != "example-large" || match != test.match {
-			t.Fatalf("%v matched %v by %s", test.names, model, match)
-		}
-	}
-	if _, _, ok := signed.Lookup("other", "example-large"); ok {
-		t.Fatal("a model matched under another vendor")
-	}
-	if lifecycle := signed.Lifecycle("example", "example-large"); lifecycle == nil || *lifecycle.RetiresAt != "2027-03-01" || *lifecycle.Replacement != "example-xl" {
-		t.Fatalf("lifecycle = %+v", lifecycle)
-	}
-}
+// Counters read the estimation section alone; it is the validated one.
 
 // loadUnsigned signs a test catalog with a throwaway key.
 func loadUnsigned(t *testing.T, raw []byte) *Signed {

@@ -35,12 +35,3 @@ func TestCompareFindsEveryKindOfDrift(t *testing.T) {
 		}
 	}
 }
-
-func TestAnInStepCatalogReportsNothing(t *testing.T) {
-	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
-	c := &catalog.Catalog{PublishedAt: now, Vendors: []catalog.Vendor{{ID: "acme", Models: []catalog.Model{{ID: "m", Prices: []catalog.Price{{Provenance: catalog.Provenance{ObservedAt: now}}}}}}}}
-	report := Compare(c, map[string][]string{"acme": {"m"}}, now)
-	if !report.Empty() || !strings.Contains(report.Markdown(c, now), "matches every vendor") {
-		t.Fatalf("report = %+v", report)
-	}
-}

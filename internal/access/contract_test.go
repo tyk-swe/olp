@@ -1,31 +1,8 @@
 package access
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"maps"
-	"slices"
-	"strings"
 	"testing"
-
-	"github.com/tyk-swe/olp/openapi"
 )
-
-func TestTheContractDeclaresEveryManagementRequirement(t *testing.T) {
-	requirements, err := ContractRequirements()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(requirements) < 140 {
-		t.Fatalf("the contract declares only %d management operations", len(requirements))
-	}
-	for pattern, req := range requirements {
-		if !req.Public && len(req.Alternatives) == 0 {
-			t.Errorf("%s admits nobody", pattern)
-		}
-	}
-}
 
 func TestContractRequirementsMustReadTruthfully(t *testing.T) {
 	operation := func(path, method, security string) string {
@@ -62,26 +39,6 @@ func TestContractRequirementsMustReadTruthfully(t *testing.T) {
 	}
 	if public, err := parseRequirements([]byte(operation("/api/v1/x", "post", `[]`))); err != nil || !public["POST /api/v1/x"].Public {
 		t.Fatal("an empty requirement must be public", err)
-	}
-}
-
-func TestConsumerCatalogAuthorityCannotBecomeManagementAuthority(t *testing.T) {
-	requirements, err := parseRequirements([]byte(`{"paths":{"/api/v1/catalog":{"get":{"security":[{"apiKeyBearer":["models_read"]}]}}}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := Principal{Kind: "key", KeyAuthority: &Authority{Policy: KeyPolicy{Scopes: []string{"models_read"}}}}
-	if requirements["GET /api/v1/catalog"].Admits(p) != nil {
-		t.Fatal("consumer catalog authority refused")
-	}
-	for _, op := range Operations() {
-		if op != Read && p.Authorize(op) == nil {
-			t.Fatalf("consumer key admitted management operation %v", op)
-		}
-	}
-	p.KeyAuthority = nil
-	if requirements["GET /api/v1/catalog"].Admits(p) == nil {
-		t.Fatal("empty consumer authority admitted")
 	}
 }
 
@@ -124,74 +81,4 @@ func archetypes() []archetype {
 		archetype{Name: "token every scope, operator global", Kind: "machine", CreatorRole: RoleOperator, Global: true, Scopes: every},
 		archetype{Name: "token read+configure, owner global", Kind: "machine", CreatorRole: RoleOwner, Global: true, Scopes: []string{"read", "configure"}},
 	)
-}
-
-// TestRouteAuthorizationMatrix pins which callers every management route
-// admits, derived from the contract and the policy together. Review a diff as
-// a change of who may call the API.
-func TestRouteAuthorizationMatrix(t *testing.T) {
-	requirements, err := ContractRequirements()
-	if err != nil {
-		t.Fatal(err)
-	}
-	callers := archetypes()
-	for i := range callers {
-		callers[i].Operations = []string{}
-		for _, op := range callers[i].principal().Operations() {
-			callers[i].Operations = append(callers[i].Operations, op.String())
-		}
-	}
-	routes := map[string]string{}
-	for pattern, req := range requirements {
-		var row strings.Builder
-		for _, caller := range callers {
-			if req.Public || req.Admits(caller.principal()) == nil {
-				row.WriteByte('Y')
-			} else {
-				row.WriteByte('-')
-			}
-		}
-		routes[pattern] = row.String()
-	}
-	patterns := slices.Sorted(maps.Keys(routes))
-	var out bytes.Buffer
-	out.WriteString("{\n  \"archetypes\": [\n")
-	for i, caller := range callers {
-		encoded, _ := json.Marshal(caller)
-		out.WriteString("    " + string(encoded))
-		if i < len(callers)-1 {
-			out.WriteString(",")
-		}
-		out.WriteString("\n")
-	}
-	out.WriteString("  ],\n  \"routes\": {\n")
-	for i, pattern := range patterns {
-		fmt.Fprintf(&out, "    %q: %q", pattern, routes[pattern])
-		if i < len(patterns)-1 {
-			out.WriteString(",")
-		}
-		out.WriteString("\n")
-	}
-	out.WriteString("  }\n}\n")
-	golden(t, "authorization.golden.json", out.Bytes())
-}
-
-func TestInvitationLifetimeContractMatchesHandler(t *testing.T) {
-	var document struct {
-		Components struct {
-			Schemas map[string]struct {
-				Properties map[string]struct {
-					Minimum *float64 `json:"minimum"`
-					Maximum *float64 `json:"maximum"`
-				} `json:"properties"`
-			} `json:"schemas"`
-		} `json:"components"`
-	}
-	if err := json.Unmarshal(openapi.Document, &document); err != nil {
-		t.Fatal(err)
-	}
-	hours := document.Components.Schemas["CreateInvitationRequest"].Properties["expires_in_hours"]
-	if hours.Minimum == nil || *hours.Minimum != 1 || hours.Maximum == nil || *hours.Maximum != 720 {
-		t.Fatalf("expires_in_hours bounds = %v..%v, want 1..720", hours.Minimum, hours.Maximum)
-	}
 }

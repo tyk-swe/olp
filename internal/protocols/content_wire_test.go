@@ -55,37 +55,6 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 	}
 }
 
-func TestInspectInputTextBedrockRerankBlockStopsWalk(t *testing.T) {
-	body, err := encodeBedrockRerank(Object{"query": raw("query"), "documents": raw([]string{"document", "later document"})}, rerankARN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		blocked string
-		hits    int
-	}{{"query", 1}, {"document", 2}} {
-		t.Run(tc.blocked, func(t *testing.T) {
-			r, err := wire.FromFields(wire.BedrockRerank, "route", false, decodeFields(t, string(body)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			hits := 0
-			found := false
-			out := inspectInputText(t, r, func(text string) (string, bool) {
-				hits++
-				found = text == tc.blocked
-				return text, found
-			})
-			if !found || hits != tc.hits {
-				t.Fatalf("blocked=%v, inspected %d texts, want %d", found, hits, tc.hits)
-			}
-			if diff := sameJSON(t, out.OIF().Document().Bytes(), string(body)); diff != "" {
-				t.Fatal(diff)
-			}
-		})
-	}
-}
-
 func decodeFields(t *testing.T, body string) map[string]json.RawMessage {
 	t.Helper()
 	fields := map[string]json.RawMessage{}

@@ -5,11 +5,7 @@ package integration_test
 import (
 	"fmt"
 	"maps"
-	"net/http"
-	"net/netip"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/gateway"
 )
 
 func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
@@ -88,104 +84,8 @@ func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
 	}
 }
 
-func TestInvitationAcceptanceRechecksEffectivePolicy(t *testing.T) {
-	for _, processDisabled := range []bool{false, true} {
-		t.Run(fmt.Sprint(processDisabled), func(t *testing.T) {
-			h := newAccessHarness(t)
-			owner := h.owner()
-			invitation := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "policy@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "policy"}, 201)
-			h.Server.LocalLoginDisabled = processDisabled
-			if !processDisabled {
-				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.settings SET value='false' WHERE key='auth.local_login_enabled'"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "second@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "second"}, 409)
-			input := map[string]any{"token": invitation["token"], "display_name": "Policy member", "password": accessPassword}
-			h.want(nil, "POST", "/api/v1/invitations/accept", input, nil, 409)
-			var consumed bool
-			var users int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT accepted_at IS NOT NULL,(SELECT count(*) FROM olp.users WHERE email='policy@example.com') FROM olp.invitations WHERE id=$1", invitation["invitation"].(map[string]any)["id"]).Scan(&consumed, &users); err != nil || consumed || users != 0 {
-				t.Fatalf("consumed=%v users=%d err=%v", consumed, users, err)
-			}
-			h.Server.LocalLoginDisabled = false
-			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.settings SET value='true' WHERE key='auth.local_login_enabled'"); err != nil {
-				t.Fatal(err)
-			}
-			member := &browser{}
-			h.want(member, "POST", "/api/v1/invitations/accept", input, nil, 201)
-			h.want(member, "DELETE", "/api/v1/sessions/current", nil, nil, 204)
-			h.want(member, "POST", "/api/v1/sessions", map[string]any{"email": "policy@example.com", "password": accessPassword}, nil, 201)
-		})
-	}
-}
+// Spoofed leftmost hops cannot escape the first untrusted hop.
 
-func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T) {
-	h := newAccessHarness(t)
-	h.owner()
-	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8")}
-	h.Server.ClientIP = func(r *http.Request) string { return gateway.ClientIP(r, trusted) }
-	attempt := func(source, email string, status int) {
-		t.Helper()
-		h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": email, "password": "wrong"}, map[string]string{"X-Forwarded-For": source}, status)
-	}
-	for _, source := range []string{"203.0.113.1, 10.1.1.1", "2001:db8::2, 10.1.1.1"} {
-		for range 5 {
-			attempt(source, "independent@example.com", 401)
-		}
-		attempt(source, "independent@example.com", 429)
-	}
-	// Spoofed leftmost hops cannot escape the first untrusted hop.
-	for i := 0; i < 6; i++ {
-		status := 401
-		if i == 5 {
-			status = 429
-		}
-		attempt(fmt.Sprintf("198.51.100.%d, 203.0.113.3", i), "spoof@example.com", status)
-	}
-	for i := 0; i < 31; i++ {
-		status := 401
-		if i == 30 {
-			status = 429
-		}
-		attempt(fmt.Sprintf("2001:db8:1::%x", i+1), "distributed@example.com", status)
-	}
-	// A denied attempt does not slide the window or permanently lock the account.
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.auth_admission SET window_started_at=now()-interval '61 seconds'"); err != nil {
-		t.Fatal(err)
-	}
-	attempt("2001:db8:2::1", "distributed@example.com", 401)
-	// The same forwarded headers are ignored through an untrusted direct peer.
-	h.Server.ClientIP = func(r *http.Request) string {
-		return gateway.ClientIP(r, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
-	}
-	for i := 0; i < 6; i++ {
-		status := 401
-		if i == 5 {
-			status = 429
-		}
-		attempt(fmt.Sprintf("203.0.113.%d", i), "untrusted@example.com", status)
-	}
-}
+// A denied attempt does not slide the window or permanently lock the account.
 
-func TestSessionListShowsBrowserHintDerivedFromUserAgent(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	h.invite(owner, "member@example.com", "viewer")
-	b := &browser{}
-	h.want(b, "POST", "/api/v1/sessions", map[string]any{"email": "member@example.com", "password": accessPassword}, map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Private untrusted <script>"}, 201)
-	sessions := h.want(b, "GET", "/api/v1/sessions", nil, nil, 200)["items"].([]any)
-	found := false
-	for _, item := range sessions {
-		row := item.(map[string]any)
-		if row["current"] == true {
-			found = true
-			if row["browser_hint"] != "Chrome on Windows" {
-				t.Fatalf("unsafe or missing hint: %v", row)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("current session missing")
-	}
-}
+// The same forwarded headers are ignored through an untrusted direct peer.

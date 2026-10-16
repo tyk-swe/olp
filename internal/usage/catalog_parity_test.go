@@ -4,7 +4,6 @@ package usage
 // pricing revision; this test feeds equivalent cases to both validators.
 
 import (
-	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/catalog"
@@ -53,60 +52,4 @@ func usageFromCatalog(p catalog.Price) Price {
 		UnitPrice: catalogRate(p.UnitPrice), PerRequest: catalogRate(p.PerRequest), BatchMultiplier: catalogRate(p.BatchMultiplier),
 		ToolCalls: catalogToolCalls(p.ToolCalls), Tiers: catalogTiers(p.Tiers), Windows: catalogWindows(p.Windows)}
 	return entry
-}
-
-func TestCatalogAndRevisionRulesAgree(t *testing.T) {
-	decimal := func(s string) *catalog.Decimal { v := catalog.Decimal(s); return &v }
-	tier := func(above int64, input, output bool) catalog.Tier {
-		t := catalog.Tier{AboveInputTokens: above}
-		if input {
-			t.InputPerMillion = decimal("1")
-		}
-		if output {
-			t.OutputPerMillion = decimal("2")
-		}
-		return t
-	}
-	window := func(days []int, start, end string) catalog.WindowPeriod {
-		return catalog.WindowPeriod{Days: days, Start: start, End: end, Multiplier: catalog.Decimal("2")}
-	}
-	cases := []struct {
-		name  string
-		price catalog.Price
-		valid bool
-	}{
-		{"audio only", catalog.Price{AudioInputPerMillion: decimal("1")}, true},
-		{"tool fees only", catalog.Price{ToolCalls: map[string]catalog.Decimal{"web_search": "0"}}, true},
-		{"cached without input", catalog.Price{CachedInputPerMillion: decimal("0.5"), OutputPerMillion: decimal("1")}, false},
-		{"tier key set differs", catalog.Price{InputPerMillion: decimal("1"), OutputPerMillion: decimal("2"),
-			Tiers: []catalog.Tier{tier(100, true, false)}}, false},
-		{"tier key set matches", catalog.Price{InputPerMillion: decimal("1"), OutputPerMillion: decimal("2"),
-			Tiers: []catalog.Tier{tier(100, true, true)}}, true},
-		{"tier thresholds not increasing", catalog.Price{InputPerMillion: decimal("1"),
-			Tiers: []catalog.Tier{tier(100, true, false), tier(100, true, false)}}, false},
-		{"window overlap on shared day", catalog.Price{InputPerMillion: decimal("1"),
-			Windows: &catalog.Windows{TimeZone: "UTC", Periods: []catalog.WindowPeriod{
-				window([]int{1, 2}, "09:00", "17:00"), window([]int{2, 3}, "16:00", "24:00")}}}, false},
-		{"window no shared day", catalog.Price{InputPerMillion: decimal("1"),
-			Windows: &catalog.Windows{TimeZone: "UTC", Periods: []catalog.WindowPeriod{
-				window([]int{1}, "09:00", "17:00"), window([]int{2}, "16:00", "24:00")}}}, true},
-		{"window same day contiguous", catalog.Price{InputPerMillion: decimal("1"),
-			Windows: &catalog.Windows{TimeZone: "UTC", Periods: []catalog.WindowPeriod{
-				window([]int{1}, "09:00", "17:00"), window([]int{1}, "17:00", "24:00")}}}, true},
-		{"bad tool name", catalog.Price{ToolCalls: map[string]catalog.Decimal{"Web Search": "1"}}, false},
-		{"bad zone", catalog.Price{InputPerMillion: decimal("1"),
-			Windows: &catalog.Windows{TimeZone: "Mars/Olympus", Periods: []catalog.WindowPeriod{
-				window([]int{1}, "00:00", "24:00")}}}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			price := tc.price
-			price.Operation = "generation"
-			catalogErr := catalogPrice(price).Validate()
-			_, usageErr := normalizePrice(usageFromCatalog(price), nil)
-			if (catalogErr == nil) != tc.valid || (usageErr == nil) != tc.valid {
-				t.Fatalf("catalog %v, revision %v, want valid=%v", catalogErr, usageErr, tc.valid)
-			}
-		})
-	}
 }

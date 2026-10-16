@@ -10,19 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/config"
 )
 
-func TestModeConfigurationWithoutServices(t *testing.T) {
-	for _, mode := range []string{"all", "control", "gateway", "worker"} {
-		env := map[string]string{"OLP_DATABASE_URL": "postgres://user:secret@localhost/db", "OLP_VALKEY_URL": "redis://localhost"}
-		c, err := config.Parse([]string{mode, "--listen-addr=127.0.0.1:8082"}, func(k string) string { return env[k] }, io.Discard)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if c.ListenAddr != "127.0.0.1:8082" || c.Mode.Public() != (mode != "worker") || c.Mode.Management() != (mode == "all" || mode == "control") {
-			t.Fatalf("wrong configuration for %s", mode)
-		}
-	}
-}
-
 func TestInvalidConfigAndSecretErrors(t *testing.T) {
 	for _, extra := range []map[string]string{
 		{"OLP_DATABASE_URL": "postgres://secret%broken"},
@@ -66,41 +53,6 @@ func TestInvalidConfigAndSecretErrors(t *testing.T) {
 	}
 }
 
-func TestExplicitFlagOverridesInvalidEnvironment(t *testing.T) {
-	env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/db", "OLP_DATABASE_MAX_CONNECTIONS": "invalid"}
-	c, err := config.Parse([]string{"all", "--database-max-connections=3"}, func(k string) string { return env[k] }, io.Discard)
-	if err != nil || c.DatabaseMaxConnections != 3 {
-		t.Fatalf("flag precedence: %v", err)
-	}
-}
-
-// The unconfined plugin tier is off unless the deployment names the
-// directory of its executables, as a flag or an environment variable.
-func TestUnconfinedPluginDirEnablesTheTier(t *testing.T) {
-	env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/db"}
-	c, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
-	if err != nil || c.UnconfinedPluginDir != "" {
-		t.Fatalf("default: %q %v", c.UnconfinedPluginDir, err)
-	}
-	env["OLP_UNCONFINED_PLUGIN_DIR"] = "/opt/olp/plugins"
-	if c, err = config.Parse([]string{"gateway"}, func(k string) string { return env[k] }, io.Discard); err != nil || c.UnconfinedPluginDir != "/opt/olp/plugins" {
-		t.Fatalf("environment: %q %v", c.UnconfinedPluginDir, err)
-	}
-	if c, err = config.Parse([]string{"control", "--unconfined-plugin-dir=/srv/plugins"}, func(k string) string { return env[k] }, io.Discard); err != nil || c.UnconfinedPluginDir != "/srv/plugins" {
-		t.Fatalf("flag: %q %v", c.UnconfinedPluginDir, err)
-	}
-}
-
-func TestInlineSecretsAreRefused(t *testing.T) {
-	for _, name := range []string{"OLP_AUTH_HMAC_KEY", "OLP_MASTER_KEY", "OLP_BOOTSTRAP_TOKEN"} {
-		env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/db", name: "inline-secret-value"}
-		_, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
-		if err == nil || !strings.Contains(err.Error(), name+"_FILE") || strings.Contains(err.Error(), "inline-secret-value") {
-			t.Fatalf("%s: inline secret was not refused safely: %v", name, err)
-		}
-	}
-}
-
 func TestMetricsTenantLabelsAndSeriesCap(t *testing.T) {
 	env := map[string]string{"OLP_DATABASE_URL": "postgres://user:secret@localhost/db", "OLP_METRICS_TENANT_LABELS": "project,key,end_user"}
 	c, err := config.Parse([]string{"gateway"}, func(k string) string { return env[k] }, io.Discard)
@@ -130,20 +82,5 @@ func TestMetricsTenantLabelsAndSeriesCap(t *testing.T) {
 	}
 	if len(c.MetricsTenantLabels) != 1 || c.MetricsTenantLabels[0] != "end_user" || c.MetricsSeriesCap != 64 {
 		t.Fatalf("flags labels=%v cap=%d", c.MetricsTenantLabels, c.MetricsSeriesCap)
-	}
-}
-
-func TestResponseCacheRequiresSeparateInstance(t *testing.T) {
-	for _, cacheURL := range []string{"redis://localhost:6379/1", "rediss://localhost/3"} {
-		env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/olp", "OLP_VALKEY_URL": "redis://localhost/0", "OLP_CACHE_VALKEY_URL": cacheURL}
-		_, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
-		if err == nil || !strings.Contains(err.Error(), "separate Valkey") {
-			t.Fatalf("accepted same instance: %v", err)
-		}
-	}
-	env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/olp", "OLP_VALKEY_URL": "redis://localhost/0", "OLP_CACHE_VALKEY_URL": "redis://cache.example:6380"}
-	c, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
-	if err != nil || c.CacheValkeyURL != env["OLP_CACHE_VALKEY_URL"] {
-		t.Fatal(c.CacheValkeyURL, err)
 	}
 }

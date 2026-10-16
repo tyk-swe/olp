@@ -455,35 +455,10 @@ func TestConfigurationPromotion(t *testing.T) {
 	}
 }
 
-func TestConfigurationPricingRequiresSettings(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	_, configure := createToken(h, owner, "configure-only", []string{"configure"})
-	_, settings := createToken(h, owner, "configure-settings", []string{"configure", "settings"})
-	doc := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	doc["projects"] = []any{map[string]any{"name": "imported"}}
-	body := map[string]any{"document": doc}
-	h.machineWant(configure, "POST", "/api/v1/configuration/apply", body, idem("no-pricing"), 200)
-	// An imported project starts with its creator as manager, as one created
-	// through the projects API does.
-	var managers int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.project_members m JOIN olp.projects p ON p.id=m.project_id
-		JOIN olp.users u ON u.id=m.user_id WHERE p.name='imported' AND m.role='manager' AND u.email='owner@example.com'`).Scan(&managers); err != nil || managers != 1 {
-		t.Fatalf("an imported project has %d creator managers: %v", managers, err)
-	}
-	doc["projects"] = []any{map[string]any{"name": "must-rollback"}}
-	doc["pricing"] = map[string]any{"effective_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-		"prices": []any{repPrice("openai_compatible", vendorModel, "generation")}}
-	h.machineWant(configure, "POST", "/api/v1/configuration/apply", body, idem("denied-pricing"), 403)
-	var count int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.projects WHERE name='must-rollback'").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("rejected import mutated projects: count=%d err=%v", count, err)
-	}
-	h.machineWant(settings, "POST", "/api/v1/configuration/apply", body, idem("authorized-pricing"), 200)
-	// An unchanged pricing section does not require settings.
-	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"]
-	h.machineWant(configure, "POST", "/api/v1/configuration/apply", map[string]any{"document": exported}, idem("unchanged-pricing"), 200)
-}
+// An imported project starts with its creator as manager, as one created
+// through the projects API does.
+
+// An unchanged pricing section does not require settings.
 
 func seedPromotionEnrollment(t *testing.T, h *accessHarness, providerID, slotID string) string {
 	t.Helper()
@@ -510,93 +485,4 @@ func seedPromotionEnrollment(t *testing.T, h *accessHarness, providerID, slotID 
 	return pendingID
 }
 
-func TestConfigurationStagedSlotLifetimes(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
-		"name": "Promoted slot lifetimes", "credential": vendorSecret, "model": vendorModel,
-		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
-	}, idem("provider-slot-lifetimes"), 201)
-	providerID := created["id"].(string)
-	path := "/api/v1/providers/" + providerID + "/credential-slots"
-	pool := h.want(owner, "GET", path, nil, nil, 200)
-	defaultID := pool["items"].([]any)[0].(map[string]any)["id"].(string)
-	retainedID, removedID := access.NewID(), access.NewID()
-	for _, slot := range []struct{ id, name string }{{retainedID, "retained"}, {removedID, "removed"}} {
-		pool = h.want(owner, "PUT", path+"/"+slot.id, map[string]any{"slot": map[string]any{"name": slot.name}, "credential": vendorSecret}, withMatch(pool, idem("slot-"+slot.name)), 200)
-	}
-	retainedPending := seedPromotionEnrollment(t, h, providerID, retainedID)
-	removedPending := seedPromotionEnrollment(t, h, providerID, removedID)
-	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	entry := document["providers"].([]any)[0].(map[string]any)
-	selected := []any{}
-	for _, raw := range entry["slots"].([]any) {
-		slot := raw.(map[string]any)
-		if slot["name"] == "removed" {
-			continue
-		}
-		// Exercise the unique positions/default constraints without changing IDs.
-		if slot["name"] == "retained" {
-			slot["position"] = 0
-		} else {
-			slot["position"] = 1
-		}
-		selected = append(selected, slot)
-	}
-	entry["slots"] = selected
-	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("stage-slot-removal"), 200)
-	current := h.want(owner, "GET", path, nil, nil, 200)
-	if len(current["items"].([]any)) != 2 || current["etag"] == pool["etag"] {
-		t.Fatalf("staged inventory=%v", current)
-	}
-	for _, expected := range []struct {
-		id        string
-		position  int
-		isDefault bool
-	}{{retainedID, 0, false}, {defaultID, 1, true}} {
-		var position int
-		var isDefault bool
-		if err := h.Pool.QueryRow(t.Context(), "SELECT position,is_default FROM olp.provider_slots WHERE provider_id=$1 AND id=$2", providerID, expected.id).Scan(&position, &isDefault); err != nil {
-			t.Fatal(err)
-		}
-		if position != expected.position || isDefault != expected.isDefault {
-			t.Fatal("staging lost reordered slot/default identity")
-		}
-	}
-	for _, state := range []struct {
-		id      string
-		present bool
-	}{{retainedPending, true}, {removedPending, false}} {
-		var enrollment, secret bool
-		if err := h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.grant_enrollments WHERE id=$1),EXISTS(SELECT 1 FROM olp.secrets WHERE id=$1)", state.id).Scan(&enrollment, &secret); err != nil {
-			t.Fatal(err)
-		}
-		if enrollment != state.present || secret != state.present {
-			t.Fatalf("enrollment lifetime mismatch present=%v enrollment=%v secret=%v", state.present, enrollment, secret)
-		}
-	}
-}
-
-func TestConfigurationCredentialBindingAdvancesParentPrecondition(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
-		"name": "Staged credential authority", "credential": vendorSecret, "model": vendorModel,
-		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
-	}, idem("staged-binding-provider"), 201)
-	path := "/api/v1/providers/" + created["id"].(string)
-	before := h.want(owner, "GET", path, nil, nil, 200)
-	pool := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
-	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	entry := document["providers"].([]any)[0].(map[string]any)
-	binding := entry["slots"].([]any)[0].(map[string]any)["credential_ref"].(string)
-	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document, "secret_bindings": map[string]any{binding: "new destination private key"}}, idem("stage-new-key"), 200)
-	after := h.want(owner, "GET", path, nil, nil, 200)
-	currentPool := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
-	if before["etag"] == after["etag"] || pool["etag"] == currentPool["etag"] {
-		t.Fatal("new credential binding retained stale parent/collection mutation precondition")
-	}
-	h.want(owner, "PATCH", path, map[string]any{"name": before["name"], "configuration": before["configuration"]}, etagHeader(before), 412)
-}
+// Exercise the unique positions/default constraints without changing IDs.

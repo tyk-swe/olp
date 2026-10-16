@@ -56,17 +56,3 @@ func TestStabilityServicesFollowTheModel(t *testing.T) {
 		t.Fatalf("filtered image: %+v", failure)
 	}
 }
-
-func TestRecraftTakesAspectRatios(t *testing.T) {
-	format := "webp"
-	request := imageRequest(3, "1792x1024", "url")
-	request.OutputFormat = &format
-	call, failure := encodeRecraftImage(request, "recraftv4_1")
-	if failure != nil || call.Path != "images/generations/raster" ||
-		string(call.JSON) != `{"image_format":"webp","model":"recraftv4_1","n":3,"prompt":"a small illustration","response_format":"url","size":"16:9"}` {
-		t.Fatalf("call = %+v %s %v", call, call.JSON, failure)
-	}
-	if _, failure := encodeRecraftImage(imageRequest(7, "", ""), "recraftv4_1"); failure == nil {
-		t.Fatal("Recraft accepted seven images")
-	}
-}

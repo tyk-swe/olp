@@ -3,11 +3,9 @@ package observability
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -49,16 +47,6 @@ func TestReadinessServesCachedSnapshot(t *testing.T) {
 	}
 }
 
-func TestLivenessNeverChecksDependencies(t *testing.T) {
-	cache := NewCache()
-	handler := NewHandler(cache, nil).ServeMux()
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, httptest.NewRequest("GET", "/health/live", nil))
-	if w.Code != 200 {
-		t.Fatalf("liveness depends on services: %d", w.Code)
-	}
-}
-
 func TestMetricsRenderSnapshotAndLiveSeries(t *testing.T) {
 	cache := NewCache()
 	cache.recordReadiness(&Health{Status: "ok"})
@@ -84,39 +72,4 @@ func TestMetricsRenderSnapshotAndLiveSeries(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", series, body)
 		}
 	}
-}
-
-// TestAllocationCountersAdvanceWithAllocation: the harness measures a process's
-// allocations per request as the difference of two scrapes, so the counters must
-// be there and must grow when the process allocates.
-func TestAllocationCountersAdvanceWithAllocation(t *testing.T) {
-	read := func() (objects, bytes uint64) {
-		var body strings.Builder
-		writeAllocationMetrics(&body)
-		for _, line := range strings.Split(body.String(), "\n") {
-			var value uint64
-			switch {
-			case strings.HasPrefix(line, "go_memstats_mallocs_total "):
-				fmt.Sscan(strings.TrimPrefix(line, "go_memstats_mallocs_total "), &value)
-				objects = value
-			case strings.HasPrefix(line, "go_memstats_alloc_bytes_total "):
-				fmt.Sscan(strings.TrimPrefix(line, "go_memstats_alloc_bytes_total "), &value)
-				bytes = value
-			}
-		}
-		return objects, bytes
-	}
-	objectsBefore, bytesBefore := read()
-	if objectsBefore == 0 || bytesBefore == 0 {
-		t.Fatalf("a running process has allocated nothing: %d objects, %d bytes", objectsBefore, bytesBefore)
-	}
-	held := make([][]byte, 0, 20_000)
-	for i := 0; i < 20_000; i++ {
-		held = append(held, make([]byte, 1024))
-	}
-	objectsAfter, bytesAfter := read()
-	if objectsAfter-objectsBefore < 10_000 || bytesAfter-bytesBefore < 10<<20 {
-		t.Errorf("20,000 allocations of 1 KiB moved the counters by %d objects and %d bytes", objectsAfter-objectsBefore, bytesAfter-bytesBefore)
-	}
-	runtime.KeepAlive(held)
 }

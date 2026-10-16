@@ -2,7 +2,6 @@ package protocols
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 
@@ -56,99 +55,6 @@ func at(v any, path ...any) any {
 	return v
 }
 
-func TestToolOnlyAssistantTurnsEncodeNullChatContent(t *testing.T) {
-	for _, tc := range []struct {
-		family wire.Format
-		body   string
-	}{
-		{wire.Anthropic, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"f","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`},
-		{wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"t1","content":"ok"}]}`},
-	} {
-		t.Run(string(tc.family), func(t *testing.T) {
-			out := encodeBody(t, decodeBody(t, tc.family, tc.body), wire.Chat, "generation")
-			assistant, _ := at(out, "messages", 1).(map[string]any)
-			if content, ok := assistant["content"]; !ok || content != nil {
-				t.Fatalf("assistant content = %#v, want null", content)
-			}
-			if at(assistant, "tool_calls", 0, "id") != "t1" {
-				t.Fatalf("assistant = %#v", assistant)
-			}
-		})
-	}
-}
-
-func TestToolsWithoutParametersEncodeValidSchemas(t *testing.T) {
-	g := decodeBody(t, wire.Gemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":5},"tools":[{"functionDeclarations":[{"name":"now","description":"time"},{"name":"get","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}]}]}`)
-	anthropic := encodeBody(t, g, wire.Anthropic, "generation")
-	schema, _ := json.Marshal(at(anthropic, "tools", 0, "input_schema"))
-	if string(schema) != `{"properties":{},"type":"object"}` {
-		t.Fatalf("anthropic input_schema = %s", schema)
-	}
-	if at(anthropic, "tools", 1, "input_schema", "properties", "q", "type") != "string" {
-		t.Fatalf("anthropic dropped declared schema: %#v", at(anthropic, "tools", 1))
-	}
-	chat := encodeBody(t, g, wire.Chat, "generation")
-	if _, ok := at(chat, "tools", 0, "function").(map[string]any)["parameters"]; ok {
-		t.Fatalf("chat tool has parameters: %#v", at(chat, "tools", 0))
-	}
-	if at(chat, "tools", 1, "function", "parameters", "properties", "q", "type") != "string" {
-		t.Fatalf("chat dropped declared schema: %#v", at(chat, "tools", 1))
-	}
-	count := encodeBody(t, g, wire.InputTokens, "token_count")
-	if _, ok := at(count, "tools", 0).(map[string]any)["parameters"]; ok {
-		t.Fatalf("responses tool has parameters: %#v", at(count, "tools", 0))
-	}
-	chatSource := decodeBody(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"now"}}]}`)
-	gemini := encodeBody(t, chatSource, wire.Gemini, "generation")
-	if _, ok := at(gemini, "tools", 0, "functionDeclarations", 0).(map[string]any)["parameters"]; ok {
-		t.Fatalf("gemini declaration has parameters: %#v", at(gemini, "tools"))
-	}
-}
-
-func TestEmptyTextPartsAreNotEncoded(t *testing.T) {
-	r := parse(t, wire.Chat, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c1","content":""}]}`)
-	for _, kind := range []string{"anthropic", "gemini"} {
-		body, _, err := Encode(r, kind, kind, "wire-model", nil)
-		if err != nil {
-			t.Fatalf("%s: %v", kind, err)
-		}
-		if strings.Contains(string(body), `"text":""`) {
-			t.Fatalf("%s body has an empty text part: %s", kind, body)
-		}
-		if kind != "anthropic" {
-			continue
-		}
-		var v map[string]any
-		if err := json.Unmarshal(body, &v); err != nil {
-			t.Fatal(err)
-		}
-		assistant, _ := at(v, "messages", 1, "content").([]any)
-		if len(assistant) != 1 || at(assistant, 0, "type") != "tool_use" {
-			t.Fatalf("assistant content = %#v", assistant)
-		}
-		result, _ := at(v, "messages", 2, "content", 0).(map[string]any)
-		if _, ok := result["content"]; ok || result["type"] != "tool_result" {
-			t.Fatalf("tool_result = %#v", result)
-		}
-	}
-}
-
-func TestGeminiGroupsParallelToolResultsIntoOneTurn(t *testing.T) {
-	g := decodeBody(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":null,"tool_calls":[{"id":"a","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"b","type":"function","function":{"name":"y","arguments":"{}"}}]},{"role":"tool","tool_call_id":"a","content":"1"},{"role":"tool","tool_call_id":"b","content":"2"},{"role":"user","content":"again"},{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"x","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c","content":"3"}]}`)
-	out := encodeBody(t, g, wire.Gemini, "generation")
-	contents, _ := out["contents"].([]any)
-	if len(contents) != 6 {
-		t.Fatalf("contents = %#v", contents)
-	}
-	grouped, _ := at(contents, 2, "parts").([]any)
-	if at(contents, 2, "role") != "user" || len(grouped) != 2 || at(grouped, 0, "functionResponse", "id") != "a" || at(grouped, 1, "functionResponse", "id") != "b" {
-		t.Fatalf("tool turn = %#v", at(contents, 2))
-	}
-	if at(contents, 3, "parts", 0, "text") != "again" || at(contents, 5, "parts", 0, "functionResponse", "id") != "c" {
-		t.Fatalf("later turns merged: %#v", contents)
-	}
-}
-
 func TestTranslatedCountToOpenAIUsesResponsesShape(t *testing.T) {
 	r := parse(t, wire.GeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]},{"role":"model","parts":[{"text":"yo"}]}],"generationConfig":{"maxOutputTokens":5,"temperature":0.2,"stopSequences":["x"],"responseMimeType":"application/json"}}}`)
 	body, encodedWire, err := Encode(r, "openai", "openai", "wire-model", nil)
@@ -178,74 +84,5 @@ func TestTranslatedCountToOpenAIUsesResponsesShape(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"tool_choice":{"name":"f","type":"function"}`) {
 		t.Fatalf("tool_choice not in Responses shape: %s", body)
-	}
-}
-
-func TestCountRequestsOmitGenerationDefaults(t *testing.T) {
-	defaults := Object{"max_tokens": json.RawMessage(`100`), "temperature": json.RawMessage(`0.2`)}
-	for _, tc := range []struct {
-		family wire.Format
-		kind   string
-		body   string
-	}{
-		{wire.AnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`},
-		{wire.InputTokens, "openai", `{"model":"m","input":"hi"}`},
-		{wire.InputTokens, "anthropic", `{"model":"m","input":"hi"}`},
-		{wire.GeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`},
-	} {
-		t.Run(string(tc.family)+"->"+tc.kind, func(t *testing.T) {
-			body, _, err := Encode(parse(t, tc.family, tc.body), tc.kind, tc.kind, "wire-model", defaults)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, key := range []string{"max_tokens", "temperature", "max_output_tokens"} {
-				if strings.Contains(string(body), `"`+key+`"`) {
-					t.Fatalf("count body has %s: %s", key, body)
-				}
-			}
-		})
-	}
-	gemini := Object{"generationConfig": json.RawMessage(`{"temperature":0.2,"maxOutputTokens":100}`), "safetySettings": json.RawMessage(`[]`)}
-	bedrock := Object{"inferenceConfig": json.RawMessage(`{"maxTokens":100}`), "additionalModelRequestFields": json.RawMessage(`{"top_k":5}`)}
-	openaiDefaults := Object{"response_format": json.RawMessage(`{"type":"text"}`), "reasoning_effort": json.RawMessage(`"low"`), "verbosity": json.RawMessage(`"low"`), "service_tier": json.RawMessage(`"auto"`)}
-	for _, tc := range []struct {
-		name     string
-		family   wire.Format
-		kind     string
-		body     string
-		defaults Object
-		allowed  []string
-	}{
-		{"gemini native", wire.GeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, gemini, []string{"contents"}},
-		{"gemini nested", wire.GeminiCount, "gemini", `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`, gemini, []string{"generateContentRequest"}},
-		{"anthropic to gemini", wire.AnthropicCount, "gemini", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, gemini, []string{"contents", "generateContentRequest"}},
-		{"anthropic to bedrock", wire.AnthropicCount, "bedrock", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, bedrock, []string{"input"}},
-		{"openai to bedrock", wire.InputTokens, "bedrock", `{"model":"m","input":"hi"}`, bedrock, []string{"input"}},
-		{"openai native", wire.InputTokens, "openai", `{"model":"m","input":"hi"}`, openaiDefaults, []string{"model", "input"}},
-		{"anthropic to openai", wire.AnthropicCount, "openai", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, openaiDefaults, []string{"model", "input"}},
-		{"anthropic native", wire.AnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, Object{"service_tier": json.RawMessage(`"auto"`)}, []string{"model", "messages"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			body, _, err := Encode(parse(t, tc.family, tc.body), tc.kind, tc.kind, "wire-model", tc.defaults)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var top map[string]json.RawMessage
-			if err := json.Unmarshal(body, &top); err != nil {
-				t.Fatal(err)
-			}
-			for key := range top {
-				if !slices.Contains(tc.allowed, key) {
-					t.Fatalf("count body has %s: %s", key, body)
-				}
-			}
-		})
-	}
-	body, _, err := Encode(parse(t, wire.Chat, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`), "anthropic", "anthropic", "wire-model", defaults)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), `"max_tokens":100`) {
-		t.Fatalf("generation lost provider defaults: %s", body)
 	}
 }

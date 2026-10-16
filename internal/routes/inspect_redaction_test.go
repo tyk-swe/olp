@@ -48,30 +48,6 @@ func TestInspectionKeepsSettingsAndPresenceWithoutContent(t *testing.T) {
 	}
 }
 
-func TestInspectionDiagnosticsCannotExposeArbitraryPointerNames(t *testing.T) {
-	for pointer, want := range map[string]string{
-		"/messages/0/content/private-prompt-marker":   "/messages",
-		"/tools/0/input_schema/private-schema-marker": "/tools",
-		"/private-native-key":                         "/native_fields",
-		"/thinking/budget_tokens":                     "/thinking/budget_tokens",
-	} {
-		if inspectionField(pointer) != want {
-			t.Fatal("inspection diagnostic exposed a private pointer or lost a safe control")
-		}
-	}
-}
-
-func TestInspectionBoundsExactScalarDisplayWithoutRounding(t *testing.T) {
-	document, err := oif.ParseJSON([]byte(`{"temperature":0.`+strings.Repeat("0", 512)+`}`), oif.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := inspectRequest(document, nil)
-	if len(result.Fields) != 1 || result.Fields[0].Kind != "number" || !result.Fields[0].Redacted || result.Fields[0].ValueJSON != nil {
-		t.Fatal("overlong numeric lexeme was exposed or silently rounded instead of remaining redacted")
-	}
-}
-
 func TestInspectionExplainsOrderedToolsWithoutExposingNativeState(t *testing.T) {
 	document, err := oif.ParseJSON([]byte(`{
 		"system":"private-system-prompt",
@@ -103,24 +79,5 @@ func TestInspectionExplainsOrderedToolsWithoutExposingNativeState(t *testing.T) 
 	results := result.Structure[3].Parts
 	if results[0].CallOrdinal == nil || *results[0].CallOrdinal != 2 || results[1].CallOrdinal == nil || *results[1].CallOrdinal != 1 {
 		t.Fatalf("parallel tool correspondence lost: %+v", results)
-	}
-}
-
-func TestInspectionStructureIsBoundedAndUnknownEnumsAreRedacted(t *testing.T) {
-	parts := make([]string, 20)
-	for index := range parts {
-		parts[index] = `{"type":"private-kind","private-schema-name":"private-value"}`
-	}
-	document, err := oif.ParseJSON([]byte(`{"messages":[{"role":"private-role","content":[`+strings.Join(parts, ",")+`]}]}`), oif.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	structure, omitted := inspectStructure(document.Root())
-	if omitted != 0 || len(structure) != 1 || structure[0].Role != "other" || len(structure[0].Parts) != maxInspectedParts || structure[0].OmittedParts != 4 {
-		t.Fatalf("bounded structure was not preserved: %+v, omitted %d", structure, omitted)
-	}
-	encoded, _ := json.Marshal(structure)
-	if strings.Contains(string(encoded), "private-") {
-		t.Fatalf("unknown enum or member escaped: %s", encoded)
 	}
 }

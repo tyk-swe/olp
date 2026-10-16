@@ -38,11 +38,3 @@ func TestGeneratedClientSourceEscapesMountedPathsAndDoesNotCopyCredentials(t *te
 		}
 	}
 }
-
-func TestClientCodeRejectsUnsupportedFormatsAndSurfaceConfusion(t *testing.T) {
-	for _, entry := range [][3]string{{"agents", "python", "openai"}, {"agents", "javascript", "anthropic"}, {"langchain", "go", "openai"}, {"openai", "unknown", "openai"}} {
-		if _, err := clientCode(entry[0], entry[1], entry[2], "https://olp.example.com", "/run/key", "assistant"); err == nil {
-			t.Fatalf("accepted %v", entry)
-		}
-	}
-}

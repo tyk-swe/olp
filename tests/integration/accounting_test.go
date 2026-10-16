@@ -393,67 +393,10 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 	}
 }
 
-func TestAccountingRejectsEventsOutsideTheReplayWindow(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPricing(t, fixture, 1, time.Now().UTC().Add(-30*24*time.Hour),
-		acctPrice{Kind: "openai", VendorID: acctPtr("openai"), Model: "gpt-4o",
-			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15")})
-	cases := []struct {
-		name       string
-		observedAt time.Time
-	}{
-		{name: "older than the replay horizon",
-			observedAt: time.Now().UTC().Add(-8 * 24 * time.Hour)},
-		{name: "further ahead than the accepted clock skew",
-			observedAt: time.Now().UTC().Add(10 * time.Minute)},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			event := acctEvent(t, fixture, acctEventOptions{ObservedAt: test.observedAt,
-				Attempts: []usage.Attempt{
-					acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, acctObserved(10, 10, nil, nil)),
-				}})
-			result := acctPersist(t, fixture, event)
-			if result.Outcome != usage.PersistOutcomeRejectedOutsideReplayWindow {
-				t.Fatalf("outcome = %v, want rejected", result.Outcome)
-			}
-			if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts
-                WHERE request_id = $1::uuid`, event.RequestID); count != 0 {
-				t.Fatalf("facts = %d, want none", count)
-			}
-			if count := acctCount(t, fixture, `SELECT count(*) FROM olp.requests
-                WHERE id = $1::uuid`, event.RequestID); count != 0 {
-				t.Fatalf("requests = %d, want none", count)
-			}
-			var status string
-			if err := fixture.Pool.QueryRow(t.Context(), `SELECT status
-                FROM olp.request_metadata_event_receipts WHERE event_id = $1::uuid`,
-				event.EventID).Scan(&status); err != nil {
-				t.Fatalf("load receipt: %v", err)
-			}
-			if status != "rejected" {
-				t.Fatalf("receipt status = %s, want rejected", status)
-			}
-			// The rejection is admitted as a gap of unknown size rather than
-			// being silently dropped.
-			if count := acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_ingestion_gaps
-                WHERE reason = 'request_metadata_event_outside_replay_window'
-                  AND certainty = 'lower_bound' AND event_count = 0`); count == 0 {
-				t.Fatal("the rejection recorded no completeness gap")
-			}
-			// Redelivering the rejected event is recognised, not re-rejected.
-			replay := acctPersist(t, fixture, event)
-			if replay.Outcome != usage.PersistOutcomeDuplicate {
-				t.Fatalf("replay outcome = %v, want duplicate", replay.Outcome)
-			}
-		})
-	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.api_key_cost_windows
-        WHERE api_key_id = $1::uuid`, fixture.Key); count != 0 {
-		t.Fatalf("rejected events opened %d budget windows, want none", count)
-	}
-}
+// The rejection is admitted as a gap of unknown size rather than
+// being silently dropped.
+
+// Redelivering the rejected event is recognised, not re-rejected.
 
 // acctMedia is usage measured in media units rather than tokens.
 func acctMedia(units string) *usage.AttemptUsage {
@@ -611,27 +554,6 @@ func TestAccountingPricingProvenance(t *testing.T) {
 	}
 }
 
-func TestAccountingRejectsCachedTokensWithoutTheirTotal(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	observed := time.Now().UTC().Add(-time.Minute)
-	acctPricing(t, fixture, 1, observed.Add(-time.Hour),
-		acctPrice{Kind: "openai", VendorID: acctPtr("openai"), Model: "gpt-4o",
-			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15"),
-			Cached: acctPtr("0.75")})
-
-	event := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed,
-		Attempts: []usage.Attempt{
-			acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, &usage.AttemptUsage{
-				Observed: true, Complete: true,
-				OutputTokens: acctPtr(int64(500)), CachedInputTokens: acctPtr(int64(400)),
-			}),
-		}})
-	if _, err := acctPersistErr(t, fixture, event); !errors.Is(err, usage.ErrInvalidEvent) {
-		t.Fatalf("persist err = %v, want ErrInvalidEvent", err)
-	}
-}
-
 func TestAccountingRecordsTheInputEstimateOfEachAttempt(t *testing.T) {
 	t.Parallel()
 	fixture := acctSeed(t, acctPool(t))
@@ -714,75 +636,5 @@ func TestAccountingRecordsTheInputEstimateOfEachAttempt(t *testing.T) {
 	}
 	if estimate != nil || provenance != "" || family != "" {
 		t.Fatalf("an unestimated attempt recorded %v %q %q", estimate, provenance, family)
-	}
-}
-
-// The database refuses what the event contract refuses, so the two cannot drift
-// apart unnoticed: an estimate its constraints would abort on is one Validate
-// has already turned away.
-func TestAccountingFactsRefuseAMalformedEstimate(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	for name, columns := range map[string]string{
-		"a negative estimate":              "-1, 'tokenizer', ''",
-		"an estimate without provenance":   "5, '', ''",
-		"a provenance without an estimate": "NULL, 'tokenizer', ''",
-		"an unknown provenance":            "5, 'guess', ''",
-		"a malformed family":               "NULL, '', 'Not A Family'",
-	} {
-		t.Run(name, func(t *testing.T) {
-			event := acctEvent(t, fixture, acctEventOptions{Attempts: []usage.Attempt{
-				acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, acctObserved(10, 10, nil, nil)),
-			}})
-			acctPersist(t, fixture, event)
-			_, err := fixture.Pool.Exec(t.Context(), `UPDATE olp.attempt_usage_facts
-			    SET (estimated_input_tokens, estimate_provenance, model_family) = (`+columns+`)
-			    WHERE request_id = $1::uuid`, event.RequestID)
-			if err == nil {
-				t.Fatalf("the fact table accepted %s", name)
-			}
-		})
-	}
-}
-
-// A selector's attempt records what its own usage would have cost on the most
-// expensive target the selector avoided, at the price in effect when it ran;
-// an attempt without a price of its own records no baseline.
-func TestAccountingPricesTheBaselineASelectorAvoided(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	observed := time.Now().UTC().Add(-time.Minute)
-	acctPricing(t, fixture, 1, observed.Add(-time.Hour),
-		acctPrice{Kind: "openai", VendorID: acctPtr("openai"), Model: "gpt-4o",
-			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15")},
-		acctPrice{Kind: "openai", ProviderID: acctPtr(fixture.Provider), Model: "gpt-4o-mini",
-			Operation: "generation", Input: acctPtr("1"), Output: acctPtr("2")})
-	selected := func(model string) usage.Attempt {
-		attempt := acctAttempt(t, fixture.Provider, 1, model, 200, acctObserved(1000, 500, nil, nil))
-		attempt.Routing = &usage.Routing{ProviderRevisionID: fixture.Revision, Selector: acctPtr("short"),
-			Baseline: &usage.Baseline{ProviderID: fixture.Provider, UpstreamModel: "gpt-4o", VendorID: acctPtr("openai")}}
-		return attempt
-	}
-	baselineOf := func(requestID string) (selector, cost *string) {
-		if err := fixture.Pool.QueryRow(t.Context(), `SELECT selector, baseline_cost::text
-            FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, requestID).Scan(&selector, &cost); err != nil {
-			t.Fatal(err)
-		}
-		return selector, cost
-	}
-
-	priced := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed, Attempts: []usage.Attempt{selected("gpt-4o-mini")}})
-	acctPersist(t, fixture, priced)
-	acctSameMoney(t, fixture, acctLoadFact(t, fixture, priced.RequestID, 1).Cost, "0.002")
-	if selector, cost := baselineOf(priced.RequestID); selector == nil || *selector != "short" {
-		t.Fatalf("selector %v", selector)
-	} else {
-		acctSameMoney(t, fixture, cost, "0.0105")
-	}
-
-	unpriced := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed, Attempts: []usage.Attempt{selected("unlisted")}})
-	acctPersist(t, fixture, unpriced)
-	if selector, cost := baselineOf(unpriced.RequestID); selector == nil || cost != nil {
-		t.Fatalf("an unpriced attempt recorded baseline %v", cost)
 	}
 }

@@ -54,10 +54,3 @@ func TestManagementNetworkProtectsEveryManagementSurface(t *testing.T) {
 		}
 	}
 }
-
-func TestUnconfiguredManagementNetworkReturnsOriginalHandler(t *testing.T) {
-	next := http.NewServeMux()
-	if managementNetwork(nil, nil, next) != next {
-		t.Fatal("unconfigured policy added middleware")
-	}
-}

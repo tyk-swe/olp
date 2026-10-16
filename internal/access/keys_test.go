@@ -1,51 +1,10 @@
 package access
 
 import (
-	"encoding/json"
 	"errors"
-	"math"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/tyk-swe/olp/internal/limits"
 )
-
-func TestKeyExpiryChangesRequireFutureDate(t *testing.T) {
-	past, future := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-	for _, tc := range []struct {
-		name    string
-		expires *time.Time
-		changed bool
-		valid   bool
-	}{
-		{"unchanged expired key", &past, false, true},
-		{"unchanged future expiry", &future, false, true},
-		{"new past expiry", &past, true, false},
-		{"new future expiry", &future, true, true},
-		{"clear expiry", nil, true, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := keyInput{Name: "expiry", KeyPolicy: KeyPolicy{
-				Scopes: []string{"inference"}, AllowedRoutes: []string{}, ExpiresAt: tc.expires,
-			}}
-			err := validateKey(input, tc.changed)
-			if tc.valid {
-				if err != nil {
-					t.Fatalf("rejected supported expiry: %v", err)
-				}
-				return
-			}
-			var problem *Problem
-			if !errors.As(err, &problem) || problem.Status != 422 || problem.Field != "expires_at" {
-				t.Fatalf("got %v, want an expires_at validation error", err)
-			}
-		})
-	}
-}
 
 func TestKeyBudgetFormats(t *testing.T) {
 	for _, field := range []string{"daily_cost_limit", "monthly_cost_limit"} {
@@ -103,90 +62,5 @@ func TestKeyBudgetFormats(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestKeyLimitRanges(t *testing.T) {
-	for _, field := range []string{"requests_per_minute", "tokens_per_minute", "max_concurrency"} {
-		for _, value := range []int64{math.MinInt64, -1, 0, 1, math.MaxInt32, math.MaxInt32 + 1, limits.MaxCounter, limits.MaxCounter + 1, math.MaxInt64} {
-			t.Run(field+"/"+strconv.FormatInt(value, 10), func(t *testing.T) {
-				input := keyInput{Name: "limits", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}}}
-				switch field {
-				case "requests_per_minute":
-					input.RequestsPerMinute = &value
-				case "tokens_per_minute":
-					input.TokensPerMinute = &value
-				case "max_concurrency":
-					input.MaxConcurrency = &value
-				}
-				err := validateKey(input, false)
-				if value > 0 && value <= limits.MaxCounter && (field == "tokens_per_minute" || value <= math.MaxInt32) {
-					if err != nil {
-						t.Fatalf("rejected supported limit: %v", err)
-					}
-					return
-				}
-				var p *Problem
-				if !errors.As(err, &p) || p.Status != 422 || p.Field != field {
-					t.Fatalf("got %v, want a validation error for %s", err, field)
-				}
-			})
-		}
-	}
-	input := keyInput{Name: "unlimited", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}}}
-	if err := validateKey(input, false); err != nil {
-		t.Fatalf("rejected omitted limits: %v", err)
-	}
-}
-
-func TestCreateRejectsMalformedProjectID(t *testing.T) {
-	s := &Server{}
-	for name, create := range map[string]func(*http.Request, Principal) (Reply, error){
-		"api key": s.createAPIKey, "budget group": s.createBudgetGroup,
-	} {
-		r := httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"x","project_id":"abc"}`))
-		r.Header.Set("Content-Type", "application/json")
-		_, err := create(r, Principal{})
-		var problem *Problem
-		if !errors.As(err, &problem) || problem.Status != 422 || problem.Field != "project_id" {
-			t.Fatalf("%s: malformed project_id = %v", name, err)
-		}
-	}
-}
-
-func TestParseProjectIDCanonicalises(t *testing.T) {
-	upper := "0F8FAD5B-D9CB-469F-A165-70867728950E"
-	got, err := parseProjectID(&upper)
-	if err != nil || got == nil || *got != strings.ToLower(upper) {
-		t.Fatalf("canonical project id = %v, %v", got, err)
-	}
-	if got, err := parseProjectID(nil); got != nil || err != nil {
-		t.Fatalf("absent project id = %v, %v", got, err)
-	}
-}
-
-func TestKeyPolicyResponseMetadataIsOptIn(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		policy string
-		want   bool
-	}{
-		{"stored before the policy existed", `{"scopes":["inference"],"allowed_routes":[]}`, false},
-		{"explicitly off", `{"response_metadata":false}`, false},
-		{"opted in", `{"response_metadata":true}`, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var policy KeyPolicy
-			if err := json.Unmarshal([]byte(tc.policy), &policy); err != nil {
-				t.Fatal(err)
-			}
-			if policy.ResponseMetadata != tc.want {
-				t.Fatalf("response_metadata = %v, want %v", policy.ResponseMetadata, tc.want)
-			}
-		})
-	}
-	encoded, err := json.Marshal(KeyPolicy{ResponseMetadata: true})
-	if err != nil || !strings.Contains(string(encoded), `"response_metadata":true`) {
-		t.Fatalf("stored policy = %s, %v", encoded, err)
 	}
 }

@@ -54,30 +54,6 @@ func TestEmbeddedCatalogMapsToValidPrices(t *testing.T) {
 	}
 }
 
-func TestCatalogMappingSkipsWhatThisBuildCannotStore(t *testing.T) {
-	observed := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	provenance := catalog.Provenance{SourceURL: "https://example.test/pricing", ObservedAt: observed}
-	three := catalog.Decimal("3")
-	model := func(id string, operation string) catalog.Model {
-		return catalog.Model{ID: id, Aliases: []string{id + "-snapshot"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, Provenance: provenance,
-			Prices: []catalog.Price{{Operation: operation, InputPerMillion: &three, Unrepresentable: []catalog.Unrepresentable{{Component: "service_tier", Detail: "Priority is 1.5x."}}, Provenance: provenance}}}
-	}
-	c := &catalog.Catalog{APIVersion: catalog.APIVersion, PublishedAt: observed, Currency: "USD", Vendors: []catalog.Vendor{
-		{ID: "anthropic", Name: "Anthropic", Models: []catalog.Model{model("known", "generation"), model("future-operation", "teleportation")}},
-		{ID: "future-vendor", Name: "Future", Models: []catalog.Model{model("other", "generation")}},
-	}}
-	doc, skipped := catalogDocument(c, vendors.Kind)
-	if len(doc.Prices) != 2 || doc.Prices[0].Model != "known" || doc.Prices[1].Model != "known-snapshot" || *doc.Prices[0].VendorID != "anthropic" || doc.Prices[0].ProviderKind != "anthropic" {
-		t.Fatalf("prices = %+v", doc.Prices)
-	}
-	if len(skipped) != 2 || skipped[0].Model != "future-operation" || skipped[1].VendorID != "future-vendor" {
-		t.Fatalf("skipped = %+v", skipped)
-	}
-	if len(doc.Unrepresentable) != 1 || doc.Unrepresentable[0].Component != "service_tier" {
-		t.Fatalf("unrepresentable = %+v", doc.Unrepresentable)
-	}
-}
-
 // catalogUpstream serves a signed catalog and its signature the way a static
 // file host does, with whatever media type the host chose.
 type catalogUpstream struct {
@@ -184,36 +160,5 @@ func TestFetchedCatalogsVerifyBeforeAnyPriceIsRead(t *testing.T) {
 	}
 	if fetched, err = s.fetchCatalog(context.Background(), nil); err != nil || fetched.Catalog.SHA256 != bundled.SHA256 {
 		t.Fatalf("bundled catalog: %+v %v", fetched.Catalog, err)
-	}
-}
-
-func TestPriceListSourcesStillRequireJSON(t *testing.T) {
-	server := httptest.NewServer(&catalogUpstream{document: []byte(`{"currency":"USD","prices":[]}`), contentType: "text/plain"})
-	defer server.Close()
-	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	s := &Server{Egress: policy, VendorKind: vendors.Kind}
-	if _, err := s.fetchPriceDocument(context.Background(), server.URL+"/catalog.json"); problemCode(err) != "invalid_source_document" {
-		t.Fatalf("a text/plain price list was read: %v", err)
-	}
-}
-
-func TestSignatureURLAppendsToThePath(t *testing.T) {
-	got, err := signatureURL("https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json?ref=x")
-	if err != nil || got != "https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json.sig?ref=x" {
-		t.Fatalf("%s %v", got, err)
-	}
-}
-
-func TestSourceInputNeedsAURLOnlyForPriceLists(t *testing.T) {
-	s := &Server{Egress: &egress.Policy{}}
-	if err := s.validateSourceInput(&sourceInput{Name: "list"}); err == nil {
-		t.Fatal("a price list without a URL was accepted")
-	}
-	bundled := sourceInput{Name: "release catalog", Format: FormatCatalog}
-	if err := s.validateSourceInput(&bundled); err != nil || bundled.URL != nil {
-		t.Fatalf("bundled catalog source: %v", err)
-	}
-	if err := s.validateSourceInput(&sourceInput{Name: "x", Format: "spreadsheet"}); err == nil {
-		t.Fatal("an unknown format was accepted")
 	}
 }

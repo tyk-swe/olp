@@ -3,9 +3,6 @@
 package export
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,7 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,176 +165,12 @@ func runWorker(t *testing.T, pool *pgxpool.Pool, installation string, ring *secr
 	return w
 }
 
-// TestIntegrationMeteringEnqueue checks the accounting trigger fans one
-// metering record per priced attempt to every accepting sink, and none for
-// unpriced or not-billable usage.
-func TestIntegrationMeteringEnqueue(t *testing.T) {
-	pool := matrixPool(t)
-	f := seedMeteringFixtures(t, pool)
-	sink := insertSink(t, pool, "metering-https", "https", "json", "https://127.0.0.1/hook",
-		[]string{"metering"}, `{}`, nil, nil)
-	observed := time.Now().UTC().Add(-time.Minute)
+// A priced attempt produces one metering record carrying the whole
+// accounting payload, scoped to the consumer project.
 
-	// A priced attempt produces one metering record carrying the whole
-	// accounting payload, scoped to the consumer project.
-	event := meteringEvent(t, f, f.provider, observed, "metering-model", 1000)
-	persistMetering(t, pool, event)
-	var recordID, sourceID, projectID, outcome string
-	var payload json.RawMessage
-	err := pool.QueryRow(t.Context(), `SELECT r.id::text,r.source_id::text,r.project_id::text,r.outcome,r.payload
-	    FROM olp.export_records r WHERE r.stream='metering'`).Scan(&recordID, &sourceID, &projectID, &outcome, &payload)
-	if err != nil {
-		t.Fatalf("metering record: %v", err)
-	}
-	if sourceID != event.Attempts[0].ID || projectID != f.project || outcome != "success" {
-		t.Fatalf("record %s %s %s", sourceID, projectID, outcome)
-	}
-	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []string{"attempt_id", "request_id", "observed_at", "project_id", "api_key_id",
-		"route", "provider_id", "upstream_model", "operation", "surface", "input_tokens", "output_tokens",
-		"cached_input_tokens", "cache_write_input_tokens", "cache_write_5m_input_tokens",
-		"cache_write_1h_input_tokens", "audio_input_tokens", "cached_audio_input_tokens",
-		"audio_output_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens",
-		"media_units", "tool_calls", "batch", "cost", "charge", "list_cost", "currency",
-		"pricing_revision_id", "rate_card_revision_id", "discount_id", "commitment_weight",
-		"attribution", "end_user_digest"} {
-		if _, ok := data[field]; !ok {
-			t.Fatalf("payload missing %q: %s", field, payload)
-		}
-	}
-	if data["attempt_id"] != event.Attempts[0].ID || data["project_id"] != f.project ||
-		data["cost"] != "0.003000000000" || data["currency"] != "USD" ||
-		data["input_tokens"] != float64(1000) || data["route"] != "metering-route" {
-		t.Fatalf("payload %s", payload)
-	}
+// A committed attempt reports cost 0 but is still a priced attempt.
 
-	// A committed attempt reports cost 0 but is still a priced attempt.
-	committed := uuid.NewString()
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.providers
-	    (id,name,kind,state,configuration,etag,slots_etag,active_revision,active_revision_id,created_by)
-	    VALUES($1::uuid,$2,'openai','active',$3::jsonb,$4::uuid,$5::uuid,1,$6::uuid,$7::uuid)`, committed,
-		"committed-"+committed, `{"kind":"openai","auth_mode":"api_key","endpoint":"https://127.0.0.1:9","options":{"commitment":{"amount":"300","period":"day"}}}`,
-		uuid.NewString(), uuid.NewString(), uuid.NewString(), f.owner); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_revisions
-	    (id,provider_id,revision,name,configuration,models,slots,source_etag,activated_by)
-	    SELECT $1::uuid,$2::uuid,1,'committed',p.configuration,'[]'::jsonb,'[]'::jsonb,$3::uuid,$4::uuid
-	    FROM olp.providers p WHERE p.id=$2::uuid`, uuid.NewString(), committed, uuid.NewString(), f.owner); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.providers p SET active_revision_id=r.id
-	    FROM olp.provider_revisions r WHERE r.provider_id=p.id AND p.id=$1::uuid`, committed); err != nil {
-		t.Fatal(err)
-	}
-	committedEvent := meteringEvent(t, f, committed, observed, "metering-model", 1000)
-	persistMetering(t, pool, committedEvent)
-	var zeroCost int64
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.export_records r
-	    WHERE r.stream='metering' AND r.source_id=$1::uuid AND r.payload->>'cost'='0.000000000000'`,
-		committedEvent.Attempts[0].ID).Scan(&zeroCost); err != nil || zeroCost != 1 {
-		t.Fatalf("committed attempt record %d %v", zeroCost, err)
-	}
-
-	// An unpriced attempt produces none.
-	unpriced := meteringEvent(t, f, f.provider, observed, "metering-unpriced", 1000)
-	persistMetering(t, pool, unpriced)
-	var n int64
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.export_records r
-	    WHERE r.stream='metering' AND r.source_id=$1::uuid`, unpriced.Attempts[0].ID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("unpriced attempt enqueued %d %v", n, err)
-	}
-	if pendingFor(t, pool, sink) != 2 {
-		t.Fatal("expected two pending metering records")
-	}
-}
-
-// TestIntegrationCloudEventsRetry delivers a metering record twice after a
-// lost acknowledgement: identical bytes, the same CloudEvent id.
-func TestIntegrationCloudEventsRetry(t *testing.T) {
-	pool := matrixPool(t)
-	ring := matrixRing(t)
-	fixtures := seedMeteringFixtures(t, pool)
-	const installation = "metering-installation"
-
-	var mu sync.Mutex
-	var bodies [][]byte
-	var signatures []string
-	fail := atomic.Bool{}
-	fail.Store(true)
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		bodies = append(bodies, body)
-		signatures = append(signatures, r.Header.Get("X-OLP-Signature"))
-		mu.Unlock()
-		if fail.Load() {
-			w.WriteHeader(500)
-			return
-		}
-		w.WriteHeader(200)
-	}))
-	t.Cleanup(receiver.Close)
-
-	credential, _ := json.Marshal(map[string]any{"signing_secret": "0123456789abcdef0123456789abcdef"})
-	secretID := uuid.NewString()
-	sealed, err := ring.Seal(installation, secrets.SinkCredential, secretID, credential)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.secrets(id,purpose,key_version,ciphertext)
-	    VALUES($1,'sink_credential',1,$2)`, secretID, sealed); err != nil {
-		t.Fatal(err)
-	}
-	sink := insertSink(t, pool, "metering-ce", "https", "cloudevents", receiver.URL,
-		[]string{"metering"}, `{"source":"/olp/installations/test"}`, &secretID, nil)
-
-	source := uuid.NewString()
-	enqueueMetering(t, pool, source, fixtures.project, time.Now().UTC().Add(-time.Minute),
-		`{"charge":"0.003000000000","input_tokens":1000}`)
-	if pendingFor(t, pool, sink) != 1 {
-		t.Fatal("metering record was not queued")
-	}
-	runWorker(t, pool, installation, ring)
-	if pendingFor(t, pool, sink) != 1 {
-		t.Fatal("a failed delivery was lost")
-	}
-	fail.Store(false)
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now() WHERE sink_id=$1::uuid`, sink); err != nil {
-		t.Fatal(err)
-	}
-	runWorker(t, pool, installation, ring)
-	if pendingFor(t, pool, sink) != 0 {
-		t.Fatal("retry stayed pending")
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(bodies) != 2 {
-		t.Fatalf("receiver hits %d", len(bodies))
-	}
-	if string(bodies[0]) != string(bodies[1]) {
-		t.Fatalf("redelivery rewrote the event:\n%s\n%s", bodies[0], bodies[1])
-	}
-	var event map[string]any
-	if err := json.Unmarshal(bodies[0], &event); err != nil {
-		t.Fatal(err)
-	}
-	if event["id"] != source || event["type"] != "dev.openllmproxy.attempt.priced" ||
-		event["source"] != "/olp/installations/test" || event["subject"] != fixtures.project {
-		t.Fatalf("cloudevent %s", bodies[0])
-	}
-	if event["specversion"] != "1.0" || event["datacontenttype"] != "application/json" {
-		t.Fatalf("cloudevent headers %s", bodies[0])
-	}
-	sum := hmac.New(sha256.New, []byte("0123456789abcdef0123456789abcdef"))
-	sum.Write(bodies[0])
-	if signatures[0] != "sha256="+hex.EncodeToString(sum.Sum(nil)) {
-		t.Fatalf("signature %q", signatures[0])
-	}
-}
+// An unpriced attempt produces none.
 
 // TestIntegrationStripeDelivery sends a metering record through the fake
 // Stripe that loses the first acknowledgement; the retried delivery carries

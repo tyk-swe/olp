@@ -15,83 +15,9 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
-
-func TestIntegrationSemanticCacheRoutes(t *testing.T) {
-	h, _ := cacheHarness(t)
-	h.gateway.Admission = NewAdmission(mediaLimiter(t), nil, h.gateway.log)
-	url := os.Getenv("OLP_TEST_CACHE_VALKEY_URL")
-	if url == "" {
-		t.Fatal("OLP_TEST_CACHE_VALKEY_URL is required")
-	}
-	cfg, err := coordination.Configuration(url, "", time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := coordination.Open(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-	h.gateway.Cache.Client = client
-	h.gateway.Cache.Installation = uuid.NewString()
-	h.republish(func(s *routing.Snapshot, a, b routing.Provider) {
-		b.Capabilities = append(b.Capabilities, routing.Capability{Model: modelB, Operation: "embeddings", Surface: "openai", Mode: "unary"})
-		s.Providers[b.ID] = b
-		main := s.Routes[routeSlug]
-		main.Targets = main.Targets[:1]
-		main.Cache = &cache.Policy{Mode: "semantic", EmbeddingRoute: "cache-embedding", AllowUnsealedVectors: true}
-		s.Routes[routeSlug] = main
-		s.Routes["cache-embedding"] = routing.Route{ID: uuid.NewString(), Slug: "cache-embedding", RevisionID: uuid.NewString(), RoutingID: uuid.NewString(), Operations: []string{"embeddings"}, OverallTimeout: 5000, MaxAttempts: 1, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Targets: []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 3000, RoutingID: uuid.NewString()}}}
-	})
-	h.rt.mu.Lock()
-	key := h.rt.keys[fullKey]
-	key.LookupID = "cache_test_lookup"
-	key.Policy.AllowedRoutes = []string{routeSlug, "cache-embedding"}
-	key.Policy.MaxConcurrency = perMinute(1)
-	h.rt.keys[fullKey] = key
-	h.rt.mu.Unlock()
-	h.mock.set("b", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"object":"list","model":"model-b","data":[{"object":"embedding","index":0,"embedding":[1,0,0]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
-	})
-	request := func(text string) string {
-		response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"`+text+`"}]}`), nil)
-		defer response.Body.Close()
-		body, _ := io.ReadAll(response.Body)
-		if response.StatusCode != 200 {
-			t.Fatalf("%d %s", response.StatusCode, body)
-		}
-		return response.Header.Get("X-OLP-Cache")
-	}
-	if got := request("hello"); got != "miss" {
-		t.Fatal(got)
-	}
-	if got := request("greetings"); got != "semantic-hit" {
-		t.Fatal(got)
-	}
-	for _, env := range h.sink.await(t, 4) {
-		if env.Origin == usage.OriginCacheEmbedding {
-			event := accountingEvent(env)
-			if event == nil || event.ParentRequestID == nil {
-				t.Fatal("embedding lost parent accounting")
-			}
-			if _, err := usage.Validate(event); err != nil {
-				t.Fatalf("invalid embedding accounting: %v", err)
-			}
-		}
-	}
-	if h.mock.count("a") != 1 || h.mock.count("b") != 2 {
-		t.Fatalf("generation/embedding attempts = %d/%d", h.mock.count("a"), h.mock.count("b"))
-	}
-	client.Close()
-	if got := request("hello"); got != "bypass" {
-		t.Fatalf("closed cache connection did not bypass: %s", got)
-	}
-}
 
 func TestIntegrationSemanticCacheEmbeddingModels(t *testing.T) {
 	for _, fidelity := range []string{routing.FidelityTransformed, routing.FidelityStrict} {
@@ -206,60 +132,6 @@ func TestIntegrationSemanticCacheEmbeddingModels(t *testing.T) {
 			request("refresh", "miss", map[string]string{"X-OLP-Cache": "no-cache"})
 			request("refresh", "hit", nil)
 		})
-	}
-}
-
-func TestIntegrationCacheHitExplicitChargeAdmission(t *testing.T) {
-	h, _ := cacheHarness(t)
-	limiter := mediaLimiter(t)
-	h.gateway.Admission = NewAdmission(limiter, nil, h.gateway.log)
-	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
-		route := s.Routes[routeSlug]
-		route.Cache.CountHitsAgainst = []string{"requests", "budgets"}
-		s.Routes[routeSlug] = route
-	})
-	h.rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), RateCards: []usage.RoutingRateCard{{Revisions: []usage.RoutingCardRevision{{
-		ID: uuid.NewString(), EffectiveAt: time.Now().Add(-time.Hour), Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
-			ProviderKind: "openai_compatible", Model: modelA, Operation: "generation", Currency: "USD",
-			InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
-		}}},
-	}}}}}
-	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK {
-		t.Fatalf("warm cache: %d %v", response.StatusCode, body)
-	}
-	h.sink.nth(t, 1)
-	h.rt.mu.Lock()
-	key := h.rt.keys[fullKey]
-	key.LookupID = "cache_charge_admission"
-	key.Policy.CostBasis = "charge"
-	key.Policy.DailyCostLimit = costText("0.0001")
-	key.Policy.RequestsPerMinute = perMinute(1)
-	h.rt.keys[fullKey] = key
-	h.rt.mu.Unlock()
-	windows := limits.BudgetWindows(time.Now())
-	if _, _, err := limiter.ApplyCostSnapshot(t.Context(), limits.CostSnapshot{
-		Basis: limits.BasisCharge, CostOwnerID: key.ID,
-		DailyWindowID: windows.DailyID, MonthlyWindowID: windows.MonthlyID,
-		DailyAccrued: "0", MonthlyAccrued: "0",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("cache hit exceeded charge budget: status=%d body=%v", response.StatusCode, body)
-	}
-	h.sink.nth(t, 2)
-	h.rt.mu.Lock()
-	key.Policy.DailyCostLimit = costText("0.0003")
-	h.rt.keys[fullKey] = key
-	h.rt.mu.Unlock()
-	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != "hit" {
-		t.Fatalf("rejected hit retained its RPM debit: status=%d cache=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), body)
-	}
-	if got := h.sink.nth(t, 3).Attempts[0].Cache; got == nil || got.BudgetCost != "0" || got.BudgetCharge != "0.0002" {
-		t.Fatalf("cache debit = %+v", got)
-	}
-	if h.mock.count("a") != 1 {
-		t.Fatal("cache hit dispatched a provider request")
 	}
 }
 

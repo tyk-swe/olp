@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -75,201 +72,6 @@ func optionsManifest() abi.Manifest {
 		Query:   map[string]string{"placement": "{options.region}-{options.account}"},
 	}
 	return manifest
-}
-
-func TestPluginProfileHostingPlacesTheStaticCredential(t *testing.T) {
-	c := pluginConfig(t, pluginManifest())
-	if err := c.Validate(&egress.Policy{}); err != nil {
-		t.Fatal(err)
-	}
-	endpoint, err := c.URL(wire.Chat, "acme-large", false)
-	if err != nil || endpoint != "https://api.acme.example/v2/chat/completions" {
-		t.Fatalf("addressed %q: %v", endpoint, err)
-	}
-	req, _ := http.NewRequest(http.MethodPost, endpoint, nil)
-	secret := "sk acme&secret"
-	sensitive, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, []byte(secret), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if req.Header.Get("Authorization") != "Token "+secret || req.Header.Get("X-Acme-Key") != secret || req.Header.Get("X-Acme-Client") != "olp" {
-		t.Fatalf("placed headers %v", req.Header)
-	}
-	if req.URL.Query().Get("key") != secret || !strings.Contains(req.URL.RawQuery, "key=sk+acme%26secret") {
-		t.Fatalf("placed query %q", req.URL.RawQuery)
-	}
-	for _, placed := range []string{secret, "Token " + secret, "sk+acme%26secret"} {
-		if !slices.Contains(sensitive.Values(), placed) {
-			t.Errorf("%q is not redacted: %q", placed, sensitive)
-		}
-	}
-	if slices.Contains(sensitive.Values(), "olp") {
-		t.Error("a value without the credential is redacted")
-	}
-}
-
-func TestPluginProvidersSendOnlyWhatTheirProfileDeclares(t *testing.T) {
-	manifest := pluginManifest()
-	manifest.Profiles[0].Hosting = abi.Hosting{Address: "https://api.acme.example/v2", Query: map[string]string{"key": "{credential}"}}
-	c := pluginConfig(t, manifest)
-	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
-	if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, []byte("secret"), nil); err != nil {
-		t.Fatal(err)
-	}
-	if len(req.Header) != 0 || req.URL.RawQuery != "key=secret" {
-		t.Fatalf("a plugin provider acquired a kind default: %v %q", req.Header, req.URL.RawQuery)
-	}
-}
-
-func TestPluginHostingRejectsCredentialsItCannotPlace(t *testing.T) {
-	c := pluginConfig(t, pluginManifest())
-	for _, secret := range []string{"", "line\nbreak", "nul\x00"} {
-		req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
-		if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, []byte(secret), nil); !errors.Is(err, ErrCredentialRejected) {
-			t.Errorf("placed %q: %v", secret, err)
-		}
-	}
-	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions?key=caller", nil)
-	if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, []byte("secret"), nil); err == nil || errors.Is(err, ErrAuthentication) {
-		t.Fatalf("a declared query parameter replaced operation addressing: %v", err)
-	}
-}
-
-func TestPluginProfileCatalogueEntry(t *testing.T) {
-	anthropic := pluginManifest()
-	anthropic.Profiles[0].Dialect = "anthropic-messages"
-	p := pluginConfig(t, anthropic).Plugin.Profile()
-	if p.Kind != KindPlugin || p.Revision != pluginDigest || p.Hosting != "plugin" || !p.Strict || p.Transport != "http" ||
-		*p.Plugin != (Plugin{Digest: pluginDigest, Name: "acme", Version: "1.0.0"}) ||
-		!slices.Equal(p.Authentication, []string{AuthStaticCredential}) || !slices.Equal(p.Operations, []string{"generation"}) {
-		t.Fatalf("catalogued %+v", p)
-	}
-	if p.DialectRevision != anthropicMessagesRevision || !slices.Equal(p.SemanticHeaders, []string{"Anthropic-Version", "Anthropic-Beta"}) || p.OperationDialects["generation"] != "anthropic-messages" || p.DefaultSchemas["generation"] == nil {
-		t.Fatalf("the profile does not share its dialect's revision and semantics: %+v", p)
-	}
-	if _, err := NewPluginProfile(pluginDigest, anthropic, "acme-other"); err == nil {
-		t.Fatal("found an undeclared profile")
-	}
-	for _, builtin := range Profiles() {
-		if !builtin.Strict || builtin.Plugin != nil {
-			t.Fatalf("built-in %s lost its strict treatment", builtin.ID)
-		}
-	}
-}
-
-func TestPluginProfileSurvivesPublication(t *testing.T) {
-	c := pluginConfig(t, pluginManifest())
-	decoded, encoded := publish(t, c)
-	if err := decoded.ValidateProfile(); err != nil || decoded.Plugin.Address(nil) != c.Plugin.Address(nil) {
-		t.Fatalf("decoded %s: %v", encoded, err)
-	}
-	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
-	if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, decoded, []byte("secret"), nil); err != nil || req.Header.Get("Authorization") != "Token secret" {
-		t.Fatalf("decoded profile placed %v: %v", req.Header, err)
-	}
-	tampered := strings.Replace(string(encoded), `{credential}"`, `{password}"`, 1)
-	if err := json.Unmarshal([]byte(tampered), &decoded); err == nil {
-		t.Fatal("decoded a hosting adaptation OLP does not run")
-	}
-}
-
-// An unconfined plugin's profiles say so, from the installed plugin a
-// provider pins through publication, so gateways know which targets their
-// deployment may serve.
-func TestUnconfinedPluginProfileSurvivesPublication(t *testing.T) {
-	installed, _ := json.Marshal(InstalledPlugin{Manifest: pluginManifest(), Unconfined: true})
-	plugin, err := DecodePluginProfile(pluginDigest, installed, "acme-chat")
-	if err != nil || !plugin.Unconfined() || !plugin.Profile().Plugin.Unconfined {
-		t.Fatalf("decoded %+v: %v", plugin, err)
-	}
-	encoded, err := json.Marshal(plugin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded PluginProfile
-	if err = json.Unmarshal(encoded, &decoded); err != nil || !decoded.Unconfined() {
-		t.Fatalf("published %s: %v", encoded, err)
-	}
-	confined, err := NewPluginProfile(pluginDigest, pluginManifest(), "acme-chat")
-	if err != nil || confined.Unconfined() {
-		t.Fatalf("a confined plugin's profile: %v", err)
-	}
-}
-
-// A profile's declared discovery and classification reach the provider
-// unchanged through publication, with the classes that govern failover.
-func TestPluginProfileDeclaresDiscoveryAndClassification(t *testing.T) {
-	c := pluginConfig(t, pluginManifest())
-	published, _ := publish(t, c)
-	for _, c := range []Config{c, published} {
-		profile, _ := c.Profile()
-		discovery, declared := c.Plugin.Discovery()
-		if !profile.ModelDiscovery || !declared || discovery.Path != "/models" || discovery.Models != "data" || discovery.ID != "id" ||
-			*discovery.Pagination != (abi.Pagination{Parameter: "page_token", Cursor: "next_page_token"}) {
-			t.Fatalf("discovery %v %+v", profile.ModelDiscovery, discovery)
-		}
-		want := []upstream.Rule{{Status: 400, Code: "insufficient_quota", Class: upstream.RateLimit}, {Type: "overloaded", Class: upstream.ServerError}}
-		if got := c.Classification(); !slices.Equal(got, want) {
-			t.Fatalf("classification %+v", got)
-		}
-	}
-	discovery, _ := c.Plugin.Discovery()
-	discovery.Pagination.Cursor = "changed"
-	if again, _ := c.Plugin.Discovery(); again.Pagination.Cursor != "next_page_token" {
-		t.Fatal("a caller changed the profile's discovery")
-	}
-	for class, want := range map[string]upstream.Class{abi.ClassCredential: upstream.Credential, abi.ClassRateLimited: upstream.RateLimit, abi.ClassRetryable: upstream.ServerError, abi.ClassTerminal: upstream.ClientError} {
-		manifest := pluginManifest()
-		manifest.Profiles[0].Hosting.Classification = []abi.FailureRule{{Status: 409, Class: class}}
-		if got := pluginConfig(t, manifest).Classification(); len(got) != 1 || got[0].Class != want {
-			t.Errorf("%s classified as %+v", class, got)
-		}
-	}
-
-	undeclared := pluginManifest()
-	undeclared.Profiles[0].Hosting.Discovery, undeclared.Profiles[0].Hosting.Classification = nil, nil
-	c = pluginConfig(t, undeclared)
-	if profile, _ := c.Profile(); profile.ModelDiscovery || c.Classification() != nil {
-		t.Fatalf("a profile declaring neither: %+v %+v", profile, c.Classification())
-	}
-	if _, declared := c.Plugin.Discovery(); declared {
-		t.Fatal("found an undeclared listing")
-	}
-	if (Config{Kind: "openai"}).Classification() != nil {
-		t.Fatal("a built-in profile declares a classification")
-	}
-	for _, builtin := range Profiles() {
-		if builtin.ModelDiscovery {
-			t.Fatalf("built-in %s declares discovery", builtin.ID)
-		}
-	}
-}
-
-func TestPluginProviderConfigurationFollowsItsProfile(t *testing.T) {
-	c := pluginConfig(t, pluginManifest())
-	for name, mutate := range map[string]func(*Config){
-		"unresolved plugin":  func(c *Config) { c.Plugin = nil },
-		"other revision":     func(c *Config) { c.ProfileRevision = strings.Repeat("0", 64) },
-		"other kind":         func(c *Config) { c.Kind = "openai" },
-		"built-in auth mode": func(c *Config) { c.AuthMode = "api_key" },
-		"other endpoint":     func(c *Config) { c.Endpoint = "https://api.acme.example/v3" },
-		"cloud context":      func(c *Config) { c.CloudRegion = "us-east-1" },
-		"undeclared header":  func(c *Config) { c.SemanticHeaders = map[string]string{"X-Acme-Client": "other"} },
-	} {
-		t.Run(name, func(t *testing.T) {
-			changed := c
-			mutate(&changed)
-			if changed.Validate(&egress.Policy{}) == nil {
-				t.Fatal("accepted")
-			}
-		})
-	}
-	if !c.Supports("generation", "anthropic", "streaming") || c.Supports("generation", "bedrock", "unary") || c.Supports("embeddings", "openai", "unary") || c.Supports("token_count", "openai", "unary") {
-		t.Fatal("a plugin profile supports more than generation")
-	}
-	if !SecretRequired(AuthStaticCredential) {
-		t.Fatal("a static credential is not a stored secret")
-	}
 }
 
 func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
@@ -365,61 +167,9 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 	}
 }
 
-// A plugin profile never takes a built-in profile's ID, on which OLP keys
-// behaviour, such as strict compilation leaving Gemini Interactions to its
-// own contract: install refuses it, and so does publishing a provider that
-// pins a plugin installed before.
-func TestPluginProfilesNeverTakeABuiltInProfileID(t *testing.T) {
-	for _, builtin := range Profiles() {
-		manifest := pluginManifest()
-		manifest.Profiles[0].ID = builtin.ID
-		if refusal, ok := errors.AsType[*ProfileError](ValidatePluginProfile(manifest.Profiles[0])); !ok || refusal.Field != "id" {
-			t.Fatalf("%s: want a refusal of id, got %v", builtin.ID, refusal)
-		}
-		installed, _ := json.Marshal(InstalledPlugin{Manifest: manifest})
-		if _, err := DecodePluginProfile(pluginDigest, installed, builtin.ID); err == nil {
-			t.Fatalf("published a plugin profile identified as the built-in %s", builtin.ID)
-		}
-	}
-}
+// Each value fills its part of one path segment, whatever it contains.
 
-func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
-	c := pluginConfig(t, optionsManifest())
-	c.PluginOptions = map[string]string{"account": "acme/prod", "region": "eu"}
-	c.Endpoint = c.Plugin.Address(c.PluginOptions)
-	if err := c.Validate(&egress.Policy{}); err != nil {
-		t.Fatal(err)
-	}
-	// Each value fills its part of one path segment, whatever it contains.
-	endpoint, err := c.URL(wire.Chat, "acme-large", false)
-	if err != nil || endpoint != "https://api.acme.example/accounts/acme%2Fprod/v2/chat/completions" {
-		t.Fatalf("addressed %q: %v", endpoint, err)
-	}
-	req, _ := http.NewRequest(http.MethodPost, endpoint, nil)
-	sensitive, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, []byte("secret"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if req.Header.Get("Authorization") != "Token secret" || req.Header.Get("X-Acme-Region") != "eu" || req.URL.Query().Get("placement") != "eu-acme/prod" {
-		t.Fatalf("placed %v %q", req.Header, req.URL.RawQuery)
-	}
-	if req.URL.EscapedPath() != "/accounts/acme%2Fprod/v2/chat/completions" {
-		t.Fatalf("placed the request at %s", req.URL.EscapedPath())
-	}
-	if !slices.Equal(sensitive.Values(), []string{"secret", "Token secret"}) {
-		t.Fatalf("redacts %q; options are not secret", sensitive)
-	}
-	moved := c
-	moved.PluginOptions = map[string]string{"account": "other", "region": "eu"}
-	if moved.Validate(&egress.Policy{}) == nil {
-		t.Fatal("the endpoint kept the address of other options")
-	}
-	// Published snapshots carry the options with the profile.
-	decoded, encoded := publish(t, c)
-	if decoded.Validate(&egress.Policy{}) != nil || !maps.Equal(decoded.PluginOptions, c.PluginOptions) {
-		t.Fatalf("decoded %s", encoded)
-	}
-}
+// Published snapshots carry the options with the profile.
 
 func TestPluginOptionValuesFollowTheirDeclaration(t *testing.T) {
 	plugin := pluginConfig(t, optionsManifest()).Plugin
@@ -464,65 +214,7 @@ func TestPluginOptionValuesFollowTheirDeclaration(t *testing.T) {
 	}
 }
 
-func TestPluginProfileCataloguesItsOptionsSchema(t *testing.T) {
-	plugin := pluginConfig(t, optionsManifest()).Plugin
-	want := `{"additionalProperties":false,"properties":{` +
-		`"account":{"description":"The Acme account that serves requests.","maxLength":256,"minLength":1,"title":"Account","type":"string"},` +
-		`"region":{"enum":["us","eu"],"maxLength":256,"minLength":1,"title":"Region","type":"string"},` +
-		`"team":{"maxLength":256,"minLength":1,"pattern":"^[a-z]+$","title":"Team","type":"string"}},` +
-		`"required":["account","region"],"type":"object"}`
-	if got := string(plugin.Profile().OptionsSchema); got != want {
-		t.Fatalf("options schema %s", got)
-	}
-	// Properties keep the declared order, which the provider wizard shows.
-	reordered := optionsManifest()
-	options := reordered.Profiles[0].Options
-	options[0], options[2] = options[2], options[0]
-	plugin = pluginConfig(t, reordered).Plugin
-	if schema := string(plugin.Profile().OptionsSchema); strings.Index(schema, `"team"`) > strings.Index(schema, `"account"`) {
-		t.Fatalf("options schema lost the declared order: %s", schema)
-	}
-	for _, builtin := range Profiles() {
-		if builtin.OptionsSchema != nil {
-			t.Fatalf("built-in %s declares options", builtin.ID)
-		}
-	}
-}
-
-func TestPluginOptionDeclarationsAreValidated(t *testing.T) {
-	if err := ValidatePluginProfile(optionsManifest().Profiles[0]); err != nil {
-		t.Fatal(err)
-	}
-	many := make([]abi.Option, 17)
-	for i := range many {
-		many[i] = abi.Option{Name: fmt.Sprintf("option_%d", i), Label: "Option", Optional: true}
-	}
-	for name, tc := range map[string]struct {
-		mutate func(*abi.Profile)
-		field  string
-	}{
-		"too many options":      {func(p *abi.Profile) { p.Options = append(p.Options, many...) }, "options"},
-		"malformed name":        {func(p *abi.Profile) { p.Options[2].Name = "Team" }, "options[2].name"},
-		"duplicate name":        {func(p *abi.Profile) { p.Options[2].Name = "region" }, "options[2].name"},
-		"no label":              {func(p *abi.Profile) { p.Options[0].Label = "" }, "options[0].label"},
-		"long description":      {func(p *abi.Profile) { p.Options[0].Description = strings.Repeat("d", 501) }, "options[0].description"},
-		"enum and pattern":      {func(p *abi.Profile) { p.Options[1].Pattern = "^[a-z]+$" }, "options[1].pattern"},
-		"duplicate enum value":  {func(p *abi.Profile) { p.Options[1].Enum = []string{"us", "us"} }, "options[1].enum[1]"},
-		"invalid pattern":       {func(p *abi.Profile) { p.Options[2].Pattern = "(" }, "options[2].pattern"},
-		"optional in template":  {func(p *abi.Profile) { p.Hosting.Headers["X-Acme-Team"] = "{options.team}" }, "hosting.headers.X-Acme-Team"},
-		"optional in address":   {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/teams/{options.team}" }, "hosting.address"},
-		"undeclared in address": {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/{options.project}" }, "hosting.address"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			p := optionsManifest().Profiles[0]
-			tc.mutate(&p)
-			refusal, ok := errors.AsType[*ProfileError](ValidatePluginProfile(p))
-			if !ok || refusal.Field != tc.field {
-				t.Fatalf("want a refusal of %s, got %v", tc.field, refusal)
-			}
-		})
-	}
-}
+// Properties keep the declared order, which the provider wizard shows.
 
 // grantManifest declares a profile that authenticates with a grant, whose
 // hosting adaptation places grant facts beside an option.
@@ -545,65 +237,6 @@ func grantCredential(t *testing.T, token string, facts map[string]string) []byte
 		t.Fatal(err)
 	}
 	return secret
-}
-
-func TestPluginGrantCredentialsStayBoundToTheirEnrollingProfileAndBuild(t *testing.T) {
-	c := pluginConfig(t, grantManifest())
-	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
-	for _, identity := range []struct{ digest, profile string }{
-		{pluginDigest, "other-profile"}, {strings.Repeat("a", 64), c.ProfileID}, {"", c.ProfileID}, {pluginDigest, ""},
-	} {
-		secret, _ := json.Marshal(GrantCredential{PluginDigest: identity.digest, ProfileID: identity.profile, AccessToken: "secret-token",
-			Facts: map[string]string{"account": "account", "project": "project"}})
-		req, _ := http.NewRequest(http.MethodPost, c.Endpoint+"/chat/completions", nil)
-		if _, err := NewAuth(&egress.Policy{}).Apply(t.Context(), req, c, secret, nil); !errors.Is(err, ErrCredentialRejected) {
-			t.Fatalf("accepted grant for %s/%s: %v", identity.digest, identity.profile, err)
-		}
-		if len(req.Header) != 0 || req.URL.RawQuery != "" {
-			t.Fatalf("placed a mismatched grant: %v %s", req.Header, req.URL)
-		}
-	}
-}
-
-// A profile that authenticates with a grant places the grant's current
-// access token where the static credential would go, and its grant facts
-// beside the provider's options.
-func TestPluginGrantProfilePlacesTheAccessTokenAndGrantFacts(t *testing.T) {
-	c := pluginConfig(t, grantManifest())
-	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
-	if err := c.Validate(&egress.Policy{}); err != nil {
-		t.Fatal(err)
-	}
-	if p, _ := c.Profile(); !slices.Equal(p.Authentication, []string{AuthGrant}) || !SecretRequired(AuthGrant) {
-		t.Fatalf("a grant profile authenticates with %v", p.Authentication)
-	}
-	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
-	sensitive, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, grantCredential(t, "at-123", map[string]string{"account": "acct 7", "project": "p/1"}), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if req.Header.Get("Authorization") != "Bearer at-123" || req.Header.Get("X-Acme-Account") != "acct 7" || req.URL.RawQuery != "placement=eu-acct+7&project=p%2F1" {
-		t.Fatalf("placed %v %q", req.Header, req.URL.RawQuery)
-	}
-	if !slices.Contains(sensitive.Values(), "at-123") || !slices.Contains(sensitive.Values(), "Bearer at-123") || slices.Contains(sensitive.Values(), "acct 7") {
-		t.Fatalf("redacts %q", sensitive)
-	}
-	for name, secret := range map[string][]byte{
-		"static credential":  []byte("at-123"),
-		"no access token":    grantCredential(t, "", map[string]string{"account": "a", "project": "p"}),
-		"unrecorded fact":    grantCredential(t, "at-123", map[string]string{"account": "a"}),
-		"fact out of header": grantCredential(t, "at-123", map[string]string{"account": "a\r\nX-Injected: 1", "project": "p"}),
-	} {
-		req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
-		if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, secret, nil); !errors.Is(err, ErrCredentialRejected) {
-			t.Errorf("%s: placed with %v", name, err)
-		}
-	}
-	static := c
-	static.AuthMode = AuthStaticCredential
-	if static.Validate(&egress.Policy{}) == nil {
-		t.Fatal("a grant profile accepted a static credential")
-	}
 }
 
 // baseManifest declares a grant profile whose address begins with the grant

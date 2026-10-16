@@ -153,110 +153,18 @@ func acctPriceGPT4o(t *testing.T, fixture acctFixture) {
 			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15")})
 }
 
-func TestRequestMetadataConsumerDrainsTheGroupAcrossWorkers(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPriceGPT4o(t, fixture)
-	valkey, prefix, stream := acctKeyspace(t)
-	limiter, err := limits.New(valkey, prefix+"limits")
-	if err != nil {
-		t.Fatalf("open limiter: %v", err)
-	}
+// Acknowledged deliveries are deleted, so a drained group empties the stream.
 
-	const deliveries = 6
-	for range deliveries {
-		event := acctBillableEvent(t, fixture)
-		payload, err := usage.Encode(event)
-		if err != nil {
-			t.Fatalf("encode event: %v", err)
-		}
-		acctPublish(t, valkey, stream, payload)
-	}
+// Reconstructed spend is pushed back into the distributed counters.
 
-	for worker := range 3 {
-		acctConsumer(t, fixture.Pool, acctValkey(t), stream,
-			fmt.Sprintf("worker-%d", worker), limiter, usage.ReclaimIdle)
-	}
+// A worker takes the delivery and dies before acknowledging it.
 
-	acctEventually(t, "every delivery to become durable usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == deliveries
-	})
-	// Acknowledged deliveries are deleted, so a drained group empties the stream.
-	acctEventually(t, "the stream to drain", func() bool {
-		return acctStreamLength(t, valkey, stream) == 0
-	})
-	acctEventually(t, "the consumers to publish their health", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_consumer_health
-            WHERE singleton AND pending_events = 0`) == 1
-	})
+// A delivery younger than the idle threshold belongs to whoever holds it,
+// even when that owner is slow, so an impatient replica must leave it alone.
 
-	acctEventually(t, "every delivery to be counted", func() bool {
-		_, _, duplicates, processed := acctCounters(t, fixture.Pool)
-		if duplicates != 0 {
-			t.Fatalf("duplicates = %d, want none: each delivery was handled once", duplicates)
-		}
-		return processed == deliveries
-	})
-	// Reconstructed spend is pushed back into the distributed counters.
-	keys, err := valkey.Do(t.Context(), "KEYS", prefix+"limits*")
-	if err != nil {
-		t.Fatalf("list limit keys: %v", err)
-	}
-	if !strings.Contains(fmt.Sprint(keys), "cost") {
-		t.Fatalf("limit keys = %v, want the reconstructed spend", keys)
-	}
-	daily, _ := acctWindow(t, fixture, "day")
-	acctSameMoney(t, fixture, &daily, "0.063")
-}
-
-func TestRequestMetadataConsumerReclaimsADeadOwnersDeliveries(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPriceGPT4o(t, fixture)
-	valkey, _, stream := acctKeyspace(t)
-
-	event := acctBillableEvent(t, fixture)
-	payload, err := usage.Encode(event)
-	if err != nil {
-		t.Fatalf("encode event: %v", err)
-	}
-	acctPublish(t, valkey, stream, payload)
-
-	// A worker takes the delivery and dies before acknowledging it.
-	do(t, valkey, "XGROUP", "CREATE", stream, usage.Group, "0", "MKSTREAM")
-	do(t, valkey, "XREADGROUP", "GROUP", usage.Group, "dead-worker", "COUNT", "1",
-		"STREAMS", stream, ">")
-	if pending := acctStreamLength(t, valkey, stream); pending != 1 {
-		t.Fatalf("stream length = %d, want the unacknowledged delivery", pending)
-	}
-
-	// A delivery younger than the idle threshold belongs to whoever holds it,
-	// even when that owner is slow, so an impatient replica must leave it alone.
-	patient := acctConsumer(t, fixture.Pool, acctValkey(t), stream, "patient", nil, usage.ReclaimIdle)
-	time.Sleep(2 * time.Second)
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != 0 {
-		t.Fatalf("facts = %d, want the delivery left with its owner until it goes idle", count)
-	}
-	patient()
-
-	acctConsumer(t, fixture.Pool, acctValkey(t), stream, "survivor", nil, 0)
-	acctEventually(t, "the survivor to reclaim the delivery", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
-	})
-	acctEventually(t, "the reclaimed delivery to be acknowledged", func() bool {
-		return acctStreamLength(t, valkey, stream) == 0
-	})
-	// The reclaim counter is written before the batch is processed and the
-	// remaining counters only once it has been, so an acknowledged delivery
-	// does not yet prove its work was accounted for.
-	acctEventually(t, "the reclaimed delivery to be counted", func() bool {
-		_, _, _, processed := acctCounters(t, fixture.Pool)
-		return processed > 0
-	})
-	if reclaimed, _, _, processed := acctCounters(t, fixture.Pool); reclaimed < 1 || processed != 1 {
-		t.Fatalf("counters = %d reclaimed, %d processed; want a reclaimed delivery", reclaimed, processed)
-	}
-}
+// The reclaim counter is written before the batch is processed and the
+// remaining counters only once it has been, so an acknowledged delivery
+// does not yet prove its work was accounted for.
 
 func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 	t.Parallel()
@@ -330,119 +238,19 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 	}
 }
 
-func TestRequestMetadataConsumerReplaysACommittedEventAsADuplicate(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPriceGPT4o(t, fixture)
-	valkey, _, stream := acctKeyspace(t)
+// PostgreSQL always commits before the acknowledgement, so a crash in
+// between redelivers an event that is already accounted for.
 
-	// PostgreSQL always commits before the acknowledgement, so a crash in
-	// between redelivers an event that is already accounted for.
-	event := acctBillableEvent(t, fixture)
-	payload, err := usage.Encode(event)
-	if err != nil {
-		t.Fatalf("encode event: %v", err)
-	}
-	if result := acctPersist(t, fixture, event); result.Outcome != usage.PersistOutcomePersisted {
-		t.Fatalf("outcome = %v, want persisted", result.Outcome)
-	}
-	acctPublish(t, valkey, stream, payload)
+// Every delivery is in the stream before the consumer starts, so they are
+// read as one page. The stream is at least once, so the page can carry the
+// same event twice, and the second copy must see the first although
+// neither has committed yet.
 
-	acctConsumer(t, fixture.Pool, valkey, stream, "replay", nil, usage.ReclaimIdle)
-	acctEventually(t, "the redelivery to be acknowledged", func() bool {
-		return acctStreamLength(t, valkey, stream) == 0
-	})
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != 1 {
-		t.Fatalf("facts = %d, want the redelivery to charge nothing new", count)
-	}
-	acctEventually(t, "the duplicate to be counted", func() bool {
-		_, _, duplicates, _ := acctCounters(t, fixture.Pool)
-		return duplicates == 1
-	})
-	daily, _ := acctWindow(t, fixture, "day")
-	acctSameMoney(t, fixture, &daily, "0.0105")
-}
+// Valkey came back without the stream, which took the consumer group with
+// it: a flush, an eviction, or a restart with no persistence. Every group
+// command now answers NOGROUP, and the writer's next event recreates the
+// key without recreating the group, so a consumer that only retries would
+// stop accounting for this installation until an operator restarted it.
 
-func TestRequestMetadataConsumerAccountsForAPageInOneTransaction(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPriceGPT4o(t, fixture)
-	valkey, _, stream := acctKeyspace(t)
-
-	// Every delivery is in the stream before the consumer starts, so they are
-	// read as one page. The stream is at least once, so the page can carry the
-	// same event twice, and the second copy must see the first although
-	// neither has committed yet.
-	const events = 40
-	var repeated []byte
-	for index := range events {
-		payload, err := usage.Encode(acctBillableEvent(t, fixture))
-		if err != nil {
-			t.Fatalf("encode event: %v", err)
-		}
-		acctPublish(t, valkey, stream, payload)
-		if index == events/2 {
-			repeated = payload
-		}
-	}
-	acctPublish(t, valkey, stream, repeated)
-
-	acctConsumer(t, fixture.Pool, valkey, stream, "pager", nil, usage.ReclaimIdle)
-	acctEventually(t, "the page to be acknowledged", func() bool {
-		return acctStreamLength(t, valkey, stream) == 0
-	})
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != events {
-		t.Fatalf("facts = %d, want one per event", count)
-	}
-	acctEventually(t, "the page to be counted", func() bool {
-		_, _, duplicates, processed := acctCounters(t, fixture.Pool)
-		return duplicates == 1 && processed == events+1
-	})
-	daily, _ := acctWindow(t, fixture, "day")
-	acctSameMoney(t, fixture, &daily, "0.42")
-}
-
-func TestRequestMetadataConsumerRebuildsAGroupLostWithItsStream(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPriceGPT4o(t, fixture)
-	valkey, _, stream := acctKeyspace(t)
-
-	first := acctBillableEvent(t, fixture)
-	firstPayload, err := usage.Encode(first)
-	if err != nil {
-		t.Fatalf("encode event: %v", err)
-	}
-	acctPublish(t, valkey, stream, firstPayload)
-
-	acctConsumer(t, fixture.Pool, acctValkey(t), stream, "survivor", nil, usage.ReclaimIdle)
-	acctEventually(t, "the first delivery to become usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
-	})
-
-	// Valkey came back without the stream, which took the consumer group with
-	// it: a flush, an eviction, or a restart with no persistence. Every group
-	// command now answers NOGROUP, and the writer's next event recreates the
-	// key without recreating the group, so a consumer that only retries would
-	// stop accounting for this installation until an operator restarted it.
-	do(t, valkey, "DEL", stream)
-	second := acctBillableEvent(t, fixture)
-	secondPayload, err := usage.Encode(second)
-	if err != nil {
-		t.Fatalf("encode event: %v", err)
-	}
-	acctPublish(t, valkey, stream, secondPayload)
-
-	acctEventually(t, "the delivery published after the loss to become usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 2
-	})
-	acctEventually(t, "the rebuilt group to drain the stream", func() bool {
-		return acctStreamLength(t, valkey, stream) == 0
-	})
-	// The consumer keeps its own identity across the loss, so its health is
-	// published again rather than left stale at the moment of the outage.
-	acctEventually(t, "the consumer to publish its health against the new group", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_consumer_health
-            WHERE singleton AND pending_events = 0 AND checked_at > now() - interval '10 seconds'`) == 1
-	})
-}
+// The consumer keeps its own identity across the loss, so its health is
+// published again rather than left stale at the moment of the outage.

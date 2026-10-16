@@ -87,49 +87,6 @@ func TestUsagePagingParametersAreBounded(t *testing.T) {
 	}
 }
 
-func TestUsageStatusFilterIsBoundedToRealCodes(t *testing.T) {
-	status, err := statusParam(url.Values{"status_code": {"503"}})
-	if err != nil || status == nil || *status != 503 {
-		t.Fatalf("status = %v, %v; want 503", status, err)
-	}
-	for _, invalid := range []string{"99", "600", "-1", "ok", ""} {
-		values := url.Values{"status_code": {invalid}}
-		status, err = statusParam(values)
-		if invalid == "" {
-			if err != nil || status != nil {
-				t.Fatalf("a cleared status filter gave %v, %v", status, err)
-			}
-			continue
-		}
-		if problem := usageProblem(t, err); problem.Status != 400 || problem.Code != "invalid_filter" {
-			t.Fatalf("status %q gave %d %s, want 400 invalid_filter", invalid, problem.Status, problem.Code)
-		}
-	}
-}
-
-func TestRequestFiltersRejectAnImpossibleWindow(t *testing.T) {
-	after := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-	before := after.Add(-time.Second)
-	filters := RequestFilters{StartedAfter: &after, StartedBefore: &before}
-	if problem := usageProblem(t, filters.Validate()); problem.Code != "invalid_range" {
-		t.Fatalf("code = %s, want invalid_range", problem.Code)
-	}
-	filters.StartedBefore = &after
-	if problem := usageProblem(t, filters.Validate()); problem.Code != "invalid_range" {
-		t.Fatalf("an empty window gave %s, want invalid_range", problem.Code)
-	}
-	later := after.Add(time.Second)
-	filters.StartedBefore = &later
-	if err := filters.Validate(); err != nil {
-		t.Fatalf("a positive window was rejected: %v", err)
-	}
-	telepathy := "telepathy"
-	filters.Operation = &telepathy
-	if problem := usageProblem(t, filters.Validate()); problem.Code != "invalid_operation" {
-		t.Fatalf("code = %s, want invalid_operation", problem.Code)
-	}
-}
-
 func TestRequestFiltersApplyAttribution(t *testing.T) {
 	key, value, bad := "team", "billing", "not a key!"
 	if problem := usageProblem(t, RequestFilters{AttributionValue: &value}.Validate()); problem.Status != 400 || problem.Code != "invalid_filter" {

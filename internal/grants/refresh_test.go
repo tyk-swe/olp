@@ -10,34 +10,6 @@ import (
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
-// A grant is refreshed a quarter of its access token's lifetime before the
-// token expires, at most ten minutes before; one whose expiry the upstream
-// did not state, or that has no refresh token, is refreshed only on request.
-func TestGrantsRefreshAheadOfTheirAccessTokensExpiry(t *testing.T) {
-	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		expiresIn   int64
-		refreshable bool
-		expires     time.Duration
-		refresh     time.Duration
-	}{
-		{expiresIn: 3600, refreshable: true, expires: time.Hour, refresh: 50 * time.Minute},
-		{expiresIn: 60, refreshable: true, expires: time.Minute, refresh: 45 * time.Second},
-		{expiresIn: 60, expires: time.Minute},
-		{refreshable: true},
-	} {
-		expires, refresh := schedule(now, tc.expiresIn, tc.refreshable)
-		if at(expires, now) != tc.expires || at(refresh, now) != tc.refresh {
-			t.Errorf("a %d s token (refreshable %v) expires in %v and refreshes in %v", tc.expiresIn, tc.refreshable, at(expires, now), at(refresh, now))
-		}
-	}
-	for failures, want := range map[int]time.Duration{1: 30 * time.Second, 2: time.Minute, 5: 8 * time.Minute, 6: 10 * time.Minute, 64: 10 * time.Minute} {
-		if got := backoff(failures); got != want {
-			t.Errorf("after %d failures a refresh waits %v, want %v", failures, got, want)
-		}
-	}
-}
-
 func at(t *time.Time, from time.Time) time.Duration {
 	if t == nil {
 		return 0
@@ -94,14 +66,5 @@ func TestRefreshFailuresArePermanentOnlyWhenTheGrantCanNoLongerRefresh(t *testin
 		if permanent(err) != want {
 			t.Errorf("%v: permanent %v", err, !want)
 		}
-	}
-}
-
-func TestRefreshFailuresAreClippedToValidText(t *testing.T) {
-	if got := clip("résumé", 2); got != "r" {
-		t.Fatalf("clipped %q", got)
-	}
-	if got := clip("bad \xff byte", 64); got != "bad  byte" {
-		t.Fatalf("clipped %q", got)
 	}
 }

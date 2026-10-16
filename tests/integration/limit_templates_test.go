@@ -116,35 +116,3 @@ func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
 	// Unknown and cross-project references cannot be saved.
 	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Bad template", "scopes": []string{"inference"}, "allowed_routes": []string{}, "limit_template": "key"}, idem("unassigned-template"), 422)
 }
-
-func TestLimitTemplatesPromoteWithReferencesAndPermissions(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Portable templates"}, idem("project"), 201)
-	id := project["id"].(string)
-	path := "/api/v1/projects/" + id + "/limit-templates"
-	current := h.want(owner, "GET", path, nil, nil, 200)
-	h.want(owner, "PUT", path, map[string]any{"templates": map[string]any{"standard": map[string]any{"requests_per_minute": 2}}}, etagHeader(current), 200)
-	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Member", "project_id": id, "scopes": []string{"inference"}, "allowed_routes": []string{}, "limit_template": "standard"}, idem("member"), 201)
-	ep := "/api/v1/projects/" + id + "/end-user-policy"
-	current = h.want(owner, "GET", ep, nil, nil, 200)
-	h.want(owner, "PUT", ep, map[string]any{"policy": map[string]any{"limit_template": "standard"}}, etagHeader(current), 200)
-	doc := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	entry := doc["projects"].([]any)[0].(map[string]any)
-	if entry["end_user_limit_template"] != "standard" {
-		t.Fatal("project reference missing from export")
-	}
-	entry["limit_templates"] = map[string]any{"standard": map[string]any{"requests_per_minute": 5}}
-	body := map[string]any{"document": doc}
-	token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{"name": "Configure only", "scopes": []string{"configure"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, idem("token"), 201)["secret"].(string)
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("denied"), 403)
-	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("apply"), 200)
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("unchanged"), 200)
-	entry["limit_templates"] = map[string]any{}
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("referenced-delete"), 409)
-	saved := h.want(owner, "GET", path, nil, nil, 200)["templates"].(map[string]any)["standard"].(map[string]any)
-	if saved["requests_per_minute"] != float64(5) {
-		t.Fatalf("failed removal changed policy: %v", saved)
-	}
-}

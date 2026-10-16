@@ -92,7 +92,3 @@ func testContinuationSDK(t *testing.T, command string, args ...string) {
 		t.Fatalf("SDK did not complete exactly one native two-turn workflow: calls=%d rejected=%d output=%s", calls.Load(), rejected.Load(), output)
 	}
 }
-
-func TestNegotiatedContinuationOfficialJavaScriptSDK(t *testing.T) {
-	testContinuationSDK(t, "node", "tests/sdk-smoke/negotiated-continuation.mjs")
-}

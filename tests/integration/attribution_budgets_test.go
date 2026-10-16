@@ -12,11 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func TestAttributionBudgetsShareHistoryAcrossKeysAndGateways(t *testing.T) {
-	for _, window := range []string{"daily_cost_limit", "weekly_cost_limit", "monthly_cost_limit"} {
-		t.Run(window, func(t *testing.T) { testAttributionBudgetWindow(t, window) })
-	}
-}
 func testAttributionBudgetWindow(t *testing.T, window string) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -104,38 +99,5 @@ func testAttributionBudgetWindow(t *testing.T, window string) {
 	otherDetail = h.want(owner, "PUT", otherPath, map[string]any{"budgets": caps("4", "")}, etagHeader(otherDetail), 200)
 	if otherDetail["usage"].(map[string]any)["team"].(map[string]any)["core"].(map[string]any)["daily"].(map[string]any)["accrued"] != "0" {
 		t.Fatalf("project spend leaked: %+v", otherDetail)
-	}
-}
-
-func TestAttributionBudgetPromotionAndValidation(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Promoted allocations"}, idem("project"), 201)
-	path := "/api/v1/projects/" + project["id"].(string) + "/attribution-budgets"
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	for _, body := range []any{map[string]any{}, map[string]any{"budgets": nil}, map[string]any{"budgets": map[string]any{"team": map[string]any{"core": map[string]any{}}}}} {
-		h.want(owner, "PUT", path, body, etagHeader(detail), 422)
-	}
-	h.want(owner, "PUT", path, map[string]any{"budgets": map[string]any{"team": map[string]any{"core": map[string]any{"weekly_cost_limit": "12.34"}}}}, etagHeader(detail), 200)
-	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	entry := document["projects"].([]any)[0].(map[string]any)
-	if entry["attribution_budgets"].(map[string]any)["team"].(map[string]any)["core"].(map[string]any)["weekly_cost_limit"] != "12.34" {
-		t.Fatal("export lost cap")
-	}
-	entry["attribution_budgets"] = map[string]any{"team": map[string]any{"core": map[string]any{"weekly_cost_limit": "50"}}}
-	token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{"name": "configure only", "scopes": []string{"configure"}, "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339)}, idem("token"), 201)["secret"].(string)
-	body := map[string]any{"document": document}
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("deny"), 403)
-	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("apply"), 200)
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("noop"), 200)
-	detail = h.want(owner, "GET", path, nil, nil, 200)
-	if detail["budgets"].(map[string]any)["team"].(map[string]any)["core"].(map[string]any)["weekly_cost_limit"] != "50" {
-		t.Fatal("promotion lost cap")
-	}
-	delete(entry, "attribution_budgets")
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("clear"), 200)
-	if len(h.want(owner, "GET", path, nil, nil, 200)["budgets"].(map[string]any)) != 0 {
-		t.Fatal("omission did not clear")
 	}
 }

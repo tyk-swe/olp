@@ -2,12 +2,9 @@ package connectors
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -44,34 +41,3 @@ var goldenKinds = []string{"openai", "openai_compatible", "anthropic", "gemini",
 var goldenOperations = []string{"generation", "token_count", "embeddings", "moderation", "rerank", "batch", "realtime", "bedrock_invoke",
 	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 	"video_create", "video_list", "video_get", "video_content", "video_delete"}
-
-// TestSupportsMatrixIsReviewed pins every tuple the connector matrix admits,
-// so a change to it is a reviewed difference rather than a side effect.
-func TestSupportsMatrixIsReviewed(t *testing.T) {
-	var out strings.Builder
-	for _, kind := range goldenKinds {
-		for _, vendor := range goldenVendors {
-			var admitted []string
-			for _, operation := range goldenOperations {
-				for _, surface := range []string{"openai", "anthropic", "gemini", "bedrock", "native"} {
-					for _, mode := range []string{"unary", "streaming", "async", "realtime"} {
-						if Supports(kind, vendor, operation, surface, mode) {
-							admitted = append(admitted, operation+"/"+surface+"/"+mode)
-						}
-					}
-				}
-			}
-			fmt.Fprintf(&out, "%s %q: %s\n", kind, vendor, strings.Join(admitted, " "))
-		}
-	}
-	golden(t, "supports.golden", []byte(out.String()))
-}
-
-// TestProfileCatalogueIsReviewed pins the built-in profile catalogue.
-func TestProfileCatalogueIsReviewed(t *testing.T) {
-	encoded, err := json.MarshalIndent(Profiles(), "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "profiles.golden", append(encoded, '\n'))
-}

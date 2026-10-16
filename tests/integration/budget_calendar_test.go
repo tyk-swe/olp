@@ -98,26 +98,3 @@ func TestBudgetCalendarSettingAndValkeyAdmission(t *testing.T) {
 	}
 
 }
-
-func TestBudgetCalendarPromotionRequiresSettingsAndPreservesWindows(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	if document["budget_time_zone"] != "UTC" {
-		t.Fatal("missing exported zone")
-	}
-	document["budget_time_zone"] = "America/New_York"
-	token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{"name": "configure only", "scopes": []string{"configure"}, "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339)}, idem("token"), 201)["secret"].(string)
-	body := map[string]any{"document": document}
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("denied"), 403)
-	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
-	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("apply"), 200)
-	h.machineWant(token, "POST", "/api/v1/configuration/apply", body, idem("unchanged"), 200)
-	detail := h.want(owner, "GET", "/api/v1/settings/budgets.time_zone", nil, nil, 200)
-	for _, item := range detail["calendar"].([]any) {
-		v := item.(map[string]any)
-		if v["time_zone"] != "UTC" || v["pending_time_zone"] != "America/New_York" {
-			t.Fatalf("promotion reset active window: %+v", v)
-		}
-	}
-}

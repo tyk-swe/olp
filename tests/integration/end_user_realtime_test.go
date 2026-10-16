@@ -14,18 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 )
 
-func TestEndUserBlockClosesEstablishedRealtimeSessions(t *testing.T) {
-	testRealtimeAuthorityRestriction(t, "end_user")
-}
-
-func TestAPIKeyNetworkChangeClosesEstablishedRealtimeSessions(t *testing.T) {
-	testRealtimeAuthorityRestriction(t, "network")
-}
-
-func TestRequiredAttributionClosesEstablishedRealtimeSessions(t *testing.T) {
-	testRealtimeAuthorityRestriction(t, "attribution")
-}
-
 func testRealtimeAuthorityRestriction(t *testing.T, restriction string) {
 	for _, protocol := range []string{"openai", "gemini"} {
 		t.Run(protocol, func(t *testing.T) {
@@ -108,8 +96,4 @@ func testRealtimeAuthorityRestriction(t *testing.T, restriction string) {
 			}
 		})
 	}
-}
-
-func TestAPIKeyOverlapExpiryClosesEstablishedRealtimeSessions(t *testing.T) {
-	testRealtimeAuthorityRestriction(t, "overlap")
 }

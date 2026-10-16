@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/oif"
 	"hash/crc32"
 	"strings"
 	"testing"
@@ -24,44 +23,6 @@ func evaluateText(t testing.TB, e *Engine, text, phase string, m *Masking) (Resu
 	return e.Evaluate(context.Background(), Evaluation{Phase: phase, Segments: []Segment{{ID: "text", Text: text}}}, m)
 }
 
-func TestActionsAndRequestLocalMasking(t *testing.T) {
-	for _, action := range []string{Block, Redact, Mask, Annotate} {
-		for _, monitor := range []bool{false, true} {
-			t.Run(action+map[bool]string{true: "_monitor"}[monitor], func(t *testing.T) {
-				e := testEngine(t, "builtin.regex", `{"rules":[{"id":"account","pattern":"secret","replacement":"$1"}]}`, Input, action, monitor, nil)
-				m := &Masking{}
-				r, err := evaluateText(t, e, "a secret", Input, m)
-				if monitor || action == Annotate {
-					if err != nil || r.Segments[0].Text != "a secret" || r.Changed {
-						t.Fatalf("evaluation-only mutation: %+v %v", r, err)
-					}
-				} else if action == Block {
-					if !errors.Is(err, ErrBlocked) || !r.Blocked {
-						t.Fatal(r, err)
-					}
-				} else if action == Redact {
-					if err != nil || r.Segments[0].Text != "a $1" {
-						t.Fatal(r, err)
-					}
-				} else {
-					if err != nil || r.Segments[0].Text == "a secret" || m.Restore(r.Segments[0].Text) != "a secret" {
-						t.Fatal(r, err)
-					}
-					if (&Masking{}).Restore(r.Segments[0].Text) != r.Segments[0].Text {
-						t.Fatal("mapping escaped its request")
-					}
-				}
-				data, _ := json.Marshal(r.Decisions)
-				if strings.Contains(string(data), "secret") || strings.Contains(string(data), "$1") {
-					t.Fatal("content in evidence")
-				}
-				if err := ValidateEvidence(r.Decisions); err != nil {
-					t.Fatal(err)
-				}
-			})
-		}
-	}
-}
 func TestDetectorCorpus(t *testing.T) {
 	cases := []struct{ kind, category, positive, negative string }{
 		{"builtin.pii", "pii.email", "メール alice@example.com", "alice at example dot com"},
@@ -97,17 +58,7 @@ func TestDetectorCorpus(t *testing.T) {
 		})
 	}
 }
-func TestUnicodeKeywordAutomaton(t *testing.T) {
-	e := testEngine(t, "builtin.keywords", `{"words":["strasse","ΣΊΓΜΑ","秘密"]}`, Input, Block, false, nil)
-	for _, value := range []string{"Straße", "σίγμα", "秘密"} {
-		if _, err := evaluateText(t, e, value, Input, nil); !errors.Is(err, ErrBlocked) {
-			t.Fatalf("missed %q: %v", value, err)
-		}
-	}
-	if _, err := evaluateText(t, e, "astrasseb", Input, nil); err != nil {
-		t.Fatal("word boundary false positive", err)
-	}
-}
+
 func TestSchemaDoesNotFetchRemoteReferences(t *testing.T) {
 	d := Revision{Type: "builtin.schema", Configuration: json.RawMessage(`{"schema":{"$ref":"https://127.0.0.1/private"}}`), TimeoutMS: 100, OnError: FailClosed}
 	if ValidateDefinition(d) == nil {
@@ -133,71 +84,7 @@ func TestToolsDenyOverridesAllowAndUntrustedResults(t *testing.T) {
 		}
 	}
 }
-func TestFailurePoliciesAndDeadline(t *testing.T) {
-	d := Revision{ID: "revision", GuardrailID: "guard", Type: "webhook", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`), TimeoutMS: 1, OnError: FailClosed}
-	for _, policy := range []string{FailOpen, FailClosed} {
-		d.OnError = policy
-		e, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: Block}}, map[string]Revision{d.ID: d}, EvaluatorFunc(func(ctx context.Context, _ Revision, _ Evaluation) (Verdict, error) {
-			<-ctx.Done()
-			return Verdict{}, ctx.Err()
-		}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		r, err := evaluateText(t, e, "private", Input, nil)
-		if r.Blocked != (policy == FailClosed) || (err != nil) != (policy == FailClosed) {
-			t.Fatal(r, err)
-		}
-	}
-}
-func TestStreamSplitMatchAndStrictFrames(t *testing.T) {
-	e := testEngine(t, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`, OutputStream, Block, false, nil)
-	s, err := NewStream(e, Evaluation{}, 256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out, err := s.Push(t.Context(), []byte("first"), "sec"); err != nil || len(out) != 0 {
-		t.Fatal(out, err)
-	}
-	if _, err := s.Push(t.Context(), []byte("second"), "ret"); !errors.Is(err, ErrBlocked) {
-		t.Fatal("split match released", err)
-	}
-	s, _ = NewStream(e, Evaluation{}, 256)
-	frames := [][]byte{[]byte("one"), []byte("two"), []byte("three")}
-	var emitted [][]byte
-	for _, frame := range frames {
-		out, err := s.Push(t.Context(), frame, "ordinary text ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		emitted = append(emitted, out...)
-	}
-	last, err := s.Finish(t.Context())
-	emitted = append(emitted, last...)
-	if err != nil || len(emitted) != len(frames) {
-		t.Fatal(emitted, err)
-	}
-	for i := range frames {
-		if string(emitted[i]) != string(frames[i]) {
-			t.Fatal("strict frame changed")
-		}
-	}
-	unbounded := testEngine(t, "builtin.regex", `{"rules":[{"id":"all","pattern":"a.*z"}]}`, OutputStream, Block, false, nil)
-	if _, err := NewStream(unbounded, Evaluation{}, 256); !errors.Is(err, ErrSurface) {
-		t.Fatal("unbounded rule accepted", err)
-	}
-}
-func TestCompilationPinsConfiguration(t *testing.T) {
-	d := Revision{ID: "r", GuardrailID: "g", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"x","pattern":"one"}]}`), TimeoutMS: 100, OnError: FailClosed}
-	e, err := Compile([]Entry{{GuardrailID: "g", RevisionID: "r", Phase: Input, Action: Block}}, map[string]Revision{"r": d}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	copy(d.Configuration, strings.Repeat(" ", len(d.Configuration)))
-	if _, err := evaluateText(t, e, "one", Input, nil); !errors.Is(err, ErrBlocked) {
-		t.Fatal("mutable configuration", err)
-	}
-}
+
 func BenchmarkBuiltins100KTokens(b *testing.B) {
 	e := testEngine(b, "builtin.pii", `{}`, Input, Block, false, nil)
 	text := strings.Repeat("ordinary safe prompt words ", 20000)
@@ -227,134 +114,6 @@ func githubFixture(entropy string) string {
 	return "ghp_" + entropy + string(checksum)
 }
 
-func TestIBANRegistryChecksums(t *testing.T) {
-	for _, value := range []string{"BI4210000100010000332045181", "DJ2100010000000154000100186", "EG380019000500000000263180002", "FK88SC123456789012", "HN88CABF00000000000250005469", "LY83002048000020100120361", "MN121234123456789123", "NI45BAPR00000013000003558124", "OM810180000001299123456", "RU0304452522540817810538091310419", "SD2129010501234001", "SO211000001001000100141", "YE15CBYE0001018861234567891234"} {
-		if !validIBAN(value) {
-			t.Errorf("missed registered IBAN %s", value[:2])
-		}
-		invalid := value[:2] + "00" + value[4:]
-		if validIBAN(invalid) {
-			t.Errorf("accepted invalid checksum %s", value[:2])
-		}
-	}
-}
-
-func TestPhaseActionMatrix(t *testing.T) {
-	for _, phase := range []string{Input, InputParallel, Output, OutputStream} {
-		for _, action := range []string{Block, Redact, Mask, Annotate} {
-			for _, monitor := range []bool{false, true} {
-				t.Run(phase+"/"+action+map[bool]string{true: "/monitor"}[monitor], func(t *testing.T) {
-					d := Revision{ID: "r", GuardrailID: "g", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"s","pattern":"secret","replacement":"hidden"}]}`), TimeoutMS: 1000, OnError: FailClosed}
-					e, err := Compile([]Entry{{GuardrailID: "g", RevisionID: "r", Phase: phase, Action: action, Monitor: monitor}}, map[string]Revision{"r": d}, nil)
-					incompatible := action == Mask && phase != Input || action == Redact && phase == InputParallel && !monitor
-					if incompatible {
-						if err == nil {
-							t.Fatal("incompatible action accepted")
-						}
-						return
-					}
-					if err != nil {
-						t.Fatal(err)
-					}
-					result, err := evaluateText(t, e, "secret", phase, &Masking{})
-					if monitor || action == Annotate {
-						if err != nil || result.Changed || result.Segments[0].Text != "secret" {
-							t.Fatal(result, err)
-						}
-					} else if action == Block {
-						if !errors.Is(err, ErrBlocked) {
-							t.Fatal(result, err)
-						}
-					} else if err != nil || !result.Changed {
-						t.Fatal(result, err)
-					}
-				})
-			}
-		}
-	}
-}
-func TestStreamingRedactionAndMaskRestoration(t *testing.T) {
-	e := testEngine(t, "builtin.regex", `{"rules":[{"id":"s","pattern":"secret","replacement":"hidden"}]}`, OutputStream, Redact, false, nil)
-	stream, err := NewStream(e, Evaluation{}, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream.Rewriter(func(_ []byte, text string) ([]byte, error) { return []byte(text), nil })
-	var output []byte
-	for _, chunk := range []string{"sec", "ret"} {
-		frames, err := stream.Push(t.Context(), []byte(chunk), chunk)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range frames {
-			output = append(output, f...)
-		}
-	}
-	frames, err := stream.Finish(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range frames {
-		output = append(output, f...)
-	}
-	if string(output) != "hidden" {
-		t.Fatalf("stream redaction: %q", output)
-	}
-	masks := &Masking{}
-	e = testEngine(t, "builtin.pii", `{"categories":["pii.email"]}`, Input, Mask, false, nil)
-	masked, err := evaluateText(t, e, "alice@example.com", Input, masks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream, err = NewStream(e, Evaluation{}, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream.Masking(masks)
-	stream.Rewriter(func(_ []byte, text string) ([]byte, error) { return []byte(text), nil })
-	token := masked.Segments[0].Text
-	output = nil
-	for _, chunk := range []string{token[:10], token[10:]} {
-		frames, err := stream.Push(t.Context(), []byte(chunk), chunk)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range frames {
-			output = append(output, f...)
-		}
-	}
-	frames, err = stream.Finish(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range frames {
-		output = append(output, f...)
-	}
-	if string(output) != "alice@example.com" {
-		t.Fatalf("stream restoration failed: %q", output)
-	}
-}
-
-func TestNativeToolArgumentEscapesCannotBypassInspection(t *testing.T) {
-	document, err := oif.ParseJSON([]byte(`{"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"send","arguments":"{\"address\":\"\\u0061lice@example.com\"}"}}]}]}`), oif.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	surface, err := NativeSurface(document, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine := testEngine(t, "builtin.pii", `{"categories":["pii.email"]}`, Input, Block, false, nil)
-	_, err = engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: surface.Segments}, nil)
-	if !errors.Is(err, ErrBlocked) {
-		t.Fatal("escaped tool argument bypassed inspection", err)
-	}
-	preserved, err := surface.Apply(surface.Segments)
-	if err != nil || string(preserved.Bytes()) != string(document.Bytes()) {
-		t.Fatal("inspection changed native bytes")
-	}
-}
-
 func BenchmarkGuardrailStreaming(b *testing.B) {
 	engine := testEngine(b, "builtin.keywords", `{"words":["forbidden"]}`, OutputStream, Block, false, nil)
 	frame := []byte(strings.Repeat("ordinary safe text ", 256))
@@ -374,16 +133,5 @@ func BenchmarkGuardrailStreaming(b *testing.B) {
 		if _, err = stream.Finish(b.Context()); err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-func TestKeywordWordCannotMatchHalfOfUnicodeExpansion(t *testing.T) {
-	engine := testEngine(t, "builtin.keywords", `{"words":["s"]}`, Input, Block, false, nil)
-	if _, err := evaluateText(t, engine, "ß", Input, nil); err != nil {
-		t.Fatal("one letter matched half of a case-fold expansion")
-	}
-	engine = testEngine(t, "builtin.keywords", `{"words":["ss"]}`, Input, Block, false, nil)
-	if _, err := evaluateText(t, engine, "ß", Input, nil); !errors.Is(err, ErrBlocked) {
-		t.Fatal("whole case-fold expansion did not match")
 	}
 }

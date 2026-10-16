@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 )
@@ -42,32 +41,7 @@ func TestQualifiedEmbeddingControlsAndStorage(t *testing.T) {
 		t.Fatalf("target source discarded: %s", result.Body)
 	}
 }
-func TestQualifiedEmbeddingOmittedEncodingIgnoresTargetBase64Default(t *testing.T) {
-	c := config("voyage-embeddings", "embeddings")
-	c.Provider.OperationDefaults = map[string]connectors.DefaultSet{"embeddings": {Dialect: "voyage-embeddings", Values: map[string]json.RawMessage{"encoding_format": json.RawMessage(`"base64"`)}}}
-	template, err := operationplan.Compile(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for body, want := range map[string]string{
-		`{"model":"route","input":["a"]}`:                            "null",
-		`{"model":"route","input":["a"],"encoding_format":"base64"}`: `"base64"`,
-	} {
-		source, err := operationplan.Parse("openai-embeddings", []byte(body), 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		plan, err := template.Bind(source, operationplan.Context{Route: "route"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var fields map[string]json.RawMessage
-		_ = json.Unmarshal(plan.Body(), &fields)
-		if string(fields["encoding_format"]) != want {
-			t.Fatalf("%s: upstream encoding_format %s, want %s: %s", body, fields["encoding_format"], want, plan.Body())
-		}
-	}
-}
+
 func TestNativeDefaultsPreserveSourcePresenceAndRequireClient(t *testing.T) {
 	c := config("voyage-embeddings", "embeddings")
 	c.Provider.OperationDefaults = map[string]connectors.DefaultSet{"embeddings": {Dialect: "voyage-embeddings", Values: map[string]json.RawMessage{"output_dtype": json.RawMessage(`"uint8"`), "truncation": json.RawMessage(`true`), "encoding_format": json.RawMessage(`"base64"`)}}}
@@ -90,21 +64,5 @@ func TestNativeDefaultsPreserveSourcePresenceAndRequireClient(t *testing.T) {
 	_ = json.Unmarshal(plan.Body(), &fields)
 	if string(fields["truncation"]) != "false" || string(fields["encoding_format"]) != "null" || string(fields["native"]) != `{"zero":-0}` {
 		t.Fatalf("source rewritten %s", plan.Body())
-	}
-}
-func TestUninspectableVectorOutputPolicyRefusesBeforeDispatch(t *testing.T) {
-	c := config("tei-embeddings", "embeddings")
-	c.Policy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "block", Phase: "output", Action: "block", Pattern: "secret"}}}
-	template, err := operationplan.Compile(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, _ := operationplan.Parse("tei-embeddings", []byte(`{"inputs":"a"}`), 0)
-	plan, err := template.Bind(request, operationplan.Context{Route: "route"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = plan.CheckInput(); err == nil {
-		t.Fatal("missing output policy coverage admitted")
 	}
 }

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/scim"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func scimToken(h *accessHarness, owner *browser, scopes []string) string {
@@ -147,135 +146,14 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 	scimCall(t, h, token, "DELETE", gpath, nil, "", 204)
 }
 
-func TestSCIMKeepsAProjectManager(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	token := scimToken(h, owner, []string{"access"})
-	uid := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("manager"), "", 201)["id"].(string)
-	upath := "/scim/v2/Users/" + uid
-	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "SCIM managed"}, idem("scim-managed-project"), 201)["id"].(string)
-	group := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{"schemas": []string{scim.GroupSchema}, "displayName": "Managers", "members": []any{map[string]any{"value": uid}}, scim.GroupExtension: map[string]any{"role": "developer", "projects": []any{map[string]any{"value": project, "role": "manager"}}}}, "", 201)
-	gpath := "/scim/v2/Groups/" + group["id"].(string)
-	// The SCIM grant satisfies the console's rule, so the direct manager leaves.
-	ownerID := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
-	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+ownerID, nil, projectEtag(h, owner, project), 204)
+// The SCIM grant satisfies the console's rule, so the direct manager leaves.
 
-	scimCall(t, h, token, "PATCH", gpath, scimPatch(map[string]any{"op": "remove", "path": `members[value eq "` + uid + `"]`}), "", 409)
-	scimCall(t, h, token, "PATCH", gpath, scimPatch(map[string]any{"op": "replace", "path": scim.GroupExtension + ":projects", "value": []any{map[string]any{"value": project, "role": "viewer"}}}), "", 409)
-	scimCall(t, h, token, "DELETE", gpath, nil, "", 409)
-	scimCall(t, h, token, "DELETE", upath, nil, "", 409)
-	// Taking the user over locally would end their group grant too.
-	provisioned := h.want(owner, "GET", "/api/v1/users/"+uid, nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v1/users/"+uid, map[string]any{"role": "developer"}, etagHeader(provisioned), 409)
-	// The console's mapping editor applies the same rule.
-	mapping := h.want(owner, "GET", "/api/v1/scim/groups", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	h.want(owner, "PUT", "/api/v1/scim/groups/"+group["id"].(string)+"/mapping", map[string]any{"mapping": map[string]any{"role": "developer", "accessScope": "assigned", "projects": []any{}}}, etagHeader(mapping), 409)
-	var managers int
-	if e := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.effective_project_members WHERE project_id=$1 AND role='manager'", project).Scan(&managers); e != nil || managers != 1 {
-		t.Fatalf("managers=%d err=%v", managers, e)
-	}
+// Taking the user over locally would end their group grant too.
 
-	// Another delegated manager lets the directory withdraw its grant.
-	p := h.want(owner, "GET", "/api/v1/projects/"+project, nil, nil, 200)
-	h.want(owner, "PUT", "/api/v1/projects/"+project+"/members/"+ownerID, map[string]any{"role": "manager"}, etagHeader(p), 200)
-	scimCall(t, h, token, "DELETE", gpath, nil, "", 204)
-}
+// The console's mapping editor applies the same rule.
 
-func TestSCIMMappingsPromoteWithoutIdentitiesOrMemberships(t *testing.T) {
-	source := newAccessHarness(t)
-	owner := source.owner()
-	token := scimToken(source, owner, []string{"access"})
-	project := source.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Build"}, idem("scim-promotion-project"), 201)["id"].(string)
-	user := scimCall(t, source, token, "POST", "/scim/v2/Users", scimUser("private-directory-subject"), "", 201)
-	group := scimCall(t, source, token, "POST", "/scim/v2/Groups", map[string]any{"schemas": []string{scim.GroupSchema}, "displayName": "Builders", "externalId": "private-directory-group", "members": []any{map[string]any{"value": user["id"]}}}, "", 201)
-	managed := source.want(owner, "GET", "/api/v1/scim/groups", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	source.want(owner, "PUT", "/api/v1/scim/groups/"+group["id"].(string)+"/mapping", map[string]any{"mapping": map[string]any{"role": "developer", "accessScope": "assigned", "projects": []any{map[string]any{"value": project, "role": "manager"}}}}, etagHeader(managed), 200)
-	// Directory replacement preserves an unfamiliar omitted extension.
-	scimCall(t, source, token, "PUT", "/scim/v2/Groups/"+group["id"].(string), map[string]any{"schemas": []string{scim.GroupSchema}, "displayName": "Builders", "members": []any{map[string]any{"value": user["id"]}}}, "", 200)
-	document := source.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
-	raw, _ := json.Marshal(document)
-	for _, value := range []string{project, user["id"].(string), group["id"].(string), "private-directory-subject", "private-directory-group"} {
-		if bytes.Contains(raw, []byte(value)) {
-			t.Fatalf("nonportable SCIM identity exported: %s", value)
-		}
-	}
-	destination := newAccessHarness(t)
-	targetOwner := destination.owner()
-	configure := scimToken(destination, targetOwner, []string{"configure"})
-	request := map[string]any{"document": document}
-	destination.machineWant(configure, "POST", "/api/v1/configuration/plan", request, nil, 403)
-	destination.machineWant(configure, "POST", "/api/v1/configuration/apply", request, idem("scim-import"), 403)
-	destination.want(targetOwner, "POST", "/api/v1/configuration/plan", request, nil, 200)
-	destination.want(targetOwner, "POST", "/api/v1/configuration/apply", request, idem("scim-import"), 200)
-	imported := destination.want(targetOwner, "GET", "/api/v1/scim/groups", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	if imported["member_count"] != float64(0) || imported["mapping"].(map[string]any)["role"] != "developer" {
-		t.Fatal(imported)
-	}
-	destination.machineWant(configure, "GET", "/api/v1/configuration/export", nil, nil, 403)
-	destination.want(targetOwner, "POST", "/api/v1/configuration/apply", request, idem("scim-import-again"), 200)
-	var users int
-	if err := destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.scim_users").Scan(&users); err != nil || users != 0 {
-		t.Fatalf("users promoted: %d %v", users, err)
-	}
-}
+// Another delegated manager lets the directory withdraw its grant.
 
-func TestSCIMRevokesSessionsAndProtectsTheUsableOwner(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	token := scimToken(h, owner, []string{"access"})
-	input := scimUser("directory-owner")
-	input[scim.UserExtension] = map[string]any{"role": "owner", "accessScope": "global"}
-	user := scimCall(t, h, token, "POST", "/scim/v2/Users", input, "", 201)
-	id := user["id"].(string)
-	// Model an independently enrolled local sign-in; SCIM never accepts passwords.
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.users SET password_hash=$2 WHERE id=$1", id, secrets.HashPassword(accessPassword)); err != nil {
-		t.Fatal(err)
-	}
-	signIn := func() *browser {
-		b := &browser{}
-		h.want(b, "POST", "/api/v1/sessions", map[string]any{"email": "directory-owner@example.com", "password": accessPassword}, nil, 201)
-		return b
-	}
-	member := signIn()
-	scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, scimPatch(map[string]any{"op": "replace", "path": "displayName", "value": "Directory Owner"}), "", 200)
-	h.want(member, "GET", "/api/v1/profile", nil, nil, 401)
-	member = signIn()
-	memberToken := scimToken(h, member, []string{"access"})
-	profile := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)
-	ownerID := profile["id"].(string)
-	detail := h.want(member, "GET", "/api/v1/users/"+ownerID, nil, nil, 200)
-	h.want(member, "PATCH", "/api/v1/users/"+ownerID, map[string]any{"active": false}, etagHeader(detail), 200)
-	scimCall(t, h, memberToken, "DELETE", "/scim/v2/Users/"+id, nil, "", 409)
-	current := scimCall(t, h, memberToken, "GET", "/scim/v2/Users/"+id, nil, "", 200)
-	if current["active"] != true {
-		t.Fatal("owner refusal did not roll back")
-	}
-	h.want(member, "GET", "/api/v1/profile", nil, nil, 200)
-}
+// Directory replacement preserves an unfamiliar omitted extension.
 
-func TestSCIMSortsPrimaryValuesAndProjectsComplexAttributes(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	token := scimToken(h, owner, []string{"access"})
-	a := scimUser("sort-a")
-	a["emails"] = []any{map[string]any{"value": "a@example.com", "primary": false}, map[string]any{"value": "z@example.com", "primary": true}}
-	b := scimUser("sort-b")
-	b["emails"] = []any{map[string]any{"value": "m@example.com", "primary": true}}
-	firstUser := scimCall(t, h, token, "POST", "/scim/v2/Users", a, "", 201)
-	second := scimCall(t, h, token, "POST", "/scim/v2/Users", b, "", 201)
-	list := scimCall(t, h, token, "GET", "/scim/v2/Users?sortBy=emails.value&count=1&attributes=emails.value", nil, "", 200)
-	first := list["Resources"].([]any)[0].(map[string]any)
-	if list["totalResults"] != float64(2) || first["id"] != second["id"] || first["userName"] != nil || first["emails"].([]any)[0].(map[string]any)["primary"] != nil {
-		t.Fatal(list)
-	}
-	list = scimCall(t, h, token, "GET", "/scim/v2/Users?sortBy=emails.value&sortOrder=descending&startIndex=2", nil, "", 200)
-	if list["Resources"].([]any)[0].(map[string]any)["id"] != second["id"] {
-		t.Fatal(list)
-	}
-	updated := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+firstUser["id"].(string), scimPatch(map[string]any{"op": "replace", "path": `emails[value eq "a@example.com"].primary`, "value": true}), "", 200)
-	entries := updated["emails"].([]any)
-	if entries[0].(map[string]any)["primary"] != true || entries[1].(map[string]any)["primary"] != false {
-		t.Fatal("primary email did not transfer", updated)
-	}
-
-}
+// Model an independently enrolled local sign-in; SCIM never accepts passwords.

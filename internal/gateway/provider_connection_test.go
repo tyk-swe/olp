@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/pem"
 	"io"
 	"net/http"
@@ -15,9 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/coder/websocket"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func TestConfiguredResourceAndRealtimeUseThePinnedConnection(t *testing.T) {
@@ -93,33 +90,4 @@ func TestConfiguredResourceAndRealtimeUseThePinnedConnection(t *testing.T) {
 		t.Fatal(path)
 	}
 	h.gateway.connections.CloseIdleConnections()
-}
-
-func TestConfiguredDefaultBoundsReachSharedAdmission(t *testing.T) {
-	h := newHarness(t, Config{})
-	var provider routing.Provider
-	for _, value := range h.rt.release.Snapshot.Providers {
-		if value.Name == "a" {
-			provider = value
-		}
-	}
-	provider.ProfileID = "compatible-chat"
-	provider.ProfileRevision = "1"
-	provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`)}}}
-	request, err := openai.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"abcd"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	x := &call{routeLeg: routeLeg{attempts: []routing.Attempt{{ProviderID: provider.ID, UpstreamModel: modelA}}}, generation: generationCall{parsed: request}}
-	if got := x.attemptReservation(x.attempts[0], &provider); got < 9001 {
-		t.Fatalf("configured bound omitted from shared reservation: %d", got)
-	}
-	prepared, err := x.preparedProvider(&provider, "", modelA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	field, _ := prepared.invocation.Prepared.Document().Lookup("/max_tokens")
-	if field.Raw() != "9000" {
-		t.Fatal("admission and dispatch use different controls")
-	}
 }

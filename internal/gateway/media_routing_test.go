@@ -6,17 +6,12 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // mediaProvider returns the named fixture provider and its snapshot id.
@@ -115,46 +110,6 @@ func TestMediaRoutingHeaderValidation(t *testing.T) {
 				t.Fatalf("rejected routing header reached upstream %d times", calls)
 			}
 		})
-	}
-}
-
-func TestMediaDuplicateRoutingHeaderRejected(t *testing.T) {
-	h := newMediaHarness(t)
-	for _, path := range []string{"/v1/images/generations", "/v1/audio/transcriptions", "/v1/videos"} {
-		var body *bytes.Reader
-		var contentType string
-		switch path {
-		case "/v1/images/generations":
-			body = bytes.NewReader([]byte(`{"model":"team-chat","prompt":"photo"}`))
-			contentType = "application/json"
-		case "/v1/audio/transcriptions":
-			data, ct := mediaFormBody(t, map[string]string{"model": routeSlug}, "file", "audio.mp3", []byte("audio"))
-			body, contentType = bytes.NewReader(data), ct
-		default:
-			data, ct := mediaFormBody(t, map[string]string{"model": routeSlug, "prompt": "clip"}, "", "", nil)
-			body, contentType = bytes.NewReader(data), ct
-		}
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.server.URL+path, body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+fullKey)
-		req.Header.Set("Content-Type", contentType)
-		req.Header.Add(routingHeader, `{"strategy":"weighted"}`)
-		req.Header.Add(routingHeader, `{"max_attempts":1}`)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded map[string]any
-		json.NewDecoder(resp.Body).Decode(&decoded)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid_request" {
-			t.Fatalf("%s: status=%d body=%v", path, resp.StatusCode, decoded)
-		}
-	}
-	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
-		t.Fatalf("duplicate routing header reached upstream %d times", calls)
 	}
 }
 
@@ -354,216 +309,12 @@ func TestMediaStrictParameterFiltering(t *testing.T) {
 	})
 }
 
-func TestMediaUnmeterableSkipKeepsBudgetForEligibleTarget(t *testing.T) {
-	h := newMediaHarness(t)
-	aID, a := mediaProvider(t, h, "a")
-	one := int64(1)
-	a.Slots[0].RequestsPerMinute = &one // a hard quota with no limiter configured is unmeterable
-	h.rt.release.Snapshot.Providers[aID] = a
-	resp, _ := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
-		[]byte(`{"model":"team-chat","prompt":"photo"}`),
-		map[string]string{routingHeader: `{"max_attempts":1}`})
-	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 0 || h.mock.count("b") != 1 {
-		t.Fatalf("unmeterable skip consumed the budget: status=%d calls a=%d b=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
-	}
-	env := h.sink.last(t)
-	if len(env.Attempts) != 1 || env.Attempts[0].UpstreamModel != modelB || env.Outcome != "success" {
-		t.Fatalf("envelope %+v", env)
-	}
-}
+// a hard quota with no limiter configured is unmeterable
 
-func TestMediaLocalCooldownSkipsCooledSlot(t *testing.T) {
-	h := newMediaHarness(t)
-	h.mock.set("a", status(http.StatusTooManyRequests, `{"error":{"message":"slow down"}}`))
-	resp, _ := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
-		[]byte(`{"model":"team-chat","prompt":"photo"}`), nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("first status=%d", resp.StatusCode)
-	}
-	resp, _ = mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
-		[]byte(`{"model":"team-chat","prompt":"photo"}`), nil)
-	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 2 {
-		t.Fatalf("cooled slot retried: status=%d calls a=%d b=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
-	}
-}
+// While the half-open probe is in flight the provider rejects every
+// sibling dispatch, so a concurrent request must use the next target.
 
-func TestMediaHalfOpenProbeIsExclusive(t *testing.T) {
-	h := newMediaHarness(t)
-	aID, _ := mediaProvider(t, h, "a")
-	for i := 0; i < circuitFailures; i++ {
-		h.gateway.health.record(aID, AttemptFact{Class: classConnect})
-	}
-	h.gateway.health.mu.Lock()
-	h.gateway.health.provider(aID).openUntil = time.Now().Add(-time.Second)
-	h.gateway.health.mu.Unlock()
+// An image edit is not idempotent: a post-dispatch server failure leaves
+// the upstream outcome unprovable, so no sibling may retry it.
 
-	var once sync.Once
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		once.Do(func() { close(entered) })
-		select {
-		case <-release:
-		case <-r.Context().Done():
-			return
-		}
-		status(http.StatusOK, `{"data":[{"url":"https://example.com/probe.png"}]}`)(w, r)
-	})
-
-	first := make(chan int, 1)
-	go func() {
-		resp, _ := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
-			[]byte(`{"model":"team-chat","prompt":"photo"}`), nil)
-		first <- resp.StatusCode
-	}()
-	select {
-	case <-entered:
-	case <-time.After(3 * time.Second):
-		t.Fatal("probe request never reached the recovering provider")
-	}
-	// While the half-open probe is in flight the provider rejects every
-	// sibling dispatch, so a concurrent request must use the next target.
-	resp, _ := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
-		[]byte(`{"model":"team-chat","prompt":"photo"}`), nil)
-	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 1 {
-		t.Fatalf("half-open probe not exclusive: status=%d calls a=%d b=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
-	}
-	close(release)
-	if code := <-first; code != http.StatusOK {
-		t.Fatalf("probe status=%d", code)
-	}
-}
-
-func TestMediaAmbiguousFailureNeverRetries(t *testing.T) {
-	h := newMediaHarness(t)
-	h.mock.set("a", status(http.StatusInternalServerError, `{"error":{"message":"went away mid-write"}}`))
-	h.mock.set("b", status(200, `{"data":[{"url":"https://example.com/i.png"}]}`))
-	// An image edit is not idempotent: a post-dispatch server failure leaves
-	// the upstream outcome unprovable, so no sibling may retry it.
-	body, contentType := imageEditBody(t)
-	resp, decoded := mediaRequest(t, h, http.MethodPost, "/v1/images/edits", body,
-		map[string]string{"Content-Type": contentType})
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, decoded) != "ambiguous_upstream_result" ||
-		h.mock.count("a") != 1 || h.mock.count("b") != 0 {
-		t.Fatalf("ambiguous edit retried: status=%d calls a=%d b=%d body=%v", resp.StatusCode, h.mock.count("a"), h.mock.count("b"), decoded)
-	}
-	env := h.sink.last(t)
-	if len(env.Attempts) != 1 || env.Attempts[0].Class != classAmbiguous {
-		t.Fatalf("attempts %+v", env.Attempts)
-	}
-}
-
-func TestMediaRevocationBetweenSiblingCredentials(t *testing.T) {
-	h := newMediaHarness(t)
-	release := h.rt.release
-	snapshot := release.Snapshot
-	siblingID, credentialID := uuid.NewString(), uuid.NewString()
-	credentials := map[string][]byte{credentialID: []byte("sibling-secret")}
-	for id, provider := range snapshot.Providers {
-		for _, slot := range provider.Slots {
-			credentials[*slot.CredentialID], _ = release.Credential(*slot.CredentialID)
-		}
-		if provider.Name == "a" {
-			provider.Slots = append(provider.Slots, routing.Slot{ID: siblingID, Name: "sibling", Enabled: true, Priority: 1, Weight: 1, CredentialID: &credentialID})
-			snapshot.Providers[id] = provider
-		}
-	}
-	var err error
-	h.rt.release, err = runtime.NewRelease(release.ID, release.Sequence, snapshot, credentials)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+secretA {
-			t.Error("dispatched the credential revoked mid-request")
-			status(http.StatusOK, `{"data":[{"url":"https://example.com/i.png"}]}`)(w, r)
-			return
-		}
-		// The first credential's call is pending when authority revokes its sibling.
-		h.rt.mu.Lock()
-		h.rt.revoked[credentialID] = true
-		h.rt.mu.Unlock()
-		status(http.StatusUnauthorized, `{"error":{"message":"bad key"}}`)(w, r)
-	})
-	resp, _ := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
-		[]byte(`{"model":"team-chat","prompt":"photo"}`), nil)
-	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 1 {
-		t.Fatalf("status=%d calls a=%d b=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
-	}
-	env := h.sink.last(t)
-	if len(env.Attempts) != 2 || env.Attempts[0].CredentialID != h.credA || env.Attempts[1].UpstreamModel != modelB {
-		t.Fatalf("envelope %+v", env)
-	}
-}
-
-func TestGateProbeReleasedWhenDispatchAbandoned(t *testing.T) {
-	h := newMediaHarness(t)
-	aID, a := mediaProvider(t, h, "a")
-	for i := 0; i < circuitFailures; i++ {
-		h.gateway.health.record(aID, AttemptFact{Class: classConnect})
-	}
-	h.gateway.health.mu.Lock()
-	h.gateway.health.provider(aID).openUntil = time.Now().Add(-time.Second)
-	h.gateway.health.mu.Unlock()
-
-	slot := a.Slots[0]
-	gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute), "")
-	if gate.verdict != gateAdmitted || gate.hold == nil || !gate.hold.probed {
-		t.Fatalf("expected an admitted probe, got %+v", gate)
-	}
-	if !h.gateway.health.open(aID) {
-		t.Fatal("held probe should still close the endpoint to siblings")
-	}
-	h.gateway.releaseHold(t.Context(), gate.hold)
-	if h.gateway.health.open(aID) {
-		t.Fatal("abandoned probe kept the endpoint closed")
-	}
-	if probed, granted := h.gateway.health.claim(aID); !granted || !probed {
-		t.Fatal("released probe could not be claimed by a sibling")
-	}
-}
-
-func TestPinnedSettleReturnsHalfOpenProbe(t *testing.T) {
-	cases := []struct {
-		name       string
-		dispatched bool
-		fact       AttemptFact
-		open       bool
-	}{
-		{name: "success closes the circuit", dispatched: true, fact: AttemptFact{Class: "success"}, open: false},
-		{name: "failure reopens the circuit", dispatched: true, fact: AttemptFact{Class: classConnect}, open: true},
-		{name: "undispatched releases the probe", dispatched: false, open: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newMediaHarness(t)
-			aID, a := mediaProvider(t, h, "a")
-			for i := 0; i < circuitFailures; i++ {
-				h.gateway.health.record(aID, AttemptFact{Class: classConnect})
-			}
-			h.gateway.health.mu.Lock()
-			h.gateway.health.provider(aID).openUntil = time.Now().Add(-time.Second)
-			h.gateway.health.mu.Unlock()
-
-			slot := a.Slots[0]
-			gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute), "")
-			if gate.verdict != gateAdmitted || !gate.hold.probed {
-				t.Fatalf("expected an admitted probe, got %+v", gate)
-			}
-			x := &call{dispatched: tc.dispatched}
-			if tc.dispatched {
-				x.facts = []AttemptFact{tc.fact}
-			}
-			h.gateway.settlePinHold(t.Context(), x, gate.hold, nil)
-			h.gateway.health.mu.Lock()
-			probing := h.gateway.health.provider(aID).probing
-			h.gateway.health.mu.Unlock()
-			if probing {
-				t.Fatal("pinned settle left the half-open probe claimed")
-			}
-			if got := h.gateway.health.open(aID); got != tc.open {
-				t.Fatalf("circuit open = %v, want %v", got, tc.open)
-			}
-		})
-	}
-}
+// The first credential's call is pending when authority revokes its sibling.

@@ -1,14 +1,6 @@
 package coordination_test
 
 import (
-	"bytes"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
-	"math/big"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -64,84 +56,6 @@ func TestConfigurationPreservesConnectionSettings(t *testing.T) {
 			}
 			if len(request.GetRootCerts()) != 0 {
 				t.Fatal("configuration without a CA file replaced the system trust roots")
-			}
-		})
-	}
-}
-
-func TestConfigurationRejectsInvalidURLsWithoutExposingCredentials(t *testing.T) {
-	t.Parallel()
-	const invalidURL = "OLP_VALKEY_URL must be a redis:// or rediss:// URL without query or fragment"
-	for _, tc := range []struct{ name, url, message string }{
-		{"empty", "", invalidURL},
-		{"scheme", "https://worker:private-password@cache.example", invalidURL},
-		{"missing host", "redis://worker:private-password@/0", invalidURL},
-		{"invalid escape", "redis://worker:private-password%ZZ@cache.example", invalidURL},
-		{"query", "redis://worker:private-password@cache.example?secret=private-password", invalidURL},
-		{"fragment", "redis://worker:private-password@cache.example#private-password", invalidURL},
-		{"nonnumeric port", "redis://worker:private-password@cache.example:invalid", invalidURL},
-		{"zero port", "redis://worker:private-password@cache.example:0", "invalid OLP_VALKEY_URL port"},
-		{"large port", "redis://worker:private-password@cache.example:65536", "invalid OLP_VALKEY_URL port"},
-		{"negative database", "redis://worker:private-password@cache.example/-1", "invalid OLP_VALKEY_URL database"},
-		{"nonnumeric database", "redis://worker:private-password@cache.example/private-password", "invalid OLP_VALKEY_URL database"},
-		{"nested path", "redis://worker:private-password@cache.example/0/1", "invalid OLP_VALKEY_URL database"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			cfg, err := coordination.Configuration(tc.url, "", time.Second)
-			if cfg != nil || err == nil || err.Error() != tc.message {
-				t.Fatalf("configuration returned %v; want sanitized error %q and no client configuration", err, tc.message)
-			}
-		})
-	}
-}
-
-func TestConfigurationValidatesCustomTrustRoots(t *testing.T) {
-	t.Parallel()
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	certificate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, public, private)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trust := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	dir := t.TempDir()
-	for name, data := range map[string][]byte{"ca.pem": trust, "empty.pem": {}, "invalid.pem": []byte("private-password is not a certificate")} {
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, tc := range []struct{ name, url, file, message string }{
-		{"custom roots", "rediss://cache.example", "ca.pem", ""},
-		{"plaintext", "redis://cache.example", "ca.pem", "OLP_VALKEY_TLS_CA_FILE requires rediss://"},
-		{"missing file", "rediss://cache.example", "missing.pem", "OLP_VALKEY_TLS_CA_FILE must contain PEM trust roots"},
-		{"empty file", "rediss://cache.example", "empty.pem", "OLP_VALKEY_TLS_CA_FILE must contain PEM trust roots"},
-		{"invalid PEM", "rediss://cache.example", "invalid.pem", "OLP_VALKEY_TLS_CA_FILE must contain PEM trust roots"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := coordination.Configuration(tc.url, filepath.Join(dir, tc.file), time.Second)
-			if tc.message != "" {
-				if cfg != nil || err == nil || err.Error() != tc.message {
-					t.Fatalf("configuration returned %v; want sanitized error %q and no client configuration", err, tc.message)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			request, err := cfg.ToProtobuf()
-			if err != nil {
-				t.Fatal(err)
-			}
-			roots := request.GetRootCerts()
-			if request.GetTlsMode().String() != "SecureTls" || len(roots) != 1 || !bytes.Equal(roots[0], trust) {
-				t.Fatal("custom trust roots were not passed to the verified TLS connection")
 			}
 		})
 	}

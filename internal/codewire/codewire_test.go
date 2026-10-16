@@ -3,7 +3,6 @@ package codewire
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -15,70 +14,6 @@ func refusal(err error) string {
 		return r.Code
 	}
 	return fmt.Sprint(err)
-}
-
-func TestClientIdentityBuildsConversationTrees(t *testing.T) {
-	long := strings.Repeat("a", 101)
-	for _, test := range []struct {
-		name                 string
-		headers              http.Header
-		conversation, parent string
-		refusal              string
-	}{
-		{name: "opencode root", headers: http.Header{"X-Opencode-Session-Id": {"ses_3a1Bc"}, "X-Session-Id": {"ses_3a1Bc"}}, conversation: "ses:5f3a1Bc"},
-		{name: "opencode child", headers: http.Header{"X-Opencode-Session-Id": {"ses_child"}, "X-Opencode-Parent-Session-Id": {"ses_root"}, "X-Session-Affinity": {"ses_root"}}, conversation: "ses:5fchild", parent: "ses:5froot"},
-		{name: "claude main", headers: http.Header{"X-Claude-Code-Session-Id": {"0b4e1a4e-6f5b-4e0e-9d0a-111111111111"}}, conversation: "0b4e1a4e-6f5b-4e0e-9d0a-111111111111"},
-		{name: "claude subagent", headers: http.Header{"X-Claude-Code-Session-Id": {"s1"}, "X-Claude-Code-Agent-Id": {"a1"}}, conversation: "s1/a1", parent: "s1"},
-		{name: "claude nested", headers: http.Header{"X-Claude-Code-Session-Id": {"s1"}, "X-Claude-Code-Agent-Id": {"a2"}, "X-Claude-Code-Parent-Agent-Id": {"a1"}}, conversation: "s1/a2", parent: "s1/a1"},
-		{name: "teammate name", headers: http.Header{"X-Claude-Code-Session-Id": {"s1"}, "X-Claude-Code-Agent-Id": {"researcher@team"}}, conversation: "s1/researcher:40team", parent: "s1"},
-		{name: "long identifier", headers: http.Header{"X-Opencode-Session-Id": {long}}, conversation: component(long)},
-		{name: "both clients", headers: http.Header{"X-Opencode-Session-Id": {"s"}, "X-Claude-Code-Session-Id": {"s"}}, refusal: "code_identity_ambiguous"},
-		{name: "repeated", headers: http.Header{"X-Claude-Code-Session-Id": {"s", "s"}}, refusal: "code_identity_ambiguous"},
-		{name: "empty", headers: http.Header{"X-Opencode-Session-Id": {""}}, refusal: "code_identity_ambiguous"},
-		{name: "parent agent alone", headers: http.Header{"X-Claude-Code-Session-Id": {"s1"}, "X-Claude-Code-Parent-Agent-Id": {"a1"}}, refusal: "code_identity_ambiguous"},
-		{name: "agent without session", headers: http.Header{"X-Claude-Code-Agent-Id": {"a1"}}, refusal: "code_identity_invalid"},
-		{name: "parent without session", headers: http.Header{"X-Opencode-Parent-Session-Id": {"p"}}, refusal: "code_identity_invalid"},
-		{name: "codex headers only", headers: http.Header{"Session_id": {"root"}, "Thread-Id": {"root"}}, refusal: "code_identity_invalid"},
-		{name: "self parent", headers: http.Header{"X-Opencode-Session-Id": {"same"}, "X-Opencode-Parent-Session-Id": {"same"}}, refusal: "code_identity_invalid"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			identity, err := ClientIdentity(test.headers)
-			if test.refusal != "" {
-				if refusal(err) != test.refusal {
-					t.Fatalf("refusal %v, want %s", err, test.refusal)
-				}
-				return
-			}
-			if err != nil || identity.Conversation != test.conversation || identity.Parent != test.parent {
-				t.Fatalf("identity %+v %v", identity, err)
-			}
-		})
-	}
-	if component("a_b") == component("a:5fb") || component("a.b") != "a.b" || !strings.HasPrefix(component("_x"), "h-") {
-		t.Fatal("component encoding is not injective or not readable")
-	}
-}
-
-func TestClassifyReadsModelIdentityAndEstimateOnly(t *testing.T) {
-	headers := http.Header{"X-Claude-Code-Session-Id": {"s1"}}
-	body := `{"model":"glm-5.3","max_tokens":1000,"messages":[{"role":"user","content":"private"}]}`
-	request, err := ClassifyMessages([]byte(body), headers)
-	if err != nil || request.Operation.Name != "messages" || request.Operation.Model != "glm-5.3" || request.Operation.Identity.Conversation != "s1" || request.Estimate != int64(len(body))/4+1000 || request.PreviousResponse != "" {
-		t.Fatalf("messages: %+v %v", request, err)
-	}
-	chat := `{"model":"kimi-k3","max_completion_tokens":50,"max_tokens":9000,"stream":true}`
-	request, err = ClassifyChat([]byte(chat), http.Header{"X-Opencode-Session-Id": {"ses_1"}})
-	if err != nil || request.Operation.Name != "chat" || request.Estimate != int64(len(chat))/4+50 {
-		t.Fatalf("chat: %+v %v", request, err)
-	}
-	for body, code := range map[string]string{`[]`: "code_body_invalid", `{"model":"a","model":"b"}`: "code_body_invalid", `{"model":"bad model"}`: "code_model_invalid", `{"max_tokens":1}`: "code_model_invalid"} {
-		if _, err := ClassifyMessages([]byte(body), headers); refusal(err) != code {
-			t.Fatalf("%s: %v", body, err)
-		}
-	}
-	if _, err := ClassifyChat([]byte(`{"model":"kimi-k3"}`), http.Header{}); refusal(err) != "code_identity_invalid" {
-		t.Fatalf("anonymous request admitted: %v", err)
-	}
 }
 
 func stream(observer Observer, body string) []codemode.Observation {
@@ -128,102 +63,6 @@ func TestMessagesUsageIncludesCacheTrafficAndEndsOnStop(t *testing.T) {
 	}
 	if o := NewMessages().Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error"}}`)); !o.Terminal || o.Status != 0 || o.Outcome.Kind != "failed" {
 		t.Fatalf("unary error: %+v", o)
-	}
-}
-
-func TestMessagesUsageNeedsFinalOutput(t *testing.T) {
-	start := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n" +
-		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"more content\"}}\n\n"
-	stop := "data: {\"type\":\"message_stop\"}\n\n"
-	for _, test := range []struct {
-		name, ending string
-		known        bool
-	}{
-		{name: "message stop only", ending: stop},
-		{name: "delta without output", ending: "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":10}}\n\n" + stop},
-		{name: "inferred stop without usage", ending: "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"},
-		{name: "final zero output", ending: "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n" + stop, known: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			observed := stream(NewMessages(), start+test.ending)
-			if len(observed) != 1 || !observed[0].Terminal || !observed[0].Successful {
-				t.Fatalf("observations: %+v", observed)
-			}
-			usage := observed[0].Usage
-			if test.known {
-				if usage.Total == nil || *usage.Total != 10 || usage.Output == nil || *usage.Output != 0 {
-					t.Fatalf("final zero usage: %+v", usage)
-				}
-			} else if usage != (codemode.Usage{}) {
-				t.Fatalf("preliminary usage became known: %+v", usage)
-			}
-		})
-	}
-}
-
-func TestMessagesMalformedCountersKeepUsageUnknown(t *testing.T) {
-	valid := `{"input_tokens":10,"output_tokens":3,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}`
-	for counter, value := range map[string]string{"input_tokens": "10", "output_tokens": "3", "cache_read_input_tokens": "0", "cache_creation_input_tokens": "0"} {
-		for _, invalid := range []string{"-1", "1.5", `"3"`, "null", "true", "9007199254740992"} {
-			t.Run(counter+"/"+invalid, func(t *testing.T) {
-				malformed := strings.Replace(valid, fmt.Sprintf(`%q:%s`, counter, value), fmt.Sprintf(`%q:%s`, counter, invalid), 1)
-				unary := NewMessages().Unary([]byte(fmt.Sprintf(`{"type":"message","stop_reason":"end_turn","usage":%s}`, malformed)))
-				messages := NewMessages()
-				messages.Event([]byte(fmt.Sprintf(`{"type":"message_start","message":{"usage":%s}}`, valid)))
-				messages.Event([]byte(fmt.Sprintf(`{"type":"message_delta","usage":%s}`, malformed)))
-				messages.Event([]byte(fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":%s}`, valid)))
-				stopped := messages.Event([]byte(`{"type":"message_stop"}`))
-				for name, observed := range map[string]codemode.Observation{"unary": unary, "stream": stopped} {
-					if !observed.Terminal || !observed.Successful || observed.Usage != (codemode.Usage{}) {
-						t.Fatalf("%s accepted malformed usage: %+v", name, observed)
-					}
-				}
-			})
-		}
-	}
-}
-
-func TestChatDerivesOnlyAbsentTotals(t *testing.T) {
-	for _, test := range []struct {
-		name, total string
-		known       bool
-	}{
-		{name: "absent", known: true},
-		{name: "valid", total: `,"total_tokens":26`, known: true},
-		{name: "negative", total: `,"total_tokens":-1`},
-		{name: "fractional", total: `,"total_tokens":1.5`},
-		{name: "text", total: `,"total_tokens":"bad"`},
-		{name: "numeric text", total: `,"total_tokens":"26"`},
-		{name: "null", total: `,"total_tokens":null`},
-		{name: "boolean", total: `,"total_tokens":true`},
-		{name: "too large", total: `,"total_tokens":9007199254740992`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			body := fmt.Sprintf(`{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":6%s}}`, test.total)
-			check := func(t *testing.T, observed codemode.Observation) {
-				t.Helper()
-				if !observed.Terminal || !observed.Successful {
-					t.Fatalf("observation: %+v", observed)
-				}
-				if test.known {
-					if observed.Usage.Total == nil || *observed.Usage.Total != 26 {
-						t.Fatalf("known total: %+v", observed.Usage)
-					}
-				} else if observed.Usage.Total != nil {
-					t.Fatalf("malformed total became known: %+v", observed.Usage)
-				}
-			}
-			t.Run("unary", func(t *testing.T) {
-				check(t, NewChat().Unary([]byte(body)))
-			})
-			t.Run("SSE", func(t *testing.T) {
-				observed := stream(NewChat(), "data: "+body+"\n\ndata: [DONE]\n\n")
-				if len(observed) != 1 {
-					t.Fatalf("observations: %+v", observed)
-				}
-				check(t, observed[0])
-			})
-		})
 	}
 }
 

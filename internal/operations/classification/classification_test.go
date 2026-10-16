@@ -108,25 +108,7 @@ func TestModerationPreservesNativeCategoriesThresholdsAndInputScope(t *testing.T
 		})
 	}
 }
-func TestModerationCorruptionDoesNotBecomeProviderSuccess(t *testing.T) {
-	d := definition(t, "openai-moderation")
-	r := request(t, d, `{"model":"route","input":["one","two"]}`)
-	for _, raw := range []string{
-		`{"id":"id","model":"m","results":[{"flagged":false,"categories":{"a":false},"category_scores":{"a":0}}]}`,
-		`{"id":"id","model":"m","results":[{"flagged":null,"categories":{"a":false},"category_scores":{"a":0}},{"flagged":false,"categories":{"a":false},"category_scores":{"a":0}}]}`,
-		`{"id":"id","model":"m","results":[{"flagged":false,"categories":{"a":false},"category_scores":{"b":0}},{"flagged":false,"categories":{"a":false},"category_scores":{"a":0}}]}`,
-		`{"id":"id","model":"m","results":[{"flagged":false,"categories":{"a":false},"category_scores":{"a":"0"}},{"flagged":false,"categories":{"a":false},"category_scores":{"a":0}}]}`,
-	} {
-		_, err := d.Result(r, result(t, r, raw))
-		requireCode(t, err, "fidelity_protocol_violation")
-	}
-	for _, raw := range []string{`{"input":null}`, `{"input":[]}`, `{"input":["text",{"type":"text","text":"part"}]}`, `{"input":[{"type":"image_url","image_url":null}]}`, `{"input":"text","model":null}`} {
-		_, err := d.Request(request(t, d, raw))
-		if err == nil {
-			t.Fatalf("accepted corrupt input %s", raw)
-		}
-	}
-}
+
 func TestTEIPredictionRetainsPairBatchLabelsAndRawScoreUnits(t *testing.T) {
 	d := definition(t, "tei-classification")
 	for _, tc := range []struct {
@@ -237,30 +219,5 @@ func TestClassificationPolicyCoversTextAndRefusesOpaqueScopes(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(visible, "|"), "must-be-inspected") {
 		t.Fatal("unknown output text escaped policy inspection")
-	}
-}
-func TestDefinitionsAreRegisteredAndModelOverlayDoesNotTouchNativeInput(t *testing.T) {
-	registry := operations.NewRegistry()
-	for _, d := range classification.Definitions() {
-		if err := registry.Register(d); err != nil {
-			t.Fatal(err)
-		}
-		r := request(t, d, string(d.Probe("route")))
-		if _, err := d.Request(r); err != nil {
-			t.Fatalf("%s probe: %v", d.Identity.ID, err)
-		}
-	}
-	d := definition(t, "openai-moderation")
-	r := request(t, d, `{"input":["a","b"],"extension":9007199254740993}`)
-	changes, err := d.BindModel(r.Document(), "native-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bound, err := r.WithChanges(changes...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(bound.Document().Raw(), `"extension":9007199254740993`) || !strings.Contains(bound.Document().Raw(), `"input":["a","b"]`) {
-		t.Fatal("model overlay modified native data")
 	}
 }

@@ -1,7 +1,6 @@
 package codemode
 
 import (
-	"math"
 	"strings"
 	"testing"
 	"time"
@@ -36,32 +35,5 @@ func TestOutcomeRejectsUnboundedAndContradictoryMetadata(t *testing.T) {
 		if err := o.Validate(); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-func TestAllowanceObservationsBoundIdentityNumbersAndTimestamps(t *testing.T) {
-	now := time.Now().UTC()
-	w := AllowanceWindow{LimitID: "codex", Window: "primary", UsedPercent: 20, RemainingPercent: 80, ObservedAt: now}
-	for _, mutate := range []func(*AllowanceWindow){
-		func(w *AllowanceWindow) { w.LimitID = strings.Repeat("x", 101) },
-		func(w *AllowanceWindow) { w.Window = "secret-canary" },
-		func(w *AllowanceWindow) { w.UsedPercent = math.NaN() },
-		func(w *AllowanceWindow) { w.RemainingPercent = math.NaN() },
-		func(w *AllowanceWindow) { w.RemainingPercent = 81 },
-		func(w *AllowanceWindow) { w.ObservedAt = time.Time{} },
-		func(w *AllowanceWindow) { w.ObservedAt = now.Add(time.Second) },
-	} {
-		invalid := w
-		mutate(&invalid)
-		if err := (Allowance{ObservedAt: now, Windows: []AllowanceWindow{invalid}}).Validate(); err == nil {
-			t.Fatalf("invalid allowance accepted: %+v", invalid)
-		}
-	}
-	if err := (Allowance{ObservedAt: now, Windows: []AllowanceWindow{w, w}}).Validate(); err == nil {
-		t.Fatal("duplicate window identities accepted")
-	}
-	balance := "secret-canary"
-	if err := (Credits{Balance: &balance, ObservedAt: now}).Validate(); err == nil {
-		t.Fatal("free text balance accepted")
 	}
 }

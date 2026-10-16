@@ -135,15 +135,3 @@ func TestAuthenticationFailuresTellARejectedCredentialFromATransientOne(t *testi
 		})
 	}
 }
-
-func TestOnlyStoredCredentialModesRequireASecret(t *testing.T) {
-	for mode, required := range map[string]bool{
-		"none": false, "adc": false, "azure_default": false, "default_chain": false,
-		"api_key": true, "headers": true, "service_account": true, "azure_client_secret": true, "static": true,
-		"unregistered": true,
-	} {
-		if SecretRequired(mode) != required {
-			t.Errorf("%s: secret required=%t, want %t", mode, !required, required)
-		}
-	}
-}

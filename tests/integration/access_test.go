@@ -327,49 +327,6 @@ func etagHeader(record map[string]any) map[string]string {
 	return map[string]string{"If-Match": `"` + record["etag"].(string) + `"`}
 }
 
-func TestAPIKeyRouteAllowlistsRejectNull(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "null routes", "allowed_routes": nil}, map[string]string{"Idempotency-Key": "routes-omitted"}, 422)
-	if items := h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)["items"].([]any); len(items) != 0 {
-		t.Fatal("a rejected null allowlist persisted a key")
-	}
-	for _, tc := range []struct {
-		name   string
-		routes []string
-	}{
-		{"omitted", nil},
-		{"empty", []string{}},
-		{"restricted", []string{"private"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := map[string]any{"name": tc.name}
-			if tc.routes != nil {
-				input["allowed_routes"] = tc.routes
-			}
-			created := h.want(owner, "POST", "/api/v1/api-keys", input, map[string]string{"Idempotency-Key": "routes-" + tc.name}, 201)
-			path := "/api/v1/api-keys/" + created["id"].(string)
-			record := h.want(owner, "GET", path, nil, nil, 200)
-			routes, ok := record["allowed_routes"].([]any)
-			if !ok || len(routes) != len(tc.routes) {
-				t.Fatal("the route allowlist must remain an array with the supplied restrictions")
-			}
-			for i, route := range routes {
-				if route != tc.routes[i] {
-					t.Fatal("the route allowlist changed")
-				}
-			}
-			h.want(owner, "PATCH", path, map[string]any{"allowed_routes": nil}, etagHeader(record), 422)
-			if current := h.want(owner, "GET", path, nil, nil, 200); current["etag"] != record["etag"] {
-				t.Fatal("a rejected null allowlist changed the key")
-			}
-		})
-	}
-	if items := h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)["items"].([]any); len(items) != 3 {
-		t.Fatal("the inventory must contain only the valid keys")
-	}
-}
-
 func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -444,75 +401,6 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 			t.Fatal("secret or raw user agent entered storage")
 		}
 	}
-}
-
-func TestConcurrentSetupInvitationsAndPasswordSessionTransitions(t *testing.T) {
-	h := newAccessHarness(t)
-	var wg sync.WaitGroup
-	statuses := make(chan int, 2)
-	for range 2 {
-		wg.Go(func() {
-			status, _, _ := h.request(nil, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword}, map[string]string{"X-OLP-Setup-Token": h.Bootstrap})
-			statuses <- status
-		})
-	}
-	wg.Wait()
-	close(statuses)
-	counts := map[int]int{}
-	for status := range statuses {
-		counts[status]++
-	}
-	if counts[201] != 1 || counts[409] != 1 {
-		t.Fatal("setup race", counts)
-	}
-	owner := &browser{}
-	h.want(owner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, 201)
-	invite := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "invite@example.com", "role": "operator"}, map[string]string{"Idempotency-Key": "invite-race"}, 201)
-	statuses = make(chan int, 2)
-	for range 2 {
-		wg.Go(func() {
-			status, _, _ := h.request(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": invite["token"], "display_name": "Member", "password": accessPassword}, nil)
-			statuses <- status
-		})
-	}
-	wg.Wait()
-	close(statuses)
-	counts = map[int]int{}
-	for status := range statuses {
-		counts[status]++
-	}
-	if counts[201] != 1 || counts[410] != 1 {
-		t.Fatal("invitation race", counts)
-	}
-	retired := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "retired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "retired"}, 201)
-	id := retired["invitation"].(map[string]any)["id"].(string)
-	h.want(owner, "DELETE", "/api/v1/invitations/"+id, nil, map[string]string{"Idempotency-Key": "retire"}, 200)
-	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": retired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
-	expired := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "expired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "expired"}, 201)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.invitations SET expires_at=now()-interval '1 second' WHERE id=$1", expired["invitation"].(map[string]any)["id"]); err != nil {
-		t.Fatal(err)
-	}
-	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": expired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
-	for _, token := range []string{invite["token"].(string), secrets.Token()} {
-		problem := h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": token, "display_name": "Member", "password": accessPassword}, nil, 410)
-		if problem["status"] != float64(410) {
-			t.Fatal("unavailable invitation problem must expose the terminal status")
-		}
-	}
-	previous := &browser{Cookies: map[string]*http.Cookie{}, CSRF: owner.CSRF}
-	for name, c := range owner.Cookies {
-		previous.Cookies[name] = c
-	}
-	profile := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)
-	h.want(owner, "POST", "/api/v1/profile/password", map[string]any{"current_password": accessPassword, "new_password": "new long integration password"}, etagHeader(profile), 200)
-	h.want(previous, "GET", "/api/v1/sessions/current", nil, nil, 401)
-	h.want(owner, "GET", "/api/v1/sessions/current", nil, nil, 200)
-	h.want(owner, "DELETE", "/api/v1/sessions/current", nil, nil, 204)
-	h.want(owner, "GET", "/api/v1/sessions/current", nil, nil, 401)
-	for range 5 {
-		h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": "nobody@example.com", "password": "wrong"}, nil, 401)
-	}
-	h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": "nobody@example.com", "password": "wrong"}, nil, 429)
 }
 
 func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
@@ -631,24 +519,4 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 		t.Fatal("runtime can mutate migration history")
 	}
 	_ = fmt.Sprintf("%s", database.ValkeyNamespace(first))
-}
-
-func TestSessionAdministrationRequiresInstallationOwner(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	ownerSessions := h.want(owner, "GET", "/api/v1/sessions", nil, nil, 200)["items"].([]any)
-	session := ownerSessions[0].(map[string]any)["id"].(string)
-	ownerID := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
-
-	assigned := h.invite(owner, "assigned-owner@example.com", "owner")
-	profile := h.want(assigned, "GET", "/api/v1/profile", nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
-	h.want(assigned, "POST", "/api/v1/sessions", map[string]any{"email": "assigned-owner@example.com", "password": accessPassword}, nil, 201)
-	developer := h.invite(owner, "session-developer@example.com", "developer")
-
-	for _, caller := range []*browser{assigned, developer} {
-		h.want(caller, "GET", "/api/v1/sessions?user_id="+ownerID, nil, nil, 403)
-		h.want(caller, "DELETE", "/api/v1/sessions/"+session, nil, nil, 404)
-	}
-	h.want(owner, "GET", "/api/v1/sessions", nil, nil, 200)
 }

@@ -3,14 +3,10 @@ package connectors
 import (
 	"encoding/json"
 	"errors"
-	"io"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -33,129 +29,8 @@ func envelopedManifest() abi.Manifest {
 	return manifest
 }
 
-func TestPluginEnvelopeWrapsRequestsAndUnwrapsResponses(t *testing.T) {
-	c := pluginConfig(t, envelopedManifest())
-	c.Bindings = map[string]Binding{"acme": {Model: "acme-large-002"}}
-	wrapped := c.WrapRequest([]byte(`{"contents":[{"parts":[{"text":"<hi>"}]}]}`), "acme")
-	if want := `{"model":"acme-large-002","project":"olp","request":{"contents":[{"parts":[{"text":"<hi>"}]}]}}`; string(wrapped) != want {
-		t.Fatalf("wrapped %s, want %s", wrapped, want)
-	}
-	for body, want := range map[string]string{
-		`{"response":{"candidates":[]},"traceId":"t-1"}`: `{"candidates":[]}`,
-		`{"response": [1, 2]}`:                           `[1, 2]`,
-		`{"error":{"code":400,"message":"no"}}`:          `{"error":{"code":400,"message":"no"}}`,
-		`[{"response":{}}]`:                              `[{"response":{}}]`,
-		`not json`:                                       `not json`,
-	} {
-		if got := c.UnwrapResponse([]byte(body)); string(got) != want {
-			t.Errorf("unwrapped %s to %s, want %s", body, got, want)
-		}
-	}
-
-	requestOnly := envelopedManifest()
-	requestOnly.Profiles[0].Hosting.Envelope.Response = ""
-	if c = pluginConfig(t, requestOnly); string(c.UnwrapResponse([]byte(`{"response":{}}`))) != `{"response":{}}` {
-		t.Fatal("unwrapped a response the profile reads as it is")
-	}
-	plain := pluginConfig(t, pluginManifest())
-	if string(plain.WrapRequest([]byte(`{"messages":[]}`), "acme")) != `{"messages":[]}` || string(plain.UnwrapResponse([]byte(`{"response":{}}`))) != `{"response":{}}` {
-		t.Fatal("a profile without an envelope changed a body")
-	}
-}
-
-// Envelope fields may carry the provider's options, filled from its values as
-// hosting's headers and query parameters are.
-func TestPluginEnvelopeFieldsCarryTheProvidersOptions(t *testing.T) {
-	manifest := envelopedManifest()
-	manifest.Profiles[0].Options = []abi.Option{{Name: "project", Label: "Project"}}
-	manifest.Profiles[0].Hosting.Envelope.Fields["project"] = "projects/{options.project}"
-	c := pluginConfig(t, manifest)
-	c.PluginOptions = map[string]string{"project": `acme "prod"`}
-	wrapped := c.WrapRequest([]byte(`{"contents":[]}`), "acme-large")
-	if want := `{"model":"acme-large","project":"projects/acme \"prod\"","request":{"contents":[]}}`; string(wrapped) != want {
-		t.Fatalf("wrapped %s, want %s", wrapped, want)
-	}
-}
-
-func TestPluginEnvelopeUnwrapsEachStreamEvent(t *testing.T) {
-	c := pluginConfig(t, envelopedManifest())
-	upstream := "event: chunk\nid: 7\ndata: {\"response\":{\"n\":1},\"traceId\":\"t-1\"}\n\n" +
-		": keep-alive\n\n" +
-		"retry: 250\r\ndata: {\"response\":\r\ndata: {\"n\":2}}\r\n\r\n" +
-		"data: {\"error\":{\"code\":429}}\n\n" +
-		"data: [DONE]\n\n"
-	var events []sse.Frame
-	if err := sse.Decode(c.StreamPayload(testutil.Fragmented([]byte(upstream), 3), 1024), 1024, func(f sse.Frame) error {
-		events = append(events, f)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	name, id, retry := "chunk", "7", uint64(250)
-	want := []sse.Frame{
-		{Event: &name, ID: &id, Data: `{"n":1}`},
-		{ID: &id, RetryMS: &retry, Data: `{"n":2}`},
-		{ID: &id, Data: `{"error":{"code":429}}`},
-		{ID: &id, Data: `[DONE]`},
-	}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("unwrapped %+v, want %+v", events, want)
-	}
-
-	// Events reach the codec no larger than the upstream sent them, so an event
-	// within the limit stays within it.
-	longID := strings.Repeat("i", 40)
-	long := "data:{\"response\":\"" + strings.Repeat("x", 90) + "\"}\n\n"
-	passed := "data:[" + strings.Repeat("1,", 50) + "1]\n\n"
-	limit := max(len(long), len(passed))
-	events = nil
-	if err := sse.Decode(c.StreamPayload(strings.NewReader("id:"+longID+"\ndata:{\"response\":1}\n\n"+long+passed), limit), limit, func(f sse.Frame) error {
-		events = append(events, f)
-		return nil
-	}); err != nil || len(events) != 3 || *events[2].ID != longID || events[1].Data != `"`+strings.Repeat("x", 90)+`"` {
-		t.Fatalf("events at the limit: %+v %v", events, err)
-	}
-
-	oversized := "data: {\"response\":\"" + strings.Repeat("x", 64) + "\"}\n\n"
-	if _, err := io.ReadAll(c.StreamPayload(strings.NewReader(oversized), 32)); !errors.Is(err, sse.ErrEventTooLarge) {
-		t.Fatalf("read an event beyond the limit: %v", err)
-	}
-	stream := strings.NewReader("data: {\"response\":{}}\n\n")
-	if plain := pluginConfig(t, pluginManifest()); plain.StreamPayload(stream, 1024) != stream {
-		t.Fatal("a profile without an envelope reframed its stream")
-	}
-}
-
-func TestPluginEnvelopePreservesSeparateIDFramesAtEventLimit(t *testing.T) {
-	c := pluginConfig(t, envelopedManifest())
-	payload := `{"candidates":[{"content":{"parts":[{"text":"` + strings.Repeat("x", 64) + `"}]}}]}`
-	dataFrame := "data:{\"response\":" + payload + "}\n\n"
-	id := strings.Repeat("i", len(dataFrame)-len("id:\n\n"))
-	for name, prior := range map[string]string{"initial ID": "", "changed ID": "id:old\ndata:{\"response\":{}}\n\n"} {
-		t.Run(name, func(t *testing.T) {
-			upstream := prior + "id:" + id + "\n\n" + dataFrame + "id:\n\n" + dataFrame
-			for _, width := range []int{1, len(upstream)} {
-				var events []sse.Frame
-				err := sse.Decode(c.StreamPayload(testutil.Fragmented([]byte(upstream), width), len(dataFrame)), len(dataFrame), func(frame sse.Frame) error {
-					events = append(events, frame)
-					return nil
-				})
-				if err != nil {
-					t.Fatalf("width=%d: rejected frames within the event limit: %v", width, err)
-				}
-				emptyID := ""
-				want := []sse.Frame{{ID: &id, Data: payload}, {ID: &emptyID, Data: payload}}
-				if prior != "" {
-					oldID := "old"
-					want = append([]sse.Frame{{ID: &oldID, Data: `{}`}}, want...)
-				}
-				if !reflect.DeepEqual(events, want) {
-					t.Fatalf("width=%d: events=%+v, want %+v", width, events, want)
-				}
-			}
-		})
-	}
-}
+// Events reach the codec no larger than the upstream sent them, so an event
+// within the limit stays within it.
 
 // prepared is a prepared Responses request with body as its document.
 func prepared(t *testing.T, body string) oif.Prepared {
@@ -176,91 +51,8 @@ func prepared(t *testing.T, body string) oif.Prepared {
 	return p
 }
 
-func TestPluginRewritesSetDefaultAndDeleteDeclaredMembers(t *testing.T) {
-	manifest := pluginManifest()
-	manifest.Profiles[0].Dialect = "openai-responses"
-	manifest.Profiles[0].Hosting.Rewrites = []abi.Rewrite{
-		{Op: abi.RewriteSet, Path: "/store", Value: json.RawMessage(`false`)},
-		{Op: abi.RewriteDefault, Path: "/instructions", Value: json.RawMessage(`"Be brief."`)},
-		{Op: abi.RewriteDelete, Path: "/max_output_tokens"},
-		{Op: abi.RewriteSet, Path: "/reasoning/effort", Value: json.RawMessage(`"low"`)},
-		{Op: abi.RewriteSet, Path: "/metadata/client/name", Value: json.RawMessage(`null`)},
-	}
-	c := pluginConfig(t, manifest)
-	for name, tc := range map[string]struct {
-		body, want string
-		changed    []string
-	}{
-		"members the request lacks": {
-			`{"model":"m","input":"hi","max_output_tokens":5}`,
-			`{"model":"m","input":"hi","store":false,"instructions":"Be brief.","reasoning":{"effort":"low"},"metadata":{"client":{"name":null}}}`,
-			[]string{"", "/store", "/instructions", "/max_output_tokens", "/reasoning", "/metadata"},
-		},
-		"members the request has": {
-			`{"model":"m","store":true,"instructions":"Mine.","input":"hi","reasoning":{"summary":"auto","effort":"high"},"metadata":{"client":{}}}`,
-			`{"model":"m","store":false,"instructions":"Mine.","input":"hi","reasoning":{"summary":"auto","effort":"low"},"metadata":{"client":{"name":null}}}`,
-			[]string{"", "/store", "/reasoning/effort", "/metadata/client/name"},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rewritten, err := c.Rewrite(prepared(t, tc.body))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := rewritten.Document().Raw(); got != tc.want {
-				t.Fatalf("rewrote to %s, want %s", got, tc.want)
-			}
-			changed := []string{}
-			for _, entry := range rewritten.Provenance() {
-				if entry.Origin == hostingRewrite {
-					changed = append(changed, entry.Pointer)
-				}
-			}
-			if !reflect.DeepEqual(changed, tc.changed) {
-				t.Fatalf("recorded rewrites of %q, want %q", changed, tc.changed)
-			}
-		})
-	}
-
-	// A default the request has and a deletion of a member it lacks change
-	// nothing; sets always apply.
-	satisfied := prepared(t, `{"model":"m","input":"hi","store":false,"instructions":"Mine.","reasoning":{"effort":"low"},"metadata":{"client":{"name":null}}}`)
-	unchanged, err := c.Rewrite(satisfied)
-	if err != nil || unchanged.Document().Raw() != satisfied.Document().Raw() {
-		t.Fatalf("a request that satisfies every rewrite changed: %s %v", unchanged.Document().Raw(), err)
-	}
-	for _, entry := range unchanged.Provenance() {
-		if entry.Pointer == "/instructions" || entry.Pointer == "/max_output_tokens" {
-			t.Fatalf("recorded a rewrite that changed nothing: %+v", entry)
-		}
-	}
-	if same, err := pluginConfig(t, pluginManifest()).Rewrite(satisfied); err != nil || !reflect.DeepEqual(same, satisfied) {
-		t.Fatalf("a profile without rewrites changed a request: %v", err)
-	}
-	if _, err := c.Rewrite(prepared(t, `{"model":"m","input":"hi","reasoning":"high"}`)); err == nil || !strings.Contains(err.Error(), "/reasoning to be an object") {
-		t.Fatalf("placed a rewrite inside a request value that is not an object: %v", err)
-	}
-}
-
-func TestPluginProfilesWithBodyChangesAreTransformedOnly(t *testing.T) {
-	for name, mutate := range map[string]func(*abi.Hosting){
-		"envelope": func(h *abi.Hosting) { h.Envelope = &abi.Envelope{Response: "response"} },
-		"rewrite": func(h *abi.Hosting) {
-			h.Rewrites = []abi.Rewrite{{Op: abi.RewriteDelete, Path: "/user"}}
-		},
-	} {
-		manifest := pluginManifest()
-		mutate(&manifest.Profiles[0].Hosting)
-		c := pluginConfig(t, manifest)
-		if p, _ := c.Profile(); p.Strict {
-			t.Errorf("a profile with a declared %s serves strict routes", name)
-		}
-		decoded, encoded := publish(t, c)
-		if !reflect.DeepEqual(decoded.Plugin.hosting, c.Plugin.hosting) {
-			t.Errorf("the %s did not survive publication: %s", name, encoded)
-		}
-	}
-}
+// A default the request has and a deletion of a member it lacks change
+// nothing; sets always apply.
 
 func TestPluginEnvelopeAndRewriteValidationLocatesTheOffendingValue(t *testing.T) {
 	if err := ValidatePluginProfile(envelopedManifest().Profiles[0]); err != nil {

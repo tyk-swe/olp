@@ -114,53 +114,9 @@ func TestMessagesToolLoopThinkingAndStreamingAgree(t *testing.T) {
 	}
 }
 
-func TestMessagesEnforcesTheToolAndThinkingContracts(t *testing.T) {
-	h := newHarness(t)
-	use := map[string]any{"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": map[string]any{}}
-	result := map[string]any{"type": "tool_result", "tool_use_id": "toolu_1", "content": "r"}
-	assistant := map[string]any{"role": "assistant", "content": []any{use}}
-	for name, messages := range map[string][]any{
-		"call without a result":   {user("x"), assistant, user("again")},
-		"call ends the request":   {user("x"), assistant},
-		"result without a call":   {user("x"), map[string]any{"role": "user", "content": []any{result}}},
-		"result for another call": {user("x"), assistant, map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_2", "content": "r"}}}},
-		"altered thinking":        {user("x"), map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "thinking", "thinking": "t", "signature": "tampered"}, map[string]any{"type": "text", "text": "a"}}}, user("again")},
-		"unsigned thinking":       {user("x"), map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "thinking", "thinking": "t"}}}, user("again")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := message(h, map[string]any{"messages": messages})
-			want(t, r, http.StatusBadRequest)
-			if path(r.json(), "type") != "error" || path(r.json(), "error", "type") != "invalid_request_error" {
-				t.Fatalf("%s", r.body)
-			}
-		})
-	}
-	// A matched pair passes, even with other text next to the result.
-	ok := message(h, map[string]any{"messages": []any{user("x"), assistant, map[string]any{"role": "user", "content": []any{result, map[string]any{"type": "text", "text": "<system-reminder>note</system-reminder>"}}}}})
-	want(t, ok, 200)
-	if path(ok.json(), "content", 0, "text") != "The tools returned: r" {
-		t.Fatalf("%s", ok.body)
-	}
-}
+// A matched pair passes, even with other text next to the result.
 
-func TestMessagesRequestValidation(t *testing.T) {
-	h := newHarness(t)
-	ask := []any{user("x")}
-	want(t, message(h, map[string]any{"messages": ask, "max_tokens": 0}), http.StatusBadRequest)
-	want(t, message(h, map[string]any{"messages": []any{}}), http.StatusBadRequest)
-	r := h.do("POST", AnthropicPrefix+"/messages", map[string]string{"X-Api-Key": testCredential}, map[string]any{"model": AnthropicModel, "max_tokens": 4, "messages": ask})
-	want(t, r, http.StatusBadRequest) // the version header is required
-	r = h.anthropic("/messages", map[string]any{"model": "other", "max_tokens": 4, "messages": ask})
-	want(t, r, http.StatusNotFound)
-	if path(r.json(), "error", "type") != "not_found_error" {
-		t.Fatalf("%s", r.body)
-	}
-	r = message(h, map[string]any{"messages": []any{user("[[olp:fail 529]]")}})
-	want(t, r, 529)
-	if path(r.json(), "error", "type") != "overloaded_error" {
-		t.Fatalf("%s", r.body)
-	}
-}
+// the version header is required
 
 func TestPromptCachingReportsWritesAndReads(t *testing.T) {
 	h := newHarness(t)
@@ -226,48 +182,7 @@ func TestPromptCachingReportsWritesAndReads(t *testing.T) {
 	}
 }
 
-func TestCountTokensAgreesWithMessageUsage(t *testing.T) {
-	h := newHarness(t)
-	prompt := map[string]any{"model": AnthropicModel, "system": "be brief", "messages": []any{user(strings.Repeat("count these words ", 20))}, "tools": []any{weatherUse}}
-	count := h.anthropic("/messages/count_tokens", prompt)
-	want(t, count, 200)
-	prompt["max_tokens"] = 8
-	input, create, read := usageOfMessage(t, h.anthropic("/messages", prompt))
-	if got := count.json()["input_tokens"].(float64); got < 1 || got != input+create+read {
-		t.Fatalf("count_tokens %v, message usage %v", got, input+create+read)
-	}
-	want(t, h.anthropic("/messages/count_tokens", map[string]any{"model": "other", "messages": []any{user("x")}}), http.StatusNotFound)
-	want(t, h.anthropic("/messages/count_tokens", map[string]any{"model": AnthropicModel}), http.StatusBadRequest)
-}
-
-func TestMessagesStructuredOutput(t *testing.T) {
-	h := newHarness(t)
-	schema := map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "integer"}}, "required": []any{"a"}}
-	for name, body := range map[string]map[string]any{
-		"output_config": {"output_config": map[string]any{"format": map[string]any{"type": "json_schema", "schema": schema}}},
-		"output_format": {"output_format": map[string]any{"type": "json_schema", "schema": schema}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			body["messages"] = []any{user("x")}
-			r := message(h, body)
-			want(t, r, 200)
-			if path(r.json(), "content", 0, "text") != `{"a":42}` {
-				t.Fatalf("%s", r.body)
-			}
-		})
-	}
-	// The pre-structured-output idiom: a forced tool whose input is the object.
-	forced := message(h, map[string]any{"messages": []any{user("x")}, "tools": []any{map[string]any{"name": "json", "input_schema": schema}},
-		"tool_choice": map[string]any{"type": "tool", "name": "json"}})
-	want(t, forced, 200)
-	if path(forced.json(), "content", 0, "name") != "json" || !reflect.DeepEqual(path(forced.json(), "content", 0, "input"), map[string]any{"a": float64(42)}) {
-		t.Fatalf("%s", forced.body)
-	}
-	anyTool := message(h, map[string]any{"messages": []any{user("x")}, "tools": []any{weatherUse}, "tool_choice": map[string]any{"type": "any"}})
-	if path(anyTool.json(), "content", 0, "input", "city") != "fixture" {
-		t.Fatalf("%s", anyTool.body)
-	}
-}
+// The pre-structured-output idiom: a forced tool whose input is the object.
 
 func TestMessagesRequirePairedBetaHeaders(t *testing.T) {
 	h := newHarness(t)

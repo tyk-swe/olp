@@ -107,350 +107,52 @@ func fleetConsumerPending(t *testing.T, c *coordination.Client, stream, consumer
 	return 0
 }
 
-// TestCrashBeforeAcknowledgementReplaysAsDuplicate proves that a delivery a
-// worker persisted but was killed before acknowledging costs nothing when it
-// comes back: the replacement worker recognises it, the ledger does not move,
-// and the receipt that recorded it the first time is the receipt that stays.
-func TestCrashBeforeAcknowledgementReplaysAsDuplicate(t *testing.T) {
-	in := fleetProvisioned(t)
-	_, secret := in.key("replayed", nil)
-	replica := in.replica("fleet-replay-gateway")
+// Nothing consumes yet, so the events are still on the stream and one of
+// them can be kept as the copy a crash would redeliver.
 
-	const requests = 3
-	for range requests {
-		if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != 200 {
-			t.Fatalf("inference: %d %s", status, code)
-		}
-	}
-	// Nothing consumes yet, so the events are still on the stream and one of
-	// them can be kept as the copy a crash would redeliver.
-	var payloads []string
-	fleetEventually(t, "every event to reach the stream", 30*time.Second, func() bool {
-		payloads = fleetPayloads(t, in.valkey, in.stream)
-		return len(payloads) == requests
-	})
-	replayed := payloads[0]
+// The worker dies the way a lost machine does, before it could acknowledge
+// anything more, and the delivery it already persisted arrives again.
 
-	worker := in.worker("fleet-replay-worker")
-	fleetEventually(t, "the worker to account for every request", 60*time.Second, func() bool {
-		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
-	})
-	receipts := in.count("SELECT count(*) FROM olp.request_metadata_event_receipts")
-	if receipts != requests {
-		t.Fatalf("receipts = %d, want %d", receipts, requests)
-	}
-	_, duplicates, _ := fleetCounters(t, in.h.Pool)
+// The worker is lost with deliveries it had taken and not acknowledged:
+// the entries below are moved into exactly that consumer's pending list,
+// which is the state its termination leaves behind.
 
-	// The worker dies the way a lost machine does, before it could acknowledge
-	// anything more, and the delivery it already persisted arrives again.
-	if err := worker.Kill(); err != nil {
-		t.Fatalf("kill the worker: %v", err)
-	}
-	do(t, in.valkey, "XADD", in.stream, "*", "event", replayed)
+// A survivor may not simply steal a delivery that might still be in
+// progress; it claims it only once it has been idle past the reclaim window,
+// which is why this takes longer than a restart otherwise would.
 
-	replacement := in.worker("fleet-replay-replacement")
-	fleetEventually(t, "the replacement worker to recognise the replay", 60*time.Second, func() bool {
-		_, seen, _ := fleetCounters(t, in.h.Pool)
-		return seen > duplicates
-	})
-	fleetEventually(t, "the replayed delivery to be acknowledged and removed", 30*time.Second,
-		func() bool { return len(fleetPayloads(t, in.valkey, in.stream)) == 0 })
+// Reclaiming must account for each delivery once, not once per claim.
 
-	if total := in.count("SELECT count(*) FROM olp.attempt_usage_facts"); total != requests {
-		t.Fatalf("usage facts = %d after a replay, want %d", total, requests)
-	}
-	if total := in.count("SELECT count(*) FROM olp.requests"); total != requests {
-		t.Fatalf("requests = %d after a replay, want %d", total, requests)
-	}
-	if total := in.count(
-		"SELECT count(*) FROM olp.request_metadata_event_receipts"); total != receipts {
-		t.Fatalf("receipts = %d after a replay, want the original %d", total, receipts)
-	}
-	if total := in.count(
-		`SELECT count(*) FROM olp.request_metadata_ingestion_gaps
-            WHERE reason = 'invalid_request_metadata_event'`); total != 0 {
-		t.Fatalf("a replayed delivery was recorded as %d metadata gaps", total)
-	}
-	if err := replacement.Stop(15 * time.Second); err != nil {
-		t.Fatalf("stop the replacement worker: %v", err)
-	}
-}
+// The neighbouring installation elects a leader under the same identifier.
+// It is another installation's leader, so this one still has none.
 
-// TestPendingDeliveriesAreReclaimedAfterAWorkerIsLost proves that deliveries
-// a worker took and never acknowledged are not lost with it: once they have been
-// idle long enough, another worker claims them and accounts for each exactly
-// once.
-func TestPendingDeliveriesAreReclaimedAfterAWorkerIsLost(t *testing.T) {
-	in := fleetProvisioned(t)
-	_, secret := in.key("reclaimed", nil)
-	replica := in.replica("fleet-reclaim-gateway")
+// Both installations hold the identifier at once, which is exactly the
+// state an unscoped probe reports as two leaders of one installation.
 
-	const served = 2
-	for range served {
-		if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != 200 {
-			t.Fatalf("inference: %d %s", status, code)
-		}
-	}
-	lost := in.worker("fleet-reclaim-lost")
-	fleetEventually(t, "the first worker to account for the first requests", 60*time.Second,
-		func() bool {
-			return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == served
-		})
-	consumers := fleetConsumers(t, in.valkey, in.stream)
-	if len(consumers) != 1 {
-		t.Fatalf("consumers in the group = %v, want exactly the first worker", consumers)
-	}
-	owner := consumers[0]
+// The second worker finds leadership taken and waits, which is the state a
+// standby is in when the leader is lost.
 
-	// The worker is lost with deliveries it had taken and not acknowledged:
-	// the entries below are moved into exactly that consumer's pending list,
-	// which is the state its termination leaves behind.
-	if err := lost.Kill(); err != nil {
-		t.Fatalf("kill the first worker: %v", err)
-	}
-	const stranded = 2
-	for range stranded {
-		if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != 200 {
-			t.Fatalf("inference after the worker was lost: %d %s", status, code)
-		}
-	}
-	fleetEventually(t, "the stranded events to reach the stream", 30*time.Second, func() bool {
-		return len(fleetPayloads(t, in.valkey, in.stream)) == stranded
-	})
-	do(t, in.valkey, "XREADGROUP", "GROUP", usage.Group, owner, "COUNT", "100",
-		"STREAMS", in.stream, ">")
-	if pending := fleetConsumerPending(t, in.valkey, in.stream, owner); pending != stranded {
-		t.Fatalf("pending deliveries owned by the lost worker = %d, want %d", pending, stranded)
-	}
+// The next pass of the standby elects it; passes are a minute apart, so the
+// takeover is given two of them.
 
-	// A survivor may not simply steal a delivery that might still be in
-	// progress; it claims it only once it has been idle past the reclaim window,
-	// which is why this takes longer than a restart otherwise would.
-	survivor := in.worker("fleet-reclaim-survivor")
-	fleetEventually(t, "the survivor to reclaim and account for the stranded deliveries",
-		usage.ReclaimIdle+90*time.Second, func() bool {
-			return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == served+stranded
-		})
-	if pending := fleetConsumerPending(t, in.valkey, in.stream, owner); pending != 0 {
-		t.Fatalf("the lost worker still owns %d deliveries after they were reclaimed", pending)
-	}
-	if _, _, reclaimed := fleetCounters(t, in.h.Pool); reclaimed < stranded {
-		t.Fatalf("reclaimed deliveries = %d, want at least %d", reclaimed, stranded)
-	}
-	// Reclaiming must account for each delivery once, not once per claim.
-	if total := in.count("SELECT count(*) FROM olp.requests"); total != served+stranded {
-		t.Fatalf("requests = %d, want %d", total, served+stranded)
-	}
-	if total := in.count(
-		"SELECT count(*) FROM olp.request_metadata_event_receipts"); total != served+stranded {
-		t.Fatalf("receipts = %d, want %d", total, served+stranded)
-	}
-	if err := survivor.Stop(15 * time.Second); err != nil {
-		t.Fatalf("stop the surviving worker: %v", err)
-	}
-}
+// Leadership is a lease on a session, so the last worker leaving returns it.
 
-// TestReconciliationLeadershipIsScopedToTheInstallation proves that the
-// leadership probe answers for one installation and not for the cluster.
-// Reconciliation leadership is a PostgreSQL advisory lock, which is scoped to a
-// database, so two installations sharing a cluster each elect their own leader
-// under the same lock identifier. A probe that could not tell them apart would
-// report several holders of a lock only one session can hold, and would also
-// let a neighbour's leader stand in for a takeover this installation never
-// performed, so every leadership assertion in this file rests on this.
-func TestReconciliationLeadershipIsScopedToTheInstallation(t *testing.T) {
-	pool, _ := accessDatabase(t)
-	neighbour, _ := accessDatabase(t)
+// Budget admission first needs a live consumer heartbeat; this fixture
+// runs no worker, so seed the row a healthy consumer would report.
 
-	if pid, held := fleetLeader(t, pool); held {
-		t.Fatalf("backend %d holds leadership in an installation that elected nobody", pid)
-	}
-	// The neighbouring installation elects a leader under the same identifier.
-	// It is another installation's leader, so this one still has none.
-	theirs, err := limits.TryAcquireLeader(t.Context(), neighbour)
-	if err != nil {
-		t.Fatalf("elect a leader in the neighbouring installation: %v", err)
-	}
-	if theirs == nil {
-		t.Fatal("leadership in a fresh neighbouring installation was already held")
-	}
-	defer theirs.Close(context.WithoutCancel(t.Context()))
-	theirPID, held := fleetLeader(t, neighbour)
-	if !held {
-		t.Fatal("the neighbouring installation reports no leader after electing one")
-	}
-	if pid, held := fleetLeader(t, pool); held {
-		t.Fatalf("backend %d leads the neighbouring installation and was reported as this one's leader", pid)
-	}
+// Nothing has published a balance yet, so there is no amount to spend
+// against and the request is refused rather than served unaccounted.
 
-	// Both installations hold the identifier at once, which is exactly the
-	// state an unscoped probe reports as two leaders of one installation.
-	mine, err := limits.TryAcquireLeader(t.Context(), pool)
-	if err != nil {
-		t.Fatalf("elect a leader in this installation: %v", err)
-	}
-	if mine == nil {
-		t.Fatal("a neighbouring installation's leader blocked this installation's election")
-	}
-	defer mine.Close(context.WithoutCancel(t.Context()))
-	myPID, held := fleetLeader(t, pool)
-	if !held {
-		t.Fatal("this installation reports no leader after electing one")
-	}
-	if myPID == theirPID {
-		t.Fatalf("both installations report backend %d as their leader", myPID)
-	}
-	if pid, _ := fleetLeader(t, neighbour); pid != theirPID {
-		t.Fatalf("the neighbouring installation's leader moved to %d, want %d", pid, theirPID)
-	}
-}
+// Spend beyond the limit is recorded the way the consumer records it, and
+// reconciliation is what turns stored spend into an admission decision.
 
-// TestCostReconciliationSurvivesLeaderLoss proves that reconciliation is a
-// responsibility and not a process: exactly one worker holds it, and when that
-// worker is lost another takes it over and resumes publishing spend windows.
-func TestCostReconciliationSurvivesLeaderLoss(t *testing.T) {
-	in := fleetInstallation(t)
-	leaderWorker := in.worker("fleet-leader-first")
-	var elected int32
-	fleetEventually(t, "the first worker to take reconciliation leadership", 40*time.Second,
-		func() bool {
-			pid, held := fleetLeader(t, in.h.Pool)
-			elected = pid
-			return held
-		})
-	// The second worker finds leadership taken and waits, which is the state a
-	// standby is in when the leader is lost.
-	standby := in.worker("fleet-leader-standby")
-	fleetEventually(t, "the standby to record a pass it skipped", 40*time.Second, func() bool {
-		return in.count(`SELECT coalesce(max(skipped_total), 0) FROM olp.worker_task_health
-            WHERE task = $1`, string(usage.TaskCostReconciliation)) > 0
-	})
-	if pid, held := fleetLeader(t, in.h.Pool); !held || pid != elected {
-		t.Fatalf("leadership moved to %d (held %v) while the leader was alive, want %d",
-			pid, held, elected)
-	}
+// Losing the counters is not the same as having none: the key keeps its
+// budget, so it is refused until the balance is republished.
 
-	lostAt := time.Now().UTC()
-	if err := leaderWorker.Kill(); err != nil {
-		t.Fatalf("kill the leader: %v", err)
-	}
-	// The next pass of the standby elects it; passes are a minute apart, so the
-	// takeover is given two of them.
-	fleetEventually(t, "the standby to take leadership and reconcile", 150*time.Second, func() bool {
-		pid, held := fleetLeader(t, in.h.Pool)
-		if !held || pid == elected {
-			return false
-		}
-		return in.count(`SELECT count(*) FROM olp.worker_task_health
-            WHERE task = $1 AND last_success_at >= $2`,
-			string(usage.TaskCostReconciliation), lostAt) == 1
-	})
-	if err := standby.Stop(15 * time.Second); err != nil {
-		t.Fatalf("stop the surviving worker: %v", err)
-	}
-	// Leadership is a lease on a session, so the last worker leaving returns it.
-	if pid, held := fleetLeader(t, in.h.Pool); held {
-		t.Fatalf("backend %d still holds reconciliation leadership after every worker stopped", pid)
-	}
-}
+// A snapshot of a window that has already closed says nothing about today,
+// so it may not initialize today's counters at any accrued amount.
 
-// TestBudgetsRecoverFromLostSpendState proves what a cost budget does when the
-// shared counters it is admitted against are wrong or gone: a key over its limit
-// is refused, a key whose balance cannot be read is refused rather than served,
-// reconciliation repairs the counters, and a snapshot from a window that has
-// already closed can never be mistaken for today's balance.
-func TestBudgetsRecoverFromLostSpendState(t *testing.T) {
-	in := fleetProvisioned(t)
-	keyID, secret := in.key("budgeted", map[string]any{"daily_cost_limit": "0.01"})
-	replica := in.replica("fleet-budget-gateway")
-	limiter := limLimiter(t, in.valkey, in.namespace)
-	day, month := in.costKeys(keyID)
-
-	// Budget admission first needs a live consumer heartbeat; this fixture
-	// runs no worker, so seed the row a healthy consumer would report.
-	if _, err := in.h.Pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health
-        (singleton, pending_events, lag_events, oldest_pending_at, checked_at)
-        VALUES(true,0,0,NULL,now())
-        ON CONFLICT (singleton) DO UPDATE SET pending_events=0, lag_events=0,
-            oldest_pending_at=NULL, oldest_lagged_at=NULL, checked_at=now()`); err != nil {
-		t.Fatal(err)
-	}
-
-	// Nothing has published a balance yet, so there is no amount to spend
-	// against and the request is refused rather than served unaccounted.
-	served := in.vendor.chats.Load()
-	if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != http.StatusServiceUnavailable ||
-		code != "distributed_limits_unavailable" {
-		t.Fatalf("unreconciled budget: %d %s", status, code)
-	}
-	if in.vendor.chats.Load() != served {
-		t.Fatal("a request whose budget could not be read reached the upstream")
-	}
-
-	// Spend beyond the limit is recorded the way the consumer records it, and
-	// reconciliation is what turns stored spend into an admission decision.
-	kbFact(t, in.h, keyID, in.provider, time.Now().UTC(), "billable", kbText("0.020000000000"), false)
-	if report := fleetReconcile(t, in.h.Pool, limiter); report.KeysReconciled != 1 ||
-		report.DailyWindowsReconciled != 1 {
-		t.Fatalf("reconciliation report = %+v, want one key and one daily window", report)
-	}
-	status, code, header := fleetChat(t, replica.PublicOrigin, secret)
-	if status != http.StatusTooManyRequests || code != "budget_exhausted" {
-		t.Fatalf("exhausted budget: %d %s", status, code)
-	}
-	if retry := fleetRetryAfter(t, header); retry < 1 || retry > 86400 {
-		t.Fatalf("Retry-After %d is outside the day the budget resets over", retry)
-	}
-	if in.vendor.chats.Load() != served {
-		t.Fatal("a request over budget reached the upstream")
-	}
-
-	// Losing the counters is not the same as having none: the key keeps its
-	// budget, so it is refused until the balance is republished.
-	do(t, in.valkey, "DEL", day)
-	do(t, in.valkey, "DEL", month)
-	if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != http.StatusServiceUnavailable ||
-		code != "distributed_limits_unavailable" {
-		t.Fatalf("flushed budget counters: %d %s", status, code)
-	}
-
-	// A snapshot of a window that has already closed says nothing about today,
-	// so it may not initialize today's counters at any accrued amount.
-	windows := limits.BudgetWindows(time.Now().UTC())
-	stale := limits.CostSnapshot{CostOwnerID: keyID,
-		DailyWindowID: windows.DailyID - 1, DailyAccrued: "0.00",
-		MonthlyWindowID: windows.MonthlyID - 1, MonthlyAccrued: "0.00"}
-	daily, monthly, err := limiter.ApplyCostSnapshot(t.Context(), stale)
-	if err != nil {
-		t.Fatalf("apply a snapshot from a closed window: %v", err)
-	}
-	if daily || monthly {
-		t.Fatalf("a snapshot from a closed window initialized today (daily %v, monthly %v)",
-			daily, monthly)
-	}
-	if fleetExists(t, in.valkey, day) || fleetExists(t, in.valkey, month) {
-		t.Fatal("a snapshot from a closed window created today's counters")
-	}
-	if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != http.StatusServiceUnavailable ||
-		code != "distributed_limits_unavailable" {
-		t.Fatalf("budget after a stale snapshot: %d %s", status, code)
-	}
-
-	// The next reconciliation pass repairs exactly what was lost.
-	if report := fleetReconcile(t, in.h.Pool, limiter); report.DailyWindowsReconciled != 1 {
-		t.Fatalf("repair report = %+v, want one daily window", report)
-	}
-	if !fleetExists(t, in.valkey, day) || !fleetExists(t, in.valkey, month) {
-		t.Fatal("reconciliation did not republish the counters it owns")
-	}
-	if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != http.StatusTooManyRequests ||
-		code != "budget_exhausted" {
-		t.Fatalf("repaired budget: %d %s", status, code)
-	}
-	if in.vendor.chats.Load() != served {
-		t.Fatal("a request over budget reached the upstream after recovery")
-	}
-}
+// The next reconciliation pass repairs exactly what was lost.
 
 // TestGatewayEpochsRecordAndResolveLostReplicas proves that a replica which
 // disappears leaves a record an operator can act on: its epoch is confirmed

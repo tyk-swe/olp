@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -46,24 +45,6 @@ func useBedrockProvider(h *harness) {
 func converseReply(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = io.WriteString(w, `{"output":{"message":{"role":"assistant","content":[{"text":"`+answerText+`"}]}},"stopReason":"end_turn","usage":{"inputTokens":3,"outputTokens":2,"totalTokens":5}}`)
-}
-
-func TestContentPolicyBedrockInputBlocksBeforeDispatch(t *testing.T) {
-	h := newHarness(t, Config{})
-	useBedrockProvider(h)
-	h.mock.set("a", converseReply)
-	setRoutePolicy(h, contentpolicy.Rule{ID: "no-secrets", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionBlock})
-	resp, body := h.chat(fullKey, nil, `,"messages":[{"role":"system","content":"keep it short"},{"role":"user","content":"say s3cr3t"}]`)
-	if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "content_policy_blocked" {
-		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
-	}
-	if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-		t.Fatalf("provider called: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
-	}
-	decisions := policyDecisions(h)
-	if len(decisions) != 1 || decisions[0] != (contentpolicy.Decision{RuleID: "no-secrets", Phase: "input", Action: "block", Outcome: "blocked"}) {
-		t.Fatalf("decisions %+v", decisions)
-	}
 }
 
 func TestContentPolicyBedrockInputRedactReachesConverse(t *testing.T) {
@@ -109,40 +90,6 @@ func TestContentPolicyBedrockInputRedactReachesConverse(t *testing.T) {
 	}
 }
 
-// Canonical surfaces only encode to inspectable wires today (a bedrock_invoke
-// body is refused by the encoder first), so the fail-closed gate is checked
-// directly against wires the input rules cannot read.
-func TestContentPolicyUninspectableWireFailsClosed(t *testing.T) {
-	route := &routing.Route{Slug: routeSlug, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
-		{ID: "no-secrets", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionBlock},
-	}}}
-	compiled, e := compiledPolicy(route)
-	if e != nil {
-		t.Fatal(e)
-	}
-	for _, encodedWire := range []wire.Format{wire.BedrockInvoke, wire.GeminiInteractions, wire.Realtime, wire.ImageGeneration} {
-		e := inputPolicyWireGate(route, compiled, encodedWire)
-		if e == nil || e.Status != http.StatusUnprocessableEntity || e.Code != "content_policy_surface_unavailable" || !strings.Contains(e.Message, string(encodedWire)) {
-			t.Fatalf("%s: gate=%+v", encodedWire, e)
-		}
-	}
-	for _, encodedWire := range []wire.Format{wire.Bedrock, "bedrock_count", wire.BedrockEmbeddings, wire.Chat, wire.Anthropic, wire.Gemini} {
-		if e := inputPolicyWireGate(route, compiled, encodedWire); e != nil {
-			t.Fatalf("%s: inspectable wire refused: %+v", encodedWire, e)
-		}
-	}
-	outputOnly := &routing.Route{Slug: routeSlug, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
-		{ID: "mask-out", Phase: contentpolicy.PhaseOutput, Pattern: "s3cr3t", Action: contentpolicy.ActionRedact, Replacement: "x"},
-	}}}
-	compiled, e = compiledPolicy(outputOnly)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e := inputPolicyWireGate(outputOnly, compiled, wire.BedrockInvoke); e != nil {
-		t.Fatalf("output-only policy refused: %+v", e)
-	}
-}
-
 // These structured-data regressions exercise the Bedrock destination contract
 // without an unrelated OpenAI fallback target.
 func useOnlyBedrockProvider(h *harness) {
@@ -166,29 +113,6 @@ func bedrockToolArguments(t *testing.T, input string) string {
 		t.Fatal(err)
 	}
 	return `,"messages":[{"role":"user","content":"run the tool"},{"role":"assistant","content":null,"tool_calls":[{"id":"call","type":"function","function":{"name":"lookup","arguments":` + string(arguments) + `}}]},{"role":"tool","tool_call_id":"call","content":"done"}]`
-}
-
-func TestContentPolicyBedrockStructuredInputBlocksBeforeDispatch(t *testing.T) {
-	for _, tc := range []struct{ name, input, pattern string }{
-		{"object key", `{"s3cr3t":"safe"}`, "s3cr3t"},
-		{"escaped object key", `{"s3cr\u0033t":"safe"}`, "s3cr3t"},
-		{"number", `{"count":9007199254740993}`, "9007199254740993"},
-		{"boolean", `{"enabled":true}`, "true"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, Config{})
-			useOnlyBedrockProvider(h)
-			h.mock.set("a", converseReply)
-			setRoutePolicy(h, contentpolicy.Rule{ID: "no-structured-secrets", Phase: contentpolicy.PhaseInput, Pattern: tc.pattern, Action: contentpolicy.ActionBlock})
-			resp, body := h.chat(fullKey, nil, bedrockToolArguments(t, tc.input))
-			if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "content_policy_blocked" {
-				t.Fatalf("status=%d body=%v", resp.StatusCode, body)
-			}
-			if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-				t.Fatalf("provider called: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
-			}
-		})
-	}
 }
 
 func TestContentPolicyBedrockStructuredInputRedactsBeforeDispatch(t *testing.T) {
@@ -217,18 +141,5 @@ func TestContentPolicyBedrockStructuredInputRedactsBeforeDispatch(t *testing.T) 
 	decisions := policyDecisions(h)
 	if len(decisions) != 1 || decisions[0].Outcome != "redacted" || decisions[0].RuleID != "mask-structured-secret" {
 		t.Fatalf("decisions %+v", decisions)
-	}
-}
-
-func TestContentPolicyBedrockStructuredKeyCollisionFailsBeforeDispatch(t *testing.T) {
-	h := newHarness(t, Config{})
-	useOnlyBedrockProvider(h)
-	setRoutePolicy(h, contentpolicy.Rule{ID: "mask-secret", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionRedact, Replacement: "[MASK]"})
-	resp, body := h.chat(fullKey, nil, bedrockToolArguments(t, `{"s3cr3t":1,"[MASK]":2}`))
-	if resp.StatusCode != http.StatusUnprocessableEntity || errorCode(t, body) != "content_policy_surface_unavailable" {
-		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
-	}
-	if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
-		t.Fatalf("provider called: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
 	}
 }

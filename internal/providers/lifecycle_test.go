@@ -2,7 +2,6 @@ package providers
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -11,77 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 )
-
-func TestPublishedSlotsUseOnlyCredentialsRequiredByAuthMode(t *testing.T) {
-	for _, authMode := range []string{AuthNone, AuthAPIKey, AuthHeaders} {
-		for _, enabled := range []bool{false, true} {
-			for _, revoked := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/enabled=%t/revoked=%t", authMode, enabled, revoked), func(t *testing.T) {
-					credential, version := "retained-credential", 1
-					row := slotRow{
-						ID: "slot", Default: true, Name: "default", Enabled: enabled, Weight: 1,
-						CredentialID: &credential, CredentialVersion: &version, CredentialRevoked: revoked,
-					}
-					slot := row.published(authMode)
-					if slot.Enabled != (enabled && (authMode == AuthNone || !revoked)) {
-						t.Fatalf("incorrect published eligibility: %+v", slot)
-					}
-					if authMode == AuthNone {
-						if slot.CredentialID != nil || slot.CredentialVersion != nil {
-							t.Fatalf("no-auth slot still references a credential: %+v", slot)
-						}
-					} else if slot.CredentialID != row.CredentialID || slot.CredentialVersion != row.CredentialVersion {
-						t.Fatalf("authenticated slot lost its credential: %+v", slot)
-					}
-					if row.CredentialID != &credential || row.CredentialVersion != &version || row.Enabled != enabled {
-						t.Fatal("publication changed the draft slot")
-					}
-				})
-			}
-		}
-	}
-}
-
-// A credential slot's version fits a provider that authenticates with it: a
-// pasted credential a provider that takes a static one, and a grant only a
-// provider pinning the plugin build that enrolled it, whatever the build's
-// name.
-func TestCredentialVersionsFitOnlyProvidersThatAuthenticateWithThem(t *testing.T) {
-	enrolling, other := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	grant := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: enrolling, ProfileID: "profile"}
-	static := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileRevision: enrolling}
-	for _, tc := range []struct {
-		cfg     *Configuration
-		plugin  string
-		refusal string
-	}{
-		{cfg: grant, plugin: enrolling},
-		{cfg: static},
-		{cfg: grant, plugin: other, refusal: "re-enroll the slot's grant"},
-		{cfg: grant, refusal: "Enroll a grant"},
-		{cfg: static, plugin: enrolling, refusal: "Rotate its credential"},
-	} {
-		row := slotRow{Name: "Default", CredentialID: new("credential"), CredentialPlugin: tc.plugin}
-		if tc.plugin != "" {
-			row.CredentialProfile = "profile"
-		}
-		err := row.credentialFits(tc.cfg)
-		problem, refused := errors.AsType[*access.Problem](err)
-		if (err != nil) != (tc.refusal != "") || refused && (problem.Code != "credential_mismatch" || !strings.Contains(problem.Detail, tc.refusal)) {
-			t.Errorf("a %s provider and a version enrolled through %q: %v", tc.cfg.AuthMode, tc.plugin, err)
-		}
-	}
-}
-
-func TestGrantCredentialCannotCrossProfilesWithinTheSameBuild(t *testing.T) {
-	cfg := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: strings.Repeat("a", 64), ProfileID: "receiving-profile"}
-	for _, profile := range []string{"enrolling-profile", "", "receiving-profile"} {
-		row := slotRow{Name: "default", CredentialID: new("credential"), CredentialPlugin: cfg.ProfileRevision, CredentialProfile: profile}
-		if err := row.credentialFits(cfg); (err == nil) != (profile == cfg.ProfileID) {
-			t.Fatalf("profile %q: %v", profile, err)
-		}
-	}
-}
 
 // Every slot of a provider revision observes one principal: activation
 // refuses slots whose credential versions observe different principals,

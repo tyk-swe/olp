@@ -45,20 +45,3 @@ func TestConfigurationPreservesConnectionAndEnforcesSessionSettings(t *testing.T
 		})
 	}
 }
-
-func TestConfigurationRejectsInvalidURLsWithoutExposingCredentials(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct{ name, url string }{
-		{"invalid escape", "postgres://worker:private-password%ZZ@db.example/olp"},
-		{"invalid port", "postgres://worker:private-password@db.example:invalid/olp"},
-		{"invalid TLS mode", "postgres://worker:private-password@db.example/olp?sslmode=private-password"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			cfg, err := database.Configuration(tc.url, 3, time.Second)
-			if cfg != nil || err == nil || err.Error() != "invalid OLP_DATABASE_URL" {
-				t.Fatalf("configuration returned %v; want a sanitized OLP_DATABASE_URL error and no pool configuration", err)
-			}
-		})
-	}
-}

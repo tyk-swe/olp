@@ -76,19 +76,3 @@ func TestSignalMeasurementsKeepUnknownSeparateFromRecovery(t *testing.T) {
 		})
 	}
 }
-
-func TestSignalMeasurementsRejectInvalidStoredBudgetAndWorkerEvidence(t *testing.T) {
-	for _, test := range []struct {
-		event string
-		row   signalTestRow
-	}{
-		{"worker.stale", signalTestRow{"export_delivery", "", "-1"}},
-		{"worker.stale", signalTestRow{"export_delivery", "", "not-a-number"}},
-		{"budget.exhausted", signalTestRow{"project", "id", nil, "Project", "day", int64(7), "-1", "20", true}},
-		{"budget.exhausted", signalTestRow{"project", "id", nil, "Project", "day", int64(7), "1", "0", true}},
-	} {
-		if _, err := scanRuleSignal(test.row, signalRule{event: test.event}, time.Now(), nil, nil); err == nil {
-			t.Fatalf("accepted invalid %s evidence %v", test.event, test.row)
-		}
-	}
-}

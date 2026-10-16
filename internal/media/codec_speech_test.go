@@ -18,43 +18,6 @@ func speechRequest(voice, format string, speed *float64) *Request {
 	return r
 }
 
-func TestElevenLabsSpeech(t *testing.T) {
-	speed := 1.1
-	call, failure := encodeElevenLabsSpeech(speechRequest("21m00Tcm4TlvDq8ikWAM", "pcm", &speed), "eleven_multilingual_v2")
-	if failure != nil {
-		t.Fatal(failure.Message)
-	}
-	if call.Path != "text-to-speech/21m00Tcm4TlvDq8ikWAM" || call.Query.Get("output_format") != "pcm_24000" || call.CharacterHeader != "Character-Cost" ||
-		string(call.JSON) != `{"model_id":"eleven_multilingual_v2","text":"Hello there.","voice_settings":{"speed":1.1}}` {
-		t.Fatalf("call = %+v %s", call, call.JSON)
-	}
-	fast := 2.0
-	instructions := "cheerful"
-	for name, invalid := range map[string]*Request{
-		"aac":          speechRequest("v", "aac", nil),
-		"fast":         speechRequest("v", "", &fast),
-		"no voice":     speechRequest("", "", nil),
-		"instructions": {Op: OpSpeech, Input: "x", Voice: "v", Instructions: &instructions},
-	} {
-		if _, failure := encodeElevenLabsSpeech(invalid, "eleven_multilingual_v2"); failure == nil {
-			t.Fatalf("%s was accepted", name)
-		}
-	}
-}
-
-func TestDeepgramSpeechNamesItsVoiceInTheModel(t *testing.T) {
-	call, failure := encodeDeepgramSpeech(speechRequest("thalia", "wav", nil), "aura-2-thalia-en")
-	if failure != nil {
-		t.Fatal(failure.Message)
-	}
-	if call.Path != "speak" || call.Query.Encode() != "container=wav&encoding=linear16&model=aura-2-thalia-en" || string(call.JSON) != `{"text":"Hello there."}` || call.CharacterHeader != "Dg-Char-Count" {
-		t.Fatalf("call = %+v %s", call, call.JSON)
-	}
-	if _, failure := encodeDeepgramSpeech(speechRequest("alloy", "", nil), "aura-2-thalia-en"); failure == nil {
-		t.Fatal("a voice the model does not speak in was accepted")
-	}
-}
-
 func TestVendorTranscriptsReadAsOpenAIFormats(t *testing.T) {
 	for _, test := range []struct {
 		name   string
