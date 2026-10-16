@@ -132,3 +132,18 @@ func TestMetricsTenantLabelsAndSeriesCap(t *testing.T) {
 		t.Fatalf("flags labels=%v cap=%d", c.MetricsTenantLabels, c.MetricsSeriesCap)
 	}
 }
+
+func TestResponseCacheRequiresSeparateInstance(t *testing.T) {
+	for _, cacheURL := range []string{"redis://localhost:6379/1", "rediss://localhost/3"} {
+		env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/olp", "OLP_VALKEY_URL": "redis://localhost/0", "OLP_CACHE_VALKEY_URL": cacheURL}
+		_, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "separate Valkey") {
+			t.Fatalf("accepted same instance: %v", err)
+		}
+	}
+	env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/olp", "OLP_VALKEY_URL": "redis://localhost/0", "OLP_CACHE_VALKEY_URL": "redis://cache.example:6380"}
+	c, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
+	if err != nil || c.CacheValkeyURL != env["OLP_CACHE_VALKEY_URL"] {
+		t.Fatal(c.CacheValkeyURL, err)
+	}
+}

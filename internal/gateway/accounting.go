@@ -109,6 +109,7 @@ func accountingEvent(e Envelope) *usage.Event {
 		return nil
 	}
 	event := &usage.Event{
+		CacheResult:          e.CacheResult,
 		EvaluatorGuardrailID: optionalText(e.EvaluatorGuardrailID),
 		Version:              usage.WireVersion,
 		EventID:              uuid.Must(uuid.NewV7()).String(),
@@ -184,6 +185,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		FirstByteMS:   optionalMilliseconds(fact.FirstByte),
 		Usage:         &evidence,
 		Routing: &usage.Routing{
+			Cache:            fact.Cache,
 			Interaction:      fact.Interaction,
 			Mode:             optionalText(fact.Mode),
 			CredentialSlotID: optionalText(fact.SlotID),
@@ -215,7 +217,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 			attempt.Routing.PricingRevisionID = &fact.Price.RevisionID
 		}
 	}
-	if fact.Class != classSuccess {
+	if fact.Class != classSuccess && fact.Class != "cache_hit" {
 		attempt.ErrorClass = optionalText(fact.Class)
 	}
 	if fact.UsageObserved {
@@ -247,7 +249,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 // attemptSuccessful reports whether the attempt completed successfully, which
 // is when a per-request price component applies.
 func attemptSuccessful(fact *AttemptFact) bool {
-	return fact.Class == classSuccess && fact.Status >= 200 && fact.Status <= 299
+	return (fact.Class == classSuccess || fact.Class == "cache_hit") && fact.Status >= 200 && fact.Status <= 299
 }
 
 // attemptUsage is the billing evidence an attempt carries into its usage event.

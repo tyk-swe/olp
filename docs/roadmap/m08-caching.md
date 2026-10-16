@@ -2,10 +2,10 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M7](m07-guardrails.md) | Lower cost and latency for repeated work |
+| Implemented | [M7](m07-guardrails.md) | Lower cost and latency for repeated work |
 
 LiteLLM caches responses in Redis, Valkey, object storage, memory or disk, with
-semantic variants and per-request controls. OLP has no response cache: it
+semantic variants and per-request controls. At the planning baseline, OLP had no response cache: it
 forwards provider prompt-caching controls natively and prices cache reads and
 writes, but every request reaches a provider. A response cache stores content,
 which OLP's durable records never hold, so this milestone builds caching as an
@@ -144,7 +144,15 @@ reports show cache read and write tokens by route.
 | Configuration and Helm | `internal/config/`, `deploy/helm/` |
 | Console | `console/src/lib/features/routes/` |
 
-## Decisions to settle
+## Confirmed implementation decisions
+
+Default sharing is per API key; wider scopes require explicit route configuration.
+Replay stays within the original unary/streaming mode. Cache storage requires a
+separate Valkey instance, not a different logical database. Semantic matching and
+prompt-control insertion require transformed routes. Request-local masking and
+caller-provided provider credentials bypass response caching.
+
+## Planning decisions (historical)
 
 1. Whether a cache may be shared across keys within a project by default
    (recommended: no; `key` scope is the default, and wider scopes are explicit).
@@ -156,16 +164,48 @@ reports show cache read and write tokens by route.
 
 ## Exit criteria
 
-- [ ] Hits and misses are correct for unary and streamed responses on every
+- [x] Hits and misses are correct for unary and streamed responses on every
       surface, and replayed streams validate against the protocol corpus.
-- [ ] No entry is ever served across a key or project boundary in an isolation
+- [x] No entry is ever served across a key or project boundary in an isolation
       test with `key` and `project` scopes.
-- [ ] A new route or guardrail revision misses every older entry.
-- [ ] Inspecting the cache Valkey reveals no plaintext response for exact
+- [x] A new route or guardrail revision misses every older entry.
+- [x] Inspecting the cache Valkey reveals no plaintext response for exact
       entries.
-- [ ] Losing the cache Valkey degrades to `bypass` without request errors.
+- [x] Losing the cache Valkey degrades to `bypass` without request errors.
 - [ ] A cache hit adds at most 1 ms at p95 over scenario S1's added latency on
       the same hardware.
-- [ ] Prompt-cache insertion raises measured cache-read tokens on a fixture
+- [x] Prompt-cache insertion raises measured cache-read tokens on a fixture
       replaying multi-turn traffic, and never applies on strict routes.
-- [ ] The [parity matrix](parity.md) caching rows are `Parity` or better.
+- [x] The [parity matrix](parity.md) caching rows are `Parity` or better.
+
+## Implementation evidence (2026-10-16)
+
+`make check` passed with race detection, including the Go protocol corpus,
+1,316 console tests and the script suites. The focused PostgreSQL/Valkey run
+passed management authorization and project-isolation sweeps, cache activation,
+sealed storage, invalidation, quotas, semantic embedding children, audit
+acknowledgement and accounting. Native unary/stream replay covers Chat
+Completions, Responses, Anthropic, Gemini and Bedrock Converse. The packaged
+Chromium cache journey passed publication, replay, statistics, purge and axe.
+Generated contracts reproduced byte-for-byte, and Helm lint/render passed.
+
+The focused regression gate compared 15 gateway/preparation benchmarks with
+the pre-M8 tree, using six 100 ms samples, and found no significant regression
+above 10%. The dedicated cache benchmark used Go 1.27.2, `GOMAXPROCS=4`, an
+8-vCPU Intel Haswell host and the pinned Valkey Bundle 9.1.0. With competing
+builds stopped, six paired one-second samples measured:
+
+| Warm request path | Median p95 |
+| --- | --- |
+| Cache bypass | 0.286 ms |
+| Exact cache hit | 0.990 ms |
+| Additional latency | 0.704 ms |
+
+This development measurement satisfies the 1 ms overhead budget. The full-rate
+S1 reference-hardware run remains an open release qualification step alongside
+M1, so its exit checkbox remains open.
+
+The broad `make integration` attempt encountered an eight-second process
+shutdown timeout in `TestCodeCLIFollowupAutomaticRetriesAndRecovery/websocket-reconnect`.
+That case passed when rerun alone. The broad run was not completed; the focused
+M8 integration and browser results above are the completed evidence.

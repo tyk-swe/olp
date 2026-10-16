@@ -437,3 +437,11 @@ Guardrail configuration uses typed definitions, ordered `guardrail_policies`,
 and additive `guardrail_attachments`. Version 1 imports are normalized explicitly;
 version 2 artifacts cannot mix `content_policy` with the new fields. See
 [Guardrails](guardrails.md) for lifecycles, portable references and examples.
+
+### Response-cache intent
+
+Route `cache` and `prompt_cache` policies round-trip through export, plan and
+apply, and publish in the immutable runtime snapshot. The cache deployment URL
+and credentials are environment bindings, not promotion artifacts. Restoring
+configuration into an empty installation restores policy, not cached content.
+See [response caching](caching.md).

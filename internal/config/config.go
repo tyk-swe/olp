@@ -39,6 +39,8 @@ type Config struct {
 	DatabaseMaxConnections    int
 	ValkeyURL                 string
 	ValkeyCAFile              string
+	CacheValkeyURL            string
+	CacheValkeyCAFile         string
 	ListenAddr                string
 	ObservabilityListenAddr   string
 	PublicOrigin              string
@@ -108,13 +110,16 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	}
 	f := flag.NewFlagSet("olp "+args[0], flag.ContinueOnError)
 	f.SetOutput(output)
-	var databaseFile, databaseReadFile, valkeyFile, level string
+	var databaseFile, databaseReadFile, valkeyFile, cacheValkeyFile, level string
 	f.StringVar(&c.DatabaseURL, "database-url", "", "PostgreSQL URL (OLP_DATABASE_URL)")
 	f.StringVar(&databaseFile, "database-url-file", "", "file containing PostgreSQL URL")
 	f.StringVar(&c.DatabaseReadURL, "database-read-url", "", "optional PostgreSQL replica for runtime release and authority reads")
 	f.StringVar(&c.Region, "region", "", "deployment region for regional limits and local provider preference")
 	f.StringVar(&databaseReadFile, "database-read-url-file", "", "file containing optional PostgreSQL read-replica URL")
 	f.IntVar(&c.DatabaseMaxConnections, "database-max-connections", 20, "PostgreSQL pool capacity")
+	f.StringVar(&c.CacheValkeyURL, "cache-valkey-url", "", "optional dedicated response cache Valkey URL")
+	f.StringVar(&cacheValkeyFile, "cache-valkey-url-file", "", "file containing dedicated response cache Valkey URL")
+	f.StringVar(&c.CacheValkeyCAFile, "cache-valkey-tls-ca-file", "", "PEM trust roots for response cache Valkey")
 	f.StringVar(&c.ValkeyURL, "valkey-url", "", "redis:// or rediss:// URL; required for worker")
 	f.StringVar(&valkeyFile, "valkey-url-file", "", "file containing Valkey URL")
 	f.StringVar(&c.ValkeyCAFile, "valkey-tls-ca-file", "", "PEM trust roots for Valkey TLS")
@@ -206,6 +211,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if c.DatabaseReadURL, err = secretURL(c.DatabaseReadURL, databaseReadFile, "OLP_DATABASE_READ_URL"); err != nil {
 		return c, err
 	}
+	if c.CacheValkeyURL, err = secretURL(c.CacheValkeyURL, cacheValkeyFile, "OLP_CACHE_VALKEY_URL"); err != nil {
+		return c, err
+	}
 	if c.ValkeyURL, err = secretURL(c.ValkeyURL, valkeyFile, "OLP_VALKEY_URL"); err != nil {
 		return c, err
 	}
@@ -287,6 +295,29 @@ func secretURL(value, path, name string) (string, error) {
 }
 
 func (c Config) Validate() error {
+	if c.CacheValkeyCAFile != "" && c.CacheValkeyURL == "" {
+		return errors.New("OLP_CACHE_VALKEY_TLS_CA_FILE requires OLP_CACHE_VALKEY_URL")
+	}
+	if c.CacheValkeyURL != "" {
+		cacheURL, err := url.Parse(c.CacheValkeyURL)
+		if err != nil || cacheURL.Hostname() == "" || (cacheURL.Scheme != "redis" && cacheURL.Scheme != "rediss") || cacheURL.RawQuery != "" || cacheURL.Fragment != "" {
+			return errors.New("invalid OLP_CACHE_VALKEY_URL")
+		}
+		if c.CacheValkeyCAFile != "" && cacheURL.Scheme != "rediss" {
+			return errors.New("cache TLS trust requires rediss")
+		}
+		mainURL, _ := url.Parse(c.ValkeyURL)
+		port := func(u *url.URL) string {
+			if u.Port() != "" {
+				return u.Port()
+			}
+			return "6379"
+		}
+		if mainURL != nil && strings.EqualFold(cacheURL.Hostname(), mainURL.Hostname()) && port(cacheURL) == port(mainURL) {
+			return errors.New("response cache requires a separate Valkey instance, not a logical database")
+		}
+	}
+
 	if c.Region != "" {
 		if len(c.Region) > 100 {
 			return errors.New("OLP_REGION must be a valid region name")

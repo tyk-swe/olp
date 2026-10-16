@@ -95,8 +95,8 @@ func TestStartupAuthenticatesEveryStoredSecret(t *testing.T) {
 	}
 }
 
-// The database accepts exactly the purposes the secrets package can seal, so
-// every stored record names a purpose a process can open.
+// The database accepts exactly the purposes used for stored secrets. Response
+// cache entries are sealed separately in Valkey and never stored in this table.
 func TestSealPurposesMatchTheDatabase(t *testing.T) {
 	h := newAccessHarness(t)
 	var definition string
@@ -110,7 +110,9 @@ func TestSealPurposesMatchTheDatabase(t *testing.T) {
 		stored = append(stored, match[1])
 	}
 	for _, purpose := range secrets.SealPurposes() {
-		sealed = append(sealed, purpose.String())
+		if purpose != secrets.ResponseCache {
+			sealed = append(sealed, purpose.String())
+		}
 	}
 	slices.Sort(stored)
 	slices.Sort(sealed)

@@ -97,10 +97,10 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Exact response cache | [Caching](https://docs.litellm.ai/docs/proxy/caching): Redis, Valkey, S3, GCS, memory, disk | Not available | `Gap` | M8.1 |
-| Semantic cache | [Semantic caching](https://docs.litellm.ai/docs/proxy/caching_semantic) | Not available | `Gap` | M8.2 |
-| Per-request cache controls | [Cache controls](https://docs.litellm.ai/docs/proxy/caching_controls) | Not available | `Gap` | M8.1 |
-| Provider prompt caching | Pass-through and `cache_control` injection | Native pass-through; cache read and write tokens priced, including 5-minute and 1-hour writes | `Partial` | M8.3 |
+| Exact response cache | [Caching](https://docs.litellm.ai/docs/proxy/caching): Redis, Valkey, S3, GCS, memory, disk | [Sealed, scoped Valkey cache](../caching.md), revision-bound unary/native-stream replay, expiry and constant-time purge | `Parity` | M8.1 |
+| Semantic cache | [Semantic caching](https://docs.litellm.ai/docs/proxy/caching_semantic) | Valkey Search with authorized embedding routes, bounded similarity search, exact non-query context and explicit vector-storage acknowledgement | `Parity` | M8.2 |
+| Per-request cache controls | [Cache controls](https://docs.litellm.ai/docs/proxy/caching_controls) | `no-cache`, `no-store`, `max-age`, bounded `ttl`, result and age headers; keys can forbid caching | `Parity` | M8.1 |
+| Provider prompt caching | Pass-through and `cache_control` injection | Native controls preserved; transformed Anthropic breakpoints and OpenAI cache keys; cache read/write usage and prices retained | `Parity` | M8.3 |
 
 ## Identity, tenancy and access
 

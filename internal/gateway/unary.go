@@ -246,13 +246,22 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		return fail(e)
 	}
 	admitted := x.admissionAuthority(x.authority)
-	x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority), x.limitRoute())
+	e = s.admitCacheAware(ctx, x, &admitted, keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
 	if e != nil {
 		return fail(e)
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
-		return s.unaryAttempt(ctx, x, a, p, slot, fact)
-	}})
+	var result attemptOutcome[operationplan.Result]
+	if x.cacheHit() {
+		s.recordCacheHit(x)
+		result.result.Body = x.cache.entry.Body
+	} else {
+		result = runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+			return s.unaryAttempt(ctx, x, a, p, slot, fact)
+		}})
+	}
+	if x.cache != nil && !x.cacheHit() {
+		x.cache.body = result.result.Body
+	}
 	if result.err != nil {
 		out, status := fail(result.err)
 		out.committed, out.cancelled = result.committed, out.cancelled || result.cancelled

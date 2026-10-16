@@ -74,6 +74,7 @@ describe('API key form state', () => {
       costBasis: 'cost',
       expiresAt: '',
       allowProviderState: false,
+      forbidResponseCache: false,
       responseMetadata: false,
       endUserSource: '',
       routeLimits: [],

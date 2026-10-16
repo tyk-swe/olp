@@ -422,6 +422,10 @@
               "charge"
             ],
             "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          },
+          "forbid_response_cache": {
+            "type": "boolean",
+            "description": "Forbid response cache lookup and storage for this key."
           }
         },
         "required": [
@@ -917,6 +921,9 @@
           "budget_exempt": {
             "type": "boolean",
             "description": "Caller-paid usage remains priced and reported but is excluded from cost budgets."
+          },
+          "cache": {
+            "$ref": "#/components/schemas/ResponseCacheEvidence"
           }
         },
         "required": [
@@ -1062,6 +1069,14 @@
           },
           "payload_capture_active": {
             "type": "boolean"
+          },
+          "response_cache_configured": {
+            "type": "boolean",
+            "description": "Whether this process is configured with a dedicated response cache. Does not report connection health."
+          },
+          "semantic_cache_vectors_unsealed": {
+            "type": "boolean",
+            "description": "Semantic caching indexes content-derived vectors without encryption; enabling it requires explicit acknowledgement. Response bodies remain encrypted."
           }
         },
         "required": [
@@ -2392,6 +2407,26 @@
           "expose_upstream_models": {
             "type": "boolean",
             "description": "Explicitly disclose upstream model names in route catalogs."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3111,6 +3146,10 @@
               "charge"
             ],
             "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          },
+          "forbid_response_cache": {
+            "type": "boolean",
+            "description": "Forbid response cache lookup and storage for this key."
           }
         },
         "required": [
@@ -3711,6 +3750,26 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -9759,6 +9818,26 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10316,6 +10395,19 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "cache_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "hit",
+              "semantic-hit",
+              "miss",
+              "bypass",
+              null
+            ]
           }
         },
         "required": [
@@ -10721,6 +10813,26 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11082,6 +11194,26 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13005,6 +13137,10 @@
               "charge"
             ],
             "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          },
+          "forbid_response_cache": {
+            "type": "boolean",
+            "description": "Forbid response cache lookup and storage for this key."
           }
         },
         "type": "object"
@@ -16938,6 +17074,26 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16975,11 +17131,12 @@
         "type": "object"
       },
       "RequestOrigin": {
-        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.",
+        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.",
         "enum": [
           "caller",
           "shadow",
           "classifier",
+          "cache_embedding",
           "probe",
           "playground"
         ],
@@ -21016,6 +21173,26 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -24419,6 +24596,240 @@
           "policy",
           "policy_project",
           "order"
+        ]
+      },
+      "ResponseCachePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "semantic"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "key",
+              "project",
+              "route"
+            ],
+            "default": "key"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 604800,
+            "default": 3600
+          },
+          "max_entry_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16777216,
+            "default": 1048576
+          },
+          "streaming": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "bypass"
+            ],
+            "default": "replay"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "generation",
+                "embeddings",
+                "rerank",
+                "moderation"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "count_hits_against": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "tokens",
+                "budgets"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "embedding_route": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "allow_unsealed_vectors": {
+            "type": "boolean"
+          },
+          "allow_multiturn": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "PromptCachePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "system",
+                "tools",
+                "last_user"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "ttl": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "1h"
+            ],
+            "default": "5m"
+          },
+          "key_source": {
+            "type": "string",
+            "enum": [
+              "key",
+              "session"
+            ],
+            "default": "key"
+          },
+          "session_label": {
+            "type": "string",
+            "maxLength": 32
+          }
+        },
+        "required": []
+      },
+      "CachePurgeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "route_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Supply exactly one route_id or project_id."
+      },
+      "CacheStatistics": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "requests": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hits": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "misses": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bypasses": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "avoided_costs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "currency": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "currency",
+                "amount"
+              ]
+            }
+          }
+        },
+        "required": [
+          "configured",
+          "requests",
+          "hits",
+          "misses",
+          "bypasses",
+          "avoided_costs"
+        ]
+      },
+      "ResponseCacheEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "hit",
+              "semantic-hit"
+            ]
+          },
+          "age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "similarity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "currency": {
+            "type": "string"
+          },
+          "avoided_cost": {
+            "type": "string"
+          },
+          "budget_cost": {
+            "type": "string"
+          },
+          "budget_charge": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "age_seconds"
         ]
       }
     },
@@ -58092,6 +58503,129 @@
                 "$ref": "#/components/schemas/GuardrailCredentialInput"
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/cache/purge": {
+      "post": {
+        "operationId": "purge_response_cache",
+        "tags": [
+          "cache"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CachePurgeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "purged": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "purged"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid request"
+          },
+          "503": {
+            "description": "Cache unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/cache/statistics": {
+      "get": {
+        "operationId": "get_response_cache_statistics",
+        "tags": [
+          "cache"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "route",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheStatistics"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid request"
+          },
+          "503": {
+            "description": "Cache unavailable"
           }
         }
       }

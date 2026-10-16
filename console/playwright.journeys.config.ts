@@ -105,6 +105,7 @@ export default defineConfig({
         OLP_AUTH_HMAC_KEY_FILE: authHmacKeyFile,
         OLP_BOOTSTRAP_TOKEN_FILE: bootstrapTokenFile,
         OLP_VALKEY_URL: valkeyUrl,
+        OLP_CACHE_VALKEY_URL: process.env.OLP_TEST_CACHE_VALKEY_URL ?? '',
         OLP_PROVIDER_EGRESS_ALLOW_CIDRS: '127.0.0.0/8,::1/128',
         OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS: '127.0.0.1,localhost'
       }

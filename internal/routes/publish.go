@@ -59,7 +59,9 @@ func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
 	if err != nil {
 		return err
 	}
-	for _, slug := range behavior.References() {
+	references := behavior.References()
+
+	for _, slug := range references {
 		var active bool
 		if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1 AND state='active')", slug).Scan(&active); err != nil {
 			return err
@@ -190,6 +192,11 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if behavior, _ := routing.DecodeBehavior(current.Behavior); behavior.Cache != nil && behavior.Cache.AllowUnsealedVectors {
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "cache.semantic_acknowledge", "route", promoted.routeID, "success"); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.activate", "route", promoted.routeID, "success"); err != nil {
 		return access.Reply{}, err

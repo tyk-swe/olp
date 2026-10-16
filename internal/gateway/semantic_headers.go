@@ -14,6 +14,7 @@ import (
 func semanticHeaders(header http.Header) http.Header {
 	out := header.Clone()
 	// Canonical names keep absent private-header removal allocation-free.
+	out.Del("X-Olp-Cache")
 	out.Del("X-Olp-End-User")
 	out.Del("X-Olp-Attribution")
 	out.Del(callerCredentialHeader)

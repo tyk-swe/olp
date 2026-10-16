@@ -28,28 +28,28 @@ func bedrockQualified(p *routing.Provider, model, operation, mode string) bool {
 }
 
 func (s *Server) bedrockConverse(w http.ResponseWriter, r *http.Request) {
-	if s.strictBedrockConverse(w, r) {
+	if s.preparedBedrockConverse(w, r) {
 		return
 	}
 	s.bedrockServe(w, r, wire.Bedrock, "generation", "unary", "converse")
 }
 
 func (s *Server) bedrockConverseStream(w http.ResponseWriter, r *http.Request) {
-	if s.strictBedrockConverse(w, r) {
+	if s.preparedBedrockConverse(w, r) {
 		return
 	}
 	s.bedrockServe(w, r, wire.Bedrock, "generation", "streaming", "converse-stream")
 }
 
-// Strict Converse uses the same prepared invocation and Attempt owner as the
-// other generation dialects. AWS wire framing is retained by its native codec.
-func (s *Server) strictBedrockConverse(w http.ResponseWriter, r *http.Request) bool {
+// Strict and cache-enabled Converse routes use the shared prepared invocation
+// and Attempt owner. Its native codec retains AWS event-stream framing.
+func (s *Server) preparedBedrockConverse(w http.ResponseWriter, r *http.Request) bool {
 	release := s.Runtime.Release()
 	if release == nil {
 		return false
 	}
 	route, ok := release.Snapshot.Routes[r.PathValue("model")]
-	if !ok || !route.Fidelity.Strict() {
+	if !ok || !route.Fidelity.Strict() && route.Cache == nil && route.PromptCache == nil {
 		return false
 	}
 	r = r.Clone(r.Context())

@@ -3136,6 +3136,63 @@ func (e ProjectMembershipItemRole) Valid() bool {
 	}
 }
 
+// Defines values for PromptCachePolicyKeySource.
+const (
+	PromptCachePolicyKeySourceKey     PromptCachePolicyKeySource = "key"
+	PromptCachePolicyKeySourceSession PromptCachePolicyKeySource = "session"
+)
+
+// Valid indicates whether the value is a known member of the PromptCachePolicyKeySource enum.
+func (e PromptCachePolicyKeySource) Valid() bool {
+	switch e {
+	case PromptCachePolicyKeySourceKey:
+		return true
+	case PromptCachePolicyKeySourceSession:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptCachePolicyPositions.
+const (
+	PromptCachePolicyPositionsLastUser PromptCachePolicyPositions = "last_user"
+	PromptCachePolicyPositionsSystem   PromptCachePolicyPositions = "system"
+	PromptCachePolicyPositionsTools    PromptCachePolicyPositions = "tools"
+)
+
+// Valid indicates whether the value is a known member of the PromptCachePolicyPositions enum.
+func (e PromptCachePolicyPositions) Valid() bool {
+	switch e {
+	case PromptCachePolicyPositionsLastUser:
+		return true
+	case PromptCachePolicyPositionsSystem:
+		return true
+	case PromptCachePolicyPositionsTools:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptCachePolicyTtl.
+const (
+	N1h PromptCachePolicyTtl = "1h"
+	N5m PromptCachePolicyTtl = "5m"
+)
+
+// Valid indicates whether the value is a known member of the PromptCachePolicyTtl enum.
+func (e PromptCachePolicyTtl) Valid() bool {
+	switch e {
+	case N1h:
+		return true
+	case N5m:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderAuthMode.
 const (
 	ProviderAuthModeAdc               ProviderAuthMode = "adc"
@@ -3550,18 +3607,48 @@ func (e RequestDetailResponseBudgetBoundary) Valid() bool {
 	}
 }
 
+// Defines values for RequestDetailResponseCacheResult.
+const (
+	RequestDetailResponseCacheResultBypass      RequestDetailResponseCacheResult = "bypass"
+	RequestDetailResponseCacheResultHit         RequestDetailResponseCacheResult = "hit"
+	RequestDetailResponseCacheResultLessThannil RequestDetailResponseCacheResult = "<nil>"
+	RequestDetailResponseCacheResultMiss        RequestDetailResponseCacheResult = "miss"
+	RequestDetailResponseCacheResultSemanticHit RequestDetailResponseCacheResult = "semantic-hit"
+)
+
+// Valid indicates whether the value is a known member of the RequestDetailResponseCacheResult enum.
+func (e RequestDetailResponseCacheResult) Valid() bool {
+	switch e {
+	case RequestDetailResponseCacheResultBypass:
+		return true
+	case RequestDetailResponseCacheResultHit:
+		return true
+	case RequestDetailResponseCacheResultLessThannil:
+		return true
+	case RequestDetailResponseCacheResultMiss:
+		return true
+	case RequestDetailResponseCacheResultSemanticHit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RequestOrigin.
 const (
-	RequestOriginCaller     RequestOrigin = "caller"
-	RequestOriginClassifier RequestOrigin = "classifier"
-	RequestOriginPlayground RequestOrigin = "playground"
-	RequestOriginProbe      RequestOrigin = "probe"
-	RequestOriginShadow     RequestOrigin = "shadow"
+	RequestOriginCacheEmbedding RequestOrigin = "cache_embedding"
+	RequestOriginCaller         RequestOrigin = "caller"
+	RequestOriginClassifier     RequestOrigin = "classifier"
+	RequestOriginPlayground     RequestOrigin = "playground"
+	RequestOriginProbe          RequestOrigin = "probe"
+	RequestOriginShadow         RequestOrigin = "shadow"
 )
 
 // Valid indicates whether the value is a known member of the RequestOrigin enum.
 func (e RequestOrigin) Valid() bool {
 	switch e {
+	case RequestOriginCacheEmbedding:
+		return true
 	case RequestOriginCaller:
 		return true
 	case RequestOriginClassifier:
@@ -3610,6 +3697,153 @@ func (e RequestSummaryBudgetBoundary) Valid() bool {
 	case RequestSummaryBudgetBoundaryProject:
 		return true
 	case RequestSummaryBudgetBoundaryProjectEndUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequestSummaryCacheResult.
+const (
+	RequestSummaryCacheResultBypass      RequestSummaryCacheResult = "bypass"
+	RequestSummaryCacheResultHit         RequestSummaryCacheResult = "hit"
+	RequestSummaryCacheResultLessThannil RequestSummaryCacheResult = "<nil>"
+	RequestSummaryCacheResultMiss        RequestSummaryCacheResult = "miss"
+	RequestSummaryCacheResultSemanticHit RequestSummaryCacheResult = "semantic-hit"
+)
+
+// Valid indicates whether the value is a known member of the RequestSummaryCacheResult enum.
+func (e RequestSummaryCacheResult) Valid() bool {
+	switch e {
+	case RequestSummaryCacheResultBypass:
+		return true
+	case RequestSummaryCacheResultHit:
+		return true
+	case RequestSummaryCacheResultLessThannil:
+		return true
+	case RequestSummaryCacheResultMiss:
+		return true
+	case RequestSummaryCacheResultSemanticHit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponseCacheEvidenceResult.
+const (
+	ResponseCacheEvidenceResultHit         ResponseCacheEvidenceResult = "hit"
+	ResponseCacheEvidenceResultSemanticHit ResponseCacheEvidenceResult = "semantic-hit"
+)
+
+// Valid indicates whether the value is a known member of the ResponseCacheEvidenceResult enum.
+func (e ResponseCacheEvidenceResult) Valid() bool {
+	switch e {
+	case ResponseCacheEvidenceResultHit:
+		return true
+	case ResponseCacheEvidenceResultSemanticHit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponseCachePolicyCountHitsAgainst.
+const (
+	ResponseCachePolicyCountHitsAgainstBudgets  ResponseCachePolicyCountHitsAgainst = "budgets"
+	ResponseCachePolicyCountHitsAgainstRequests ResponseCachePolicyCountHitsAgainst = "requests"
+	ResponseCachePolicyCountHitsAgainstTokens   ResponseCachePolicyCountHitsAgainst = "tokens"
+)
+
+// Valid indicates whether the value is a known member of the ResponseCachePolicyCountHitsAgainst enum.
+func (e ResponseCachePolicyCountHitsAgainst) Valid() bool {
+	switch e {
+	case ResponseCachePolicyCountHitsAgainstBudgets:
+		return true
+	case ResponseCachePolicyCountHitsAgainstRequests:
+		return true
+	case ResponseCachePolicyCountHitsAgainstTokens:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponseCachePolicyMode.
+const (
+	Exact    ResponseCachePolicyMode = "exact"
+	Semantic ResponseCachePolicyMode = "semantic"
+)
+
+// Valid indicates whether the value is a known member of the ResponseCachePolicyMode enum.
+func (e ResponseCachePolicyMode) Valid() bool {
+	switch e {
+	case Exact:
+		return true
+	case Semantic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponseCachePolicyOperations.
+const (
+	ResponseCachePolicyOperationsEmbeddings ResponseCachePolicyOperations = "embeddings"
+	ResponseCachePolicyOperationsGeneration ResponseCachePolicyOperations = "generation"
+	ResponseCachePolicyOperationsModeration ResponseCachePolicyOperations = "moderation"
+	ResponseCachePolicyOperationsRerank     ResponseCachePolicyOperations = "rerank"
+)
+
+// Valid indicates whether the value is a known member of the ResponseCachePolicyOperations enum.
+func (e ResponseCachePolicyOperations) Valid() bool {
+	switch e {
+	case ResponseCachePolicyOperationsEmbeddings:
+		return true
+	case ResponseCachePolicyOperationsGeneration:
+		return true
+	case ResponseCachePolicyOperationsModeration:
+		return true
+	case ResponseCachePolicyOperationsRerank:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponseCachePolicyScope.
+const (
+	ResponseCachePolicyScopeKey     ResponseCachePolicyScope = "key"
+	ResponseCachePolicyScopeProject ResponseCachePolicyScope = "project"
+	ResponseCachePolicyScopeRoute   ResponseCachePolicyScope = "route"
+)
+
+// Valid indicates whether the value is a known member of the ResponseCachePolicyScope enum.
+func (e ResponseCachePolicyScope) Valid() bool {
+	switch e {
+	case ResponseCachePolicyScopeKey:
+		return true
+	case ResponseCachePolicyScopeProject:
+		return true
+	case ResponseCachePolicyScopeRoute:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponseCachePolicyStreaming.
+const (
+	ResponseCachePolicyStreamingBypass ResponseCachePolicyStreaming = "bypass"
+	ResponseCachePolicyStreamingReplay ResponseCachePolicyStreaming = "replay"
+)
+
+// Valid indicates whether the value is a known member of the ResponseCachePolicyStreaming enum.
+func (e ResponseCachePolicyStreaming) Valid() bool {
+	switch e {
+	case ResponseCachePolicyStreamingBypass:
+		return true
+	case ResponseCachePolicyStreamingReplay:
 		return true
 	default:
 		return false
@@ -4766,7 +5000,10 @@ type ApiKeyDetailResponse struct {
 	EndUserSource nullable.Nullable[ApiKeyDetailResponseEndUserSource] `json:"end_user_source,omitempty"`
 	Etag          openapi_types.UUID                                   `json:"etag"`
 	ExpiresAt     nullable.Nullable[time.Time]                         `json:"expires_at,omitempty"`
-	Id            openapi_types.UUID                                   `json:"id"`
+
+	// ForbidResponseCache Forbid response cache lookup and storage for this key.
+	ForbidResponseCache *bool              `json:"forbid_response_cache,omitempty"`
+	Id                  openapi_types.UUID `json:"id"`
 
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate  nullable.Nullable[string] `json:"limit_template,omitempty"`
@@ -4934,6 +5171,7 @@ type AttemptRoutingMetadata struct {
 
 	// Budgets Route, connection and slot whose spend caps this attempt spent from.
 	Budgets          nullable.Nullable[[]openapi_types.UUID] `json:"budgets,omitempty"`
+	Cache            *ResponseCacheEvidence                  `json:"cache,omitempty"`
 	CredentialSlotId nullable.Nullable[openapi_types.UUID]   `json:"credential_slot_id,omitempty"`
 
 	// CredentialSource Absent means operator credentials. Caller attempts do not name an operator credential version.
@@ -5018,9 +5256,15 @@ type AuthenticationCapabilities struct {
 	OidcLoginEnabled     bool `json:"oidc_login_enabled"`
 	PayloadCaptureActive bool `json:"payload_capture_active"`
 
+	// ResponseCacheConfigured Whether this process is configured with a dedicated response cache. Does not report connection health.
+	ResponseCacheConfigured *bool `json:"response_cache_configured,omitempty"`
+
 	// RetentionEnforced Whether stored retention policies are applied by workers.
 	RetentionEnforced *bool `json:"retention_enforced,omitempty"`
 	SamlLoginEnabled  *bool `json:"saml_login_enabled,omitempty"`
+
+	// SemanticCacheVectorsUnsealed Semantic caching indexes content-derived vectors without encryption; enabling it requires explicit acknowledgement. Response bodies remain encrypted.
+	SemanticCacheVectorsUnsealed *bool `json:"semantic_cache_vectors_unsealed,omitempty"`
 }
 
 // BTreeMap defines model for BTreeMap.
@@ -5225,6 +5469,25 @@ type BudgetThresholdEventEvent string
 
 // BudgetWindowKind The UTC window a budget.threshold rule watches.
 type BudgetWindowKind string
+
+// CachePurgeRequest Supply exactly one route_id or project_id.
+type CachePurgeRequest struct {
+	ProjectId *openapi_types.UUID `json:"project_id,omitempty"`
+	RouteId   *openapi_types.UUID `json:"route_id,omitempty"`
+}
+
+// CacheStatistics defines model for CacheStatistics.
+type CacheStatistics struct {
+	AvoidedCosts []struct {
+		Amount   string `json:"amount"`
+		Currency string `json:"currency"`
+	} `json:"avoided_costs"`
+	Bypasses   int64 `json:"bypasses"`
+	Configured bool  `json:"configured"`
+	Hits       int64 `json:"hits"`
+	Misses     int64 `json:"misses"`
+	Requests   int64 `json:"requests"`
+}
 
 // CapabilityCertificationItemResponse defines model for CapabilityCertificationItemResponse.
 type CapabilityCertificationItemResponse struct {
@@ -6104,7 +6367,8 @@ type ConfigurationRouteEntry struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+	Budget nullable.Nullable[SpendCap]            `json:"budget,omitempty"`
+	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
@@ -6126,8 +6390,9 @@ type ConfigurationRouteEntry struct {
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
 	// Project Project name, or null for an installation-wide route
-	Project nullable.Nullable[string] `json:"project"`
-	Retired *bool                     `json:"retired,omitempty"`
+	Project     nullable.Nullable[string]            `json:"project"`
+	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+	Retired     *bool                                `json:"retired,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         *RouteRetry                      `json:"retry,omitempty"`
@@ -6401,6 +6666,9 @@ type CreateApiKeyRequest struct {
 	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 	EndUserSource nullable.Nullable[CreateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
 	ExpiresAt     nullable.Nullable[time.Time]                        `json:"expires_at,omitempty"`
+
+	// ForbidResponseCache Forbid response cache lookup and storage for this key.
+	ForbidResponseCache *bool `json:"forbid_response_cache,omitempty"`
 
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate  nullable.Nullable[string] `json:"limit_template,omitempty"`
@@ -6740,7 +7008,8 @@ type CreateRouteDraftRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+	Budget nullable.Nullable[SpendCap]            `json:"budget,omitempty"`
+	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
@@ -6759,7 +7028,8 @@ type CreateRouteDraftRequest struct {
 	OverallTimeoutMs int64                  `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
-	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	PromptCache nullable.Nullable[PromptCachePolicy]  `json:"prompt_cache,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -9053,6 +9323,23 @@ type ProjectRouteGroups struct {
 	Groups RouteGroups `json:"groups"`
 }
 
+// PromptCachePolicy defines model for PromptCachePolicy.
+type PromptCachePolicy struct {
+	KeySource    *PromptCachePolicyKeySource   `json:"key_source,omitempty"`
+	Positions    *[]PromptCachePolicyPositions `json:"positions,omitempty"`
+	SessionLabel *string                       `json:"session_label,omitempty"`
+	Ttl          *PromptCachePolicyTtl         `json:"ttl,omitempty"`
+}
+
+// PromptCachePolicyKeySource defines model for PromptCachePolicy.KeySource.
+type PromptCachePolicyKeySource string
+
+// PromptCachePolicyPositions defines model for PromptCachePolicy.Positions.
+type PromptCachePolicyPositions string
+
+// PromptCachePolicyTtl defines model for PromptCachePolicy.Ttl.
+type PromptCachePolicyTtl string
+
 // ProviderActivationResponse defines model for ProviderActivationResponse.
 type ProviderActivationResponse struct {
 	Etag              openapi_types.UUID        `json:"etag"`
@@ -9907,7 +10194,8 @@ type ReplaceRouteDraftRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+	Budget nullable.Nullable[SpendCap]            `json:"budget,omitempty"`
+	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
@@ -9921,9 +10209,10 @@ type ReplaceRouteDraftRequest struct {
 	MaxAttempts int32                            `json:"max_attempts"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
-	Operations       []string               `json:"operations"`
-	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+	MaxBodyBytes     nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
+	Operations       []string                             `json:"operations"`
+	OverallTimeoutMs int32                                `json:"overall_timeout_ms"`
+	PromptCache      nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -9959,13 +10248,14 @@ type RequestDetailResponse struct {
 	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
 
 	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
-	BudgetBoundary          *RequestDetailResponseBudgetBoundary `json:"budget_boundary,omitempty"`
-	CacheWrite1hInputTokens nullable.Nullable[int64]             `json:"cache_write_1h_input_tokens,omitempty"`
-	CacheWrite5mInputTokens nullable.Nullable[int64]             `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWriteInputTokens   nullable.Nullable[int64]             `json:"cache_write_input_tokens,omitempty"`
-	CachedAudioInputTokens  nullable.Nullable[int64]             `json:"cached_audio_input_tokens,omitempty"`
-	CachedImageInputTokens  nullable.Nullable[int64]             `json:"cached_image_input_tokens,omitempty"`
-	CachedInputTokens       nullable.Nullable[int64]             `json:"cached_input_tokens,omitempty"`
+	BudgetBoundary          *RequestDetailResponseBudgetBoundary                `json:"budget_boundary,omitempty"`
+	CacheResult             nullable.Nullable[RequestDetailResponseCacheResult] `json:"cache_result,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]                            `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]                            `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]                            `json:"cache_write_input_tokens,omitempty"`
+	CachedAudioInputTokens  nullable.Nullable[int64]                            `json:"cached_audio_input_tokens,omitempty"`
+	CachedImageInputTokens  nullable.Nullable[int64]                            `json:"cached_image_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]                            `json:"cached_input_tokens,omitempty"`
 
 	// Charge Sum of the request's attempt charges, an exact decimal string.
 	Charge      nullable.Nullable[string]    `json:"charge,omitempty"`
@@ -9985,7 +10275,7 @@ type RequestDetailResponse struct {
 	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
 	Operation            string                                `json:"operation"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
@@ -10007,6 +10297,9 @@ type RequestDetailResponse struct {
 
 // RequestDetailResponseBudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
 type RequestDetailResponseBudgetBoundary string
+
+// RequestDetailResponseCacheResult defines model for RequestDetailResponse.CacheResult.
+type RequestDetailResponseCacheResult string
 
 // RequestListResponse defines model for RequestListResponse.
 type RequestListResponse struct {
@@ -10061,7 +10354,7 @@ type RequestMetadataGatewayEpochResponse struct {
 	WriterClosed     bool                                  `json:"writer_closed"`
 }
 
-// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 type RequestOrigin string
 
 // RequestSummary defines model for RequestSummary.
@@ -10076,13 +10369,14 @@ type RequestSummary struct {
 	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
 
 	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
-	BudgetBoundary          *RequestSummaryBudgetBoundary `json:"budget_boundary,omitempty"`
-	CacheWrite1hInputTokens nullable.Nullable[int64]      `json:"cache_write_1h_input_tokens,omitempty"`
-	CacheWrite5mInputTokens nullable.Nullable[int64]      `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWriteInputTokens   nullable.Nullable[int64]      `json:"cache_write_input_tokens,omitempty"`
-	CachedAudioInputTokens  nullable.Nullable[int64]      `json:"cached_audio_input_tokens,omitempty"`
-	CachedImageInputTokens  nullable.Nullable[int64]      `json:"cached_image_input_tokens,omitempty"`
-	CachedInputTokens       nullable.Nullable[int64]      `json:"cached_input_tokens,omitempty"`
+	BudgetBoundary          *RequestSummaryBudgetBoundary                `json:"budget_boundary,omitempty"`
+	CacheResult             nullable.Nullable[RequestSummaryCacheResult] `json:"cache_result,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]                     `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]                     `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]                     `json:"cache_write_input_tokens,omitempty"`
+	CachedAudioInputTokens  nullable.Nullable[int64]                     `json:"cached_audio_input_tokens,omitempty"`
+	CachedImageInputTokens  nullable.Nullable[int64]                     `json:"cached_image_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]                     `json:"cached_input_tokens,omitempty"`
 
 	// Charge Sum of the request's attempt charges, an exact decimal string.
 	Charge      nullable.Nullable[string]    `json:"charge,omitempty"`
@@ -10102,7 +10396,7 @@ type RequestSummary struct {
 	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
 	Operation            string                                `json:"operation"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
@@ -10124,6 +10418,54 @@ type RequestSummary struct {
 
 // RequestSummaryBudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
 type RequestSummaryBudgetBoundary string
+
+// RequestSummaryCacheResult defines model for RequestSummary.CacheResult.
+type RequestSummaryCacheResult string
+
+// ResponseCacheEvidence defines model for ResponseCacheEvidence.
+type ResponseCacheEvidence struct {
+	AgeSeconds   int64                       `json:"age_seconds"`
+	AvoidedCost  *string                     `json:"avoided_cost,omitempty"`
+	BudgetCharge *string                     `json:"budget_charge,omitempty"`
+	BudgetCost   *string                     `json:"budget_cost,omitempty"`
+	Currency     *string                     `json:"currency,omitempty"`
+	Result       ResponseCacheEvidenceResult `json:"result"`
+	Similarity   *float32                    `json:"similarity,omitempty"`
+}
+
+// ResponseCacheEvidenceResult defines model for ResponseCacheEvidence.Result.
+type ResponseCacheEvidenceResult string
+
+// ResponseCachePolicy defines model for ResponseCachePolicy.
+type ResponseCachePolicy struct {
+	AllowMultiturn       *bool                                  `json:"allow_multiturn,omitempty"`
+	AllowUnsealedVectors *bool                                  `json:"allow_unsealed_vectors,omitempty"`
+	CountHitsAgainst     *[]ResponseCachePolicyCountHitsAgainst `json:"count_hits_against,omitempty"`
+	EmbeddingRoute       *string                                `json:"embedding_route,omitempty"`
+	MaxCandidates        *int                                   `json:"max_candidates,omitempty"`
+	MaxEntryBytes        *int                                   `json:"max_entry_bytes,omitempty"`
+	Mode                 ResponseCachePolicyMode                `json:"mode"`
+	Operations           *[]ResponseCachePolicyOperations       `json:"operations,omitempty"`
+	Scope                *ResponseCachePolicyScope              `json:"scope,omitempty"`
+	SimilarityThreshold  *float32                               `json:"similarity_threshold,omitempty"`
+	Streaming            *ResponseCachePolicyStreaming          `json:"streaming,omitempty"`
+	TtlSeconds           *int                                   `json:"ttl_seconds,omitempty"`
+}
+
+// ResponseCachePolicyCountHitsAgainst defines model for ResponseCachePolicy.CountHitsAgainst.
+type ResponseCachePolicyCountHitsAgainst string
+
+// ResponseCachePolicyMode defines model for ResponseCachePolicy.Mode.
+type ResponseCachePolicyMode string
+
+// ResponseCachePolicyOperations defines model for ResponseCachePolicy.Operations.
+type ResponseCachePolicyOperations string
+
+// ResponseCachePolicyScope defines model for ResponseCachePolicy.Scope.
+type ResponseCachePolicyScope string
+
+// ResponseCachePolicyStreaming defines model for ResponseCachePolicy.Streaming.
+type ResponseCachePolicyStreaming string
 
 // RetryRule defines model for RetryRule.
 type RetryRule struct {
@@ -10211,15 +10553,17 @@ type RouteAffinitySource string
 
 // RouteBehavior defines model for RouteBehavior.
 type RouteBehavior struct {
-	Affinity nullable.Nullable[RouteAffinity] `json:"affinity"`
-	Budget   nullable.Nullable[SpendCap]      `json:"budget"`
+	Affinity nullable.Nullable[RouteAffinity]       `json:"affinity"`
+	Budget   nullable.Nullable[SpendCap]            `json:"budget"`
+	Cache    nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool           `json:"caller_cost_exempt,omitempty"`
 	Fallbacks        []RouteFallback `json:"fallbacks"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	MaxBodyBytes nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
+	PromptCache  nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
@@ -10268,7 +10612,8 @@ type RouteDraftDetailResponse struct {
 	BasedOnRevisionId nullable.Nullable[openapi_types.UUID] `json:"based_on_revision_id,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget nullable.Nullable[SpendCap] `json:"budget"`
+	Budget nullable.Nullable[SpendCap]            `json:"budget"`
+	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
@@ -10293,6 +10638,7 @@ type RouteDraftDetailResponse struct {
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	ProjectName nullable.Nullable[string]             `json:"project_name"`
+	PromptCache nullable.Nullable[PromptCachePolicy]  `json:"prompt_cache,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry            `json:"retry"`
@@ -10410,7 +10756,8 @@ type RouteRevisionResponse struct {
 	Affinity    nullable.Nullable[RouteAffinity] `json:"affinity"`
 
 	// Budget Spend cap of the route itself.
-	Budget nullable.Nullable[SpendCap] `json:"budget"`
+	Budget nullable.Nullable[SpendCap]            `json:"budget"`
+	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
@@ -10423,9 +10770,10 @@ type RouteRevisionResponse struct {
 	MaxAttempts int32              `json:"max_attempts"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
-	Operations       []string               `json:"operations"`
-	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+	MaxBodyBytes     nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
+	Operations       []string                             `json:"operations"`
+	OverallTimeoutMs int32                                `json:"overall_timeout_ms"`
+	PromptCache      nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         RouteRetry            `json:"retry"`
@@ -11513,6 +11861,9 @@ type UpdateApiKeyRequest struct {
 	EndUserSource nullable.Nullable[UpdateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
 	ExpiresAt     nullable.Nullable[time.Time]                        `json:"expires_at,omitempty"`
 
+	// ForbidResponseCache Forbid response cache lookup and storage for this key.
+	ForbidResponseCache *bool `json:"forbid_response_cache,omitempty"`
+
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate  nullable.Nullable[string] `json:"limit_template,omitempty"`
 	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
@@ -11725,7 +12076,8 @@ type UpdatePublishedRouteRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+	Budget nullable.Nullable[SpendCap]            `json:"budget,omitempty"`
+	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
@@ -11739,9 +12091,10 @@ type UpdatePublishedRouteRequest struct {
 	MaxAttempts int32                            `json:"max_attempts"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
-	Operations       []string               `json:"operations"`
-	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+	MaxBodyBytes     nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
+	Operations       []string                             `json:"operations"`
+	OverallTimeoutMs int32                                `json:"overall_timeout_ms"`
+	PromptCache      nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -12202,6 +12555,11 @@ type PutInstallationBudgetJSONBody struct {
 type PutInstallationBudgetParams struct {
 	// IfMatch Quoted project etag from GET.
 	IfMatch string `json:"If-Match"`
+}
+
+// GetResponseCacheStatisticsParams defines parameters for GetResponseCacheStatistics.
+type GetResponseCacheStatisticsParams struct {
+	Route *string `form:"route,omitempty" json:"route,omitempty"`
 }
 
 // ListCodeAccountsParams defines parameters for ListCodeAccounts.
@@ -13932,6 +14290,9 @@ type CreateBudgetIncreaseJSONRequestBody = CreateBudgetIncreaseRequest
 
 // PutInstallationBudgetJSONRequestBody defines body for PutInstallationBudget for application/json ContentType.
 type PutInstallationBudgetJSONRequestBody PutInstallationBudgetJSONBody
+
+// PurgeResponseCacheJSONRequestBody defines body for PurgeResponseCache for application/json ContentType.
+type PurgeResponseCacheJSONRequestBody = CachePurgeRequest
 
 // CreateCodeAccountJSONRequestBody defines body for CreateCodeAccount for application/json ContentType.
 type CreateCodeAccountJSONRequestBody = CodeAccountWrite

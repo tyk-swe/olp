@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/cache"
 	"net/http"
 	"slices"
 	"strconv"
@@ -215,6 +216,7 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	out["affinity"], out["budget"] = behavior.Affinity, behavior.Budget
 	out["max_body_bytes"] = behavior.MaxBodyBytes
 	out["caller_cost_exempt"] = behavior.CallerCostExempt
+	out["cache"], out["prompt_cache"] = behavior.Cache, behavior.PromptCache
 	return out
 }
 
@@ -261,6 +263,8 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
+	Cache            *cache.Policy       `json:"cache,omitempty"`
+	PromptCache      *cache.PromptPolicy `json:"prompt_cache,omitempty"`
 	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
 	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
 	Slug             string              `json:"slug"`
@@ -281,7 +285,7 @@ type DraftInput struct {
 }
 
 func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
+	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
 }
 
 func sameProject(a, b *string) bool {
@@ -393,6 +397,10 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		return nil, access.Invalid("targets", "Declare at least one target that serves callers rather than shadowing them.")
 	}
 	behavior := in.behavior()
+	fidelity, _ := routing.DecodeFidelity(in.Fidelity)
+	if err := (routing.Route{Fidelity: fidelity, Behavior: behavior}).ValidateCaching(); err != nil {
+		return nil, access.Invalid("cache", err.Error())
+	}
 	tagged := func(tag string) bool {
 		return slices.ContainsFunc(targets, func(t routing.PublishedTarget) bool { return t.Shadow == nil && slices.Contains(t.Tags, tag) })
 	}

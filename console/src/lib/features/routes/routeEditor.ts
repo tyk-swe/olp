@@ -525,6 +525,16 @@ export function validateRouteBehavior(
     !attributionLabel.test(behavior.affinity.label ?? '')
   )
     return 'Session affinity by label names an attribution label.';
+  if (
+    values.fidelity.mode === 'strict' &&
+    (behavior.cache?.mode === 'semantic' || behavior.prompt_cache)
+  )
+    return 'Semantic caching and prompt-cache insertion require a transformed route.';
+  if (
+    behavior.cache?.mode === 'semantic' &&
+    (!behavior.cache.embedding_route || !behavior.cache.allow_unsealed_vectors)
+  )
+    return 'Semantic caching requires an embedding route and the unencrypted-vector acknowledgement.';
   const cap = behavior.max_body_bytes;
   if (
     cap != null &&
@@ -551,6 +561,8 @@ function behaviorFields(behavior: RouteBehavior | undefined) {
     retry: value.retry,
     affinity: value.affinity,
     budget: value.budget,
+    cache: value.cache,
+    prompt_cache: value.prompt_cache,
     ...(value.caller_cost_exempt !== undefined
       ? { caller_cost_exempt: value.caller_cost_exempt }
       : {}),

@@ -67,6 +67,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		return err
 	}
 	m.Access.Register(mux)
+	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	(&guardrails.Server{Access: m.Access, Publish: func(ctx context.Context, tx pgx.Tx, actor string) error {
 		_, err := runtime.Publish(ctx, tx, actor)

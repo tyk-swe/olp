@@ -363,3 +363,26 @@ does not prove it ran; use CI results for the commit you are checking. Browser
 journeys cover accounting, cloud configuration, bulk certification, grouped
 routes, pools, policy exclusions, preview, publication, playground, and
 replacement recovery through deterministic local providers, not paid accounts.
+
+### Response caching
+
+`go test ./internal/cache ./internal/gateway -run 'Cache|Sealed|Canonical'`
+checks canonical identity, sealing, controls, native replay and key-policy opt-out.
+The `integration`-tagged `TestIntegrationCache*`,
+`TestIntegrationSemanticCacheRoutes` and `TestResponseCache*` tests use
+`OLP_TEST_CACHE_VALKEY_URL` for a separate Valkey Search service, alongside the
+normal PostgreSQL and coordination Valkey variables. `scripts/integration.sh`
+provisions all three services and runs these tests. The hosted Chromium suite
+also exercises cache configuration, activation, miss/hit, purge and accessibility.
+
+To measure the cache path against its uncached counterpart on the same machine:
+
+```sh
+go test -tags=integration ./internal/gateway -run '^$' \
+  -bench '^BenchmarkIntegrationResponseCache$' -benchtime=1s -count=6
+```
+
+Run latency comparisons without other builds or load generators competing for
+CPU. The output includes `p95-ns/op`; the M8 budget allows at most 1 ms of
+additional p95 latency. The ordinary `BenchmarkGatewayResponseCache` uses an
+in-memory backing store and is included in the regression gate.

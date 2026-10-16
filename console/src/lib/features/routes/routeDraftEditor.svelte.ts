@@ -529,7 +529,9 @@ export class RouteDraftEditorState {
         affinity: current.affinity,
         budget: current.budget,
         max_body_bytes: current.max_body_bytes,
-        caller_cost_exempt: current.caller_cost_exempt
+        caller_cost_exempt: current.caller_cost_exempt,
+        cache: current.cache,
+        prompt_cache: current.prompt_cache
       };
       this.selectorsText = JSON.stringify(current.selectors, null, 2);
       this.policyRules = policyRulesFrom(current.content_policy);

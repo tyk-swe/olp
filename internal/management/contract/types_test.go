@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func roundTrip[T any](t *testing.T, raw string) T {
@@ -64,5 +65,16 @@ func TestClosedObjectsNeedStrictHandlerDecoding(t *testing.T) {
 func TestPluginRewriteKeepsAnExplicitNullValue(t *testing.T) {
 	for _, raw := range []string{`{"op":"set","path":"/store","value":null}`, `{"op":"delete","path":"/user"}`} {
 		roundTrip[contract.PluginRewrite](t, raw)
+	}
+}
+
+func TestRequestOriginsMatchUsageEvents(t *testing.T) {
+	for _, origin := range []string{usage.OriginCaller, usage.OriginShadow, usage.OriginClassifier, usage.OriginCacheEmbedding, usage.OriginProbe, usage.OriginPlayground} {
+		t.Run(origin, func(t *testing.T) {
+			value := roundTrip[contract.RequestOrigin](t, `"`+origin+`"`)
+			if !value.Valid() {
+				t.Fatalf("usage origin %q is missing from the management contract", origin)
+			}
+		})
 	}
 }

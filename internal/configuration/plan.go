@@ -642,6 +642,10 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		if _, err := routing.DecodeFidelity(rt.Fidelity); err != nil {
 			return nil, access.Invalid(prefix+".fidelity", err.Error())
 		}
+		fidelity, _ := routing.DecodeFidelity(rt.Fidelity)
+		if err := (routing.Route{Fidelity: fidelity, Behavior: rt.behavior()}).ValidateCaching(); err != nil {
+			return nil, access.Invalid(prefix+".cache", err.Error())
+		}
 		if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
 			return nil, err
 		}

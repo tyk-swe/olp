@@ -289,6 +289,9 @@ func (x *call) startParallel(ctx context.Context, cancelUpstream context.CancelF
 	if !x.guardrailEngine.HasPhase(guardrails.InputParallel) {
 		return nil
 	}
+	if x.cache != nil && x.cache.parallelEngine == x.guardrailEngine && slices.Equal(x.cache.parallelInput, x.guardrailInput) {
+		return nil
+	}
 	evalctx, cancel := context.WithCancel(context.WithValue(ctx, guardrailCallerKey{}, x))
 	p := &parallelGuardrail{result: make(chan guardrailResult, 1), cancel: cancel}
 	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.InputParallel, Segments: slices.Clone(x.guardrailInput), InternalModel: x.internalGuardrail}

@@ -18,6 +18,7 @@ var (
 	MFAChallengeDigest    = DigestPurpose{"mfa_challenge"}
 	MFARecoveryDigest     = DigestPurpose{"mfa_recovery"}
 	WorkloadDigest        = DigestPurpose{"workload_identity"}
+	CacheKeyDigest        = DigestPurpose{"cache_key"}
 	APIKeyDigest          = DigestPurpose{"api_key"}
 	EndUserDigest         = DigestPurpose{"end_user"}
 	ManagementTokenDigest = DigestPurpose{"management_token"}
@@ -34,7 +35,7 @@ var (
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
-	return []DigestPurpose{SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
+	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
 		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest}
 }
 
@@ -76,12 +77,13 @@ var (
 	// importer reads it, and it never serves inference.
 	BillingCredential   = SealPurpose{"billing_credential"}
 	GuardrailCredential = SealPurpose{"guardrail_credential"}
+	ResponseCache       = SealPurpose{"response_cache"}
 )
 
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, BillingCredential, GuardrailCredential}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, BillingCredential, GuardrailCredential, ResponseCache}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

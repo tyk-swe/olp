@@ -7,7 +7,7 @@ scratch=$(mktemp -d)
 export OLP_TEST_TLS_DIR="$scratch/tls"
 mkdir -p "$OLP_TEST_TLS_DIR"
 chmod 755 "$scratch" "$OLP_TEST_TLS_DIR"
-export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0
+export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0 OLP_CACHE_VALKEY_PORT=0
 project="olp-test-$$-$RANDOM"
 compose=(docker compose -p "$project" -f deploy/compose.dev.yaml -f deploy/compose.integration.yaml -f deploy/compose.replica.yaml)
 cleanup() {
@@ -40,6 +40,8 @@ done
 postgres=$("${compose[@]}" port postgres 5432)
 valkey=$("${compose[@]}" port valkey 6379)
 valkey_tls=$("${compose[@]}" port valkey 6380)
+cache_valkey=$("${compose[@]}" port cache 6379)
+export OLP_TEST_CACHE_VALKEY_URL="redis://:olp-local@$cache_valkey/0"
 export OLP_TEST_DATABASE_URL="postgres://olp:olp-local@$postgres/olp?sslmode=disable"
 export OLP_TEST_DATABASE_ADMIN_URL="postgres://olp:olp-local@$postgres/postgres?sslmode=disable"
 export OLP_TEST_DATABASE_TLS_URL="postgres://olp:olp-local@$postgres/olp?sslmode=verify-full&sslrootcert=$OLP_TEST_TLS_DIR/ca.crt"
@@ -82,7 +84,7 @@ go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m
 go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test[G-M]' -skip '^TestCode' ./tests/integration
 go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test($|[^A-M])' -skip '^TestCode' ./tests/integration
 ./scripts/code-mode-qualification.sh cli
-go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage ./internal/process ./internal/runtime
+go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage ./internal/process ./internal/runtime ./internal/cache
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration

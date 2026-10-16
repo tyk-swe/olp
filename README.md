@@ -106,7 +106,7 @@ Start with [concepts](docs/concepts.md) and the [compatibility matrix](docs/comp
 | Manage access and secrets | [Access](docs/access.md), [security](docs/security.md), [external secrets](docs/external-secrets.md) |
 | Automate management | [CLI, Go client and MCP](docs/operator-cli.md), [GitHub Actions](docs/configuration-actions.md), [Terraform/OpenTofu](docs/terraform.md) |
 | Use clients and subscription accounts | [Qualified clients](docs/clients.md), [code mode](docs/features/code-mode.md), [qualification limits](docs/qualification/code-mode.md) |
-| Configure shared resources | [Guardrails](docs/guardrails.md), [upstream MCP servers](docs/mcp-servers.md), [export sinks](docs/export-sinks.md), [model catalog](docs/model-catalog.md) |
+| Configure shared resources | [Guardrails](docs/guardrails.md), [response caching](docs/caching.md), [upstream MCP servers](docs/mcp-servers.md), [export sinks](docs/export-sinks.md), [model catalog](docs/model-catalog.md) |
 | Use the console | [Controls](docs/console.md), [installation tools](docs/operator-console.md) |
 | Develop the gateway and console | [Contributing](CONTRIBUTING.md), [testing](tests/README.md), [architecture](docs/architecture.md), [execution](docs/gateway.md), [console](console/README.md) |
 | Track remaining work | [Roadmap and parity](docs/roadmap/README.md) |

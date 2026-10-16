@@ -257,6 +257,9 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 				return &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
 			}
 			invocation, err := providerinvoke.Prepare(parsed, config, target.ProviderModel, provider.ParameterDefaults)
+			if err == nil && route.PromptCache != nil {
+				invocation, err = providerinvoke.ApplyPromptCache(invocation, config, route.PromptCache, "olp-preview-key")
+			}
 			if err != nil {
 				return err
 			}

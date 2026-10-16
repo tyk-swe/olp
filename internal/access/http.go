@@ -60,8 +60,9 @@ type Server struct {
 	// uses it to say whether stored retention policies are applied at all, not
 	// whether a pass ran. It is set during composition, before the first
 	// request is served, and never changes afterwards.
-	RetentionEnforced   bool
-	NotificationsActive bool
+	RetentionEnforced       bool
+	NotificationsActive     bool
+	ResponseCacheConfigured bool
 
 	Egress        *egress.Policy
 	passwordSlots chan struct{}

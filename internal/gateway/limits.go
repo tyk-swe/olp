@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -636,6 +637,9 @@ func (x *call) settledTokens() *int64 {
 	var total int64
 	for index := range x.facts {
 		fact := &x.facts[index]
+		if fact.Cache != nil && x.cache != nil && !slices.Contains(x.cache.policy.CountHitsAgainst, "tokens") {
+			continue
+		}
 		actual := settledAttemptTokens(fact, x.estimate)
 		switch {
 		case actual != nil:

@@ -69,8 +69,8 @@ var endUserSnapshotsSQL = reconcileCostWindowsSQL(costOwnerEndUser, true, `accou
  SELECT a.* FROM olp.end_user_accounts a
  WHERE $1::timestamptz IS NOT NULL AND ($2::uuid IS NULL OR a.id=$2::uuid)
 ), usage AS (
- SELECT a.id,f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,
-   COALESCE(f.charge,0)::numeric AS charge,
+ SELECT a.id,f.observed_at,(COALESCE(f.estimated_cost,0)+f.cache_budget_cost)::numeric AS cost,
+   (COALESCE(f.charge,0)+f.cache_budget_charge)::numeric AS charge,
    CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts,
    CASE WHEN f.charge_status<>'not_billable' AND f.charge IS NULL THEN 1 ELSE 0 END::bigint AS uncharged_attempts
  FROM accounts a JOIN (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) f ON f.end_user_digest=a.end_user_digest
@@ -78,7 +78,7 @@ var endUserSnapshotsSQL = reconcileCostWindowsSQL(costOwnerEndUser, true, `accou
  WHERE (a.api_key_id=k.id OR a.project_id=k.project_id)
    AND f.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND f.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
- SELECT a.id,h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,COALESCE(h.charge,0)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
+ SELECT a.id,h.budget_bucket,(COALESCE(h.estimated_cost,0)+h.cache_budget_cost)::numeric,(COALESCE(h.charge,0)+h.cache_budget_charge)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
  FROM accounts a JOIN (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) h ON h.end_user_digest=a.end_user_digest
  JOIN olp.api_keys k ON k.id=h.api_key_id
  WHERE (a.api_key_id=k.id OR a.project_id=k.project_id)

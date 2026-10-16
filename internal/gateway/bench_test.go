@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -445,8 +446,10 @@ func (discardSink) Terminal(Envelope) {}
 // admission estimates what the request could cost and reserves it, as it does for
 // the key of the high-throughput scenario.
 type benchLimits struct {
-	maxBody int64
-	budget  bool
+	responseCache *cache.Store
+	cachePolicy   *cache.Policy
+	maxBody       int64
+	budget        bool
 }
 
 // benchGateway is a gateway that serves one route through one provider, over
@@ -469,7 +472,7 @@ func benchGateway(tb testing.TB, upstream *benchTransport, model string, limit b
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
 		Providers:  map[string]routing.Provider{provider.ID: provider},
 		Routes: map[string]routing.Route{routeSlug: {
-			ID: routeID, Slug: routeSlug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 3, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
+			Behavior: routing.Behavior{Cache: limit.cachePolicy}, ID: routeID, Slug: routeSlug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 3, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
 			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
 			Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: provider.ID, ProviderModel: model, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
 		}},
@@ -493,6 +496,7 @@ func benchGateway(tb testing.TB, upstream *benchTransport, model string, limit b
 		}}}
 		gw.Admission = newAdmission(tb, newAllowing(0, 0, 0, false))
 	}
+	gw.Cache = limit.responseCache
 	gw.Sink = discardSink{}
 	gw.client = &http.Client{Transport: upstream}
 	mux := http.NewServeMux()

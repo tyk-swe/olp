@@ -2732,6 +2732,26 @@
             "expose_upstream_models": {
               "type": "boolean",
               "description": "Explicitly disclose upstream model names in route catalogs."
+            },
+            "cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ResponseCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3185,6 +3205,135 @@
             }
           },
           "type": "object"
+        },
+        "ResponseCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "semantic"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "key",
+                "project",
+                "route"
+              ],
+              "default": "key"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 3600
+            },
+            "max_entry_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576
+            },
+            "streaming": {
+              "type": "string",
+              "enum": [
+                "replay",
+                "bypass"
+              ],
+              "default": "replay"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "generation",
+                  "embeddings",
+                  "rerank",
+                  "moderation"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "count_hits_against": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "tokens",
+                  "budgets"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "embedding_route": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "allow_unsealed_vectors": {
+              "type": "boolean"
+            },
+            "allow_multiturn": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "PromptCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "tools",
+                  "last_user"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ],
+              "default": "5m"
+            },
+            "key_source": {
+              "type": "string",
+              "enum": [
+                "key",
+                "session"
+              ],
+              "default": "key"
+            },
+            "session_label": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": []
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -4373,6 +4522,10 @@
                 "charge"
               ],
               "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+            },
+            "forbid_response_cache": {
+              "type": "boolean",
+              "description": "Forbid response cache lookup and storage for this key."
             }
           },
           "required": [
@@ -8526,6 +8679,26 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ResponseCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -8995,6 +9168,135 @@
             }
           },
           "type": "object"
+        },
+        "ResponseCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "semantic"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "key",
+                "project",
+                "route"
+              ],
+              "default": "key"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 3600
+            },
+            "max_entry_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576
+            },
+            "streaming": {
+              "type": "string",
+              "enum": [
+                "replay",
+                "bypass"
+              ],
+              "default": "replay"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "generation",
+                  "embeddings",
+                  "rerank",
+                  "moderation"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "count_hits_against": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "tokens",
+                  "budgets"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "embedding_route": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "allow_unsealed_vectors": {
+              "type": "boolean"
+            },
+            "allow_multiturn": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "PromptCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "tools",
+                  "last_user"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ],
+              "default": "5m"
+            },
+            "key_source": {
+              "type": "string",
+              "enum": [
+                "key",
+                "session"
+              ],
+              "default": "key"
+            },
+            "session_label": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": []
         }
       }
     }
@@ -9149,6 +9451,26 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ResponseCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -9618,6 +9940,135 @@
             }
           },
           "type": "object"
+        },
+        "ResponseCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "semantic"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "key",
+                "project",
+                "route"
+              ],
+              "default": "key"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 3600
+            },
+            "max_entry_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576
+            },
+            "streaming": {
+              "type": "string",
+              "enum": [
+                "replay",
+                "bypass"
+              ],
+              "default": "replay"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "generation",
+                  "embeddings",
+                  "rerank",
+                  "moderation"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "count_hits_against": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "tokens",
+                  "budgets"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "embedding_route": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "allow_unsealed_vectors": {
+              "type": "boolean"
+            },
+            "allow_multiturn": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "PromptCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "tools",
+                  "last_user"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ],
+              "default": "5m"
+            },
+            "key_source": {
+              "type": "string",
+              "enum": [
+                "key",
+                "session"
+              ],
+              "default": "key"
+            },
+            "session_label": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": []
         }
       }
     }
@@ -14247,6 +14698,46 @@
       "required": [
         "path"
       ]
+    }
+  },
+  {
+    "name": "get_response_cache_statistics",
+    "group": "cache",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/cache/statistics",
+    "description": "get response cache statistics",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "route",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   {
@@ -21878,6 +22369,26 @@
             "expose_upstream_models": {
               "type": "boolean",
               "description": "Explicitly disclose upstream model names in route catalogs."
+            },
+            "cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ResponseCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -22331,6 +22842,135 @@
             }
           },
           "type": "object"
+        },
+        "ResponseCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "semantic"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "key",
+                "project",
+                "route"
+              ],
+              "default": "key"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 3600
+            },
+            "max_entry_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576
+            },
+            "streaming": {
+              "type": "string",
+              "enum": [
+                "replay",
+                "bypass"
+              ],
+              "default": "replay"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "generation",
+                  "embeddings",
+                  "rerank",
+                  "moderation"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "count_hits_against": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "tokens",
+                  "budgets"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "embedding_route": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "allow_unsealed_vectors": {
+              "type": "boolean"
+            },
+            "allow_multiturn": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "PromptCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "tools",
+                  "last_user"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ],
+              "default": "5m"
+            },
+            "key_source": {
+              "type": "string",
+              "enum": [
+                "key",
+                "session"
+              ],
+              "default": "key"
+            },
+            "session_label": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": []
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -24155,6 +24795,53 @@
             "multiplier"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "purge_response_cache",
+    "group": "cache",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/cache/purge",
+    "description": "purge response cache",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/CachePurgeRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "body"
+      ],
+      "$defs": {
+        "CachePurgeRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "description": "Supply exactly one route_id or project_id."
         }
       }
     }
@@ -27488,6 +28175,26 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ResponseCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -27951,6 +28658,135 @@
             }
           },
           "type": "object"
+        },
+        "ResponseCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "semantic"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "key",
+                "project",
+                "route"
+              ],
+              "default": "key"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 3600
+            },
+            "max_entry_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576
+            },
+            "streaming": {
+              "type": "string",
+              "enum": [
+                "replay",
+                "bypass"
+              ],
+              "default": "replay"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "generation",
+                  "embeddings",
+                  "rerank",
+                  "moderation"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "count_hits_against": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "tokens",
+                  "budgets"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "embedding_route": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "allow_unsealed_vectors": {
+              "type": "boolean"
+            },
+            "allow_multiturn": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "PromptCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "tools",
+                  "last_user"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ],
+              "default": "5m"
+            },
+            "key_source": {
+              "type": "string",
+              "enum": [
+                "key",
+                "session"
+              ],
+              "default": "key"
+            },
+            "session_label": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": []
         }
       }
     }
@@ -32636,6 +33472,10 @@
                 "charge"
               ],
               "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+            },
+            "forbid_response_cache": {
+              "type": "boolean",
+              "description": "Forbid response cache lookup and storage for this key."
             }
           },
           "type": "object"
@@ -35039,6 +35879,26 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ResponseCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -35502,6 +36362,135 @@
             }
           },
           "type": "object"
+        },
+        "ResponseCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "semantic"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "key",
+                "project",
+                "route"
+              ],
+              "default": "key"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 3600
+            },
+            "max_entry_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576
+            },
+            "streaming": {
+              "type": "string",
+              "enum": [
+                "replay",
+                "bypass"
+              ],
+              "default": "replay"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "generation",
+                  "embeddings",
+                  "rerank",
+                  "moderation"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "count_hits_against": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "tokens",
+                  "budgets"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "embedding_route": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "allow_unsealed_vectors": {
+              "type": "boolean"
+            },
+            "allow_multiturn": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "PromptCachePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "tools",
+                  "last_user"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ],
+              "default": "5m"
+            },
+            "key_source": {
+              "type": "string",
+              "enum": [
+                "key",
+                "session"
+              ],
+              "default": "key"
+            },
+            "session_label": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": []
         }
       }
     }

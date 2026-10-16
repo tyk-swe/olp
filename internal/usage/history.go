@@ -43,6 +43,7 @@ type Cursor struct {
 // metadata plus the usage its attempts accounted for. Token totals and money
 // are absent (null) when no fact exists yet, which is different from zero.
 type RequestSummary struct {
+	CacheResult             *string                  `json:"cache_result"`
 	EvaluatorGuardrailID    *string                  `json:"evaluator_guardrail_id,omitempty"`
 	BudgetBoundary          string                   `json:"budget_boundary,omitempty"`
 	ID                      string                   `json:"id"`
@@ -150,7 +151,7 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
         u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
         u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.guardrail_decisions, r.end_user_digest,
-        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text
+        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text,r.cache_result
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
@@ -181,7 +182,7 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
 		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
 		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.GuardrailDecisions, &s.EndUserDigest,
-		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID}
+		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID, &s.CacheResult}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.

@@ -5,6 +5,7 @@
   import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
+  import RouteCacheEditor from '$lib/features/caching/RouteCacheEditor.svelte';
   import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
   import { resolve } from '$app/paths';
@@ -213,6 +214,7 @@
         </details>
       </section>
       <RouteResilienceEditor {editor} />
+      <RouteCacheEditor {editor} />
     </div>
     <RoutePublishPanel {editor} />
   </form>

@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
+	"github.com/tyk-swe/olp/internal/cache"
 )
 
 // Conditions that start a fallback to another route.
@@ -76,13 +77,15 @@ var (
 // steered to, how a failed attempt is retried, which requests stay together
 // and how much the route may spend. The zero value adds nothing to a route.
 type Behavior struct {
-	CallerCostExempt bool        `json:"caller_cost_exempt,omitempty"`
-	MaxBodyBytes     *int64      `json:"max_body_bytes,omitempty"`
-	Fallbacks        []Fallback  `json:"fallbacks,omitempty"`
-	Selectors        []Selector  `json:"selectors,omitempty"`
-	Retry            Retry       `json:"retry,omitempty"`
-	Affinity         *Affinity   `json:"affinity,omitempty"`
-	Budget           *CostLimits `json:"budget,omitempty"`
+	Cache            *cache.Policy       `json:"cache,omitempty"`
+	PromptCache      *cache.PromptPolicy `json:"prompt_cache,omitempty"`
+	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
+	Fallbacks        []Fallback          `json:"fallbacks,omitempty"`
+	Selectors        []Selector          `json:"selectors,omitempty"`
+	Retry            Retry               `json:"retry,omitempty"`
+	Affinity         *Affinity           `json:"affinity,omitempty"`
+	Budget           *CostLimits         `json:"budget,omitempty"`
 }
 
 // Fallback names another route that serves the request when this one ends
@@ -274,12 +277,18 @@ func DecodeBehavior(raw []byte) (Behavior, error) {
 
 // IsZero reports whether the behavior declares nothing.
 func (b Behavior) IsZero() bool {
-	return !b.CallerCostExempt && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil
+	return b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil
 }
 
 // Validate checks the behavior's own shape. tagged reports whether a primary
 // target of the route carries a tag, so a selector cannot steer to nothing.
 func (b Behavior) Validate(slug string, tagged func(string) bool) error {
+	if err := b.Cache.Validate(); err != nil {
+		return invalidValue("cache", err.Error())
+	}
+	if err := b.PromptCache.Validate(); err != nil {
+		return invalidValue("prompt_cache", err.Error())
+	}
 	if !bodylimit.Valid(b.MaxBodyBytes) {
 		return invalidValue("max_body_bytes", "Use a body limit from 1 to 1073741824 bytes, or null to inherit the installation limit.")
 	}
@@ -514,6 +523,9 @@ type routeEdge struct {
 
 func (b Behavior) edges() []routeEdge {
 	var out []routeEdge
+	if b.Cache != nil && b.Cache.Mode == "semantic" {
+		out = append(out, routeEdge{b.Cache.EmbeddingRoute, false})
+	}
 	for _, f := range b.Fallbacks {
 		out = append(out, routeEdge{f.Route, true})
 	}

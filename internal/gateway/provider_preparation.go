@@ -405,6 +405,9 @@ func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled,
 // Stateless dialects cannot represent store and must keep its omission.
 func (x *call) prepareTransformed(provider *routing.Provider, cfg connectors.Config, model string) (providerinvoke.Invocation, error) {
 	invocation, err := providerinvoke.Prepare(x.generation.parsed, cfg, model, provider.ParameterDefaults)
+	if err == nil && x.route != nil && x.route.PromptCache != nil {
+		invocation, err = providerinvoke.ApplyPromptCache(invocation, cfg, x.route.PromptCache, x.promptCacheKey())
+	}
 	if err != nil || invocation.Wire != wire.Responses || x.authority.Policy.AllowProviderState {
 		return invocation, err
 	}
