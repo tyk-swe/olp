@@ -25,6 +25,7 @@ type responseCacheCall struct {
 	controls                 cache.Controls
 	ticket                   cache.Ticket
 	entry                    *cache.Entry
+	admitted                 bool // Set only after the replay passes admission.
 	result                   string
 	reason                   string
 	age                      int64
@@ -48,7 +49,7 @@ type cacheMetadata struct {
 	UsageComplete      bool        `json:"usage_complete"`
 }
 
-func (x *call) cacheHit() bool { return x.cache != nil && x.cache.entry != nil }
+func (x *call) cacheHit() bool { return x.cache != nil && x.cache.admitted }
 func (x *call) cacheHeaders(h http.Header) {
 	if x.cache == nil {
 		return
@@ -89,10 +90,8 @@ func (s *Server) initializeCache(x *call) *Error {
 			return nil
 		}
 	}
-	for _, field := range []string{"store", "background"} {
-		if v, ok := doc.Root().Lookup(field); ok && v.Raw() != "false" && v.Kind() != oif.Null {
-			return nil
-		}
+	if cacheRetentionRequested(doc) {
+		return nil
 	}
 	for _, field := range []string{"n", "candidate_count"} {
 		if v, ok := doc.Root().Lookup(field); ok && v.Raw() != "1" {
@@ -113,6 +112,16 @@ func (s *Server) initializeCache(x *call) *Error {
 	x.cache.result = "miss"
 	return nil
 }
+
+func cacheRetentionRequested(doc oif.Document) bool {
+	for _, field := range []string{"store", "background"} {
+		if v, ok := doc.Root().Lookup(field); ok && v.Raw() != "false" && v.Kind() != oif.Null {
+			return true
+		}
+	}
+	return false
+}
+
 func containsCacheReference(v oif.Value) bool {
 	switch v.Kind() {
 	case oif.Object:
@@ -161,7 +170,7 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *access
 		return e
 	}
 	tokens, budgets := true, true
-	if x.cacheHit() {
+	if x.cache.entry != nil {
 		tokens = slices.Contains(x.cache.policy.CountHitsAgainst, "tokens")
 		budgets = slices.Contains(x.cache.policy.CountHitsAgainst, "budgets")
 		estimate = 0
@@ -174,6 +183,13 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *access
 	}
 	remainder := cacheAuthority(*authority, false, tokens, budgets)
 	x.lease, e = s.Admission.reserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+	if e == nil && x.cache.entry != nil {
+		x.cache.admitted = true
+		x.cache.result = "hit"
+		if x.cache.similarity != nil {
+			x.cache.result = "semantic-hit"
+		}
+	}
 	return e
 }
 
@@ -261,6 +277,12 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 		}
 		doc = prepared.invocation.Prepared.Document()
 		x.guardrailInput = prepared.guardrailSegments
+	}
+	// Defaults and protocol preparation can add retention even when the caller
+	// omitted it. Only the effective upstream request can establish eligibility.
+	if cacheRetentionRequested(doc) {
+		c.result = "bypass"
+		return nil
 	}
 	c.target = a.TargetID
 	project := x.captureProject()
@@ -357,7 +379,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	c.ticket = ticket
 	if c.controls.NoCache {
 		if c.policy.Mode == "semantic" {
-			c.vector, err = s.cacheEmbedding(ctx, x, query)
+			c.vector, c.ticket.VectorSpace, err = s.cacheEmbedding(ctx, x, query)
 			if err != nil {
 				c.result = "bypass"
 				c.reason = "embedding"
@@ -366,7 +388,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 		return nil
 	}
 	if entry == nil && c.policy.Mode == "semantic" {
-		c.vector, err = s.cacheEmbedding(ctx, x, query)
+		c.vector, c.ticket.VectorSpace, err = s.cacheEmbedding(ctx, x, query)
 		if err != nil {
 			c.result = "bypass"
 			c.reason = "embedding"
@@ -374,7 +396,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 		}
 		lookup, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
 		var similarity float64
-		entry, similarity, err = s.Cache.Nearest(lookup, ticket, c.vector, c.policy, c.controls)
+		entry, similarity, err = s.Cache.Nearest(lookup, c.ticket, c.vector, c.policy, c.controls)
 		cancel()
 		if err != nil {
 			c.result = "bypass"
@@ -394,21 +416,21 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	}
 	c.entry = entry
 	c.age = int64(max(s.now().Sub(entry.CreatedAt)/time.Second, 0))
-	c.result = "hit"
-	if c.similarity != nil {
-		c.result = "semantic-hit"
-	}
 	c.budgetCost, c.budgetCharge = "0", "0"
+	fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: true, UsageComplete: c.metadata.UsageComplete}
+	u := attemptUsage(&fact, x.operationName())
+	var costPtr *usage.Cost
+	at := s.now()
 	if a.Price != nil {
-		fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: true, UsageComplete: c.metadata.UsageComplete}
-		if cost, ok := a.Price.Cost(attemptUsage(&fact, x.operationName()), s.now(), true, a.Discount); ok {
+		if cost, ok := a.Price.Cost(u, at, true, a.Discount); ok {
+			costPtr = &cost
 			c.budgetCost = cost.String()
 			c.budgetCharge = cost.String()
-			if rev := x.attemptCardRevision(a.ProviderID, s.now()); rev != nil {
-				if charge, ok := rev.Charge(attemptUsage(&fact, x.operationName()), s.now(), true, &cost, p.Kind, p.VendorID, a.UpstreamModel, x.operationName()); ok {
-					c.budgetCharge = charge.String()
-				}
-			}
+		}
+	}
+	if rev := x.attemptCardRevision(a.ProviderID, at); rev != nil {
+		if charge, ok := rev.Charge(u, at, true, costPtr, p.Kind, p.VendorID, a.UpstreamModel, x.operationName()); ok {
+			c.budgetCharge = charge.String()
 		}
 	}
 	return nil

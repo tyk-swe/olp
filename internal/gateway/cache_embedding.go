@@ -16,10 +16,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) ([]float32, error) {
+func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) ([]float32, string, error) {
 	route, ok := parent.snapshot().Routes[parent.cache.policy.EmbeddingRoute]
 	if !ok || !parent.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return nil, errors.New("embedding route unavailable")
+		return nil, "", errors.New("embedding route unavailable")
 	}
 	authority := cacheAuthority(parent.authority, false, true, true)
 	// The parent owns the shared caller concurrency slot. The distinct
@@ -43,16 +43,16 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 		codec, _ := operationregistry.Lookup("openai-embeddings")
 		source, err := operationplan.Parse("openai-embeddings", body, int(s.cfg.MaxBodyBytes))
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		x.unary = &unaryCall{source: source, dialect: codec, route: route.Slug, surface: "openai"}
 		if e := s.prepareUnary(ctx, x); e != nil {
 			out = &outcome{err: e}
-			return nil, e
+			return nil, "", e
 		}
 		if e := s.admitClassifier(ctx, x); e != nil {
 			out = &outcome{err: e}
-			return nil, e
+			return nil, "", e
 		}
 		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
@@ -62,16 +62,16 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 	} else {
 		parsed, err := protocols.Parse(wire.Embeddings, body, "")
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		x.generation.parsed = parsed
 		if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
 			out = &outcome{err: e}
-			return nil, e
+			return nil, "", e
 		}
 		if e := s.admitClassifier(ctx, x); e != nil {
 			out = &outcome{err: e}
-			return nil, e
+			return nil, "", e
 		}
 		out = s.execute(ctx, x)
 		if out.completion != nil {
@@ -79,7 +79,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 		}
 	}
 	if out.err != nil {
-		return nil, out.err
+		return nil, "", out.err
 	}
 	var response struct {
 		Data []struct {
@@ -87,11 +87,18 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 		} `json:"data"`
 	}
 	if json.Unmarshal(raw, &response) != nil || len(response.Data) != 1 {
-		return nil, errors.New("invalid embedding response")
+		return nil, "", errors.New("invalid embedding response")
 	}
 	vector := response.Data[0].Embedding
 	if err := cache.ValidateVector(vector); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return vector, nil
+	if len(x.facts) == 0 || x.facts[len(x.facts)-1].Class != classSuccess {
+		return nil, "", errors.New("missing embedding provenance")
+	}
+	// The successful attempt may be a weighted or failover target. Pin the
+	// vector space to that model and provider revision, not just the route.
+	fact := x.facts[len(x.facts)-1]
+	identity, _ := json.Marshal([]string{fact.ProviderID, fact.ProviderRevisionID, fact.UpstreamModel})
+	return vector, hexDigest(identity), nil
 }

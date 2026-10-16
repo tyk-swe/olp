@@ -8,13 +8,138 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestResponseCachePreparedRetentionDefaults(t *testing.T) {
+	h, memory := cacheHarness(t)
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		for id, p := range s.Providers {
+			p.ParameterDefaults = map[string]json.RawMessage{"store": json.RawMessage(`true`)}
+			s.Providers[id] = p
+		}
+	})
+	for range 2 {
+		response, body := h.chat(fullKey, nil)
+		if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != "bypass" {
+			t.Fatalf("retained request: status=%d cache=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), body)
+		}
+	}
+	memory.mu.Lock()
+	commands := memory.commands
+	memory.mu.Unlock()
+	if commands != 0 || h.mock.count("a") != 2 {
+		t.Fatalf("retained requests used cache: commands=%d provider calls=%d", commands, h.mock.count("a"))
+	}
+	for i, want := range []string{"miss", "hit"} {
+		response, body := h.chat(fullKey, nil, `,"store":false`)
+		if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != want {
+			t.Fatalf("stateless override: status=%d cache=%s want=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), want, body)
+		}
+		h.sink.nth(t, i+3)
+	}
+}
+
+func TestResponseCacheExplicitChargeWithoutProviderCost(t *testing.T) {
+	for _, incomplete := range []bool{false, true} {
+		t.Run(fmt.Sprintf("incomplete-price=%t", incomplete), func(t *testing.T) {
+			h, _ := cacheHarness(t)
+			h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+				route := s.Routes[routeSlug]
+				route.Cache.CountHitsAgainst = []string{"requests", "budgets"}
+				s.Routes[routeSlug] = route
+			})
+			h.rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), RateCards: []usage.RoutingRateCard{{Revisions: []usage.RoutingCardRevision{{
+				ID: uuid.NewString(), EffectiveAt: time.Now().Add(-time.Hour), Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
+					ProviderKind: "openai_compatible", Model: modelA, Operation: "generation", Currency: "USD",
+					InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
+				}}},
+			}}}}}
+			if incomplete {
+				h.rt.inputs.Prices = []usage.RoutingPrice{{Price: usage.Price{
+					ProviderKind: "openai_compatible", Model: modelA, Operation: "generation", OutputPerMillion: costText("1"),
+				}}}
+			}
+			for i, want := range []string{"miss", "hit"} {
+				response, body := h.chat(fullKey, nil)
+				if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != want {
+					t.Fatalf("status=%d cache=%s want=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), want, body)
+				}
+				h.sink.nth(t, i+1)
+			}
+			event := h.sink.nth(t, 2)
+			if len(event.Attempts) != 1 || event.Attempts[0].Cache == nil {
+				t.Fatalf("missing cache evidence: %+v", event.Attempts)
+			}
+			evidence := event.Attempts[0].Cache
+			if evidence.BudgetCost != "0" || evidence.BudgetCharge != "0.0002" {
+				t.Fatalf("unpriced provider lost explicit charge: %+v", evidence)
+			}
+		})
+	}
+}
+
+func TestResponseCacheAdmissionFailureRefundsRequest(t *testing.T) {
+	h, _ := cacheHarness(t)
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Cache.CountHitsAgainst = []string{"requests", "tokens"}
+		s.Routes[routeSlug] = route
+	})
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("warm cache: %d %v", response.StatusCode, body)
+	}
+	h.sink.nth(t, 1)
+	window := admitThrough(t, h)
+	h.rt.mu.Lock()
+	key := h.rt.keys[fullKey]
+	key.LookupID = "cache_refund"
+	key.Policy.RequestsPerMinute, key.Policy.TokensPerMinute = perMinute(1), perMinute(1)
+	h.rt.keys[fullKey] = key
+	h.rt.mu.Unlock()
+	awaitRequests := func(want int64) {
+		t.Helper()
+		var got int64
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+			window.mu.Lock()
+			got = 0
+			for _, counter := range window.counters {
+				got += counter.requests
+			}
+			window.mu.Unlock()
+			if got == want {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("request debit=%d, want %d", got, want)
+	}
+	for range 2 {
+		response, body := h.chat(fullKey, nil)
+		if response.StatusCode != http.StatusBadRequest || strings.Contains(response.Header.Get("X-OLP-Cache"), "hit") {
+			t.Fatalf("inadmissible replay: status=%d cache=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), body)
+		}
+		awaitRequests(0)
+	}
+	h.rt.mu.Lock()
+	key.Policy.TokensPerMinute = perMinute(100)
+	h.rt.keys[fullKey] = key
+	h.rt.mu.Unlock()
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != "hit" {
+		t.Fatalf("admitted replay: status=%d cache=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), body)
+	}
+	awaitRequests(1)
+	if h.mock.count("a") != 1 {
+		t.Fatal("rejected or replayed cache hits reached the provider")
+	}
+}
 
 func TestResponseCacheSharingScopesRemainInsideProject(t *testing.T) {
 	for _, scope := range []string{"key", "project", "route"} {

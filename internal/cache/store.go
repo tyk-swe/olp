@@ -36,7 +36,12 @@ type Space struct {
 	Scope       string `json:"scope"`
 	Fingerprint string `json:"fingerprint"`
 }
-type Ticket struct{ Key, Bucket string }
+type Ticket struct {
+	Key, Bucket string
+	// VectorSpace identifies the embedding model for semantic matches. Exact
+	// lookups leave it empty so they do not need another embedding request.
+	VectorSpace string
+}
 type Entry struct {
 	CreatedAt time.Time       `json:"created_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -45,7 +50,8 @@ type Entry struct {
 	Metadata  json.RawMessage `json:"metadata"`
 }
 type storedEntry struct {
-	Bucket string `json:"bucket"`
+	Bucket      string `json:"bucket"`
+	VectorSpace string `json:"vector_space,omitempty"`
 	Entry
 }
 type sealed struct {
@@ -139,7 +145,7 @@ func (s *Store) open(ticket Ticket, value any, controls Controls) (*Entry, error
 		return nil, ErrUnavailable
 	}
 	var stored storedEntry
-	if json.Unmarshal(plain, &stored) != nil || stored.Bucket == "" || stored.Bucket != ticket.Bucket {
+	if json.Unmarshal(plain, &stored) != nil || stored.Bucket == "" || stored.Bucket != ticket.Bucket || ticket.VectorSpace != "" && stored.VectorSpace != ticket.VectorSpace {
 		return nil, ErrUnavailable
 	}
 	entry := stored.Entry
@@ -165,7 +171,7 @@ func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy Poli
 	entry.ExpiresAt = entry.CreatedAt.Add(time.Duration(ttl) * time.Second)
 	// Search metadata is untrusted. Bind the original scope and namespace
 	// generation to the encrypted entry before accepting semantic candidates.
-	plain, err := json.Marshal(storedEntry{Bucket: ticket.Bucket, Entry: entry})
+	plain, err := json.Marshal(storedEntry{Bucket: ticket.Bucket, VectorSpace: ticket.VectorSpace, Entry: entry})
 	if err != nil || len(plain) > p.MaxEntryBytes {
 		return ErrNotStored
 	}
@@ -174,7 +180,7 @@ func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy Poli
 		return ErrUnavailable
 	}
 	blob, _ := json.Marshal(sealed{Version: s.Keys.Active, Data: ciphertext})
-	args := []string{"EVAL", `redis.call('HSET',KEYS[1],'sealed',ARGV[1],'bucket',ARGV[3]); if ARGV[4]~='' then redis.call('HSET',KEYS[1],'vector',ARGV[4]) end; redis.call('EXPIRE',KEYS[1],ARGV[2]); return 1`, "1", ticket.Key, string(blob), strconv.Itoa(ttl), ticket.Bucket, ""}
+	args := []string{"EVAL", `redis.call('HSET',KEYS[1],'sealed',ARGV[1],'bucket',ARGV[3]); if ARGV[4]~='' then redis.call('HSET',KEYS[1],'vector',ARGV[4]) end; redis.call('EXPIRE',KEYS[1],ARGV[2]); return 1`, "1", ticket.Key, string(blob), strconv.Itoa(ttl), s.vectorBucket(ticket), ""}
 	if len(vector) > 0 {
 		if _, err = s.index(ctx, len(vector)); err != nil {
 			return err
@@ -216,6 +222,13 @@ func (s *Store) index(ctx context.Context, dimension int) (string, error) {
 	return name, nil
 }
 
+func (s *Store) vectorBucket(ticket Ticket) string {
+	if ticket.VectorSpace == "" {
+		return ticket.Bucket
+	}
+	return s.digest([]string{ticket.Bucket, ticket.VectorSpace})
+}
+
 func textValue(v any) string {
 	if s, ok := v.(string); ok {
 		return s
@@ -242,7 +255,7 @@ func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, po
 	if err != nil {
 		return nil, 0, err
 	}
-	query := "(@bucket:{" + ticket.Bucket + "})=>[KNN " + strconv.Itoa(p.MaxCandidates) + " @vector $v]"
+	query := "(@bucket:{" + s.vectorBucket(ticket) + "})=>[KNN " + strconv.Itoa(p.MaxCandidates) + " @vector $v]"
 	value, err := s.Client.Do(ctx, "FT.SEARCH", name, query, "PARAMS", "2", "v", vectorBytes(vector), "RETURN", "1", "__vector_score", "LIMIT", "0", strconv.Itoa(p.MaxCandidates), "DIALECT", "2")
 	if err != nil {
 		return nil, 0, ErrUnavailable
@@ -296,7 +309,7 @@ func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, po
 		return candidates[i].score > candidates[j].score
 	})
 	for _, c := range candidates {
-		entry, err := s.Get(ctx, Ticket{Key: c.key, Bucket: ticket.Bucket}, controls)
+		entry, err := s.Get(ctx, Ticket{Key: c.key, Bucket: ticket.Bucket, VectorSpace: ticket.VectorSpace}, controls)
 		if err != nil {
 			return nil, 0, err
 		}

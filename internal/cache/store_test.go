@@ -64,7 +64,7 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 	return nil, errors.New("unsupported")
 }
 func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
-	for _, change := range []string{"same scope", "project", "route", "key", "revision", "project purge", "route purge"} {
+	for _, change := range []string{"same scope", "embedding model", "project", "route", "key", "revision", "project purge", "route purge"} {
 		t.Run(change, func(t *testing.T) {
 			s, m := testStore(t)
 			space := Space{Project: "project", Route: "route", Scope: "key", Fingerprint: "revision"}
@@ -72,6 +72,7 @@ func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			original.VectorSpace = "embedding-model-v1"
 			p := Policy{Mode: "semantic", AllowUnsealedVectors: true, EmbeddingRoute: "embeddings"}
 			if err := s.Put(t.Context(), original, Entry{Body: []byte("private response")}, p, Controls{}, []float32{1, 0}); err != nil {
 				t.Fatal(err)
@@ -96,6 +97,10 @@ func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
 			query, err := s.Begin(t.Context(), space, []byte("similar"))
 			if err != nil {
 				t.Fatal(err)
+			}
+			query.VectorSpace = original.VectorSpace
+			if change == "embedding model" {
+				query.VectorSpace = "embedding-model-v2"
 			}
 			// Simulate an altered search result pointing to a valid ciphertext
 			// from a different caller, revision, or purged namespace.
