@@ -374,7 +374,10 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 	s.settleCaps(ctx, x)
 	if x.cacheRateLease != nil {
 		zero := int64(0)
-		settleKey(ctx, x.cacheRateLease, x.dispatched || x.cacheHit(), &zero, s.log)
+		// A cache embedding uses this shared request reservation even when the
+		// parent's subsequent token or cost admission fails.
+		consumed := x.dispatched || x.cacheHit() || x.cache != nil && x.cache.embeddingDispatched
+		settleKey(ctx, x.cacheRateLease, consumed, &zero, s.log)
 	}
 	if x.lease == nil {
 		// A request that reserved nothing has nothing to settle, and is not made to

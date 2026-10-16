@@ -26,6 +26,7 @@ type responseCacheCall struct {
 	ticket                   cache.Ticket
 	entry                    *cache.Entry
 	admitted                 bool // Set only after the replay passes admission.
+	embeddingDispatched      bool // An embedding consumed the parent's shared request reservation.
 	result                   string
 	reason                   string
 	age                      int64

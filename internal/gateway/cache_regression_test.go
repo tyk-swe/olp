@@ -284,6 +284,77 @@ func TestSemanticCacheEmbeddingBodyLimit(t *testing.T) {
 	}
 }
 
+func TestSemanticCacheEmbeddingRequestDebitOnAdmissionFailure(t *testing.T) {
+	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
+		for _, tc := range []struct {
+			name         string
+			status       int
+			body         string
+			bodyLimit    *int64
+			wantRequests int64
+		}{
+			{"success", http.StatusOK, `{"object":"list","model":"model-b","data":[{"object":"embedding","index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`, nil, 1},
+			{"invalid vector", http.StatusOK, `{"object":"list","model":"model-b","data":[{"object":"embedding","index":0,"embedding":[]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`, nil, 1},
+			{"provider failure", http.StatusServiceUnavailable, `{"error":{"message":"unavailable","type":"server_error"}}`, nil, 1},
+			{"rejected before dispatch", http.StatusOK, "", int64ptr(1), 0},
+		} {
+			t.Run(fidelity+"/"+tc.name, func(t *testing.T) {
+				finished := make(chan struct{}, 1)
+				h, _ := enableTestCache(t, newHarnessWrapped(t, Config{}, func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						next.ServeHTTP(w, r)
+						finished <- struct{}{}
+					})
+				}))
+				h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+					b.Kind, b.ProfileID, b.ProfileRevision = "openai", "openai-embeddings", connectors.ProfileRevision
+					b.Capabilities = []routing.Capability{{Model: modelB, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+					s.Providers[b.ID] = b
+					route := s.Routes[routeSlug]
+					route.Targets = route.Targets[:1]
+					route.Cache = &cache.Policy{Mode: "semantic", EmbeddingRoute: "cache-embedding", AllowUnsealedVectors: true}
+					s.Routes[routeSlug] = route
+					s.Routes["cache-embedding"] = routing.Route{
+						ID: uuid.NewString(), Slug: "cache-embedding", RevisionID: uuid.NewString(), RoutingID: uuid.NewString(),
+						Operations: []string{"embeddings"}, OverallTimeout: 5000, MaxAttempts: 1, MaxBodyBytes: tc.bodyLimit,
+						Fidelity: routing.RouteFidelity{Mode: fidelity},
+						Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 3000, RoutingID: uuid.NewString()}},
+					}
+				})
+				window := admitThrough(t, h)
+				h.rt.mu.Lock()
+				key := h.rt.keys[fullKey]
+				key.LookupID = "cache_embedding_admission"
+				key.Policy.RequestsPerMinute, key.Policy.TokensPerMinute = perMinute(1), perMinute(100)
+				h.rt.keys[fullKey] = key
+				h.rt.mu.Unlock()
+				h.mock.set("b", status(tc.status, tc.body))
+				for request := range 2 {
+					response, body := h.chat(fullKey, nil, `,"max_tokens":1000`)
+					select {
+					case <-finished:
+					case <-time.After(time.Second):
+						t.Fatal("request did not finish settling")
+					}
+					wantStatus := http.StatusBadRequest
+					if request > 0 && tc.wantRequests > 0 {
+						wantStatus = http.StatusTooManyRequests
+					}
+					if response.StatusCode != wantStatus {
+						t.Fatalf("request %d: status=%d want=%d body=%v", request+1, response.StatusCode, wantStatus, body)
+					}
+					window.mu.Lock()
+					requests := window.of("olp:test:{cache_embedding_admission}:rate").requests
+					window.mu.Unlock()
+					if requests != tc.wantRequests || h.mock.count("b") != int(tc.wantRequests) || h.mock.count("a") != 0 {
+						t.Fatalf("request %d: debit=%d want=%d embedding calls=%d generation calls=%d", request+1, requests, tc.wantRequests, h.mock.count("b"), h.mock.count("a"))
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestResponseCachePreparedRetentionDefaults(t *testing.T) {
 	h, memory := cacheHarness(t)
 	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {

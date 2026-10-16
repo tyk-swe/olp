@@ -28,6 +28,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: parent.request.release}, family: wire.Embeddings, actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID, origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority, mode: "unary", routeLeg: routeLeg{route: &route}}
 	var out *outcome
 	defer func() {
+		parent.cache.embeddingDispatched = parent.cache.embeddingDispatched || x.dispatched
 		status := http.StatusOK
 		if out == nil {
 			status = 500
