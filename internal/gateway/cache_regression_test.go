@@ -119,6 +119,52 @@ func TestResponseCacheCommitmentBudgetCharges(t *testing.T) {
 	}
 }
 
+func TestSemanticCacheEmbeddingRetryDeadline(t *testing.T) {
+	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
+		t.Run(fidelity, func(t *testing.T) {
+			h, _ := cacheHarness(t)
+			h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
+				b.Kind, b.ProfileID, b.ProfileRevision = "openai", "openai-embeddings", connectors.ProfileRevision
+				b.Capabilities = []routing.Capability{{Model: modelB, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+				s.Providers[b.ID] = b
+				route := s.Routes[routeSlug]
+				route.Targets = route.Targets[:1]
+				route.Cache = &cache.Policy{Mode: "semantic", EmbeddingRoute: "cache-embedding", AllowUnsealedVectors: true}
+				s.Routes[routeSlug] = route
+				s.Routes["cache-embedding"] = routing.Route{
+					ID: uuid.NewString(), Slug: "cache-embedding", RevisionID: uuid.NewString(), RoutingID: uuid.NewString(),
+					Operations: []string{"embeddings"}, OverallTimeout: 100, MaxAttempts: 2,
+					Fidelity: routing.RouteFidelity{Mode: fidelity},
+					Retry:    routing.Retry{classRateLimit: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}},
+					Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 3000, RoutingID: uuid.NewString()}},
+				}
+			})
+			h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+				if h.mock.count("b") == 1 {
+					w.Header().Set("Retry-After", "1")
+					status(http.StatusTooManyRequests, `{"error":{"message":"slow down","type":"rate_limit_error"}}`)(w, r)
+					return
+				}
+				status(http.StatusOK, `{"object":"list","model":"model-b","data":[{"object":"embedding","index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`)(w, r)
+			})
+			started := time.Now()
+			response, body := h.chat(fullKey, nil)
+			elapsed := time.Since(started)
+			if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != "bypass" {
+				t.Fatalf("embedding deadline did not bypass cache: status=%d cache=%s elapsed=%s body=%v", response.StatusCode, response.Header.Get("X-OLP-Cache"), elapsed, body)
+			}
+			if elapsed >= time.Second || h.mock.count("b") != 1 || h.mock.count("a") != 1 {
+				t.Fatalf("retry exceeded embedding deadline: elapsed=%s embedding calls=%d generation calls=%d", elapsed, h.mock.count("b"), h.mock.count("a"))
+			}
+			for _, env := range h.sink.await(t, 2) {
+				if env.Origin == usage.OriginCacheEmbedding && (env.Status != http.StatusTooManyRequests || len(env.Attempts) != 1 || env.Attempts[0].Class != classRateLimit) {
+					t.Fatalf("embedding retried beyond its deadline: %+v", env)
+				}
+			}
+		})
+	}
+}
+
 func TestSemanticCacheEmbeddingBodyLimit(t *testing.T) {
 	for _, fidelity := range []string{routing.FidelityStrict, routing.FidelityTransformed} {
 		t.Run(fidelity, func(t *testing.T) {

@@ -51,6 +51,8 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 			out = &outcome{err: e}
 			return nil, "", e
 		}
+		ctx, cancel := x.routeContext(ctx)
+		defer cancel()
 		if e := s.admitClassifier(ctx, x); e != nil {
 			out = &outcome{err: e}
 			return nil, "", e
