@@ -17,6 +17,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -235,6 +236,20 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		policy = egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 		business = telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels)
+		var responseCache *cache.Store
+		if c.CacheValkeyURL != "" {
+			var main cache.Commander
+			if vk != nil {
+				main = vk
+			}
+			remote, err := cache.NewRemote(c.CacheValkeyURL, c.CacheValkeyCAFile, main)
+			if err != nil {
+				return err
+			}
+			defer remote.Close()
+			responseCache = &cache.Store{Client: remote, Keys: keys, Auth: auth, Installation: installation}
+		}
+
 		sender := export.NewSender(&policy)
 		sender.Installation = installation
 		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
@@ -293,6 +308,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
+			gw.Cache = responseCache
 			gw.Business = business
 			rt.GrantRefreshed = gw.GrantRefreshed
 			if limiter != nil {
@@ -387,6 +403,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			control.ManagementNetworkRestricted = len(c.ManagementAllowedCIDRs) != 0
 			control.ClientIP = func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) }
 			control.LimitsEnforced = limiter != nil
+			control.ResponseCacheConfigured = responseCache != nil
 			// The worker plane that applies retention runs only where shared
 			// state is configured, and a control process cannot see whether a
 			// separate worker replica is alive, so the console is told what

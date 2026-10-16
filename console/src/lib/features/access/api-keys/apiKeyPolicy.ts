@@ -39,6 +39,7 @@ export type ApiKeyFormState = {
   expiresAt: string;
   allowProviderState: boolean;
   responseMetadata: boolean;
+  forbidResponseCache: boolean;
   endUserSource: '' | 'header' | 'native';
   endUserPolicy: PolicyForm;
   routeLimits: RouteLimitForm;
@@ -84,6 +85,7 @@ export function createApiKeyFormState(
       : '',
     allowProviderState: editing?.allow_provider_state ?? false,
     responseMetadata: editing?.response_metadata ?? false,
+    forbidResponseCache: editing?.forbid_response_cache ?? false,
     endUserSource: editing?.end_user_source ?? '',
     endUserPolicy: policyForm(editing?.end_user_policy),
     routeLimits: routeLimitForm(editing?.route_limits),
@@ -154,6 +156,7 @@ export function buildApiKeyPolicyInput(
       : null,
     allow_provider_state: state.allowProviderState,
     response_metadata: state.responseMetadata,
+    forbid_response_cache: state.forbidResponseCache,
     end_user_source: state.endUserSource || null,
     end_user_policy: policyInput(state.endUserPolicy),
     route_limits: routeLimitsInput(state.routeLimits),

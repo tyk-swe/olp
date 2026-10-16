@@ -145,7 +145,7 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
 	var local, oidc, samlEnabled, captureEnabled bool
 	err := s.Pool.QueryRow(r.Context(), authenticationCapabilitiesSQL).Scan(&local, &oidc, &samlEnabled, &captureEnabled)
-	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "management_network_restricted": s.ManagementNetworkRestricted, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive, "payload_capture_active": captureEnabled}), err
+	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "management_network_restricted": s.ManagementNetworkRestricted, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive, "payload_capture_active": captureEnabled, "response_cache_configured": s.ResponseCacheConfigured, "semantic_cache_vectors_unsealed": true}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {

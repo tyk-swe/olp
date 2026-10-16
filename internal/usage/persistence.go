@@ -95,9 +95,9 @@ const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
 const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id)
+         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id,cache_result)
     VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($8, now()),
-            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21,$22::jsonb,$23::uuid)
+            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21,$22::jsonb,$23::uuid,NULLIF($24,''))
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp.attempts
@@ -145,9 +145,9 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
 // admission guarantees no other event's facts share this event identifier, and
 // numeric keeps the sum exact.
-const factTotalsSQL = `SELECT count(*), COALESCE(sum(estimated_cost) FILTER (WHERE NOT budget_exempt), 0)::text,
+const factTotalsSQL = `SELECT count(*), COALESCE(sum(COALESCE(estimated_cost,0)+cache_budget_cost) FILTER (WHERE NOT budget_exempt), 0)::text,
         count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND unpriced),
-        COALESCE(sum(charge) FILTER (WHERE NOT budget_exempt), 0)::text,
+        COALESCE(sum(COALESCE(charge,0)+cache_budget_charge) FILTER (WHERE NOT budget_exempt), 0)::text,
         count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND charge IS NULL)
     FROM olp.attempt_usage_facts WHERE event_id = $1::uuid`
 
@@ -377,7 +377,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 		validated.StatusCode, ev.ErrorClass, latency, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(AttributionJSON(ev.Attribution)),
 		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, OriginCaller),
-		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured, guardrailJSON(ev.GuardrailDecisions), ev.EvaluatorGuardrailID); err != nil {
+		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured, guardrailJSON(ev.GuardrailDecisions), ev.EvaluatorGuardrailID, ev.CacheResult); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {
@@ -465,6 +465,18 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		pricing.costLines, pricing.chargeLines,
 	); err != nil {
 		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
+	}
+	if attempt.Attempt.Routing != nil && attempt.Attempt.Routing.Cache != nil {
+		c := attempt.Attempt.Routing.Cache
+		amount := func(v string) string {
+			if v == "" {
+				return "0"
+			}
+			return v
+		}
+		if _, err := tx.Exec(ctx, `UPDATE olp.attempt_usage_facts SET response_cache=true,cache_avoided_cost=$2::numeric,cache_budget_cost=$3::numeric,cache_budget_charge=$4::numeric WHERE attempt_id=$1::uuid`, attempt.Attempt.ID, amount(c.AvoidedCost), amount(c.BudgetCost), amount(c.BudgetCharge)); err != nil {
+			return factCharge{}, err
+		}
 	}
 	return factCharge{billable: status != chargeNotBillable, cost: pricing.estimatedCost, unpriced: unpriced}, nil
 }

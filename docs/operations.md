@@ -533,3 +533,14 @@ Use the content-free request/attempt evidence and explicit sandbox evaluations.
 External adapters are tested against local contract fakes. Live-account vendor
 qualification and M1 reference-hardware performance qualification must be recorded
 separately before declaring the M7 exit checklist complete.
+
+## Response cache
+
+Response caching is opt-in per route and uses `OLP_CACHE_VALKEY_URL` (or its
+`_FILE` form), a separate evicting Valkey deployment. The optional Compose cache
+profile uses a 256 MiB limit and no persistence; Valkey Search is required for
+semantic matching. A cache failure produces `bypass` and leaves coordination,
+admission and accounting on their original Valkey. Monitor
+`olp_cache_requests_total`, `olp_cache_bytes_stored_total` and
+`olp_cache_errors_total`. Route/project purges invalidate a namespace without
+scanning content. [Configuration, controls and accounting](caching.md).

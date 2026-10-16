@@ -323,6 +323,13 @@
       <label
         ><input
           type="checkbox"
+          bind:checked={form.forbidResponseCache}
+          disabled={!canManage}
+        /> Forbid response caching for this key</label
+      >
+      <label
+        ><input
+          type="checkbox"
           bind:checked={form.responseMetadata}
           disabled={!canManage}
         />

@@ -156,8 +156,8 @@ names are bound into stored data and never change:
 <!-- purposes -->
 | Kind | Purposes |
 | --- | --- |
-| Digest | `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
-| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `billing_credential`, `guardrail_credential` |
+| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
+| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `billing_credential`, `guardrail_credential`, `response_cache` |
 <!-- /purposes -->
 
 Passwords are hashed with Argon2id, with at most four concurrent hashes per
@@ -273,3 +273,12 @@ secret I/O, and rechecks live eligibility after resolution. Rotation does not
 change the pinned reference; revocation observed during the remote call refuses
 its eventual secret. Static/grant serving bytes are immutable borrowed buffers;
 callers requiring mutable bytes must copy rather than clear runtime-owned state.
+
+## Response-cache content
+
+The optional response cache holds AES-256-GCM sealed bodies and event sequences
+in a separate evicting Valkey instance. Its HMAC keys bind project/key scope,
+native request semantics and immutable serving/guardrail configuration. Cache
+entries and masking maps never enter request-history tables. Semantic caching
+requires explicit acknowledgement that the vector index holds unencrypted
+content-derived vectors; responses remain sealed. See [caching](caching.md).

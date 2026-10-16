@@ -290,6 +290,15 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
 // yields no row, which is an error rather than a free request: the delivery
 // stays pending until the row is there or the operator removes the gap.
 func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt ValidatedAttempt) (attemptPricing, error) {
+	if attempt.Attempt.Routing != nil && attempt.Attempt.Routing.Cache != nil {
+		zero := "0"
+		currency := attempt.Attempt.Routing.Cache.Currency
+		var currencyPtr *string
+		if currency != "" {
+			currencyPtr = &currency
+		}
+		return attemptPricing{complete: true, estimatedCost: &zero, charge: &zero, listCost: &zero, contractedCost: &zero, currency: currencyPtr, components: []string{"response_cache"}}, nil
+	}
 	pin, err := attemptRouting(attempt.Attempt)
 	if err != nil {
 		return attemptPricing{}, err

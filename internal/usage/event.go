@@ -31,11 +31,12 @@ var ErrUnsupportedVersion = errors.New("unsupported request metadata version")
 // classifier call is made for, and charged to, the key whose request it
 // routes.
 const (
-	OriginCaller     = "caller"
-	OriginShadow     = "shadow"
-	OriginClassifier = "classifier"
-	OriginProbe      = "probe"
-	OriginPlayground = "playground"
+	OriginCaller         = "caller"
+	OriginShadow         = "shadow"
+	OriginClassifier     = "classifier"
+	OriginCacheEmbedding = "cache_embedding"
+	OriginProbe          = "probe"
+	OriginPlayground     = "playground"
 )
 
 // Keyless reports whether requests of an origin carry no API key.
@@ -46,6 +47,7 @@ func Keyless(origin string) bool {
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
+	CacheResult          string  `json:"cache_result,omitempty"`
 	EvaluatorGuardrailID *string `json:"evaluator_guardrail_id,omitempty"`
 	BudgetBoundary       string  `json:"budget_boundary,omitempty"`
 	Version              int     `json:"version"`
@@ -225,6 +227,7 @@ type AttemptUsage struct {
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
+	Cache                *CacheEvidence       `json:"cache,omitempty"`
 	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
 	CredentialSource     string               `json:"credential_source,omitempty"`
 	Interaction          *InteractionEvidence `json:"interaction,omitempty"`
@@ -322,6 +325,7 @@ func Decode(payload []byte) (*Event, error) {
 // The wire types mirror the event shape with every required field behind a
 // pointer, so an absent field is a decode failure instead of a zero value.
 type wireEvent struct {
+	CacheResult             string                `json:"cache_result,omitempty"`
 	EvaluatorGuardrailID    *string               `json:"evaluator_guardrail_id"`
 	HTTPOutcomePending      bool                  `json:"http_outcome_pending,omitempty"`
 	PayloadCaptured         bool                  `json:"payload_captured"`
@@ -424,6 +428,7 @@ type wireDecision struct {
 }
 
 type wireRouting struct {
+	Cache                *CacheEvidence       `json:"cache,omitempty"`
 	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
 	CredentialSource     string               `json:"credential_source,omitempty"`
 	Interaction          *InteractionEvidence `json:"interaction"`
@@ -457,10 +462,13 @@ var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
-var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}}
+var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}, OriginCacheEmbedding: {}}
 
 func (w wireEvent) decode() (*Event, error) {
-	event := &Event{Version: WireVersion, HTTPOutcomePending: w.HTTPOutcomePending, PayloadCaptured: w.PayloadCaptured}
+	if w.CacheResult != "" && w.CacheResult != "hit" && w.CacheResult != "semantic-hit" && w.CacheResult != "miss" && w.CacheResult != "bypass" {
+		return nil, errors.New("invalid cache result")
+	}
+	event := &Event{CacheResult: w.CacheResult, Version: WireVersion, HTTPOutcomePending: w.HTTPOutcomePending, PayloadCaptured: w.PayloadCaptured}
 	var err error
 	if event.EventID, err = requiredUUID("event_id", w.EventID); err != nil {
 		return nil, err
@@ -490,7 +498,7 @@ func (w wireEvent) decode() (*Event, error) {
 	if event.EvaluatorGuardrailID, err = optionalUUID("evaluator_guardrail_id", w.EvaluatorGuardrailID); err != nil {
 		return nil, err
 	}
-	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.EvaluatorGuardrailID != nil) {
+	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.Origin == OriginCacheEmbedding || event.EvaluatorGuardrailID != nil) {
 		return nil, errors.New("request metadata field parent_request_id belongs to shadow and classifier requests")
 	}
 	if w.EndUserDigest != nil {
@@ -735,6 +743,10 @@ func (w wireRouting) decode() (*Routing, error) {
 	}
 	routing.CredentialSource = w.CredentialSource
 	routing.BudgetExempt = w.BudgetExempt
+	if err := w.Cache.Validate(); err != nil {
+		return nil, err
+	}
+	routing.Cache = w.Cache
 	if routing.CredentialVersionID, err = optionalUUID("routing.credential_version_id", w.CredentialVersionID); err != nil {
 		return nil, err
 	}

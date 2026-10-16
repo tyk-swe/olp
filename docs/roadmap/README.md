@@ -28,7 +28,7 @@ exact attempt accounting, confined plugins and content-free diagnostics.
 ### Where it falls short
 
 Remaining work includes invoice reconciliation for providers beyond OpenAI and
-Anthropic, streaming/extensible guardrails, response caching, API-surface
+Anthropic, remaining guardrail qualification, API-surface
 completion and agent/tool execution.
 M1's harness/gate exists, but full-rate reference-hardware results remain uncollected.
 The [parity matrix](parity.md) owns capability-by-capability status.
@@ -42,7 +42,7 @@ intent. Everything ships in the single AGPL product, without a feature paywall.
 
 ## Milestones
 
-M1–M6 and M11 are implemented, and M7–M10 remain planned. The
+M1–M6, M8 and M11 are implemented; M7 is in progress, and M9–M10 remain planned. The
 [implementation review](m01-m04-implementation-review.md) records historical
 focused evidence and the [architecture review](../architecture-review.md) records
 later integrated qualification. Neither establishes uncollected full-rate,
@@ -57,8 +57,8 @@ Dependencies in the table constrain order; there are no milestone dates.
 | M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Implemented |
 | M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Implemented |
 | M6 | [Cost management and chargeback](m06-cost-management.md) | Complete pricing dimensions, rate cards, cost estimation, FOCUS and billing exports, invoice reconciliation. | M2, M4, M5 | Implemented |
-| M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | Planned |
-| M8 | [Response caching](m08-caching.md) | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation. | M7 | Planned |
+| M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | In progress |
+| M8 | [Response caching](m08-caching.md) | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation. | M7 | Implemented |
 | M9 | [API surface completion](m09-api-surface.md) | Legacy completions, cross-provider files and batches, fine-tuning, vector stores, Responses completion, realtime expansion, OCR, search, provider-retained resources and governed pass-through. | M2 | Planned |
 | M10 | [Agent gateway](m10-agent-gateway.md) | An MCP gateway with pinned tools, gateway-executed tools, an A2A agent gateway and a prompt registry. | M4, M7 | Planned |
 | M11 | [Operator ecosystem](m11-operator-ecosystem.md) | A management CLI, a Terraform provider, KMS and external secret stores, a developer catalog, multi-region gateways and a management MCP server. | M4 | Implemented |
@@ -82,9 +82,9 @@ recomputed whenever a milestone closes:
 At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
 `Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%).
 This historical scorecard is preserved for comparison.
-The current 153 capability rows reflect M1–M6, M11 and the 2026-10-13
-re-baseline: 23 `Ahead`, 87 `Parity`, 10 `Partial`, 31 `Gap`, 2 `Excluded`;
-coverage is 110/151 (73%).
+The current 153 capability rows reflect implemented capabilities and the M8
+caching work: 23 `Ahead`, 100 `Parity`, 7 `Partial`, 21 `Gap`, 2 `Excluded`;
+coverage is 123/151 (81%).
 Status rows in the legend are not capabilities. Definitions/registrations alone
 do not close broader guardrail-execution or agent-gateway workstreams.
 

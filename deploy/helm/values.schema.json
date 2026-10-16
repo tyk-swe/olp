@@ -217,6 +217,9 @@
         "region": { "type": "string", "pattern": "^$|^[a-z0-9][a-z0-9._-]{0,99}$" },
         "valkeySecretName": { "type": "string", "minLength": 1 },
         "valkeySecretKey": { "type": "string", "minLength": 1 },
+        "cacheValkeySecretName": { "type": "string" },
+        "cacheValkeySecretKey": { "type": "string", "minLength": 1 },
+        "cacheValkeyTlsCaFile": { "type": "string" },
         "masterKeySecretName": { "type": "string", "minLength": 1 },
         "masterKeySecretKey": { "type": "string", "minLength": 1 },
         "authHmacKeySecretName": { "type": "string", "minLength": 1 },
@@ -391,6 +394,7 @@
             },
             "postgresql": { "$ref": "#/definitions/networkPolicyPeer" },
             "valkey": { "$ref": "#/definitions/networkPolicyPeer" },
+            "cacheValkey": { "$ref": "#/definitions/networkPolicyPeer" },
             "providers": { "$ref": "#/definitions/networkPolicyPeer" }
           }
         }

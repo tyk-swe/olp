@@ -304,6 +304,9 @@ func forwardable(status int) bool {
 // execute adapts canonical inference to shared attempt execution. The
 // canonical transport retains its first-byte and streaming idle deadlines.
 func (s *Server) execute(ctx context.Context, x *call) *outcome {
+	if x.cacheHit() {
+		return s.replayCache(ctx, x)
+	}
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*wire.Completion]{
@@ -1103,6 +1106,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // finish emits the terminal envelope exactly once.
 func (s *Server) finish(x *call, out *outcome, status int) {
 	x.once.Do(func() {
+		s.storeCache(x, out, status)
 		completedAt := s.now()
 		x.finalizePinned(out, completedAt)
 		env := Envelope{
@@ -1144,6 +1148,9 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 				env.KeyID = ""
 				env.EndUserDigest = ""
 			}
+		}
+		if x.cache != nil {
+			env.CacheResult = x.cache.result
 		}
 		env.Usage = x.usage()
 		switch {
@@ -1267,6 +1274,9 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 		project = *x.authority.ProjectID
 	} else if x.route != nil && x.route.ProjectID != nil {
 		project = *x.route.ProjectID
+	}
+	if x.cache != nil {
+		s.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
 	}
 	for _, decision := range env.GuardrailDecisions {
 		s.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, decision.Phase, decision.Action, decision.Outcome, decision.LatencyMS)

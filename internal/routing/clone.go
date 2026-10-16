@@ -148,6 +148,15 @@ func cloneRoute(r Route) Route {
 	return r
 }
 func cloneBehavior(b Behavior) Behavior {
+	b.Cache = copyPointer(b.Cache)
+	if b.Cache != nil {
+		b.Cache.Operations = slices.Clone(b.Cache.Operations)
+		b.Cache.CountHitsAgainst = slices.Clone(b.Cache.CountHitsAgainst)
+	}
+	b.PromptCache = copyPointer(b.PromptCache)
+	if b.PromptCache != nil {
+		b.PromptCache.Positions = slices.Clone(b.PromptCache.Positions)
+	}
 	b.MaxBodyBytes = copyPointer(b.MaxBodyBytes)
 	b.Fallbacks = slices.Clone(b.Fallbacks)
 	for i := range b.Fallbacks {

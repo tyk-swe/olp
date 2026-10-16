@@ -179,6 +179,10 @@ config:
   region: ""
   valkeySecretName: olp-valkey
   valkeySecretKey: url
+  # Optional separate, evicting Valkey instance; never reuse the coordination server.
+  cacheValkeySecretName: ""
+  cacheValkeySecretKey: url
+  cacheValkeyTlsCaFile: ""
   masterKeySecretName: olp-master-key
   masterKeySecretKey: key
   authHmacKeySecretName: olp-auth-hmac-key
@@ -289,6 +293,9 @@ networkPolicy:
       cidrs: []
       port: 5432
     valkey:
+      cidrs: []
+      port: 6379
+    cacheValkey:
       cidrs: []
       port: 6379
     providers:

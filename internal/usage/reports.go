@@ -311,13 +311,13 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		// credentials bill the caller and budget-exempt attempts sit outside
 		// what the provider invoices for.
 		" budget_exempt, caller_credential," +
-		" CASE WHEN charge_status <> 'not_billable' AND usage_complete AND estimated_cost IS NOT NULL" +
+		" CASE WHEN NOT response_cache AND charge_status <> 'not_billable' AND usage_complete AND estimated_cost IS NOT NULL" +
 		" THEN 1 ELSE 0 END::bigint AS reconcil_priced_attempts," +
-		" CASE WHEN charge_status <> 'not_billable' AND unpriced" +
+		" CASE WHEN NOT response_cache AND charge_status <> 'not_billable' AND unpriced" +
 		" THEN 1 ELSE 0 END::bigint AS reconcil_unpriced_attempts," +
-		" CASE WHEN charge_status <> 'not_billable' AND NOT usage_complete" +
+		" CASE WHEN NOT response_cache AND charge_status <> 'not_billable' AND NOT usage_complete" +
 		" THEN 1 ELSE 0 END::bigint AS reconcil_incomplete_attempts," +
-		" CASE WHEN charge_status <> 'not_billable' AND (caller_credential OR budget_exempt)" +
+		" CASE WHEN NOT response_cache AND charge_status <> 'not_billable' AND (caller_credential OR budget_exempt)" +
 		" THEN 1 ELSE 0 END::bigint AS reconcil_caller_attempts" +
 		" FROM olp.attempt_usage_facts WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)

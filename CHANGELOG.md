@@ -74,6 +74,12 @@ semantic versioning and take their source from root `package.json`;
 
 ### Added
 
+- Opt-in encrypted response caching in a dedicated Valkey, with key isolation,
+  native stream replay, request controls, scoped purge, zero-provider-cost
+  accounting, metrics and Route Studio controls. Semantic caching uses Valkey
+  Search and separately metered embedding routes; transformed routes can also
+  insert Anthropic prompt-cache breakpoints and OpenAI cache keys.
+
 - A guardrail platform with immutable definitions and policies, scoped
   attachments, built-in detectors, external and model evaluators, confined WASM
   plugins, streaming enforcement and content-free decision evidence. The

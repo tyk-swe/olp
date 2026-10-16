@@ -14,8 +14,9 @@ import (
 // Envelope is the single terminal, metadata-only record of one inference
 // request. It never carries prompts, outputs, tool data, headers, or secrets.
 type Envelope struct {
-	ClientIP  string
-	RequestID string
+	CacheResult string
+	ClientIP    string
+	RequestID   string
 	// AccountingID is the durable identity of this request. It is the request
 	// id whenever the gateway minted it, and a fresh identifier when the
 	// caller named its own: a client-supplied request id is echoed back for
@@ -73,6 +74,7 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
+	Cache              *usage.CacheEvidence
 	GuardrailDecisions []guardrails.Evidence
 	BudgetExempt       bool
 	CredentialSource   string

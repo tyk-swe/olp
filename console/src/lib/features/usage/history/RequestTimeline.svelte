@@ -53,6 +53,9 @@
     >
   </div>
 {:else if detail.data}
+  {#if detail.data.cache_result}<p class="muted">
+      Response cache: {detail.data.cache_result}
+    </p>{/if}
   {#if detail.data.budget_boundary}
     <p class="inline-problem" role="status">
       Cost budget exhausted: {detail.data.budget_boundary.replaceAll('_', ' ')}.

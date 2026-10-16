@@ -70,7 +70,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- $rules = append $rules (dict "to" $dnsDestinations "ports" $dnsPorts) -}}
 {{- end -}}
-{{- range $peer := list $egress.postgresql $egress.valkey $egress.providers -}}
+{{- range $peer := list $egress.postgresql $egress.valkey $egress.cacheValkey $egress.providers -}}
 {{- if $peer.cidrs -}}
 {{- $destinations := list -}}
 {{- range $cidr := $peer.cidrs -}}

@@ -42,6 +42,15 @@ func (s *Snapshot) ValidateRouteContracts(route Route) error {
 }
 
 func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.Template, *contentpolicy.Compiled, error) {
+	if route.Cache != nil && route.Cache.Mode == "semantic" {
+		embedding, ok := s.Routes[route.Cache.EmbeddingRoute]
+		if !ok || !slices.Contains(embedding.Operations, "embeddings") {
+			return nil, nil, fmt.Errorf("semantic cache requires a published embeddings route")
+		}
+	}
+	if err := route.ValidateCaching(); err != nil {
+		return nil, nil, err
+	}
 	if err := ValidateRouteFidelity(route.Fidelity, route.ContentPolicy); err != nil {
 		return nil, nil, err
 	}

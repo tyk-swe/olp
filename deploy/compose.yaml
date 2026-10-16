@@ -16,6 +16,7 @@ x-application-environment: &application-environment
   OLP_HTTP_CONNECTION_MAX_AGE_SECONDS: ${OLP_HTTP_CONNECTION_MAX_AGE_SECONDS:-300}
   OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS: ${OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS:-30}
   OLP_VALKEY_URL: ${OLP_VALKEY_URL:-redis://valkey:6379}
+  OLP_CACHE_VALKEY_URL: ${OLP_CACHE_VALKEY_URL:-}
   OLP_PUBLIC_ORIGIN: ${OLP_PUBLIC_ORIGIN:-http://localhost:8080}
   OLP_LOCAL_LOGIN_ENABLED: ${OLP_LOCAL_LOGIN_ENABLED:-true}
   # Experimental. The directory of OLP_IMAGE that holds unconfined plugin
@@ -103,6 +104,20 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  cache:
+    image: valkey/valkey-bundle:9.1.0@sha256:16004aceeb7a1246e2d1bb85d353e38120eb440951cb7d0c971b6d63fda5b3d7
+    profiles: [cache]
+    environment:
+      VALKEY_EXTRA_FLAGS: '--maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
 
   migrate:
     <<: *olp-container

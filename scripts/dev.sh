@@ -5,6 +5,7 @@ docker compose -f deploy/compose.dev.yaml up -d --wait
 make setup
 make build-go
 export OLP_DATABASE_URL="postgres://olp:olp-local@127.0.0.1:${OLP_POSTGRES_PORT:-54321}/olp?sslmode=disable"
+export OLP_CACHE_VALKEY_URL="redis://:olp-local@127.0.0.1:${OLP_CACHE_VALKEY_PORT:-63792}/0"
 export OLP_VALKEY_URL="redis://:olp-local@127.0.0.1:${OLP_VALKEY_PORT:-63791}/0"
 export OLP_LISTEN_ADDR=127.0.0.1:8082
 export OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:9092

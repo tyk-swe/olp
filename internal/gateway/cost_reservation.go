@@ -336,6 +336,9 @@ func (x *call) costOf(owner string) usage.Cost {
 // attempt that may have been billed without reporting usage is priced, and adds
 // nothing until its usage arrives, as it adds nothing in the accounting tables.
 func (x *call) responseCost() (usage.Cost, bool) {
+	if x.cacheHit() {
+		return usage.Cost{}, true
+	}
 	var total usage.Cost
 	billable := false
 	operation := x.operationName()
@@ -369,6 +372,10 @@ func (x *call) responseCost() (usage.Cost, bool) {
 // is consumed or after, and the reservation script makes the order immaterial.
 func (s *Server) settleAdmission(ctx context.Context, x *call) {
 	s.settleCaps(ctx, x)
+	if x.cacheRateLease != nil {
+		zero := int64(0)
+		settleKey(ctx, x.cacheRateLease, x.dispatched || x.cacheHit(), &zero, s.log)
+	}
 	if x.lease == nil {
 		// A request that reserved nothing has nothing to settle, and is not made to
 		// total the tokens it would have settled.
@@ -380,7 +387,7 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 		settleKey(ctx, x.lease, x.dispatched, &actual, s.log)
 		return
 	}
-	settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+	settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.log)
 }
 
 // settledCharge is what the request's consumers owe from the attempts that
@@ -453,6 +460,10 @@ func (x *call) attemptCardRevision(providerID string, at time.Time) *usage.Routi
 // recordCost gives a lease that holds a cost estimate what the request cost, for
 // settlement to replace the estimate with.
 func (s *Server) recordCost(x *call) {
+	if x.cacheHit() && x.lease.HasCostReservation() {
+		x.lease.SetActualCost(x.cache.budgetCost, x.cache.budgetCharge)
+		return
+	}
 	if x.dispatched && x.lease.HasCostReservation() {
 		x.lease.SetActualCost(x.settledCost().String(), s.settledCharge(x).String())
 	}

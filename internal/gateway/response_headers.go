@@ -42,7 +42,7 @@ const (
 // in the spelling the headers are documented in. Header names match without
 // regard to case, so this is the list of the names above and of those a request
 // already carried.
-const exposedHeaders = "X-OLP-Guardrails, X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay, " +
+const exposedHeaders = "X-OLP-Cache, Age, X-OLP-Guardrails, X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay, " +
 	"X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider, X-OLP-Cost, " +
 	"x-ratelimit-limit-requests, x-ratelimit-remaining-requests, x-ratelimit-reset-requests, " +
 	"x-ratelimit-limit-tokens, x-ratelimit-remaining-tokens, x-ratelimit-reset-tokens, " +
@@ -203,7 +203,7 @@ func appendResetDuration(b []byte, d time.Duration) []byte {
 // response that is not a stream, its cost. A request that made no attempt, as
 // one answered from the gateway's own records is, has none of these to tell.
 func (l *headerList) metadata(text []byte, x *call, streamed bool) []byte {
-	if x.attemptCount == 0 {
+	if x.attemptCount == 0 && !x.cacheHit() {
 		return text
 	}
 	text = l.integer(text, headerAttempts, int64(x.attemptCount))
@@ -234,8 +234,18 @@ func (l *headerList) metadata(text []byte, x *call, streamed bool) []byte {
 // A key that limits nothing, a request that was admitted without a reservation,
 // and a surface with no rate-limit headers add none.
 func (x *call) responseHeaders(h http.Header, streamed bool) {
+	x.cacheHeaders(h)
 	x.guardrailHeaders(h, streamed, false)
 	surface, state := x.clientSurface(), x.lease.RateState()
+	reset := x.lease.RateReset()
+	if x.cacheRateLease != nil {
+		requestState := x.cacheRateLease.RateState()
+		state.RequestLimit = requestState.RequestLimit
+		state.RequestRemaining = requestState.RequestRemaining
+		if !state.LimitsTokens() {
+			reset = x.cacheRateLease.RateReset()
+		}
+	}
 	if !x.responseMetadata && (rateHeadersOf(surface) == nil || !state.Limited()) {
 		return
 	}
@@ -243,7 +253,7 @@ func (x *call) responseHeaders(h http.Header, streamed bool) {
 		buf  headerBuffer
 		list headerList
 	)
-	text := list.rate(buf[:0], surface, state, x.lease.RateReset())
+	text := list.rate(buf[:0], surface, state, reset)
 	if x.responseMetadata {
 		text = list.metadata(text, x, streamed)
 	}

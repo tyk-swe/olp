@@ -175,6 +175,15 @@ spec:
                 secretKeyRef:
                   name: {{ required "config.valkeySecretName is required" $root.Values.config.valkeySecretName | quote }}
                   key: {{ required "config.valkeySecretKey is required" $root.Values.config.valkeySecretKey | quote }}
+            {{- if $root.Values.config.cacheValkeySecretName }}
+            - name: OLP_CACHE_VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.config.cacheValkeySecretName | quote }}
+                  key: {{ $root.Values.config.cacheValkeySecretKey | quote }}
+            - name: OLP_CACHE_VALKEY_TLS_CA_FILE
+              value: {{ $root.Values.config.cacheValkeyTlsCaFile | quote }}
+            {{- end }}
             - name: OLP_MASTER_KEY_FILE
               value: /run/secrets/master-key/key
             - name: OLP_AUTH_HMAC_KEY_FILE

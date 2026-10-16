@@ -13,6 +13,9 @@
 {{- if empty $egress.postgresql.cidrs -}}
 {{- fail "networkPolicy.egress.postgresql.cidrs is required when networkPolicy.egress.restricted is true" -}}
 {{- end -}}
+{{- if and $root.Values.config.cacheValkeySecretName (empty $egress.cacheValkey.cidrs) -}}
+{{- fail "networkPolicy.egress.cacheValkey.cidrs is required for a configured cache under restricted egress" -}}
+{{- end -}}
 {{- if empty $egress.valkey.cidrs -}}
 {{- fail "networkPolicy.egress.valkey.cidrs is required when networkPolicy.egress.restricted is true" -}}
 {{- end -}}

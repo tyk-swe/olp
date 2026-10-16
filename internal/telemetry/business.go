@@ -198,3 +198,18 @@ func (m *BusinessMetrics) Guardrail(labels BusinessLabels, phase, action, outcom
 	m.add("olp_guardrail_decisions_total", extra, 1, nil)
 	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, BusinessLatencyBuckets)
 }
+
+// Cache records bounded, content-free cache outcome metrics.
+func (m *BusinessMetrics) Cache(route, result string, storedBytes int, failed bool) {
+	if m == nil || route == "" {
+		return
+	}
+	labels := m.labels(BusinessLabels{Route: route})
+	m.add("olp_cache_requests_total", labels+",result="+metricQuoted(result), 1, nil)
+	if storedBytes > 0 {
+		m.add("olp_cache_bytes_stored_total", labels, float64(storedBytes), nil)
+	}
+	if failed {
+		m.add("olp_cache_errors_total", labels, 1, nil)
+	}
+}

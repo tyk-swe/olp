@@ -8,6 +8,7 @@ import {
 import { verifyConsolePolish } from './console-polish';
 import { verifyDraftSave } from './draft-saving';
 import { verifyProviderRouting } from './provider-routing';
+import { verifyResponseCaching } from './response-caching';
 import { expectFact, refreshUntilRequestCount } from './request-history';
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
@@ -154,6 +155,10 @@ test.describe('Hosted console integration', () => {
     await page
       .getByRole('navigation', { name: 'Primary' })
       .getByRole('link', { name: 'Gateway', exact: true })
+      .click();
+    await page
+      .getByRole('navigation', { name: 'Gateway', exact: true })
+      .getByRole('link', { name: 'Providers', exact: true })
       .click();
     await expect(page).toHaveURL(/\/providers$/);
     await expect(
@@ -783,6 +788,18 @@ test.describe('Hosted console integration', () => {
     await signInAsOwner(page);
     await verifyProviderRouting(page, test.info());
   });
+});
+
+test('response caching publishes, replays, reports and purges through the console', async ({
+  page
+}) => {
+  test.skip(
+    process.env.OLP_CONSOLE_E2E_RESTORED === 'true',
+    'Cache lifecycle runs on the fresh installation.'
+  );
+  test.setTimeout(120000);
+  await signInAsOwner(page);
+  await verifyResponseCaching(page);
 });
 
 test('core console stays accessible and logout clears protected content in another tab', async ({
