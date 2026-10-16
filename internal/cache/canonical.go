@@ -3,7 +3,8 @@ package cache
 import (
 	"bytes"
 	"encoding/json"
-	"sort"
+	"slices"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
@@ -15,11 +16,12 @@ func Canonical(doc oif.Document) []byte {
 	writeValue(&out, doc.Root())
 	return out.Bytes()
 }
+
 func writeValue(out *bytes.Buffer, v oif.Value) {
 	switch v.Kind() {
 	case oif.Object:
 		members := v.Members()
-		sort.Slice(members, func(i, j int) bool { return members[i].Name < members[j].Name })
+		slices.SortStableFunc(members, func(a, b oif.Member) int { return strings.Compare(a.Name, b.Name) })
 		out.WriteByte('{')
 		for i, m := range members {
 			if i > 0 {

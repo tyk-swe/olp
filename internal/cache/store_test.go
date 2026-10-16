@@ -40,6 +40,8 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 		}
 		return v, nil
 	case "EVAL":
+		// numkeys distinguishes the resolve script (one key per generation)
+		// from the single-key put script.
 		if a[2] != "1" {
 			n, err := strconv.Atoi(a[2])
 			if err != nil {
@@ -66,6 +68,9 @@ func (m *memory) Do(_ context.Context, a ...string) (any, error) {
 	}
 	return nil, errors.New("unsupported")
 }
+
+// Older ciphertext authenticated only the entry key. It cannot establish
+// that a semantic search candidate belongs to the requested namespace.
 func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
 	for _, change := range []string{"same scope", "embedding model", "project", "route", "named route", "key", "revision", "project purge", "route purge", "named route purge", "named route eviction"} {
 		t.Run(change, func(t *testing.T) {
@@ -125,9 +130,6 @@ func TestSemanticCandidatesAuthenticateNamespace(t *testing.T) {
 		})
 	}
 }
-
-// Older ciphertext authenticated only the entry key. It cannot establish
-// that a semantic search candidate belongs to the requested namespace.
 
 func testStore(t *testing.T) (*Store, *memory) {
 	t.Helper()

@@ -4,10 +4,19 @@ package cache
 
 import (
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
+)
+
+const (
+	defaultTTLSeconds    = 3600
+	maxTTLSeconds        = 604800
+	defaultMaxEntryBytes = 1 << 20
+	maxEntryBytes        = 16 << 20
+	defaultSimilarity    = .95
+	defaultMaxCandidates = 5
+	maxCandidateCount    = 32
 )
 
 type Policy struct {
@@ -27,7 +36,7 @@ type Policy struct {
 
 func (p Policy) Effective() Policy {
 	if p.TTLSeconds == 0 {
-		p.TTLSeconds = 3600
+		p.TTLSeconds = defaultTTLSeconds
 	}
 	if p.Scope == "" {
 		p.Scope = "key"
@@ -36,7 +45,7 @@ func (p Policy) Effective() Policy {
 		p.Streaming = "replay"
 	}
 	if p.MaxEntryBytes == 0 {
-		p.MaxEntryBytes = 1 << 20
+		p.MaxEntryBytes = defaultMaxEntryBytes
 	}
 	if len(p.Operations) == 0 {
 		p.Operations = []string{"generation", "embeddings", "rerank", "moderation"}
@@ -48,10 +57,10 @@ func (p Policy) Effective() Policy {
 		p.CountHitsAgainst = []string{"requests"}
 	}
 	if p.SimilarityThreshold == 0 {
-		p.SimilarityThreshold = .95
+		p.SimilarityThreshold = defaultSimilarity
 	}
 	if p.MaxCandidates == 0 {
-		p.MaxCandidates = 5
+		p.MaxCandidates = defaultMaxCandidates
 	}
 	return p
 }
@@ -67,7 +76,7 @@ func (p *Policy) Validate() error {
 	if !slices.Contains([]string{"key", "project", "route"}, e.Scope) {
 		return errors.New("cache.scope must be key, project or route")
 	}
-	if e.TTLSeconds < 1 || e.TTLSeconds > 604800 || e.MaxEntryBytes < 1 || e.MaxEntryBytes > 16<<20 {
+	if e.TTLSeconds < 1 || e.TTLSeconds > maxTTLSeconds || e.MaxEntryBytes < 1 || e.MaxEntryBytes > maxEntryBytes {
 		return errors.New("cache TTL must be 1–604800 seconds and entries 1–16777216 bytes")
 	}
 	if e.Streaming != "replay" && e.Streaming != "bypass" {
@@ -83,7 +92,7 @@ func (p *Policy) Validate() error {
 		if !e.AllowUnsealedVectors || !validName(e.EmbeddingRoute) {
 			return errors.New("semantic caching requires an embedding route and allow_unsealed_vectors acknowledgement")
 		}
-		if !(e.SimilarityThreshold > 0 && e.SimilarityThreshold <= 1) || e.MaxCandidates < 1 || e.MaxCandidates > 32 {
+		if !(e.SimilarityThreshold > 0 && e.SimilarityThreshold <= 1) || e.MaxCandidates < 1 || e.MaxCandidates > maxCandidateCount {
 			return errors.New("semantic similarity must be greater than zero and at most one, with 1–32 candidates")
 		}
 		if len(e.Operations) != 1 || e.Operations[0] != "generation" {
@@ -95,6 +104,8 @@ func (p *Policy) Validate() error {
 	return nil
 }
 
+// uniqueMembers reports whether values is a non-empty subset of allowed with
+// no duplicates.
 func uniqueMembers(values, allowed []string) bool {
 	for i, v := range values {
 		if !slices.Contains(allowed, v) || slices.Contains(values[:i], v) {
@@ -175,7 +186,7 @@ func ParseControls(raw string) (Controls, error) {
 			}
 		case "max-age", "ttl":
 			n, err := strconv.Atoi(value)
-			if !hasValue || err != nil || n < 0 || n > 604800 {
+			if !hasValue || err != nil || n < 0 || n > maxTTLSeconds {
 				return c, errors.New("cache age and TTL must be 0–604800 seconds")
 			}
 			if name == "max-age" {
@@ -184,7 +195,7 @@ func ParseControls(raw string) (Controls, error) {
 				c.TTL = &n
 			}
 		default:
-			return c, fmt.Errorf("unsupported X-OLP-Cache directive")
+			return c, errors.New("unsupported X-OLP-Cache directive")
 		}
 	}
 	return c, nil
