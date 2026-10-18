@@ -585,7 +585,7 @@
 </div>
 
 {#if (playground.strictSelected || playground.activeOperation === 'decision') && playground.activeOperation !== 'translation'}
-  {#if playground.composer === 'advanced' && playground.templateKey === 'legacy-completions'}
+  {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai' && playground.templateKey === 'legacy-completions'}
     <NativeOperationPlayground
       route={playground.model.trim()}
       operation="completions"

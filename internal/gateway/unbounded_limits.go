@@ -14,10 +14,14 @@ func callerCostBudgeted(authority *access.Authority, route string) bool {
 // Batch jobs and Live sessions cannot bound their future consumption before
 // dispatch. Their lifecycle allowance cannot enforce a token or cost budget.
 // Request-rate and concurrency limits remain supported by normal admission.
-func unboundedWorkLimits(authority access.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route) *Error {
+// callerRoute retains named-route key limits when a selector changes route.
+func unboundedWorkLimits(authority access.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *Error {
 	var slug string
 	if route != nil {
 		slug = route.Slug
+	}
+	if len(callerRoute) > 0 {
+		slug = callerRoute[0]
 	}
 	if authority.UnboundedWorkBudgeted(slug) || routing.UnboundedWorkBudgeted(provider, slot, route) {
 		return invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)

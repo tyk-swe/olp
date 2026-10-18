@@ -134,8 +134,9 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	}
 	if input.Operation == "decision" {
 		prepare := accept
+		named := m.snapshot.Routes[cmp.Or(m.named, slug)]
 		accept = func(provider routing.Provider, target routing.Target) error {
-			budgeted := key.authority.UnboundedWorkBudgeted(route.Slug) || routing.UnboundedWorkBudgeted(&provider, nil, &route)
+			budgeted := key.authority.UnboundedWorkBudgeted(named.Slug) || routing.UnboundedWorkBudgeted(nil, nil, &named) || routing.UnboundedWorkBudgeted(&provider, nil, &route)
 			for _, slot := range routing.SelectSlots(provider, target.ProviderModel, route, key.id, input.Operation, input.Surface, input.Mode, []byte(input.Seed)) {
 				if eligibility != nil && slot.CredentialID != nil && eligibility(*slot.CredentialID) != routing.Eligible {
 					continue

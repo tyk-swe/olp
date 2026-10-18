@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -43,6 +44,34 @@ func TestDecisionRefusesUnboundedTokenBudgetsBeforeDispatch(t *testing.T) {
 				t.Fatalf("unbounded decision: %d %s", resp.StatusCode, body)
 			}
 		})
+	}
+}
+
+func TestDecisionDelegationKeepsNamedRouteBudget(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"decision"}
+		route.Fidelity.Mode = routing.FidelityTransformed
+		s.Routes[routeSlug] = route
+		var backup routing.Provider
+		for id, p := range s.Providers {
+			p.Kind, p.VendorID, p.ProfileID = "openai", "openai", "openai-decisions"
+			p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "decision", Surface: "openai", Mode: "unary"}}
+			s.Providers[id] = p
+			if p.Name == "b" {
+				backup = p
+			}
+		}
+		splitRoutes(s, backup, routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}})
+	})
+	key := h.rt.keys[fullKey]
+	key.Policy.RouteLimits = access.RouteLimits{routeSlug: {TokensPerMinute: new(int64(1000))}}
+	h.rt.keys[fullKey] = key
+	resp := h.do(t.Context(), http.MethodPost, "/v1/decisions", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hello","questions":[{"type":"predicate","instructions":"Is this text?"}]}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || !strings.Contains(string(body), "unbounded_work_budget") || h.mock.count("a")+h.mock.count("b") != 0 {
+		t.Fatalf("named-route cap bypassed: %d %s", resp.StatusCode, body)
 	}
 }
 

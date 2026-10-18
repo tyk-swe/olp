@@ -30,7 +30,21 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	var authority access.Authority
 	var raw []byte
 	var groups access.RouteGroups
-	if err := q.QueryRow(r.Context(), "SELECT k.policy,k.expires_at,k.revoked_at,k.project_id::text,COALESCE(p.route_groups,'{}'::jsonb) FROM olp.api_keys k LEFT JOIN olp.projects p ON p.id=k.project_id WHERE k.id=$1", key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID, &groups); err != nil {
+	var templates access.LimitTemplates
+	if err := q.QueryRow(r.Context(), `SELECT k.policy,k.expires_at,k.revoked_at,k.project_id::text,
+COALESCE(p.route_groups,'{}'::jsonb),COALESCE(p.limit_templates,'{}'::jsonb),
+k.budget_group_id::text,g.limit_template,g.requests_per_minute,g.tokens_per_minute,g.max_concurrency,
+g.daily_cost_limit::text,g.weekly_cost_limit::text,g.monthly_cost_limit::text,COALESCE(g.cost_basis,'cost'),
+p.end_user_policy,COALESCE(p.attribution_policy,'{}'::jsonb),p.budget_policy,COALESCE(p.attribution_budgets,'{}'::jsonb),
+p.organization_id::text,o.budget_policy,(SELECT budget_policy FROM olp.installation WHERE singleton)
+FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id
+LEFT JOIN olp.projects p ON p.id=k.project_id LEFT JOIN olp.organizations o ON o.id=p.organization_id
+WHERE k.id=$1`, key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID,
+		&groups, &templates, &authority.BudgetGroupID, &authority.BudgetGroupTemplate, &authority.BudgetGroupRPM,
+		&authority.BudgetGroupTPM, &authority.BudgetGroupConcurrency, &authority.BudgetGroupDailyCostLimit,
+		&authority.BudgetGroupWeeklyCostLimit, &authority.BudgetGroupMonthlyCostLimit, &authority.BudgetGroupCostBasis,
+		&authority.ProjectEndUserPolicy, &authority.ProjectAttributionPolicy, &authority.ProjectBudget,
+		&authority.ProjectAttributionBudgets, &authority.OrganizationID, &authority.OrganizationBudget, &authority.InstallationBudget); err != nil {
 		return key, err
 	}
 	if err := principal.Project(authority.ProjectID, access.View); err != nil {
@@ -42,8 +56,14 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	if err := json.Unmarshal(raw, &authority.Policy); err != nil {
 		return key, err
 	}
+	authority.Policy = authority.Policy.InRegion(s.Region)
 	if err := authority.BindRouteGroups(groups); err != nil {
 		return key, err
+	}
+	if authority.RevokedAt == nil {
+		if err := authority.BindLimitTemplates(templates); err != nil {
+			return key, err
+		}
 	}
 	key.allowProviderState = authority.Policy.AllowProviderState
 	key.authority = authority

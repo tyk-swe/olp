@@ -141,8 +141,8 @@ function settle(ms = SERVER_DELAY + 20) {
   return vi.advanceTimersByTimeAsync(ms);
 }
 
-async function establish() {
-  vi.mocked(listRoutes).mockImplementation(() => deferred([route]));
+async function establish(routes: ActiveRoute[] = [route]) {
+  vi.mocked(listRoutes).mockImplementation(() => deferred(routes));
   vi.mocked(listApiKeys).mockImplementation(() => deferred([]));
   component = mount(PlaygroundProbe, {
     target: host,
@@ -281,6 +281,41 @@ describe('basic composer', () => {
 });
 
 describe('advanced composer', () => {
+  it('replaces the completions client when the operation changes', async () => {
+    await establish([
+      {
+        ...route,
+        latest_revision: {
+          ...route.latest_revision!,
+          fidelity: { mode: 'strict' },
+          operations: ['generation', 'decision']
+        }
+      }
+    ]);
+    radio('advanced').click();
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'legacy-completions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain(
+      'Run a registered completions operation'
+    );
+    const operation = host.querySelector<HTMLSelectElement>(
+      '#playground-operation'
+    )!;
+    operation.value = 'decision';
+    operation.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain(
+      'Run a registered completions operation'
+    );
+    expect(host.textContent).toContain('Run a registered decision operation');
+  });
+
   it('restores the selected Basic surface after a Decisions template', async () => {
     vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
     await establish();

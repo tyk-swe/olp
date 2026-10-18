@@ -182,6 +182,11 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
+	if x.operationName() == "decision" {
+		if err := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, x.route, x.limitRoute()); err != nil {
+			return err
+		}
+	}
 	var incompatible error
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p routing.Provider, t routing.Target) error {
@@ -189,7 +194,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 		// estimate alone cannot enforce a token or spend cap on this request.
 		if x.operationName() == "decision" {
 			authority := x.admissionAuthority(x.authority)
-			if err := unboundedWorkLimits(authority, &p, nil, x.route); err != nil {
+			if err := unboundedWorkLimits(authority, &p, nil, x.route, x.limitRoute()); err != nil {
 				incompatible = err
 				return err
 			}
@@ -197,7 +202,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
 					continue
 				}
-				if err := unboundedWorkLimits(authority, &p, &slot, x.route); err != nil {
+				if err := unboundedWorkLimits(authority, &p, &slot, x.route, x.limitRoute()); err != nil {
 					incompatible = err
 					return err
 				}
