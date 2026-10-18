@@ -5034,9 +5034,14 @@
             },
             "redact": {
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
               },
-              "type": "array"
+              "type": "array",
+              "maxItems": 128,
+              "uniqueItems": true,
+              "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
             },
             "key_ids": {
               "items": {
@@ -33912,9 +33917,14 @@
             },
             "redact": {
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
               },
-              "type": "array"
+              "type": "array",
+              "maxItems": 128,
+              "uniqueItems": true,
+              "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
             },
             "key_ids": {
               "items": {

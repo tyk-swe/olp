@@ -9,6 +9,7 @@ import {
   deleteExportSink,
   getCaptureConfiguration,
   listCapturePolicies,
+  listCaptureRedactorOptions,
   listCaptureSinkOptions,
   listExportSinks,
   listExportSinkFocusDatasets,
@@ -88,6 +89,7 @@ vi.mock('$lib/features/observability/api', () => ({
   deleteExportSink: vi.fn(),
   getCaptureConfiguration: vi.fn(),
   listCapturePolicies: vi.fn(),
+  listCaptureRedactorOptions: vi.fn().mockResolvedValue([]),
   listCaptureSinkOptions: vi.fn(),
   listExportSinks: vi.fn(),
   listExportSinkFocusDatasets: vi.fn(),
@@ -229,6 +231,7 @@ let component: ReturnType<typeof mount> | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(listCaptureRedactorOptions).mockResolvedValue([]);
   receipts.length = 0;
   role.ops = null;
   role.current = 'owner';
@@ -934,5 +937,66 @@ it('shows a FOCUS sink settings summary and its datasets table', async () => {
   expect(listExportSinkFocusDatasets).toHaveBeenCalledWith(
     focusSink.export_sink_id,
     expect.any(AbortSignal)
+  );
+});
+
+it('preserves pins on unrelated edits and explicitly refreshes them on save', async () => {
+  const pinned: CapturePolicy = {
+    ...projectPolicy,
+    redact: ['private'],
+    redactor_revisions: [
+      {
+        name: 'private',
+        guardrail_id: 'g',
+        revision_id: 'r1',
+        revision: 1,
+        type: 'builtin.pii'
+      }
+    ]
+  };
+  vi.mocked(listCapturePolicies).mockResolvedValue([pinned]);
+  vi.mocked(updateCapturePolicy).mockResolvedValue(pinned);
+  await render();
+  clickButton('Edit', 1);
+  expect(host.textContent).toContain('revision 1');
+  choose('#policy-ratio', '0.1');
+  host
+    .querySelectorAll<HTMLFormElement>('form')[1]!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(vi.mocked(updateCapturePolicy).mock.calls[0][1]).not.toHaveProperty(
+    'redact'
+  );
+  clickButton('Edit', 1);
+  clickButton('Refresh pinned revisions on save');
+  host
+    .querySelectorAll<HTMLFormElement>('form')[1]!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(vi.mocked(updateCapturePolicy).mock.calls[1][1]).toHaveProperty(
+    'redact',
+    ['private']
+  );
+});
+
+it('saves the selected detector order', async () => {
+  vi.mocked(updateCapturePolicy).mockResolvedValue(projectPolicy);
+  await render();
+  clickButton('Edit', 1);
+  choose('#policy-redactor', 'private');
+  clickButton('Add redactor');
+  choose('#policy-redactor', 'secrets');
+  clickButton('Add redactor');
+  host
+    .querySelector<HTMLButtonElement>('[aria-label="Move secrets up"]')!
+    .click();
+  flushSync();
+  host
+    .querySelectorAll<HTMLFormElement>('form')[1]!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(vi.mocked(updateCapturePolicy).mock.calls[0][1]).toHaveProperty(
+    'redact',
+    ['secrets', 'private']
   );
 });

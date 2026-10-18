@@ -4,14 +4,18 @@ import (
 	"testing"
 )
 
-func TestCaptureRejectsUnavailableRedactionAndUnboundedPolicies(t *testing.T) {
+func TestCaptureValidatesRedactorNamesAndBounds(t *testing.T) {
 	p := CapturePolicy{Enabled: true, SampleRatio: "0.05", Include: []string{"input", "output"}, MaxBytes: 262144}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	p.Redact = []string{"builtin.secrets"}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p.Redact = []string{"PII", "pii"}
 	if err := p.Validate(); err == nil {
-		t.Fatal("unavailable redaction silently accepted")
+		t.Fatal("duplicate redactors accepted")
 	}
 	p.Redact, p.MaxBytes = nil, 1048577
 	if err := p.Validate(); err == nil {

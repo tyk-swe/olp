@@ -245,7 +245,8 @@ user-agent family, never request bodies, credentials, or content. See
   secret material. Channel credentials (chat webhook URLs, PagerDuty routing
   keys, SMTP credentials, signing secrets) are write-only, sealed under
   `notification_secret`, and never returned by any read.
-- Payload capture is opt-in, owner-enabled, unredacted, and memory-only — see
+- Payload capture is opt-in, owner-enabled and memory-only; empty redactor lists
+  capture unredacted content, while configured local redactors fail closed for capture — see
   [operations](operations.md#export-sinks-payload-capture-and-business-metrics);
   captured content never enters the database, Valkey, logs, or spans and is
   delivered only to the operator-configured sink.

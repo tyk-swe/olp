@@ -229,3 +229,13 @@ immutable conversion for each historical route policy. Existing copied policies
 keep their rule order, bounds and literal replacements. See the
 [M7 qualification checklist](roadmap/m07-guardrails.md#exit-criteria) for the
 remaining release gates, including reference-hardware and live-vendor checks.
+
+## Capture and vendor qualification
+
+[Payload capture](payload-capture.md) independently redacts complete selected
+fields using pinned local detector revisions before enqueue. Serving-time
+redaction does not establish that capture content has been inspected. External
+adapters are not eligible for capture redaction. The [pinned integration
+inventory](guardrail-vendor-coverage.md) records all 60 entries from the existing
+LiteLLM v1.105.0 baseline, local evidence, unsupported entries and follow-up owners.
+Aggregate vendor coverage remains `Partial`; live qualification is outstanding.

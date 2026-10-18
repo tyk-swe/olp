@@ -5,6 +5,7 @@ const captureSinkOptionsSQL = `SELECT id::text,name,type FROM olp.export_sinks W
 
 const captureProjection = `jsonb_build_object('id',p.id,'project_id',p.project_id,'route_slug',p.route_slug,'sink',p.sink_id,
  'sample_ratio',p.sample_ratio,'include',p.include,'redact',p.redact,'key_ids',p.key_ids,'end_user_digests',p.end_user_digests,'max_bytes',p.max_bytes,'enabled',p.enabled,
+ 'redactor_revisions',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',b.name,'guardrail_id',v.guardrail_id,'revision_id',v.id,'revision',v.revision,'type',g.type) ORDER BY b.position) FROM olp.capture_redactors b JOIN olp.guardrail_revisions v ON v.id=b.revision_id JOIN olp.guardrails g ON g.id=v.guardrail_id WHERE b.policy_id=p.id),'[]'::jsonb),
  'etag',p.etag,'created_by',p.created_by,'created_at',p.created_at,'updated_at',p.updated_at)`
 const captureConfigurationSQL = `SELECT enabled,etag::text FROM olp.capture_configuration WHERE singleton`
 const lockCaptureConfigurationSQL = `SELECT enabled,etag::text FROM olp.capture_configuration WHERE singleton FOR UPDATE`
@@ -21,7 +22,7 @@ const countCapturePoliciesSQL = `SELECT count(*) FROM olp.capture_policies`
 const captureSinkScopeSQL = `SELECT project_id::text,enabled,format FROM olp.export_sinks WHERE id=$1 FOR SHARE`
 const captureRouteScopeSQL = `SELECT project_id::text FROM olp.routes WHERE slug=$1 FOR SHARE`
 const captureKeyScopeSQL = `SELECT project_id::text FROM olp.api_keys WHERE id=$1 FOR SHARE`
-const loadCapturePoliciesSQL = `SELECT ` + captureProjection + ` FROM olp.capture_policies p
+const loadCapturePoliciesSQL = `SELECT ` + captureProjection + `,COALESCE(p.project_id,(SELECT project_id FROM olp.routes WHERE slug=p.route_slug))::text FROM olp.capture_policies p
  JOIN olp.export_sinks s ON s.id=p.sink_id
  WHERE p.enabled AND s.enabled AND s.project_id IS NULL AND s.format IN ('json','jsonl','otlp')
  AND EXISTS(SELECT 1 FROM olp.capture_configuration WHERE singleton AND enabled)

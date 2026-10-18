@@ -97,9 +97,10 @@ type call struct {
 	operationOverride         string
 	policyDecisions           []contentpolicy.Decision
 
-	capture    *export.Collector
-	estimate   int64
-	sizedInput *int64
+	captureContext context.Context
+	capture        *export.Collector
+	estimate       int64
+	sizedInput     *int64
 
 	historicalSnapshot *routing.Snapshot
 

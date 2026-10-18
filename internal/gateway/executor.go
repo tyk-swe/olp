@@ -1219,19 +1219,15 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			if x.generation.parsed != nil && x.generation.parsed.Stream {
 				mode = "streaming"
 			} else if out != nil && out.completion != nil && len(out.completion.Body) != 0 {
-				protocols.InspectOutputText(x.family, out.completion.Body, func(text string) (string, bool) {
-					x.capture.CaptureText("output", text)
-					return text, false
-				})
-				for _, raw := range protocols.CaptureDocumentToolCalls(x.family, out.completion.Body) {
-					x.capture.CaptureToolCall(raw)
-				}
+				x.capture.CaptureResponse(x.family, out.completion.Body)
+			} else {
+				x.capture.CaptureResponse(x.family, nil)
 			}
 			var traceID, spanID string
 			if context := x.request.trace.SpanContext(); context.IsValid() {
 				traceID, spanID = context.TraceID().String(), context.SpanID().String()
 			}
-			env.PayloadCaptured = x.capture.Finish(export.CaptureIdentity{
+			env.PayloadCaptured = x.capture.FinishContext(x.captureContext, export.CaptureIdentity{
 				Route: env.Route, ProjectID: x.captureProject(), KeyID: env.KeyID, EndUserDigest: env.EndUserDigest,
 				TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: mode,
 			}, completedAt)
@@ -1351,7 +1347,5 @@ func credentialHealthKey(slot *routing.Slot, generation int64) string {
 }
 
 func (x *call) captureDeliveredFrame(frame []byte) {
-	protocols.CaptureStreamFrame(x.family, frame,
-		func(text string) { x.capture.CaptureText("output", text) },
-		func(raw json.RawMessage) { x.capture.CaptureToolCall(raw) })
+	x.capture.CaptureStreamFrame(x.family, frame)
 }

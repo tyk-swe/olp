@@ -9,6 +9,14 @@ semantic versioning and take their source from root `package.json`;
 
 ### Security
 
+- Capture policies pin ordered local detector revisions and independently redact
+  complete input, output and tool arguments before enqueue. JSON escapes and
+  native stream identities are respected; failed, incomplete or out-of-bounds
+  inspection drops capture under a 100 ms total redaction budget without changing
+  inference. Add forward-only migration 0074, console ordering/pin refresh,
+  focused fixtures and an enumerated LiteLLM v1.105.0 vendor inventory. Service,
+  live-vendor and performance qualification remain open; vendor parity is Partial.
+
 - Reject uninspectable streamed log-probability output and isolate tool-call
   completion by candidate. Enforce system budgets for playground model evaluators,
   preserve their pinned routes and end-user attribution, and persist their parent

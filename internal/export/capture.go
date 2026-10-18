@@ -14,6 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -106,11 +109,13 @@ func (m *Manager) reload(ctx context.Context) {
 		return
 	}
 	var policies []CapturePolicy
+	var projects []string
 	truncated := false
 	for rows.Next() {
 		var data []byte
 		var policy CapturePolicy
-		if err := rows.Scan(&data); err != nil || json.Unmarshal(data, &policy) != nil {
+		var project *string
+		if err := rows.Scan(&data, &project); err != nil || json.Unmarshal(data, &policy) != nil {
 			rows.Close()
 			m.mu.Lock()
 			m.policies, m.loaded = nil, false
@@ -119,6 +124,11 @@ func (m *Manager) reload(ctx context.Context) {
 			return
 		}
 		policies = append(policies, policy)
+		if project != nil {
+			projects = append(projects, *project)
+		} else {
+			projects = append(projects, "")
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -130,6 +140,12 @@ func (m *Manager) reload(ctx context.Context) {
 	if len(policies) > 1000 {
 		truncated = true
 		policies = policies[:1000]
+	}
+	definitions, loadErr := loadCaptureRedactors(ctx, m.Pool)
+	for i := range policies {
+		if err := policies[i].compileRedactors(projects[i], definitions); err != nil || (loadErr != nil && len(policies[i].Redact) > 0) || ctx.Err() != nil {
+			policies[i].redactorInvalid = true
+		}
 	}
 	var scoped, broad []CapturePolicy
 	for _, p := range policies {
@@ -168,12 +184,17 @@ func (m *Manager) Resolve(project, route, key, endUser, requestID string) *Colle
 	if policy == nil || !policy.Sample(requestID) {
 		return nil
 	}
+	if policy.redactorInvalid || (len(policy.Redact) > 0 && (policy.redactor == nil || policy.redactorProject != project)) {
+		m.dropped.Add(1)
+		m.redactionFailed.Add(1)
+		return nil
+	}
 	if m.collectors >= captureMaxCollectors {
 		m.dropped.Add(1)
 		return nil
 	}
 	m.collectors++
-	return &Collector{manager: m, policyID: policy.ID, etag: policy.ETag, requestID: requestID, maxBytes: policy.MaxBytes, include: policy.Include}
+	return &Collector{manager: m, policyID: policy.ID, etag: policy.ETag, requestID: requestID, maxBytes: policy.MaxBytes, include: policy.Include, redactor: policy.redactor}
 }
 
 func (m *Manager) release() {
@@ -339,6 +360,9 @@ func (m *Manager) audit(ctx context.Context, tx pgx.Tx, requestID, action, outco
 }
 
 type Collector struct {
+	redactor  *guardrails.Engine
+	stream    *protocols.CaptureStream
+	invalid   bool
 	manager   *Manager
 	policyID  string
 	etag      string
@@ -432,22 +456,54 @@ type CaptureIdentity struct {
 }
 
 func (c *Collector) Finish(identity CaptureIdentity, queuedAt time.Time) bool {
+	return c.FinishContext(context.Background(), identity, queuedAt)
+}
+
+func (c *Collector) FinishContext(ctx context.Context, identity CaptureIdentity, queuedAt time.Time) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if c == nil {
 		return false
 	}
 	defer c.Close()
 	c.mu.Lock()
-	if c.finished {
+	if c.finished || c.released {
 		c.mu.Unlock()
 		return false
 	}
 	c.finished = true
 	oversized := c.oversized
+	invalid := c.invalid
 	input, output, tools := c.input, c.output.String(), c.toolCalls
+	if identity.Mode == "streaming" && (c.includes("output") || c.includes("tool_calls")) {
+		if c.stream == nil {
+			invalid = true
+		} else {
+			var err error
+			output, tools, err = c.stream.Finish()
+			invalid = invalid || err != nil
+		}
+	}
+	if c.redactor != nil && c.includes("input") && len(input) == 0 {
+		invalid = true
+	}
 	c.mu.Unlock()
-	if oversized {
+	if oversized || invalid || ctx.Err() != nil {
+		if c.redactor != nil {
+			c.manager.redactionFailed.Add(1)
+		}
 		c.manager.dropped.Add(1)
 		return false
+	}
+	if c.redactor != nil {
+		var err error
+		input, output, tools, err = redactCapture(ctx, c.redactor, input, output, tools)
+		if err != nil {
+			c.manager.redactionFailed.Add(1)
+			c.manager.dropped.Add(1)
+			return false
+		}
 	}
 	data := map[string]any{"request_id": c.requestID}
 	for key, value := range map[string]string{
@@ -492,7 +548,10 @@ func (c *Collector) Finish(identity CaptureIdentity, queuedAt time.Time) bool {
 		"route": identity.Route, "outcome": identity.Outcome,
 		"occurred_at": queuedAt.UTC().Format(time.RFC3339Nano), "data": json.RawMessage(payload),
 	})
-	if err != nil || len(record) > c.maxBytes {
+	if err != nil || len(record) > c.maxBytes || ctx.Err() != nil {
+		if c.redactor != nil {
+			c.manager.redactionFailed.Add(1)
+		}
 		c.manager.dropped.Add(1)
 		return false
 	}
@@ -507,6 +566,7 @@ func (c *Collector) Close() {
 	released := c.released
 	c.released = true
 	c.input = nil
+	c.stream = nil
 	c.toolCalls = nil
 	c.output.Reset()
 	c.mu.Unlock()
@@ -525,4 +585,46 @@ func zeroHex(id string) bool {
 		}
 	}
 	return true
+}
+
+// Invalidate is content-free and never changes inference behavior.
+func (c *Collector) Invalidate() {
+	if c != nil {
+		c.mu.Lock()
+		c.invalid = true
+		c.mu.Unlock()
+	}
+}
+
+func (c *Collector) CaptureStreamFrame(family wire.Format, frame []byte) {
+	if c == nil || (!c.includes("output") && !c.includes("tool_calls")) {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.released || c.finished || c.invalid {
+		return
+	}
+	if c.stream == nil {
+		c.stream = protocols.NewCaptureStream(family, captureFieldMax, c.includes("output"), c.includes("tool_calls"))
+	}
+	if c.stream.Push(frame) != nil {
+		c.invalid = true
+		c.stream = nil
+	}
+}
+
+func (c *Collector) CaptureResponse(family wire.Format, body []byte) {
+	if c == nil || (!c.includes("output") && !c.includes("tool_calls")) {
+		return
+	}
+	output, calls, err := protocols.CaptureResponse(family, body, c.includes("output"), c.includes("tool_calls"))
+	if err != nil {
+		c.Invalidate()
+		return
+	}
+	c.CaptureText("output", output)
+	for _, call := range calls {
+		c.CaptureToolCall(call)
+	}
 }

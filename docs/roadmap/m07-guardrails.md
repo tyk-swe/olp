@@ -207,29 +207,27 @@ content; external policies still send content to their declared services.
 
 ### M7.8 Capture redaction integration
 
-[M5.2](m05-observability.md#m52-payload-capture) still rejects nonempty `redact`
-configuration in `internal/export/capture_policy.go`. Serving-time guardrails do
-not establish that captured input, output or tool arguments were redacted. This
-adapter is an explicit remaining deliverable, owned jointly by export and
-guardrail maintainers.
+[M5.2](m05-observability.md#m52-payload-capture) now implements
+[capture-specific redaction](../payload-capture.md). Creation and explicit
+`redact` updates resolve ordered project-local names to immutable active
+revisions; unrelated edits and later detector activations preserve those pins.
+The console exposes the order, pinned revisions and explicit refresh on save.
 
-Resolve each capture policy's named redactors to immutable local definition
-revisions at publication. The first adapter accepts span-producing built-in
-regex, PII, secret and keyword detectors only; external/model/plugin evaluation
-and masking/restoration are excluded. Inspect each complete selected capture
-field in bounded request memory before serialization and enqueue. Captured
-original input requires its own pass even when serving input was transformed;
-output and tool arguments use the corresponding capture surfaces.
+Only local regex, PII, secrets and keyword detectors are eligible. Cache reloads
+compile the pinned engine outside the request path. Capture independently inspects
+selected prepared input, complete output and tool arguments before serialization
+and enqueue, decoding JSON escapes and preserving valid argument JSON. Streaming
+assembly uses native identities and completion signals, including Responses
+terminal-snapshot deduplication. Unsupported or incomplete surfaces drop capture.
 
-Capture redaction always fails closed for the **capture**: malformed spans,
-timeout, unavailable surface, incomplete stream or exhausted memory drops the
-whole capture, increments a content-free failure counter and records no payload.
-It does not alter an already accepted inference result or fail open by sending
-raw content. Never enqueue original bytes alongside a redacted copy, and never
-use PostgreSQL/Valkey for intermediate or retry storage. Preserve M5's explicit
-owner opt-in, sink restrictions and queue/drop semantics. Nonempty `redact`
-remains rejected until publication validation, unary/stream/tool fixtures and
-sink readback prove this contract.
+Capture forces fail-closed behavior, with a 100 ms total redaction budget bounded
+further by each detector timeout and caller cancellation. Malformed spans,
+unavailable fields and exhausted bounds drop the whole record and increment
+content-free counters. Existing owner opt-in, installation sinks, field/record,
+collector/queue and project limits remain. Inference results are unchanged and
+payloads never enter durable staging. Focused tests pass; new service fixtures
+are compiled but their execution and release acceptance remain open in the
+[qualification handoff](m07-qualification.md).
 
 ## Change map
 
@@ -240,7 +238,7 @@ sink readback prove this contract.
 | Webhook and vendor adapters | `internal/guardrails/`, `internal/egress/` |
 | Plugin capability | `sdk/plugin/abi/`, `internal/plugins/` |
 | Console | `console/src/lib/features/guardrails/` |
-| Capture-specific redaction adapter (remaining) | `internal/export/capture_policy.go`, `internal/gateway/events.go` |
+| Capture-specific redaction adapter | `internal/export/capture_policy.go`, `internal/gateway/executor.go` |
 
 ## Binding bounds and qualification order
 
@@ -257,18 +255,21 @@ arguments are withheld until complete and validated within the same byte bound.
 | 1 | Guardrail/runtime maintainers: preserve the engine, migration, scope ordering and immutable-release contracts | Existing unit, integration and configuration fixtures; no regression in historical revisions |
 | 2 | Gateway maintainers: qualify the surface/action matrix, cancellation, accounting, logprobs and retained-response exclusions | Unary/stream protocol corpus, failure injection and authorization/isolation sweeps |
 | 3 | Connector/plugin maintainers: qualify each of six named adapters and WASM invocation | Local-fake contracts plus opt-in live-service smoke evidence by adapter and version |
-| 4 | Export/guardrail maintainers: add M7.8 capture redaction without durable payload staging | Publication refusals and redacted sink readback across unary/stream/tool fixtures |
+| 4 | Export/guardrail maintainers: qualify the implemented M7.8 capture adapter without durable payload staging | Publication refusals and redacted sink readback across unary/stream/tool fixtures |
 | 5 | Performance maintainers: run the built-in and streaming workload on M1 reference hardware | S3 latency, throughput, allocations and memory artifacts with no configured guardrails as control |
-| 6 | Guardrail/connector maintainers: freeze the pinned reference vendor inventory and reconcile each entry | Name/version, adapter status, supported actions, local/live evidence and any specifically approved exclusion; aggregate row stays `Partial` while gaps remain |
+| 6 | Guardrail/connector maintainers: review the [frozen 60-entry inventory](../guardrail-vendor-coverage.md) and qualify each mapping | Name/version, adapter status, supported actions, local/live evidence and any specifically approved exclusion; aggregate row stays `Partial` while gaps remain |
 
 The six built-in external adapters are Bedrock, Azure Content Safety, Azure
 Prompt Shields, Model Armor, Lakera and Presidio. Webhooks and WASM permit custom
 integrations but do not count as qualification of unnamed vendors. Broader
 vendor parity remains `Partial` unless a separately reviewed catalog expansion
 closes it; this milestone does not manufacture parity by renaming the subset.
-The guardrail maintainer owns that inventory and a follow-on adapter backlog.
-Every reference vendor starts as unsupported until its named adapter and live
-contract evidence exist. New adapters reuse M7.3's existing credential, egress,
+The guardrail maintainer owns the [pinned inventory](../guardrail-vendor-coverage.md)
+and its follow-on adapter backlog. The baseline is LiteLLM v1.105.0 at
+`80b9556dd312d18c535ae06884faa97d1fdb8f46`; no broader parity is claimed.
+The pinned inventory explicitly separates local adapter mappings from live
+qualification. Every unsupported registry entry retains a named follow-up owner.
+New adapters reuse M7.3's existing credential, egress,
 verdict and failure contracts; no new in-process extension model is permitted.
 An explicit exclusion must identify the vendor and rationale in the parity
 record; a generic webhook option is not an exclusion or proof of support.
@@ -331,7 +332,8 @@ The local PII microbenchmark over 540 KB of ordinary prompt text measured
 not an S3 load qualification. The broader vendor parity row remains `Partial`
 because the implemented set is deliberately narrower than the reference's set.
 
-Local verification covers the full Go suite, the management authorization and
+Historical platform verification (before the capture-completion change) covers
+the full Go suite, the management authorization and
 isolation sweeps, legacy policy fixtures, configuration v2 migration/promotion,
 the generated apply client, WASM conformance and focused race tests. Console
 checks cover 1,316 unit/component assertions plus a Chromium keyboard and Axe
@@ -343,3 +345,9 @@ buffer, the local streaming keyword benchmark processed 486 KB across 100
 frames in about 24 ms (20 MB/s), with 1.52 MB allocated across the entire run.
 Successful strict frames remain byte-identical. S3 throughput and latency still
 need reference-hardware qualification.
+
+The capture-completion increment adds migration 0074, publication and collector
+fixtures, native complete-stream fixtures, console controls and the frozen
+inventory. Its validation is deliberately bounded; see the [handoff](m07-qualification.md).
+The capture, vendor-review, live-service and performance exit boxes remain
+unchecked pending human qualification.

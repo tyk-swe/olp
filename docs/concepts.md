@@ -140,8 +140,9 @@ sinks, not for OLP's durable records. An installation owner must enable it;
 authorized managers then opt individual projects or routes into bounded,
 sampled input, output or tool-call capture. Captured content exists only in a
 volatile gateway queue and goes directly to an installation sink. It never
-enters PostgreSQL, Valkey, ordinary logs or trace spans. Until M7 redaction is
-available, capture is unredacted and nonempty redaction policies fail closed.
+enters PostgreSQL, Valkey, ordinary logs or trace spans. Optional pinned local
+redactors inspect complete selected fields before enqueue; failures drop the
+whole capture. An empty redactor list means unredacted capture.
 Request history's capture marker means queued, not confirmed delivered. See the
 [capture runbook](operations.md#export-sinks-payload-capture-and-business-metrics).
 

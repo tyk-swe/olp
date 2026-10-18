@@ -1,0 +1,281 @@
+package export
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+)
+
+func redactedPolicy(t *testing.T) CapturePolicy {
+	t.Helper()
+	p := sampledPolicy("1")
+	p.Redact = []string{"private"}
+	p.RedactorRevisions = []CaptureRedactor{{Name: "private", GuardrailID: "g", RevisionID: "r1", Revision: 1, Type: "builtin.regex"}}
+	if err := p.compileRedactors("project", map[string]guardrails.Revision{"r1": {ID: "r1", GuardrailID: "g", ProjectID: "project", Type: "builtin.regex", TimeoutMS: 1000, OnError: guardrails.FailOpen, Configuration: json.RawMessage(`{"rules":[{"id":"secret","pattern":"secret","replacement":"[REMOVED]"}]}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+func TestCaptureRedactionDecodedFieldsAndUnchangedSource(t *testing.T) {
+	p := redactedPolicy(t)
+	m := testManager(p)
+	c := m.Resolve("project", "", "", "", "req")
+	raw := json.RawMessage(`[{"role":"user","content":"se\u0063ret","tool_calls":[{"function":{"name":"f","arguments":"{\"key\":\"se\\u0063ret\"}"}}]}]`)
+	original := string(raw)
+	c.CaptureDocument(map[string]json.RawMessage{"messages": raw})
+	c.CaptureText("output", "secret")
+	call := json.RawMessage(`{"function":{"name":"f","arguments":"{\"key\":\"se\\u0063ret\"}"}}`)
+	c.CaptureToolCall(call)
+	if !c.Finish(CaptureIdentity{ProjectID: "project"}, time.Now()) {
+		t.Fatal("redaction did not queue")
+	}
+	queued := <-m.queue
+	if strings.Contains(string(queued.record), "secret") || strings.Contains(string(queued.record), `0063`) {
+		t.Fatal("raw content in queue")
+	}
+	var record struct {
+		Data struct {
+			Input  map[string]json.RawMessage
+			Output string
+			Tools  []struct{ Function struct{ Arguments string } } `json:"tool_calls"`
+		}
+	}
+	if err := json.Unmarshal(queued.record, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Data.Output != "[REMOVED]" || !json.Valid([]byte(record.Data.Tools[0].Function.Arguments)) || !strings.Contains(record.Data.Tools[0].Function.Arguments, "[REMOVED]") {
+		t.Fatal("replacement broke capture JSON")
+	}
+	if string(raw) != original || string(call) != `{"function":{"name":"f","arguments":"{\"key\":\"se\\u0063ret\"}"}}` {
+		t.Fatal("inference source mutated")
+	}
+}
+func TestCaptureRedactionEligibilityAndBindings(t *testing.T) {
+	for _, kind := range []string{"builtin.regex", "builtin.pii", "builtin.secrets", "builtin.keywords", "builtin.schema", "builtin.tools", "webhook", "model", "plugin", "presidio"} {
+		want := kind == "builtin.regex" || kind == "builtin.pii" || kind == "builtin.secrets" || kind == "builtin.keywords"
+		if captureDetectorEligible(kind) != want {
+			t.Fatalf("eligibility %s", kind)
+		}
+	}
+	for _, test := range []string{"missing", "scope", "owner", "name", "type"} {
+		t.Run(test, func(t *testing.T) {
+			p := redactedPolicy(t)
+			d := guardrails.Revision{ID: "r1", GuardrailID: "g", ProjectID: "project", Type: "builtin.regex", OnError: guardrails.FailOpen, TimeoutMS: 1, Configuration: json.RawMessage(`{"rules":[]}`)}
+			defs := map[string]guardrails.Revision{"r1": d}
+			switch test {
+			case "missing":
+				delete(defs, "r1")
+			case "scope":
+				d.ProjectID = "other"
+				defs["r1"] = d
+			case "owner":
+				d.GuardrailID = "other"
+				defs["r1"] = d
+			case "name":
+				p.Redact[0] = "other"
+			case "type":
+				d.Type = "webhook"
+				defs["r1"] = d
+			}
+			if p.compileRedactors("project", defs) == nil || !p.redactorInvalid {
+				t.Fatal("invalid binding accepted")
+			}
+			m := testManager(p)
+			if m.Resolve("project", "", "", "", "req") != nil {
+				t.Fatal("invalid cache policy served")
+			}
+			_, _, dropped, _, failed := m.Metrics()
+			if dropped != 1 || failed != 1 {
+				t.Fatal("missing content-free drop counters")
+			}
+		})
+	}
+}
+func TestCaptureRedactionDropsMalformedUnavailableCancelledAndBounds(t *testing.T) {
+	for _, test := range []string{"malformed", "opaque", "missing", "field", "segments", "cancelled", "closed", "expanded"} {
+		t.Run(test, func(t *testing.T) {
+			p := redactedPolicy(t)
+			m := testManager(p)
+			c := m.Resolve("project", "", "", "", "req")
+			c.CaptureDocument(map[string]json.RawMessage{"messages": json.RawMessage(`[{"content":"secret"}]`)})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			switch test {
+			case "malformed":
+				c.CaptureToolCall(json.RawMessage(`{"arguments":"{broken"}`))
+			case "opaque":
+				c.CaptureDocument(map[string]json.RawMessage{"messages": json.RawMessage(`[{"content":[{"type":"image_url","image_url":"secret"}]}]`)})
+			case "missing":
+				c.CaptureDocument(nil)
+			case "field":
+				c.CaptureText("output", strings.Repeat("s", captureFieldMax+1))
+			case "segments":
+				c.CaptureDocument(map[string]json.RawMessage{"input": json.RawMessage(`["` + strings.Repeat(`x","`, guardrails.MaxSegments) + `x"]`)})
+			case "cancelled":
+				cancel()
+			case "closed":
+				c.Close()
+			case "expanded":
+				c.CaptureText("output", strings.Repeat("secret ", captureFieldMax/7))
+			}
+			if c.FinishContext(ctx, CaptureIdentity{}, time.Now()) {
+				t.Fatal("unsafe capture queued")
+			}
+			if len(m.queue) != 0 || m.collectors != 0 {
+				t.Fatal("drop retained content or collector")
+			}
+			if test != "closed" {
+				_, _, d, _, r := m.Metrics()
+				if d != 1 || r != 1 {
+					t.Fatalf("counters dropped=%d failed=%d", d, r)
+				}
+			}
+		})
+	}
+}
+func TestCaptureRedactionBudgetAndInvalidVerdicts(t *testing.T) {
+	for _, test := range []string{"timeout", "span", "unavailable"} {
+		t.Run(test, func(t *testing.T) {
+			evaluator := guardrails.EvaluatorFunc(func(ctx context.Context, _ guardrails.Revision, e guardrails.Evaluation) (guardrails.Verdict, error) {
+				if test == "timeout" {
+					<-ctx.Done()
+					return guardrails.Verdict{}, ctx.Err()
+				}
+				if test == "unavailable" {
+					return guardrails.Verdict{}, errors.New("unavailable")
+				}
+				return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: e.Segments[0].ID, Start: 0, End: 10000}}}, nil
+			})
+			engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "g", RevisionID: "r", Phase: guardrails.Input, Action: guardrails.Redact}}, map[string]guardrails.Revision{"r": {ID: "r", GuardrailID: "g", Type: "webhook", Configuration: json.RawMessage(`{"endpoint":"https://example.com","content_egress":true,"credential_ref":"credential"}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, evaluator)
+			if err != nil {
+				t.Fatal(err)
+			}
+			started := time.Now()
+			_, _, _, err = redactCapture(t.Context(), engine, nil, "secret", nil)
+			if err == nil {
+				t.Fatal("invalid evaluation accepted")
+			}
+			if time.Since(started) > 500*time.Millisecond {
+				t.Fatal("budget not bounded")
+			}
+		})
+	}
+}
+func TestCaptureRedactionSplitStreamAndTerminalSnapshots(t *testing.T) {
+	p := redactedPolicy(t)
+	p.Include = []string{"output", "tool_calls"}
+	m := testManager(p)
+	c := m.Resolve("project", "", "", "", "req")
+	frames := []string{
+		`{"choices":[{"index":0,"delta":{"content":"sec","tool_calls":[{"index":0,"function":{"name":"a","arguments":"{\"x\":\"sec"}},{"index":1,"function":{"name":"b","arguments":"{\"x\":\"sec"}}]}}]}`,
+		`{"choices":[{"index":0,"delta":{"content":"ret","tool_calls":[{"index":1,"function":{"arguments":"ret\"}"}},{"index":0,"function":{"arguments":"ret\"}"}}]},"finish_reason":"tool_calls"}]}`,
+	}
+	for _, frame := range frames {
+		c.CaptureStreamFrame(wire.Chat, []byte("data: "+frame+"\n\n"))
+	}
+	if !c.Finish(CaptureIdentity{Mode: "streaming"}, time.Now()) {
+		t.Fatal("complete split stream dropped")
+	}
+	raw := (<-m.queue).record
+	if strings.Contains(string(raw), "secret") || strings.Count(string(raw), "[REMOVED]") != 3 {
+		t.Fatalf("split secret not removed: %s", raw)
+	}
+}
+
+func TestCaptureLocalDetectorsAndOrderedTransforms(t *testing.T) {
+	for _, tc := range []struct{ kind, config, text string }{
+		{"builtin.pii", `{"categories":["pii.email"]}`, "alice@example.com"},
+		{"builtin.secrets", `{"categories":["secret.aws_access_key"]}`, "AKIAIOSFODNN7EXAMPLE"},
+		{"builtin.keywords", `{"words":["secret"]}`, "SECRET"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			p := sampledPolicy("1")
+			p.Include = []string{"output"}
+			p.Redact = []string{"local"}
+			p.RedactorRevisions = []CaptureRedactor{{Name: "local", GuardrailID: "g", RevisionID: "r", Type: tc.kind}}
+			definitions := map[string]guardrails.Revision{"r": {ID: "r", GuardrailID: "g", ProjectID: "p", Type: tc.kind, Configuration: json.RawMessage(tc.config), TimeoutMS: 1000, OnError: guardrails.FailOpen}}
+			if err := p.compileRedactors("p", definitions); err != nil {
+				t.Fatal(err)
+			}
+			// Changing live management data after compilation cannot change this pin.
+			d := definitions["r"]
+			d.Configuration = json.RawMessage(`{}`)
+			definitions["r"] = d
+			m := testManager(p)
+			c := m.Resolve("p", "", "", "", "r")
+			c.CaptureText("output", tc.text)
+			if !c.Finish(CaptureIdentity{}, time.Now()) {
+				t.Fatal("local detector dropped")
+			}
+			if raw := (<-m.queue).record; strings.Contains(string(raw), tc.text) {
+				t.Fatal("local detector did not redact")
+			}
+		})
+	}
+	p := sampledPolicy("1")
+	p.Include = []string{"output"}
+	p.Redact = []string{"first", "second"}
+	defs := map[string]guardrails.Revision{}
+	for i, rule := range []string{`{"rules":[{"id":"one","pattern":"secret","replacement":"intermediate"}]}`, `{"rules":[{"id":"two","pattern":"intermediate","replacement":"final"}]}`} {
+		name := p.Redact[i]
+		defs[name] = guardrails.Revision{ID: name, GuardrailID: name, ProjectID: "p", Type: "builtin.regex", Configuration: json.RawMessage(rule), TimeoutMS: 1000, OnError: guardrails.FailOpen}
+		p.RedactorRevisions = append(p.RedactorRevisions, CaptureRedactor{Name: name, GuardrailID: name, RevisionID: name, Type: "builtin.regex"})
+	}
+	if err := p.compileRedactors("p", defs); err != nil {
+		t.Fatal(err)
+	}
+	m := testManager(p)
+	c := m.Resolve("p", "", "", "", "r")
+	c.CaptureText("output", "secret")
+	if !c.Finish(CaptureIdentity{}, time.Now()) {
+		t.Fatal("ordered transform dropped")
+	}
+	if raw := string((<-m.queue).record); !strings.Contains(raw, `"output":"final"`) {
+		t.Fatal("detector order was not applied")
+	}
+}
+func TestCaptureMalformedJSONUnicodeAndKeyCollisions(t *testing.T) {
+	p := redactedPolicy(t)
+	for _, raw := range []string{`{"x":"\ud800"}`, `{"x":"secret","x":"safe"}`, `{"secret":"value","[REMOVED]":"other"}`} {
+		if _, _, _, err := redactCapture(t.Context(), p.redactor, map[string]json.RawMessage{"input": json.RawMessage(raw)}, "", nil); err == nil {
+			t.Fatalf("malformed JSON accepted: %s", raw)
+		}
+	}
+	var names captureRedactorNames
+	if json.Unmarshal([]byte(`null`), &names) == nil {
+		t.Fatal("null redactors accepted")
+	}
+}
+
+func TestCaptureIndependentlyInspectsServingTransformedInput(t *testing.T) {
+	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "serving", RevisionID: "serving", Phase: guardrails.Input, Action: guardrails.Redact}}, map[string]guardrails.Revision{"serving": {ID: "serving", GuardrailID: "serving", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"name","pattern":"original","replacement":"[SERVED]"}]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served, err := engine.Evaluate(t.Context(), guardrails.Evaluation{Phase: guardrails.Input, Segments: []guardrails.Segment{{ID: "text", Text: "original secret"}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _ := json.Marshal([]map[string]string{{"role": "user", "content": served.Segments[0].Text}})
+	p := redactedPolicy(t)
+	p.Include = []string{"input"}
+	m := testManager(p)
+	c := m.Resolve("project", "", "", "", "req")
+	c.CaptureDocument(map[string]json.RawMessage{"messages": document})
+	if !c.Finish(CaptureIdentity{}, time.Now()) {
+		t.Fatal("transformed input dropped")
+	}
+	raw := string((<-m.queue).record)
+	if strings.Contains(raw, "secret") || !strings.Contains(raw, "[SERVED] [REMOVED]") {
+		t.Fatal("serving transform bypassed independent capture redaction")
+	}
+	if served.Segments[0].Text != "[SERVED] secret" {
+		t.Fatal("capture changed serving result")
+	}
+}

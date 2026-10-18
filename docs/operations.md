@@ -93,7 +93,10 @@ Owner-enabled payload capture is best-effort and memory-only. Policies select
 sink, input/output/tool calls, deterministic sample ratio and scope selectors.
 Limits: 1 MiB/record, 256 collectors, 64 queued records, 4 MiB/project/minute;
 violations drop the whole record. Input follows content policy; output reflects
-already-delivered frames. Custom capture redaction is not implemented and refuses.
+already-delivered frames. Optional local redactors pin immutable revisions on
+creation or explicit refresh, inspect complete fields before enqueue and fail
+closed for capture under a 100 ms total budget. Ordinary edits preserve pins.
+Empty redactor lists capture unredacted content; see [capture operations](payload-capture.md).
 Captured content never enters PostgreSQL/Valkey/logs/spans. `payload_captured`
 means queued, not delivered. Send/failed/stale-policy audit is metadata-only and
 best-effort; queue/cache drops are counters only. Monitor `olp_capture_*_total`.
