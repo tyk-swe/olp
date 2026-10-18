@@ -51,9 +51,25 @@ func captureJSON(raw []byte) (any, error) {
 	return value, nil
 }
 
-func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bool) error {
+type captureJSONContext uint8
+
+const (
+	captureStructure captureJSONContext = iota
+	captureCall
+	captureResult
+	captureLiteral
+)
+
+func (t *captureTree) walk(value any, set func(any), depth int, context captureJSONContext) error {
 	if depth > 64 {
 		return errCaptureRedaction
+	}
+	if context == captureCall {
+		switch value.(type) {
+		case map[string]any, []any:
+		default:
+			return errCaptureRedaction
+		}
 	}
 	switch v := value.(type) {
 	case string:
@@ -76,13 +92,16 @@ func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bo
 		})
 	case []any:
 		for i, child := range v {
-			if err := t.walk(child, func(x any) { v[i] = x }, depth+1, toolArguments); err != nil {
+			if err := t.walk(child, func(x any) { v[i] = x }, depth+1, context); err != nil {
 				return err
 			}
 		}
 	case map[string]any:
-		if !toolArguments && captureOpaqueMedia(v) {
+		if context != captureLiteral && captureOpaqueMedia(v) {
 			return errCaptureRedaction
+		}
+		if context != captureLiteral && (v["type"] == "function_call" || v["type"] == "tool_use") {
+			context = captureCall
 		}
 		keys := make([]string, 0, len(v))
 		for key := range v {
@@ -100,11 +119,23 @@ func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bo
 			}); err != nil {
 				return err
 			}
-			_, named := v["name"].(string)
-			// Bedrock json results and Gemini function responses contain arbitrary
-			// JSON, just like call arguments. Their property names are not protocol.
-			arguments := toolArguments || key == "json" || (named && (key == "arguments" || key == "input" || key == "args" || key == "response"))
-			if !toolArguments && named && key == "arguments" {
+			next := captureStructure
+			switch {
+			case context == captureLiteral:
+				next = captureLiteral
+			case context == captureCall && (key == "arguments" || key == "input" || key == "args"):
+				next = captureLiteral
+			case context == captureResult && key == "response", key == "json":
+				// Structured tool results contain arbitrary JSON properties.
+				next = captureLiteral
+			case key == "function" || key == "function_call" || key == "functionCall" || key == "toolUse" || key == "tool_calls":
+				if child != nil {
+					next = captureCall
+				}
+			case key == "functionResponse":
+				next = captureResult
+			}
+			if context == captureCall && key == "arguments" {
 				if raw, ok := child.(string); ok {
 					nested, err := captureJSON([]byte(raw))
 					if err != nil {
@@ -112,7 +143,7 @@ func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bo
 					}
 					v[key] = &captureArguments{value: nested}
 					box := v[key].(*captureArguments)
-					if err := t.walk(nested, func(x any) { box.value = x }, depth+1, true); err != nil {
+					if err := t.walk(nested, func(x any) { box.value = x }, depth+1, captureLiteral); err != nil {
 						return err
 					}
 					continue
@@ -121,7 +152,7 @@ func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bo
 			if strings.HasPrefix(key, "\x00capture-key:") {
 				return errCaptureRedaction
 			}
-			if err := t.walk(child, func(x any) { v[key] = x }, depth+1, arguments); err != nil {
+			if err := t.walk(child, func(x any) { v[key] = x }, depth+1, next); err != nil {
 				return err
 			}
 		}
@@ -212,7 +243,7 @@ func redactCapture(ctx context.Context, engine *guardrails.Engine, input map[str
 			return nil, "", nil, err
 		}
 		values[key] = value
-		if err := tree.walk(value, func(x any) { values[key] = x }, 0, false); err != nil {
+		if err := tree.walk(value, func(x any) { values[key] = x }, 0, captureStructure); err != nil {
 			return nil, "", nil, err
 		}
 	}
@@ -226,7 +257,7 @@ func redactCapture(ctx context.Context, engine *guardrails.Engine, input map[str
 			return nil, "", nil, err
 		}
 		tools[i] = value
-		if err := tree.walk(value, func(x any) { tools[i] = x }, 0, false); err != nil {
+		if err := tree.walk(value, func(x any) { tools[i] = x }, 0, captureCall); err != nil {
 			return nil, "", nil, err
 		}
 	}

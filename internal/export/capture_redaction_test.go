@@ -179,6 +179,29 @@ func TestCaptureRedactsStructuredToolResultJSON(t *testing.T) {
 	}
 }
 
+func TestCaptureMalformedCallMetadataCannotBypassArgumentDecoding(t *testing.T) {
+	for _, name := range []string{"", `"name":null,`, `"name":123,`, `"name":"",`} {
+		for _, input := range []map[string]json.RawMessage{
+			{"messages": json.RawMessage(`[{"role":"assistant","tool_calls":[{"function":{` + name + `"arguments":"{\"value\":\"se\\u0063ret\"}"}}]}]`)},
+			{"messages": json.RawMessage(`[{"role":"assistant","function_call":{` + name + `"arguments":"{\"value\":\"se\\u0063ret\"}"}}]`)},
+			{"input": json.RawMessage(`[{"type":"function_call",` + name + `"arguments":"{\"value\":\"se\\u0063ret\"}"}]`)},
+		} {
+			p := redactedPolicy(t)
+			p.Include = []string{"input"}
+			m := testManager(p)
+			c := m.Resolve("project", "", "", "", "req")
+			c.CaptureDocument(input)
+			if !c.Finish(CaptureIdentity{ProjectID: "project", Mode: "unary", Outcome: "failure"}, time.Now()) {
+				t.Fatal("inspectable arguments dropped")
+			}
+			raw := string((<-m.queue).record)
+			if strings.Contains(raw, "0063") || strings.Contains(raw, "secret") || !strings.Contains(raw, "[REMOVED]") {
+				t.Fatalf("malformed metadata bypassed argument decoding: %s", raw)
+			}
+		}
+	}
+}
+
 func TestCaptureDropsTruncatedUnaryOutput(t *testing.T) {
 	p := redactedPolicy(t)
 	p.Include = []string{"output"}

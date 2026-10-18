@@ -470,7 +470,7 @@ func (s *CaptureStream) gemini(f map[string]json.RawMessage) {
 				}
 				s.tool(key, s.str(fn["name"]), string(fn["args"]), true, true)
 			}
-			if present(p["inlineData"]) || present(p["fileData"]) || present(p["executableCode"]) || present(p["codeExecutionResult"]) {
+			if s.output && (present(p["inlineData"]) || present(p["fileData"]) || present(p["executableCode"]) || present(p["codeExecutionResult"])) {
 				s.invalid = true
 			}
 		}

@@ -189,6 +189,21 @@ func TestCaptureGeminiOptionalIdentities(t *testing.T) {
 	}
 }
 
+func TestCaptureGeminiUnselectedOpaqueOutput(t *testing.T) {
+	for _, output := range []bool{false, true} {
+		s := NewCaptureStream(wire.GeminiStream, 65536, output, true)
+		_ = s.Push([]byte("data: " + `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"opaque-sentinel"}},{"executableCode":{"language":"PYTHON","code":"opaque-sentinel"}},{"functionCall":{"name":"f","args":{"value":"secret"}}}]},"finishReason":"STOP"}]}` + "\n\n"))
+		text, calls, err := s.Finish()
+		if output {
+			if err == nil {
+				t.Fatal("selected opaque output accepted")
+			}
+		} else if err != nil || text != "" || len(calls) != 1 || strings.Contains(string(calls[0]), "opaque-sentinel") {
+			t.Fatalf("unselected output affected tools: %q %s %v", text, calls, err)
+		}
+	}
+}
+
 func TestCaptureSupportedLifecycleAndFeedback(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
