@@ -28,6 +28,12 @@ Tool execution uses harmless `printf`, `rg` and `cat` commands in isolated
 working directories, with workspace-write permission only for the file task.
 The model `gpt-5.4`, outputs and usage are synthetic; they
 prove neither entitlement nor real consumption nor a maximum token bound.
+Direct CLI runs (`tests/codecli/qualification_test.go`) answer from the
+`official-tool`, `official-child` and `official-compact` journeys in
+`tests/fixtures/codex-qualified/journey.go`. Runs that use OLP's generated
+configuration load it with `Client.UseConfiguration`. Runs add their journey flags to
+the shared `codecli.ControlledFlags` set: no approvals, a read-only sandbox,
+web search disabled, and the selected WebSocket setting.
 
 ## Support and evidence matrix
 
@@ -135,7 +141,8 @@ URLs and hashes are in `tests/fixtures/coding-plans/evidence.json`, enforced by
 These pins are independent of `tests/clients`, so a bump of the ordinary-route
 client suite cannot change code-mode evidence.
 
-The harness in `tests/codecli/agents.go` runs each client with the configuration
+The harness in `tests/codecli/agents.go`, with its proxy trap and environment
+allowlist in `tests/codecli/trap.go`, runs each client with the configuration
 the public client-config endpoint generated: Claude Code sources the shell file
 and OpenCode reads the `opencode.json` from its working directory. The
 environment is an allowlist with a private home and XDG directories. A decoy

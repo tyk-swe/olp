@@ -87,9 +87,10 @@ requirements.
 | Bedrock | `/bedrock` |
 | Private health and metrics | Separate observability listener on port 9090 |
 
-The [compatibility matrix](docs/compatibility.md) lists generation, token
-counting, embeddings, rerank, moderation, media, and qualified file, batch,
-realtime, and stored-response operations. Support depends on the provider,
+The [compatibility matrix](docs/compatibility.md) lists generation (including
+legacy text completions), token counting, Decisions, embeddings, rerank,
+moderation, media, and qualified file, batch, realtime, and stored-response
+operations. Support depends on the provider,
 model, and certified capability. Persisted telemetry excludes prompts, outputs,
 credentials, and uploaded content; opt-in provider state may retain content
 upstream.

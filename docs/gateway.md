@@ -374,9 +374,11 @@ credential boundaries; fetched products receive no credential.
 
 ### Unbounded work and incomplete accounting
 
-Batch creation/Gemini Live refuse `unbounded_work_budget` when applicable token/
-USD ceilings cannot bound future consumption; rate/concurrency-only policy works.
-Live rechecks newly enabled budgets on authority refresh.
+Batch creation/Gemini Live/Decisions refuse `unbounded_work_budget` when
+applicable token/USD ceilings cannot bound future consumption; rate/concurrency-only
+policy works. Live rechecks newly enabled budgets on authority refresh. For
+Decisions, a caller-paid exempt route waives USD ceilings on caller-credential
+targets but never token ceilings; route simulation reports the same refusal.
 
 Cost admission checks durable ingestion losses across every active calendar
 window and stale (>60 seconds) unclosed producer epochs. Ownership-free gaps

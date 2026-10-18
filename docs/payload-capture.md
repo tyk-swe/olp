@@ -54,10 +54,11 @@ are configured. Configured detectors provide their documented bounded coverage;
 they cannot promise to identify every secret or personal detail.
 
 Streaming capture assembles text and tool arguments by native choice, content
-block, item or tool index. Supported families are Chat Completions, Responses,
-Anthropic, Gemini GenerateContent, Bedrock ConverseStream, Mistral FIM and Cohere
-Chat. Responses terminal item/text/argument snapshots are deduplicated; conflicting
-snapshots drop capture. Completion signals are required, and truncated, malformed,
+block, item or tool index. Supported families are Chat Completions, legacy text
+completions, Responses, Anthropic, Gemini GenerateContent, Bedrock
+ConverseStream, Mistral FIM and Cohere Chat. Responses terminal
+item/text/argument snapshots are deduplicated; conflicting snapshots drop
+capture. Completion signals are required, and truncated, malformed,
 unsupported or incomplete streams drop the whole capture. Gemini's partial-argument
 extensions, opaque media and unrecognized output types are not capture surfaces.
 

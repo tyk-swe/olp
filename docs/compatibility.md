@@ -139,7 +139,19 @@ Prompt arrays and token IDs, `echo`, `best_of`, `logprobs`, `suffix`, unknown
 fields, and defaults without an equivalent mapping are refused before dispatch.
 Every result candidate retains its index; tool calls and refusals without a
 text-completion representation fail projection. These endpoints do not use the
-response cache. Unsupported inspection surfaces refuse enforcing guardrails.
+response cache. Text prompts and choice text are
+[guardrail](guardrails.md#execution) and
+[payload-capture](payload-capture.md#capture-behavior-and-bounds) surfaces for
+unary and SSE results. Unsupported inspection surfaces, such as token-ID prompts
+or `logprobs` under an output policy, refuse enforcing guardrails.
+
+Usage keeps cached and cache-write prompt token counts. On the text-completion
+target, `total_tokens` must equal prompt plus completion tokens; an inconsistent
+total is a protocol error rather than accounted usage. Admission estimates sum
+a prompt batch under one exact-tokenization budget, and the context-window check
+uses its largest prompt. When a connector's generation target is a native text
+completion profile, [active health probes](provider-routing.md#credential-pools-and-limits)
+send a short text completion instead of a chat request.
 
 `decision` is a separate operation with native `openai-decisions` and `systemone`
 profiles. The text-only contracts accept predicate/noul, choice and score
@@ -155,9 +167,18 @@ descriptions. Safety identifiers and other unmappable controls are refused.
 System One requests cannot map to OpenAI: its frozen response schema has no
 refusal variant. That direction returns `422 target_capability` before dispatch.
 Native System One remains available. No chat-generated probabilities are used.
-Because these contracts have no provider-enforced output bound, token/spend
-capped keys, routes, providers and slots are refused before dispatch. Observed
-usage is still priced and accounted on unlimited calls.
+Native answers must carry string choice and score labels that match the
+request; other answers fail validation.
+Because these contracts have no provider-enforced output bound, token-capped
+keys, budget groups, end users, routes, providers and slots, and USD-capped
+keys, routes, providers, slots and budget hierarchies, are refused with
+`unbounded_work_budget` before dispatch. A
+[caller-paid](gateway.md#caller-paid-budget-policy) route waives only the USD
+caps, and only for caller-credential targets; token caps still apply. Route
+simulation and key inspection report the same `unbounded_work_budget` diagnostic,
+including inherited hierarchy budgets and named-route limits. Observed usage is
+still priced from the target's input/output token prices, including for the
+`price` routing strategy, and accounted on unlimited calls.
 
 Local evidence is the [M9 endpoint ledger](../tests/clients/m9-endpoints.json)
 and the focused `CLIENTS=m9-go tests/clients/run.sh` suite. Live-provider

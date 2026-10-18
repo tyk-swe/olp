@@ -137,7 +137,7 @@ and the attempt settles *incomplete* rather than being billed at text rates.
 
 | Provider | Mapping |
 | --- | --- |
-| OpenAI chat completions | `prompt_tokens_details.audio_tokens` → audio input; `completion_tokens_details.audio_tokens` → audio output |
+| OpenAI chat and text completions | `prompt_tokens_details.cached_tokens` → cached input; `prompt_tokens_details.cache_write_tokens` → cache-write input (a count above the prompt tokens not already cached is a protocol error); `prompt_tokens_details.audio_tokens` → audio input; `completion_tokens_details.audio_tokens` → audio output. Text completions also require `total_tokens`, when present, to equal prompt plus completion tokens |
 | OpenAI realtime (`response.done`) | `input_token_details.audio_tokens`/`image_tokens` → audio/image input; `input_token_details.cached_tokens_details.audio_tokens`/`image_tokens` → cached audio/image input; `output_token_details.audio_tokens` → audio output |
 | OpenAI images (generation, edit, variation) | `input_tokens_details.image_tokens` → image input; `output_tokens_details.image_tokens` → image output, or every output token when no output breakdown is reported |
 | OpenAI speech | every output token → audio output |

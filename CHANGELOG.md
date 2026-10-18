@@ -17,6 +17,14 @@ semantic versioning and take their source from root `package.json`;
   focused fixtures and an enumerated LiteLLM v1.105.0 vendor inventory. Service,
   live-vendor and performance qualification remain open; vendor parity is Partial.
 
+- Decisions refuse token caps, and USD caps outside caller-paid exempt routes,
+  with `unbounded_work_budget` before dispatch. Route simulation and key
+  inspection report the same refusal, including hierarchy and named-route budgets.
+  Legacy completions refuse token-ID prompts and `logprobs` under enforcing
+  guardrails, keep stream segments open until a nonempty finish reason, and
+  reject inconsistent `total_tokens` or cache-write counts instead of accounting
+  them.
+
 - Reject uninspectable streamed log-probability output and isolate tool-call
   completion by candidate. Enforce system budgets for playground model evaluators,
   preserve their pinned routes and end-user attribution, and persist their parent
@@ -55,6 +63,10 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
+- Active health probes send a text completion to connectors whose generation
+  target is a native completion profile. The `price` routing strategy uses input
+  and output token prices for Decisions. Chat usage records
+  `prompt_tokens_details.cache_write_tokens` as cache-write input.
 - Configuration promotion activates matching guardrail drafts, advances policy
   revisions past existing drafts and supports installation definition updates.
 - Configuration exports use `openllmproxy.dev/config/v2` for guardrail
@@ -82,6 +94,20 @@ semantic versioning and take their source from root `package.json`;
 
 ### Added
 
+- Legacy text completions (`POST /v1/completions`, M9.1): native unary and SSE
+  on the `openai-completions`, `vllm-completions`, `tgi-completions`,
+  `fireworks-completions` and `together-completions` profiles, plus a
+  single-prompt mapping to Chat Completions on transformed routes. Includes
+  guardrail inspection, payload capture, exact usage and console playground
+  templates. See [compatibility](docs/compatibility.md#legacy-text-completions-and-decisions).
+- The text-only Decisions API (`POST /v1/decisions` and `POST /v1/systemone`,
+  M9.10) as operation `decision`, with native OpenAI Decisions and TypeSafe
+  System One profiles, a restricted one-way OpenAI-to-System-One mapping and
+  playground routing. Images, box questions, streaming and System-One-to-OpenAI
+  translation are refused.
+- The M9 endpoint ledger (`tests/clients/m9-endpoints.json`) and the pinned
+  OpenAI Go SDK suite (`CLIENTS=m9-go tests/clients/run.sh`). Console/browser
+  and live-provider qualification of both slices remain open.
 - Opt-in encrypted response caching in a dedicated Valkey, with key isolation,
   native stream replay, request controls, scoped purge, zero-provider-cost
   accounting, metrics and Route Studio controls. Semantic caching uses Valkey

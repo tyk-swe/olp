@@ -30,15 +30,20 @@ change, not an automatic expansion of this milestone.
 
 M9 is **In progress**, not implemented. The endpoint ledger, legacy completions,
 native Decisions and a restricted OpenAI-to-System-One mapping now have focused
-local protocol/gateway and pinned SDK evidence. System-One-to-OpenAI translation
+local protocol/gateway, route-inspection and pinned SDK evidence. Completions
+also cover M7 input/output and stream inspection, payload capture, health
+probes, exact usage totals and cache-write usage. Decisions refuse token caps and
+any USD caps that are not caller-paid exempt, both before dispatch and in route
+inspection. System-One-to-OpenAI translation
 is deliberately unavailable: the frozen System One response has no refusal
 variant, and incompatible mappings must remain unavailable.
 
 The additional retained-resource families, batch-settlement worker, expanded
 realtime, OCR/search and governed pass-through remain unimplemented. Existing
 OpenAI/Azure files and batches are building blocks, not M9 completion evidence.
-Console controls have been added for the initial codecs but are not yet locally
-qualified because the console dependencies/browser are absent in this checkout.
+Console playground controls and component tests exist for the initial codecs.
+They have not been run locally yet: console dependencies and a browser are not
+installed in the reviewed checkout, and no Chromium journey exists.
 See the local evidence below for the exact boundary.
 
 ## Baseline
@@ -410,8 +415,8 @@ advertise pending methods. SDK locks were not changed.
 
 | Slice | Local evidence | Remaining acceptance |
 | --- | --- | --- |
-| M9.1 | `internal/protocols/completions_test.go`, `internal/gateway/completions_test.go`, `internal/connectors/completions_test.go`, token exposure test, `tests/clients/m9sdk/` | Console/browser qualification; each provider's live qualification; release performance gate |
-| M9.10 | `internal/operations/decision/decision_test.go`, `internal/gateway/decisions_test.go`, `tests/clients/m9sdk/`; native and one-way mapped questions, identity, usage and explicit refusals | Console/browser and configuration-promotion integration; per-provider live qualification |
+| M9.1 | `internal/protocols/completions_test.go`, `internal/gateway/completions_test.go`, `internal/gateway/completions_probe_test.go`, `internal/connectors/completions_test.go`, `internal/interaction/completions_test.go`, `internal/routes/completions_decisions_test.go`, capture tests in `internal/protocols/capture*_test.go` and `internal/export/capture_redaction_test.go`, token exposure test, `tests/clients/m9sdk/`; TGI profile, stream guardrails, capture, probes, usage totals and cache-write usage | Console/browser qualification; each provider's live qualification; release performance gate |
+| M9.10 | `internal/operations/decision/decision_test.go`, `internal/gateway/decisions_test.go`, `internal/operationplan/decision_test.go`, `internal/routes/completions_decisions_test.go`, `internal/routes/inspect_key_test.go`, `tests/clients/m9sdk/`; native and one-way mapped questions, typed labels, identity, usage, pricing, caller-paid budgets, inspection diagnostics and explicit refusals | Console/browser and configuration-promotion integration; per-provider live qualification |
 | M9.2–M9.9 | Ledger records planned scope only | Implementation and all slice-specific acceptance, including durable settlement and provider control |
 
 Focused SDK selection: `CLIENTS=m9-go tests/clients/run.sh`. This runs the locked
@@ -420,7 +425,9 @@ unary and streaming completions, native Decisions, OpenAI-to-System-One
 translation, incompatible-mapping refusal, and credential-safe dispatch.
 
 Deferred console selection:
-`pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.svelte.test.ts`.
-Dependencies must already be installed. Chromium journeys and the dedicated M9
-resource/accounting integration selection do not yet exist and remain required;
-no exit criterion above is marked complete on the strength of the initial slice.
+`pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.svelte.test.ts src/lib/features/inference/playground/nativeOperation.test.ts`.
+Dependencies must already be installed. The second file checks that Decisions
+dialects reach their public endpoints on transformed routes. Chromium journeys
+and the dedicated M9 resource/accounting integration selection do not yet exist
+and remain required; no exit criterion above is marked complete on the strength
+of the initial slice.

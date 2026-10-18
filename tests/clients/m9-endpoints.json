@@ -105,7 +105,10 @@
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
-        "tests/clients/m9sdk/m9_test.go"
+        "tests/clients/m9sdk/m9_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -159,7 +162,10 @@
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
-        "tests/clients/m9sdk/m9_test.go"
+        "tests/clients/m9sdk/m9_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -212,7 +218,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -265,7 +274,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -312,7 +324,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -361,7 +376,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -417,7 +435,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -470,7 +491,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -523,7 +547,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -576,7 +603,10 @@
         "internal/protocols/completions_test.go",
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
-        "internal/operations/tokenization/estimate/completions_test.go"
+        "internal/operations/tokenization/estimate/completions_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -627,7 +657,10 @@
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
-        "tests/clients/m9sdk/m9_test.go"
+        "tests/clients/m9sdk/m9_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -685,7 +718,10 @@
         "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
-        "tests/clients/m9sdk/m9_test.go"
+        "tests/clients/m9sdk/m9_test.go",
+        "internal/interaction/completions_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/gateway/completions_probe_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -734,7 +770,10 @@
       "evidence": [
         "internal/operations/decision/decision_test.go",
         "tests/clients/m9sdk/m9_test.go",
-        "internal/gateway/decisions_test.go"
+        "internal/gateway/decisions_test.go",
+        "internal/operationplan/decision_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/routes/inspect_key_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -744,7 +783,7 @@
         "non-text state/instructions",
         "unmapped fields",
         "response caching",
-        "token/spend budgets without an enforceable provider output bound"
+        "token budgets, and spend budgets outside caller-paid exempt routes, without an enforceable provider output bound"
       ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
     },
@@ -782,7 +821,10 @@
       "evidence": [
         "internal/operations/decision/decision_test.go",
         "tests/clients/m9sdk/m9_test.go",
-        "internal/gateway/decisions_test.go"
+        "internal/gateway/decisions_test.go",
+        "internal/operationplan/decision_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/routes/inspect_key_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -792,7 +834,7 @@
         "non-text state/instructions",
         "unmapped fields",
         "response caching",
-        "token/spend budgets without an enforceable provider output bound"
+        "token budgets, and spend budgets outside caller-paid exempt routes, without an enforceable provider output bound"
       ],
       "reference_revision": "TypeSafe OpenAPI 0.2.0, observed 2026-10-18"
     },
@@ -826,7 +868,10 @@
       "evidence": [
         "internal/operations/decision/decision_test.go",
         "tests/clients/m9sdk/m9_test.go",
-        "internal/gateway/decisions_test.go"
+        "internal/gateway/decisions_test.go",
+        "internal/operationplan/decision_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/routes/inspect_key_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -840,7 +885,7 @@
         "score descriptions",
         "safety_identifier",
         "input arrays",
-        "token/spend budgets without an enforceable provider output bound"
+        "token budgets, and spend budgets outside caller-paid exempt routes, without an enforceable provider output bound"
       ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
     },
@@ -874,7 +919,10 @@
       "evidence": [
         "internal/operations/decision/decision_test.go",
         "tests/clients/m9sdk/m9_test.go",
-        "internal/gateway/decisions_test.go"
+        "internal/gateway/decisions_test.go",
+        "internal/operationplan/decision_test.go",
+        "internal/routes/completions_decisions_test.go",
+        "internal/routes/inspect_key_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -884,7 +932,7 @@
         "non-text state/instructions",
         "unmapped fields",
         "response caching",
-        "token/spend budgets without an enforceable provider output bound"
+        "token budgets, and spend budgets outside caller-paid exempt routes, without an enforceable provider output bound"
       ],
       "reference_revision": "TypeSafe OpenAPI 0.2.0, observed 2026-10-18"
     },

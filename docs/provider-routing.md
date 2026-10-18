@@ -213,6 +213,8 @@ uses `_exhausted`. No zero initialization; [reconcile](operations.md#spend-budge
 
 Optional `health_probe.interval_seconds` (60–86400, for example 300) sends bounded
 paid synthetic work per routed model/fleet interval, thirty-second deadline.
+Generation probes use the connector's target dialect: a native text-completion
+profile receives a 16-token `/completions` prompt instead of a chat request.
 System/probe usage remains accounted; failing health ranks targets last rather
 than eliminating availability. Shared circuit/slot cooldown evidence distinguishes
 transport/server failures from credentials. Credential-only half-open outcomes
@@ -575,7 +577,12 @@ input-side rate the selected tier carries, plus the per-request fee; the
 batch multipliers are not bounded. The pair is null when the target's price
 cannot bound the request or no token demand is known. An explicit estimated count applies to
 all targets without provenance. Admission additionally reserves reply/larger
-source-prepared bounds; simulation is not a dispatch guarantee.
+source-prepared bounds; simulation is not a dispatch guarantee. Decisions have
+no bounded maximum, so a target whose key, route, provider or eligible slot caps
+need one is marked incompatible with `unbounded_work_budget` (see
+[Decisions](compatibility.md#legacy-text-completions-and-decisions)). With a
+key, simulated attribution labels resolve through the key and project policies;
+labels the key cannot set are rejected, and attribution-scoped budgets apply.
 
 Native source indexing is limited to 65,536 JSON values. Strict inspection shares
 8 MiB across targets/legs, including media and recursively decoded tool arguments/

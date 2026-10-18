@@ -38,7 +38,8 @@ exact attempt accounting, confined plugins and content-free diagnostics.
 Remaining work includes measured non-OpenAI token calibration, invoice
 reconciliation beyond OpenAI and Anthropic, commitment release qualification,
 guardrail vendor breadth and
-capture-redaction integration, API-surface completion, and agent/tool execution.
+capture-redaction integration, API-surface completion beyond legacy completions
+and text Decisions, and agent/tool execution.
 M1's harness/gate exists, but full-rate reference-hardware results remain
 uncollected. Live-provider and external identity qualification are separate from
 fixture coverage.
@@ -55,7 +56,10 @@ intent. Everything ships in the single AGPL product, without a feature paywall.
 
 M1–M6, M8 and M11 are implemented; M7 and M9 are in progress, and M10 remains planned.
 M6 has local verification; its full integration and benchmark qualification remain
-open as recorded in [the commitment evidence](m06-commitment-evidence.md). The
+open as recorded in [the commitment evidence](m06-commitment-evidence.md). M9's
+legacy completions (M9.1) and text Decisions (M9.10) slices have local protocol,
+gateway, route-inspection and pinned SDK evidence; their console/browser and
+live-provider qualification remain open, and the other M9 slices are unbuilt. The
 [implementation review](m01-m04-implementation-review.md) records historical
 focused evidence and the [architecture review](../architecture-review.md) records
 later integrated qualification. Neither establishes uncollected full-rate,
@@ -90,7 +94,7 @@ taking a slice owns it through qualification.
 | 1 · qualification | M1 full-rate results and remaining M2–M6/M11 external checks | Existing implementation and reproducible pinned fixtures | Runtime/qualification owner; benchmark artifacts, provider/identity results and explicit unsupported tuples, tied to the tested revision |
 | 1 · guardrails | Close M7 vendor coverage decisions and capture-redaction integration | Existing immutable engine, streaming holdback and M5 capture boundary | Guardrails/export owners; named adapter contracts, capture leakage/failure tests and M7 exit evidence |
 | 1 · accounting | M2.4 calibration and M6 live billing/sink qualification; additional invoice adapters follow | Signed calibration provenance and the existing commitment/invoice ledgers | Catalog/billing owners; measured family corpus, total commitment-cost reconciliation and provider-specific import fixtures |
-| 2 · stateless APIs | M9 completions and Decisions first; OCR/search after the shared contracts | M2 certification; M7 inspection contract and M6 units for each supported surface | Protocol/connector owners; explicit operation/provider ledger, native fixtures and SDK qualification |
+| 2 · stateless APIs | M9.7 OCR/search on the shared ledger and codec contracts; qualify the implemented M9.1 completions and M9.10 Decisions in the console and against live providers | M2 certification; M7 inspection contract and M6 units for each supported surface | Protocol/connector owners; explicit operation/provider ledger, native fixtures, SDK qualification, and Chromium plus per-provider live results for M9.1/M9.10 |
 | 2 · retained APIs | M9 resource lifecycle and files/batches, then fine-tuning, vector stores, Responses and other retained families | Historical target/credential authority, cancellation and usage-settlement contract | Resource/worker owners; cross-project denial, replay, ambiguous-create, cleanup and late-usage tests |
 | 2 · realtime | M9 realtime expansion | Transport-specific inspection, accounting and revocation controls are demonstrable | Realtime owner; connection teardown, reconnect and usage-completeness qualification before enabling each transport |
 | 2 · tools | M10 direct MCP, then gateway tool loops and A2A | Existing MCP registration plus M4 authority, M7 tool governance, M5 facts and M6 prices | MCP/agent owners; pinned-tool drift, grant isolation, cancellation and one-accounting-event-per-attempt evidence |
@@ -142,9 +146,10 @@ At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
 `Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%).
 This historical scorecard is preserved for comparison.
 The current 153 capability rows reflect implemented capabilities, including M8,
-project limit templates and the scoped model catalog, with incomplete FOCUS
-commitment export corrected to `Partial`: 23 `Ahead`, 101 `Parity`, 7 `Partial`,
-20 `Gap`, 2 `Excluded`; coverage is 124/151 (82.1%).
+project limit templates, the scoped model catalog, FOCUS export with complete
+commitment cost, legacy text completions (`Parity`) and the text-only Decisions
+API (`Partial`): 23 `Ahead`, 103 `Parity`, 7 `Partial`, 18 `Gap`, 2 `Excluded`;
+coverage is 126/151 (83.4%).
 Status rows in the legend are not capabilities. Definitions/registrations alone
 do not close broader guardrail-execution or agent-gateway workstreams.
 

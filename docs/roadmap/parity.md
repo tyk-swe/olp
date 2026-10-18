@@ -4,8 +4,8 @@ The LiteLLM v1.105.0 gateway baseline reviewed 2026-10-13 is compared with
 the repository's OLP 0.1.0 implementation, reconciled 2026-10-18. This is the
 [roadmap](README.md)'s tracked capability scope, not a live-provider or released
 image qualification claim. OLP-only additions have no comparative row. Current
-counts: 23 Ahead, 101 Parity, 7 Partial, 20 Gap, 2 Excluded (153 capabilities;
-legend rows excluded). Coverage is 124/151 (82.1%).
+counts: 23 Ahead, 103 Parity, 7 Partial, 18 Gap, 2 Excluded (153 capabilities;
+legend rows excluded). Coverage is 126/151 (83.4%).
 
 Each row describes the supported scope stated in its OLP column, not every
 possible provider/model combination. Native certification and declared declines
@@ -32,13 +32,13 @@ of [M3](m03-routing-resilience.md).
 | OpenAI Chat Completions | [/chat/completions](https://docs.litellm.ai/docs/completion) | Native and translated for every connector kind | `Parity` | |
 | OpenAI Responses | [/responses](https://docs.litellm.ai/docs/response_api), bridged to chat providers | Native, translated, and stored responses for OpenAI and Azure; Codex CLI and the OpenAI Agents SDK are [qualified](../clients.md) | `Parity` | |
 | Responses compaction and Conversations | [/responses/compact](https://docs.litellm.ai/docs/response_api_compact) | Neither | `Gap` | M9.5 |
-| Decisions API | [/v1/decisions and /v1/systemone](https://docs.litellm.ai/docs/decisions) | Not served | `Gap` | M9.10 |
+| Decisions API | [/v1/decisions and /v1/systemone](https://docs.litellm.ai/docs/decisions) | Native OpenAI Decisions and TypeSafe System One for text predicate, choice and score questions, plus a restricted one-way OpenAI-to-System-One [mapping](../compatibility.md#legacy-text-completions-and-decisions); images, box questions, streaming and System-One-to-OpenAI translation are refused | `Partial` | M9.10 |
 | Anthropic Messages and token counting | [/v1/messages](https://docs.litellm.ai/docs/anthropic_unified/), [count_tokens](https://docs.litellm.ai/docs/anthropic_count_tokens) | Native and translated; Claude Code is [qualified](../clients.md) | `Parity` | |
 | Gemini generation, counting and embeddings | [/generateContent](https://docs.litellm.ai/docs/generateContent) | Native and translated generation and counting; `embedContent` and `batchEmbedContents` on strict routes to Gemini targets; Gemini CLI is [qualified](../clients.md) | `Parity` | |
 | Gemini Interactions | [/interactions](https://docs.litellm.ai/docs/interactions) | Native `gemini-interactions` profile | `Parity` | |
 | Bedrock Converse and InvokeModel | [/converse](https://docs.litellm.ai/docs/bedrock_converse), [/invoke](https://docs.litellm.ai/docs/bedrock_invoke) | Native Bedrock surface | `Parity` | |
 | Certified native fidelity | Translation with optional [drop_params](https://docs.litellm.ai/docs/completion/drop_params) | Strict routes compile an interaction contract per target and refuse lossy translation | `Ahead` | |
-| Legacy text completions | [/completions](https://docs.litellm.ai/docs/text_completion) | Not served | `Gap` | M9.1 |
+| Legacy text completions | [/completions](https://docs.litellm.ai/docs/text_completion) | Native unary and streaming [text completions](../compatibility.md#legacy-text-completions-and-decisions) on certified OpenAI, vLLM, TGI, Fireworks and Together profiles, and a single-prompt mapping to Chat Completions on transformed routes, with inspection, capture and exact usage | `Parity` | M9.1 |
 | Embeddings across providers | [Embeddings](https://docs.litellm.ai/docs/embedding/supported_embedding) | OpenAI, Azure, Gemini, Vertex, Bedrock Titan, compatible endpoints, Cohere v2, Voyage, Jina, Mistral, NVIDIA NIM, Together, Infinity, TEI and the embedding presets | `Parity` | |
 | Rerank across providers | [/rerank](https://docs.litellm.ai/docs/rerank) | Cohere, Voyage, Jina, Together, Infinity, TEI and Bedrock rerank models | `Parity` | |
 | Moderation | [/moderations](https://docs.litellm.ai/docs/moderation) | OpenAI, Azure, compatible endpoints | `Parity` | |

@@ -95,9 +95,18 @@ and enforcing external evaluators require unary delivery when their requirements
 cannot fit the window. Such requests return `422 guardrail_surface_unavailable`;
 there is no silent reduction in enforcement. Opaque media and retained surfaces
 without a complete inspection contract are refused in the same way.
-Chat streams requesting `logprobs` are refused before dispatch when output
-guardrails or input masking are active, including when provider defaults enable
-them. Unexpected log-probability payloads are refused before their frame is sent.
+Chat and legacy text-completion streams requesting `logprobs` are refused before
+dispatch when output guardrails or input masking are active, including when
+provider defaults enable them. Unexpected log-probability payloads are refused
+before their frame is sent.
+
+Legacy text completions inspect each text prompt as input and each choice's
+`text` as unary or streamed output; token-ID prompts have no text inspection
+contract and refuse. Output policies refuse any non-null completion `logprobs`
+value. A choice's stream segment stays open until it reports a nonempty finish
+reason, so TGI's empty nonterminal reason does not end it. Decisions inspect
+their text input (OpenAI `input` or System One `state`) and question text as
+input, and their answers as unary output.
 
 Stored or background Responses requests are refused when an output policy or
 input masking is configured, because later retrieval cannot replay that
