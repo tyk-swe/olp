@@ -64,6 +64,16 @@ func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bo
 				set(s)
 			}
 		})
+	case bool, nil:
+		text := "null"
+		if b, ok := v.(bool); ok {
+			text = strconv.FormatBool(b)
+		}
+		return t.scalar(text, func(s string) {
+			if s != text {
+				set(s)
+			}
+		})
 	case []any:
 		for i, child := range v {
 			if err := t.walk(child, func(x any) { v[i] = x }, depth+1, toolArguments); err != nil {

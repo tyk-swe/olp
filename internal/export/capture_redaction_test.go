@@ -98,6 +98,29 @@ func TestCaptureRedactionEligibilityAndBindings(t *testing.T) {
 	}
 }
 
+func TestCaptureRedactsAllJSONScalarTypes(t *testing.T) {
+	p := sampledPolicy("1")
+	p.Redact = []string{"scalars"}
+	p.RedactorRevisions = []CaptureRedactor{{Name: "scalars", GuardrailID: "g", RevisionID: "r", Type: "builtin.regex"}}
+	if err := p.compileRedactors("project", map[string]guardrails.Revision{"r": {ID: "r", GuardrailID: "g", ProjectID: "project", Type: "builtin.regex", TimeoutMS: 1000, Configuration: json.RawMessage(`{"rules":[{"id":"scalars","pattern":"^(true|false|null|123)$","replacement":"[REMOVED]"}]}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]json.RawMessage{"input": json.RawMessage(`[true,false,null,123,"text",456]`)}
+	calls := []json.RawMessage{json.RawMessage(`{"name":"f","arguments":"{\"a\":true,\"b\":false,\"c\":null}"}`)}
+	redacted, _, tools, err := redactCapture(t.Context(), p.redactor, input, "", calls)
+	if err != nil || string(redacted["input"]) != `["[REMOVED]","[REMOVED]","[REMOVED]","[REMOVED]","text",456]` {
+		t.Fatalf("scalar inspection: %s %v", redacted["input"], err)
+	}
+	if len(tools) != 1 || strings.Count(string(tools[0]), "[REMOVED]") != 3 {
+		t.Fatalf("nested scalar inspection: %s", tools)
+	}
+	unchanged := redactedPolicy(t)
+	preserved, _, preservedTools, err := redactCapture(t.Context(), unchanged.redactor, input, "", calls)
+	if err != nil || string(preserved["input"]) != string(input["input"]) || len(preservedTools) != 1 || string(preservedTools[0]) != `{"arguments":"{\"a\":true,\"b\":false,\"c\":null}","name":"f"}` {
+		t.Fatalf("unchanged scalar types lost: %s %s %v", preserved["input"], preservedTools, err)
+	}
+}
+
 func TestCaptureRedactsOrdinaryToolArgumentKeys(t *testing.T) {
 	p := redactedPolicy(t)
 	arguments := `{"source":"secret","document":{"image":"secret"},"audio":"secret","arguments":"secret","type":"image","inlineData":{"data":"secret"}}`
