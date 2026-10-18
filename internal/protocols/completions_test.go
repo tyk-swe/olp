@@ -148,3 +148,32 @@ func TestLegacyCompletionMappedStreamPreservesObfuscation(t *testing.T) {
 		t.Fatalf("mapped stream: %s %+v %v", output.String(), c, err)
 	}
 }
+
+func TestLegacyCompletionMappingPreservesDefaultLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields string
+		defaults     Object
+		want         string
+	}{
+		{name: "omitted", want: "16"},
+		{name: "null", fields: `,"max_tokens":null`, want: "16"},
+		{name: "explicit", fields: `,"max_tokens":50`, want: "50"},
+		{name: "provider", defaults: Object{"max_tokens": raw(32)}, want: "32"},
+		{name: "null overrides provider", fields: `,"max_tokens":null`, defaults: Object{"max_tokens": raw(32)}, want: "16"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := Parse(wire.Completions, []byte(`{"model":"route","prompt":"hello"`+tc.fields+`}`), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _, err := EncodeTarget(r, wire.Chat, "openai", "openai", "upstream", tc.defaults)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields Object
+			if err := json.Unmarshal(body, &fields); err != nil || string(fields["max_tokens"]) != tc.want {
+				t.Fatalf("output bound: %s (%v)", body, err)
+			}
+		})
+	}
+}

@@ -70,12 +70,12 @@ func lowerSystemOne(source oif.Request, view oif.View) (oif.Document, []oif.Prov
 	doc, err := parseDocument(map[string]any{"model": text(member(root, "model")), "state": json.RawMessage(member(root, "input").Raw()), "questions": questions})
 	return doc, nil, err
 }
-func projectSystemOne(source oif.Request, result oif.Result, _ oif.View, route string) (oif.Document, error) {
-	view, err := parseRequest(source)
+func projectSystemOne(source oif.Request, result oif.Result, view oif.View, route string) (oif.Document, error) {
+	requestView, err := parseRequest(source)
 	if err != nil {
 		return oif.Document{}, err
 	}
-	r := view.(Request)
+	r := requestView.(Request)
 	root := result.Source().Root()
 	answers := []any{}
 	for i, q := range r.Questions {
@@ -116,5 +116,10 @@ func projectSystemOne(source oif.Request, result oif.Result, _ oif.View, route s
 		}
 		answers = append(answers, answer)
 	}
-	return parseDocument(map[string]any{"model": route, "answers": answers, "usage": json.RawMessage(member(root, "usage").Raw())})
+	usage := map[string]any{}
+	for _, m := range member(root, "usage").Members() {
+		usage[m.Name] = json.RawMessage(m.Value.Raw())
+	}
+	usage["total_tokens"] = *view.(Result).Usage.TotalTokens
+	return parseDocument(map[string]any{"model": route, "answers": answers, "usage": usage})
 }

@@ -29,6 +29,20 @@ func TestKindCapabilityOptionsIncludeProfileTuples(t *testing.T) {
 	}
 }
 
+func TestKindCapabilityOptionsIncludeDecisions(t *testing.T) {
+	for _, kind := range []string{KindOpenAI, KindOpenAICompatible} {
+		for _, surface := range []string{SurfaceOpenAI, "native"} {
+			tuple := CapabilityInput{"decision", surface, ModeUnary}
+			if !slices.Contains(capabilityOptionsForKind(kind), tuple) {
+				t.Fatalf("%s does not publish %+v", kind, tuple)
+			}
+			if slices.Contains(capabilityOptionsForKind(kind), CapabilityInput{"decision", surface, ModeStreaming}) {
+				t.Fatalf("%s publishes streaming Decisions", kind)
+			}
+		}
+	}
+}
+
 // A commitment is a positive decimal amount on a UTC calendar period; it is
 // part of the stored provider configuration, so it flows through revisions and
 // configuration export unchanged.

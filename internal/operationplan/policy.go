@@ -3,6 +3,7 @@ package operationplan
 import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
@@ -23,7 +24,7 @@ func (p *Plan) CheckInputWithBudget(reserve func(int) error) ([]contentpolicy.De
 	if p.template.codec.InputText == nil {
 		return nil, fail("policy_conflict", "/request", "inspectable_input", "The native operation has no qualified input policy coverage.")
 	}
-	texts, err := p.template.codec.InputText(p.effective)
+	texts, err := p.GuardrailInput()
 	if err != nil {
 		return nil, err
 	}
@@ -43,15 +44,15 @@ func (p *Plan) CheckInputWithBudget(reserve func(int) error) ([]contentpolicy.De
 	}
 	return decisions, nil
 }
-func (p *Plan) checkOutput(result oif.Result) ([]contentpolicy.Decision, error) {
+func (p *Plan) checkOutput(codec operations.Dialect, result oif.Result) ([]contentpolicy.Decision, error) {
 	policy := p.template.policy
 	if policy == nil || len(policy.Output) == 0 {
 		return nil, nil
 	}
-	if p.template.codec.OutputText == nil {
+	if codec.OutputText == nil {
 		return nil, fail("policy_conflict", "/result", "inspectable_output", "The native operation has no qualified output policy coverage.")
 	}
-	texts, err := p.template.codec.OutputText(result)
+	texts, err := codec.OutputText(result)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,16 @@ func (p *Plan) GuardrailInput() ([]operations.Text, error) {
 	if p.template.codec.InputText == nil {
 		return nil, fail("guardrail_surface_unavailable", "/request", "guardrail_input", "The operation has no text inspection contract.")
 	}
-	return p.template.codec.InputText(p.effective)
+	texts, err := p.template.codec.InputText(p.effective)
+	if err != nil || p.mapping == nil {
+		return texts, err
+	}
+	codec, _ := operationregistry.Lookup(p.source.Descriptor().Dialect.ID)
+	if codec.InputText == nil {
+		return nil, fail("guardrail_surface_unavailable", "/request", "guardrail_input", "The source operation has no text inspection contract.")
+	}
+	source, err := codec.InputText(p.source)
+	return append(texts, source...), err
 }
 
 // GuardrailOutput uses the operation's own result contract. Vectors and other
@@ -85,5 +95,14 @@ func (p *Plan) GuardrailOutput(result Result) ([]operations.Text, error) {
 	if p.template.codec.OutputText == nil {
 		return nil, fail("guardrail_surface_unavailable", "/result", "guardrail_output", "The operation has no text inspection contract.")
 	}
-	return p.template.codec.OutputText(result.Envelope)
+	texts, err := p.template.codec.OutputText(result.Envelope)
+	if err != nil || p.mapping == nil {
+		return texts, err
+	}
+	codec, _ := operationregistry.Lookup(p.source.Descriptor().Dialect.ID)
+	if codec.OutputText == nil {
+		return nil, fail("guardrail_surface_unavailable", "/result", "guardrail_output", "The source operation has no text inspection contract.")
+	}
+	projected, err := codec.OutputText(result.projected)
+	return append(texts, projected...), err
 }

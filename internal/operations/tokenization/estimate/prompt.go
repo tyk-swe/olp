@@ -123,7 +123,8 @@ type Estimate struct {
 	Provenance Provenance
 	Family     Family
 
-	generation bool
+	generation  bool
+	inputCopies int64
 }
 
 // Tokens is what the request may consume, charged before the upstream reports
@@ -136,7 +137,13 @@ func (e Estimate) Tokens() int64 {
 	if !e.generation {
 		return max(e.Input, 1)
 	}
-	return max(addBounded(e.Input, e.Reply()), 1)
+	return max(addBounded(e.InputExposure(), e.Reply()), 1)
+}
+
+// InputExposure is the aggregate input charged across generated candidates.
+// Input remains the prompt size used to check each candidate's context window.
+func (e Estimate) InputExposure() int64 {
+	return multiplyBounded(e.Input, max(e.inputCopies, 1))
 }
 
 // Reply is the largest reply the request allows: for a generation, the bound it
@@ -179,7 +186,7 @@ func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estima
 				copies = max(copies, n)
 			}
 		}
-		e.Input = multiplyBounded(e.Input, copies)
+		e.inputCopies = copies
 	}
 	return e
 }

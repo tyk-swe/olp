@@ -43,6 +43,11 @@ func encodeCompletionChat(r *wire.Request, target wire.Format, kind, vendor, mod
 		}
 	}
 	delete(f, "prompt")
+	// Legacy Completions defaults to 16 output tokens. An omitted or null
+	// Chat limit would instead allow the remaining model context.
+	if limit, explicit := f["max_tokens"]; explicit && !present(limit) || !explicit && !present(defaults["max_tokens"]) {
+		f["max_tokens"] = raw(16)
+	}
 	f["messages"] = raw([]any{map[string]any{"role": "user", "content": prompt}})
 	f["model"] = raw(r.Route)
 	parsed, err := openai.Parse(wire.Chat, raw(f))

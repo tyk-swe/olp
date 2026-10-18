@@ -237,12 +237,12 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 	counter := estimate.ForModel(model)
 	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
 		to := effective.prompt.Estimate(counter, nil)
-		return admittedEstimate{reserve: to.Tokens(), input: to.Input, reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
+		return admittedEstimate{reserve: to.Tokens(), input: to.InputExposure(), reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
 	}
 	from, to := source.prompt.Estimate(counter, nil), effective.prompt.Estimate(counter, nil)
 	admitted := admittedEstimate{
 		reserve:    max(from.Tokens(), to.Tokens()),
-		input:      max(from.Input, to.Input),
+		input:      max(from.InputExposure(), to.InputExposure()),
 		reply:      max(from.Reply(), to.Reply()),
 		provenance: estimate.Weaker(from.Provenance, to.Provenance),
 		family:     to.Family,
@@ -352,7 +352,7 @@ func (x *call) attemptEstimate(provider *routing.Provider, targetID, model strin
 		bounds := record.output
 		e := x.summarizeSource().prompt.Estimate(estimate.ForModel(model), provider.ParameterDefaults)
 		e.Output, e.Candidates = bounds.output, bounds.candidates
-		return admittedEstimate{reserve: e.Tokens(), input: e.Input, reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
+		return admittedEstimate{reserve: e.Tokens(), input: e.InputExposure(), reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
 	}
 	prepared, err := x.providerAdmission(provider, targetID, model)
 	if err != nil {

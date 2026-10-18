@@ -68,6 +68,15 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	if x.guardrailEngine == nil {
 		return nil
 	}
+	// Unary operation codecs expose inspection text but cannot apply rewritten
+	// segments to their typed request and result documents.
+	if x.unary != nil {
+		for _, phase := range []string{guardrails.Input, guardrails.Output, guardrails.OutputStream} {
+			if x.guardrailEngine.HasAction(phase, guardrails.Redact) || x.guardrailEngine.HasAction(phase, guardrails.Mask) {
+				return guardrailError(guardrails.ErrSurface)
+			}
+		}
+	}
 	x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
 	if x.guardrailMasks == nil {
 		x.guardrailMasks = &guardrails.Masking{}

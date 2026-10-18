@@ -74,10 +74,11 @@ func TestDecisionMappingPreservesNamesValuesAndScale(t *testing.T) {
 	}
 	body := `{"model":"upstream","answers":{"q0":{"type":"noul","noul":0.9},"q1":{"type":"choice","choice":"true","confidence":0.8,"probabilities":{"true":0.9,"no":0.1}},"q2":{"type":"score","score":0.75,"confidence":0.5,"legend":{"0":"low","1":"high"},"probabilities":{"0":0.25,"1":0.75}}},"usage":{"input_tokens":5,"output_tokens":2}}`
 	res := result(t, SystemOne, body)
-	if _, err = parseResult(native, res); err != nil {
+	resultView, err := parseResult(native, res)
+	if err != nil {
 		t.Fatal(err)
 	}
-	projected, err := projectSystemOne(r, res, nil, "route")
+	projected, err := projectSystemOne(r, res, resultView, "route")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +92,9 @@ func TestDecisionMappingPreservesNamesValuesAndScale(t *testing.T) {
 	}
 	if response.Answers[0]["name"] != nil || response.Answers[1]["choice"] != true || response.Answers[2]["score"] != 0.75 {
 		t.Fatalf("projection: %s", projected.Bytes())
+	}
+	if total, ok := projected.Lookup("/usage/total_tokens"); !ok || total.Raw() != "7" {
+		t.Fatalf("projected usage total: %s", projected.Bytes())
 	}
 	collision := request(t, OpenAI, `{"model":"route","input":"hello","questions":[{"type":"choice","instructions":"Which?","choices":[{"value":true},{"value":"true"}]}]}`)
 	v, _ := parseRequest(collision)
