@@ -15,16 +15,16 @@ import (
 const maxCapturePolicies = 1000
 
 type createCapturePolicyInput struct {
-	ProjectID   *string  `json:"project_id"`
-	Route       *string  `json:"route_slug"`
-	SinkID      string   `json:"sink"`
-	SampleRatio string   `json:"sample_ratio"`
-	Include     []string `json:"include"`
-	Redact      []string `json:"redact"`
-	KeyIDs      []string `json:"key_ids"`
-	EndUsers    []string `json:"end_user_digests"`
-	MaxBytes    int      `json:"max_bytes"`
-	Enabled     *bool    `json:"enabled"`
+	ProjectID   *string              `json:"project_id"`
+	Route       *string              `json:"route_slug"`
+	SinkID      string               `json:"sink"`
+	SampleRatio string               `json:"sample_ratio"`
+	Include     []string             `json:"include"`
+	Redact      captureRedactorNames `json:"redact"`
+	KeyIDs      []string             `json:"key_ids"`
+	EndUsers    []string             `json:"end_user_digests"`
+	MaxBytes    int                  `json:"max_bytes"`
+	Enabled     *bool                `json:"enabled"`
 }
 
 func (m *Management) listCaptureSinks(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -186,6 +186,9 @@ func (m *Management) createCapturePolicy(r *http.Request, _ access.Principal) (a
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
+	if err := publishCaptureRedactors(r.Context(), tx, &policy); err != nil {
+		return access.Reply{}, err
+	}
 	var count int64
 	if err := tx.QueryRow(r.Context(), countCapturePoliciesSQL).Scan(&count); err != nil {
 		return access.Reply{}, err
@@ -205,6 +208,9 @@ func (m *Management) createCapturePolicy(r *http.Request, _ access.Principal) (a
 	if _, err := tx.Exec(r.Context(), createCapturePolicySQL, policy.ID, policy.ProjectID, policy.Route, policy.SinkID, policy.SampleRatio, policy.Include, policy.Redact, policy.MaxBytes, policy.Enabled, policy.ETag, p.UserID(), policy.KeyIDs, policy.EndUsers); err != nil {
 		return access.Reply{}, err
 	}
+	if err := storeCaptureRedactors(r.Context(), tx, policy); err != nil {
+		return access.Reply{}, err
+	}
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.create", "capture_policy", policy.ID, "success", policy.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
@@ -217,16 +223,16 @@ func (m *Management) createCapturePolicy(r *http.Request, _ access.Principal) (a
 
 func (m *Management) updateCapturePolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input struct {
-		SinkID      *string  `json:"sink"`
-		SampleRatio *string  `json:"sample_ratio"`
-		Include     []string `json:"include"`
-		Redact      []string `json:"redact"`
-		KeyIDs      []string `json:"key_ids"`
-		EndUsers    []string `json:"end_user_digests"`
-		MaxBytes    *int     `json:"max_bytes"`
-		Enabled     *bool    `json:"enabled"`
-		ProjectID   *string  `json:"project_id"`
-		Route       *string  `json:"route_slug"`
+		SinkID      *string              `json:"sink"`
+		SampleRatio *string              `json:"sample_ratio"`
+		Include     []string             `json:"include"`
+		Redact      captureRedactorNames `json:"redact"`
+		KeyIDs      []string             `json:"key_ids"`
+		EndUsers    []string             `json:"end_user_digests"`
+		MaxBytes    *int                 `json:"max_bytes"`
+		Enabled     *bool                `json:"enabled"`
+		ProjectID   *string              `json:"project_id"`
+		Route       *string              `json:"route_slug"`
 	}
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
@@ -295,6 +301,11 @@ func (m *Management) updateCapturePolicy(r *http.Request, _ access.Principal) (a
 			return access.Reply{}, err
 		}
 	}
+	if input.Redact != nil {
+		if err := publishCaptureRedactors(r.Context(), tx, &current); err != nil {
+			return access.Reply{}, err
+		}
+	}
 	etag = access.NewID()
 	if current.KeyIDs == nil {
 		current.KeyIDs = []string{}
@@ -307,6 +318,11 @@ func (m *Management) updateCapturePolicy(r *http.Request, _ access.Principal) (a
 	}
 	if _, err := tx.Exec(r.Context(), updateCapturePolicySQL, current.ID, current.SinkID, current.SampleRatio, current.Include, current.Redact, current.MaxBytes, current.Enabled, etag, current.KeyIDs, current.EndUsers); err != nil {
 		return access.Reply{}, err
+	}
+	if input.Redact != nil {
+		if err := storeCaptureRedactors(r.Context(), tx, current); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.update", "capture_policy", current.ID, "success", projectID); err != nil {
 		return access.Reply{}, err

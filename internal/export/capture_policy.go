@@ -1,6 +1,7 @@
 package export
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -9,13 +10,29 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 var captureRatioPattern = regexp.MustCompile(`^(0(\.[0-9]{1,9})?|1(\.0{1,9})?)$`)
 
+type CaptureRedactor struct {
+	Name        string `json:"name"`
+	GuardrailID string `json:"guardrail_id"`
+	RevisionID  string `json:"revision_id"`
+	Revision    int64  `json:"revision"`
+	Type        string `json:"type"`
+}
+
 type CapturePolicy struct {
+	redactorProject   string
+	RedactorRevisions []CaptureRedactor `json:"redactor_revisions"`
+	redactor          *guardrails.Engine
+	redactorInvalid   bool
+
 	ID          string   `json:"id"`
 	ProjectID   *string  `json:"project_id"`
 	Route       *string  `json:"route_slug"`
@@ -44,8 +61,16 @@ func (p CapturePolicy) Validate() error {
 		}
 		seen[field] = true
 	}
-	if len(p.Redact) != 0 {
-		return errors.New("capture redaction requires M7 detectors; unredacted capture is restricted to installation sinks")
+	if len(p.Redact) > guardrails.MaxEntries {
+		return errors.New("redact supports at most 128 local detectors")
+	}
+	names := map[string]bool{}
+	for _, name := range p.Redact {
+		key := strings.ToLower(name)
+		if strings.TrimSpace(name) != name || !utf8.ValidString(name) || len(name) == 0 || utf8.RuneCountInString(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) || names[key] {
+			return errors.New("redact must contain distinct detector names of 1 to 100 characters")
+		}
+		names[key] = true
 	}
 	if len(p.KeyIDs) > 256 || len(p.EndUsers) > 256 {
 		return errors.New("key_ids and end_user_digests support at most 256 values")
@@ -90,7 +115,7 @@ func (p CapturePolicy) Matches(project, route, key, endUser string) bool {
 		(len(p.EndUsers) == 0 || slices.Contains(p.EndUsers, endUser))
 }
 
-var captureInputFields = []string{"messages", "input", "contents", "system", "prompt", "preamble", "message", "chat_history", "suffix"}
+var captureInputFields = []string{"messages", "input", "contents", "system", "prompt", "preamble", "message", "chat_history", "suffix", "instructions", "systemInstruction"}
 
 func CaptureInput(document map[string]json.RawMessage) map[string]json.RawMessage {
 	result := map[string]json.RawMessage{}
@@ -104,4 +129,19 @@ func CaptureInput(document map[string]json.RawMessage) map[string]json.RawMessag
 
 func CaptureObjectName(requestID string) string {
 	return "captures/" + strings.ReplaceAll(requestID, "-", "") + ".jsonl"
+}
+
+// An omitted PATCH list preserves pins; null is not an explicit list.
+type captureRedactorNames []string
+
+func (n *captureRedactorNames) UnmarshalJSON(raw []byte) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("redact must be an array")
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return err
+	}
+	*n = names
+	return nil
 }

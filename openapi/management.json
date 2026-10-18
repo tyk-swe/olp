@@ -22313,9 +22313,14 @@
           },
           "redact": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
             },
-            "type": "array"
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
           },
           "key_ids": {
             "items": {
@@ -22340,6 +22345,14 @@
           "etag": {
             "format": "uuid",
             "type": "string"
+          },
+          "redactor_revisions": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "$ref": "#/components/schemas/CaptureRedactorRevision"
+            },
+            "description": "Pinned detector metadata in execution order. Never includes detector configuration or captured content."
           }
         },
         "required": [
@@ -22393,9 +22406,14 @@
           },
           "redact": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
             },
-            "type": "array"
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
           },
           "key_ids": {
             "items": {
@@ -22448,9 +22466,14 @@
           },
           "redact": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
             },
-            "type": "array"
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
           },
           "key_ids": {
             "items": {
@@ -24077,12 +24100,20 @@
             "format": "date-time"
           },
           "row_count": {
-            "type": "integer",
-            "format": "int64"
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Null until the dataset has been generated."
           },
           "part_count": {
-            "type": "integer",
-            "format": "int32"
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Null until the dataset has been generated."
           },
           "billed_cost": {
             "type": [
@@ -24870,6 +24901,42 @@
           "unused_cost",
           "provisional",
           "complete"
+        ]
+      },
+      "CaptureRedactorRevision": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "guardrail_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "builtin.regex",
+              "builtin.pii",
+              "builtin.secrets",
+              "builtin.keywords"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "guardrail_id",
+          "revision_id",
+          "revision",
+          "type"
         ]
       }
     },

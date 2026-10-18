@@ -15,6 +15,7 @@
     deleteExportSink,
     getCaptureConfiguration,
     listCapturePolicies,
+    listCaptureRedactorOptions,
     listCaptureSinkOptions,
     listExportSinks,
     listExportSinkFocusDatasets,
@@ -85,6 +86,26 @@
     queryKey: observabilityKeys.captureSinks(),
     queryFn: ({ signal }) => listCaptureSinkOptions(signal)
   }));
+
+  const redactorOptions = createQuery(() => ({
+    queryKey: ['capture-redactor-options'],
+    queryFn: ({ signal }) => listCaptureRedactorOptions(signal),
+    enabled: canManageProjects || canManageInstallation
+  }));
+  const eligibleRedactors = $derived(
+    (redactorOptions.data ?? []).filter(
+      (d) =>
+        d.active_revision_id &&
+        !d.retired_at &&
+        [
+          'builtin.regex',
+          'builtin.pii',
+          'builtin.secrets',
+          'builtin.keywords'
+        ].includes(d.type) &&
+        (!policyProjectId || d.project_id === policyProjectId)
+    )
+  );
 
   let error = $state('');
   let notice = $state('');
@@ -427,6 +448,30 @@
   let policySinkId = $state('');
   let policyRatio = $state('1');
   let policyInclude = $state<string[]>(['input', 'output']);
+  let policyRedactors = $state<string[]>([]);
+  let redactorName = $state('');
+  let refreshRedactors = $state(false);
+  function addRedactor() {
+    const name = redactorName.trim();
+    if (
+      name &&
+      !policyRedactors.some(
+        (value) => value.toLowerCase() === name.toLowerCase()
+      ) &&
+      policyRedactors.length < 128
+    ) {
+      policyRedactors = [...policyRedactors, name];
+      redactorName = '';
+    }
+  }
+  function moveRedactor(index: number, direction: number) {
+    const next = [...policyRedactors];
+    [next[index], next[index + direction]] = [
+      next[index + direction],
+      next[index]
+    ];
+    policyRedactors = next;
+  }
   let policyKeyIds = $state('');
   let policyEndUsers = $state('');
   let policyMaxBytes = $state('65536');
@@ -448,6 +493,9 @@
     policySinkId = policy.sink;
     policyRatio = policy.sample_ratio;
     policyInclude = [...policy.include];
+    policyRedactors = [...policy.redact];
+    refreshRedactors = false;
+    redactorName = '';
     policyKeyIds = policy.key_ids.join(', ');
     policyEndUsers = policy.end_user_digests.join(', ');
     policyMaxBytes = String(policy.max_bytes);
@@ -458,6 +506,9 @@
   function resetPolicyForm() {
     policyIntent.reset();
     editingPolicy = null;
+    policyRedactors = [];
+    refreshRedactors = false;
+    redactorName = '';
     policyRoute = policyKeyIds = policyEndUsers = '';
     policySinkId = '';
     policyRatio = '1';
@@ -517,6 +568,11 @@
     error = notice = '';
     let committed = false;
     const fields = {
+      ...(!editing ||
+      refreshRedactors ||
+      JSON.stringify(policyRedactors) !== JSON.stringify(editing.redact)
+        ? { redact: [...policyRedactors] }
+        : {}),
       sink: policySinkId,
       sample_ratio: policyRatio.trim(),
       include: policyInclude as CapturePolicy['include'],
@@ -645,7 +701,8 @@
   <h2 id="observability-heading">Export sinks and payload capture</h2>
   <p class="section-help">
     Durable metadata and usage export sinks deliver to HTTPS, OTLP logs or
-    object storage. Bounded payload capture is opt-in and unredacted.
+    object storage. Bounded payload capture is opt-in, with optional pinned
+    local redactors.
   </p>
 
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
@@ -1074,11 +1131,11 @@
 
   <h3>Payload capture</h3>
   <div class="capture-warning" role="note">
-    Payload capture stores <strong>unredacted</strong> request and response content
-    — including prompts, completions, tool calls and any secrets callers paste. It
-    is opt-in, queues are volatile, and delivery reaches only the configured operator
-    sink. Active redaction is not available in this release; do not treat capture
-    as filtered.
+    Capture is opt-in and delivered from memory to an installation-owned sink.
+    Policies without redactors capture <strong>unredacted</strong> content. Configured
+    local detectors inspect selected fields before enqueue; failed or incomplete inspection
+    drops the whole capture. Detector coverage is bounded and does not guarantee removal
+    of every secret or personal detail.
   </div>
   {#if captureConfig.isPending}<span class="inline-status" role="status"
       >Loading capture…</span
@@ -1156,6 +1213,85 @@
               >
             {/each}
           </fieldset>
+          <fieldset class="form-field">
+            <legend>Redactors in order</legend>
+            <label for="policy-redactor">Local detector name</label>
+            <input
+              id="policy-redactor"
+              list="capture-redactor-options"
+              bind:value={redactorName}
+              placeholder="Choose or enter a detector name"
+            />
+            <datalist id="capture-redactor-options">
+              {#each eligibleRedactors as detector (detector.id)}
+                <option value={detector.name}
+                  >{detector.type} · {detector.project_id}</option
+                >
+              {/each}
+            </datalist>
+            <button
+              type="button"
+              class="text-button"
+              onclick={addRedactor}
+              disabled={!redactorName.trim() || policyRedactors.length >= 128}
+              >Add redactor</button
+            >
+            <ol>
+              {#each policyRedactors as name, index (name)}
+                <li>
+                  {name}
+                  <button
+                    type="button"
+                    aria-label={`Move ${name} up`}
+                    disabled={index === 0}
+                    onclick={() => moveRedactor(index, -1)}>↑</button
+                  >
+                  <button
+                    type="button"
+                    aria-label={`Move ${name} down`}
+                    disabled={index === policyRedactors.length - 1}
+                    onclick={() => moveRedactor(index, 1)}>↓</button
+                  >
+                  <button
+                    type="button"
+                    aria-label={`Remove ${name}`}
+                    onclick={() =>
+                      (policyRedactors = policyRedactors.filter(
+                        (_, i) => i !== index
+                      ))}>Remove</button
+                  >
+                </li>
+              {/each}
+            </ol>
+            <p class="section-help">
+              Names resolve in the policy project, or the route's project when
+              no project is selected. Empty means unredacted capture.
+            </p>
+            {#if editingPolicy}
+              <p class="section-help">
+                Other edits preserve pinned revisions. Changing this list adopts
+                active revisions for every selected detector.
+              </p>
+              <button
+                type="button"
+                class="text-button"
+                onclick={() => (refreshRedactors = true)}
+                disabled={refreshRedactors || !policyRedactors.length}
+                >Refresh pinned revisions on save</button
+              >
+              {#if refreshRedactors}<p role="status">
+                  Saving will adopt the active detector revisions.
+                </p>{/if}
+              <ul aria-label="Pinned redactor revisions">
+                {#each editingPolicy.redactor_revisions ?? [] as pin (pin.revision_id)}
+                  <li>
+                    {pin.name} · revision {pin.revision}
+                    <span class="mono">{pin.revision_id}</span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </fieldset>
           <div class="form-field">
             <label for="policy-keys">Key IDs</label><input
               id="policy-keys"
@@ -1232,9 +1368,9 @@
           ><tr
             ><th scope="col">Scope</th><th scope="col">Sink</th><th scope="col"
               >Ratio</th
-            ><th scope="col">Includes</th><th scope="col">Enabled</th><th
-              scope="col"><span class="sr-only">Actions</span></th
-            ></tr
+            ><th scope="col">Includes</th><th scope="col">Redactors</th><th
+              scope="col">Enabled</th
+            ><th scope="col"><span class="sr-only">Actions</span></th></tr
           ></thead
         >
         <tbody>
@@ -1248,9 +1384,17 @@
                   : ''}</td
               ><td>{sinkOptionLabel(policy.sink)}</td><td
                 ><span class="mono">{policy.sample_ratio}</span></td
-              ><td>{policy.include.join(', ')}</td><td
-                >{policy.enabled ? 'Yes' : 'No'}</td
-              ><td
+              ><td>{policy.include.join(', ')}</td><td>
+                {#if policy.redact.length}
+                  <ol>
+                    {#each policy.redactor_revisions ?? [] as pin (pin.revision_id)}<li
+                      >
+                        {pin.name} · revision {pin.revision}
+                        <span class="mono">{pin.revision_id}</span>
+                      </li>{/each}
+                  </ol>
+                {:else}Unredacted{/if}
+              </td><td>{policy.enabled ? 'Yes' : 'No'}</td><td
                 >{#if canMutate(policy.project_id)}<button
                     class="text-button"
                     type="button"

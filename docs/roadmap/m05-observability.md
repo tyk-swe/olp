@@ -17,8 +17,8 @@ content out of OLP's own storage.
 - Request, attempt, usage, guardrail and audit facts export durably to object
   storage, OTLP collectors and HTTP endpoints, per installation or per project.
 - Operators who need prompts and outputs for debugging or evaluation capture
-  them, sampled, directly to a sink they own. Custom capture redaction remains
-  unavailable; nonempty `redact` policies are refused.
+  them, sampled, directly to a sink they own. Optional pinned local redactors
+  inspect selected fields before enqueue; see [capture](../payload-capture.md).
 - Traces and metrics follow the OpenTelemetry GenAI semantic conventions, so
   OpenTelemetry-native tools can ingest standard telemetry. Pinned Langfuse
   and Arize Phoenix readback is verified; other collectors require their own
@@ -89,13 +89,12 @@ A capture policy on a project or route opts into content export:
   object stores or HTTPS) through a bounded asynchronous queue. It is never
   written to PostgreSQL or Valkey. Overflow drops the capture and counts the
   loss, mirroring how metadata delivery protects request latency.
-- Only unredacted custom capture is available, and only to operator-configured
-  installation sinks after the owner enables capture. The
-  [M7 capture integration](m07-guardrails.md#m78-capture-redaction-integration)
-  detector engine does not by itself enable capture redaction: integrating
-  those detectors into this separate collector remains follow-up work.
-  Nonempty `redact` policies continue to fail closed until that integration has
-  input/output/tool coverage, privacy tests and bounded execution evidence.
+- Capture is restricted to operator-configured installation sinks after owner
+  opt-in. Empty `redact` captures unredacted content; ordered local detector names
+  pin active immutable revisions at creation or explicit refresh. The
+  [M7 integration](m07-guardrails.md#m78-capture-redaction-integration) inspects
+  complete selected fields before enqueue and drops failures without changing
+  inference. New service/readback fixtures await human qualification.
 - Capture never changes the upstream invocation, so strict routes may use it.
 - Creating or widening a capture policy requires the `settings` operation for
   installation scope or project-manager access for a project, and writes an
@@ -180,9 +179,9 @@ A capture policy on a project or route opts into content export:
 3. An owner must enable capture installation-wide before project managers may
    create policies for their projects. Policies deliver only to enabled,
    operator-configured installation sinks.
-4. Redaction identifiers are reserved for the M7 capture integration. Nonempty
-   redaction configurations fail closed until that integration is qualified;
-   M5 never presents unredacted content as redacted.
+4. Redaction names resolve to pinned local detector revisions through M7.
+   Missing/unsupported definitions refuse publication; evaluation failures drop
+   the capture. Empty lists remain explicitly unredacted.
 5. **Delivery classes remain distinct.** Durable metadata exports retry at
    least once, with event IDs for receiver deduplication and retention-expiry
    gaps. Payload capture is best-effort memory-only delivery and cannot promise
@@ -217,14 +216,11 @@ qualification. M6 reuses durable export delivery for metering and object sinks.
    checks. Local wire fixtures establish protocol behavior but do not establish
    access to a real S3/GCS/Azure/SMTP/chat account. Keep untested destinations
    labelled fixture-qualified rather than blocking unrelated transports.
-3. **Integrate capture redaction as a separate increment.** Follow
-   [M7.8](m07-guardrails.md#m78-capture-redaction-integration)
-   after the required detector contract is ready, applying it before enqueueing
-   each selected input/output/tool field. Drop the entire capture on unsupported
-   surfaces or detector failure without failing the inference response. Prove
-   raw content cannot escape into a sink/log/database and retain the current
-   queue and latency bounds. Until those gates pass, the existing
-   unredacted opt-in contract remains the supported behavior.
+3. **Qualify capture redaction as a separate increment.** The implemented
+   [M7.8 adapter](m07-guardrails.md#m78-capture-redaction-integration) now has
+   focused tests and compiled service fixtures. Execute the sink-readback,
+   privacy and release gates in the [handoff](m07-qualification.md) before
+   marking its acceptance complete.
 
 ## Exit criteria
 
@@ -257,7 +253,7 @@ The console exposes these controls with scoped permissions and ETag updates.
 Operations, privacy, configuration, Helm and monitoring documentation accompany
 the implementation.
 
-Qualification covers:
+Historical M5 qualification, before the M7 capture-redaction increment, covers:
 
 - All five durable streams through all five transports, including sealed
   credentials, deterministic object keys, retry/restart delivery and retention

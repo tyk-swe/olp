@@ -1,230 +1,257 @@
 package protocols
 
 import (
-	"bytes"
 	"encoding/json"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func CaptureStreamFrame(family wire.Format, frame []byte, text func(string), tool func(json.RawMessage)) {
-	if family.Surface() == "bedrock" {
-		captureBedrockFrame(frame, text, tool)
-		return
-	}
-	for line := range bytes.SplitSeq(frame, []byte("\n")) {
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		f, e := object(bytes.TrimSpace(line[5:]))
-		if e != nil {
-			continue
-		}
-		switch family.Surface() {
-		case "anthropic":
-			kind := str(f["type"])
-			switch kind {
-			case "content_block_start":
-				if block, _ := object(f["content_block"]); str(block["type"]) == "tool_use" {
-					tool(f["content_block"])
-				}
-			case "content_block_delta":
-				delta, _ := object(f["delta"])
-				switch str(delta["type"]) {
-				case "text_delta":
-					text(str(delta["text"]))
-				case "input_json_delta":
-					if present(delta["partial_json"]) {
-						tool(f["delta"])
-					}
-				}
-			}
-		case "gemini":
-			for _, v := range arr(f["candidates"]) {
-				candidate, _ := object(v)
-				content, _ := object(candidate["content"])
-				for _, part := range arr(content["parts"]) {
-					p, _ := object(part)
-					var thought bool
-					_ = json.Unmarshal(p["thought"], &thought)
-					if thought {
-						continue
-					}
-					if t := str(p["text"]); t != "" {
-						text(t)
-					}
-					if present(p["functionCall"]) {
-						tool(p["functionCall"])
-					}
-				}
-			}
-		case "native":
-			if family == wire.CohereChat {
-				delta, _ := object(f["delta"])
-				message, _ := object(delta["message"])
-				switch str(f["type"]) {
-				case "content-delta":
-					content, _ := object(message["content"])
-					if t := str(content["text"]); t != "" {
-						text(t)
-					}
-				case "tool-call-start", "tool-call-delta":
-					if present(message["tool_calls"]) {
-						tool(message["tool_calls"])
-					}
-				}
-				continue
-			}
-			for _, v := range arr(f["choices"]) {
-				choice, _ := object(v)
-				delta, _ := object(choice["delta"])
-				if t := str(delta["content"]); t != "" {
-					text(t)
-				}
-				if t := str(delta["refusal"]); t != "" {
-					text(t)
-				}
-				for _, call := range arr(delta["tool_calls"]) {
-					tool(call)
-				}
-			}
-		default:
-			if family == wire.Responses {
-				switch str(f["type"]) {
-				case "response.output_text.delta", "response.refusal.delta":
-					if t := str(f["delta"]); t != "" {
-						text(t)
-					}
-				case "response.function_call_arguments.delta", "response.function_call_arguments.done":
-					if present(f["delta"]) || present(f["arguments"]) {
-						tool(bytes.TrimSpace(line[5:]))
-					}
-				case "response.output_item.added", "response.output_item.done":
-					if item, _ := object(f["item"]); str(item["type"]) == "function_call" {
-						tool(f["item"])
-					}
-				}
-				continue
-			}
-			for _, v := range arr(f["choices"]) {
-				choice, _ := object(v)
-				delta, _ := object(choice["delta"])
-				if t := str(delta["content"]); t != "" {
-					text(t)
-				}
-				if t := str(delta["refusal"]); t != "" {
-					text(t)
-				}
-				for _, call := range arr(delta["tool_calls"]) {
-					tool(call)
-				}
-			}
-		}
-	}
-}
-
-func captureBedrockFrame(frame []byte, text func(string), tool func(json.RawMessage)) {
-	message, err := ReadBedrockEvent(bytes.NewReader(frame), len(frame))
-	if err != nil {
-		return
-	}
-	header := func(name string) string {
-		if v := message.Headers.Get(name); v != nil {
-			return v.String()
-		}
-		return ""
-	}
-	if header(":message-type") != "event" {
-		return
-	}
-	f, err := object(message.Payload)
-	if err != nil {
-		return
-	}
-	switch header(":event-type") {
-	case "contentBlockStart":
-		if start, e := optionalObject(f["start"]); e == nil {
-			if use, e := optionalObject(start["toolUse"]); e == nil && use != nil {
-				tool(start["toolUse"])
-			}
-		}
-	case "contentBlockDelta":
-		delta, _ := optionalObject(f["delta"])
-		if t := str(delta["text"]); t != "" {
-			text(t)
-		}
-		if use, e := optionalObject(delta["toolUse"]); e == nil && use != nil {
-			if present(use["input"]) {
-				tool(f["delta"])
-			}
-		}
-	}
-}
-
 func CaptureDocumentToolCalls(family wire.Format, body []byte) []json.RawMessage {
-	fields, err := object(body)
+	_, calls, err := CaptureResponse(family, body, false, true)
 	if err != nil {
 		return nil
 	}
+	return calls
+}
+
+// CaptureResponse extracts only complete, inspectable selected surfaces. Unlike
+// serving rewrites it is read-only, including on strict native routes.
+func CaptureResponse(family wire.Format, body []byte, output, tools bool) (string, []json.RawMessage, error) {
+	r := &captureReader{}
 	var calls []json.RawMessage
-	switch family.Surface() {
-	case "anthropic":
-		for _, block := range arr(fields["content"]) {
-			if b, _ := object(block); str(b["type"]) == "tool_use" {
-				calls = append(calls, block)
-			}
+	f, err := r.object(body)
+	if err != nil || !validCaptureJSON(body) {
+		return "", nil, errCaptureStream
+	}
+	var texts []string
+	add := func(raw json.RawMessage) {
+		if !output || !present(raw) {
+			return
 		}
-	case "gemini":
-		for _, v := range arr(fields["candidates"]) {
-			candidate, _ := object(v)
-			content, _ := object(candidate["content"])
-			for _, part := range arr(content["parts"]) {
-				if p, _ := object(part); present(p["functionCall"]) {
-					calls = append(calls, p["functionCall"])
-				}
-			}
-		}
-	case "bedrock":
-		message, _ := optionalObject(fields["output"])
-		if message != nil {
-			msg, _ := optionalObject(message["message"])
-			for _, block := range arr(msg["content"]) {
-				if b, _ := object(block); present(b["toolUse"]) {
-					calls = append(calls, b["toolUse"])
-				}
-			}
-		}
-	case "native":
-		if family == wire.CohereChat {
-			message, _ := object(fields["message"])
-			for _, call := range arr(message["tool_calls"]) {
-				calls = append(calls, call)
-			}
-			return calls
-		}
-		for _, v := range arr(fields["choices"]) {
-			choice, _ := object(v)
-			message, _ := object(choice["message"])
-			for _, call := range arr(message["tool_calls"]) {
-				calls = append(calls, call)
-			}
-		}
-	default:
-		if family == wire.Responses {
-			for _, item := range arr(fields["output"]) {
-				if i, _ := object(item); str(i["type"]) == "function_call" {
-					calls = append(calls, item)
-				}
-			}
-			return calls
-		}
-		for _, v := range arr(fields["choices"]) {
-			choice, _ := object(v)
-			message, _ := object(choice["message"])
-			for _, call := range arr(message["tool_calls"]) {
-				calls = append(calls, call)
-			}
+		values, e := captureResponseText(raw)
+		if e != nil {
+			err = e
+		} else {
+			texts = append(texts, values...)
 		}
 	}
-	return calls
+	switch family {
+	case wire.Chat, wire.MistralFIM:
+		if len(r.array(f["choices"])) == 0 {
+			err = errCaptureStream
+		}
+		for _, raw := range r.array(f["choices"]) {
+			c, _ := r.object(raw)
+			if !captureCompleteReason(family, r.str(c["finish_reason"])) {
+				err = errCaptureStream
+			}
+			m, _ := r.object(c["message"])
+			if m == nil {
+				err = errCaptureStream
+			}
+			if tools {
+				for _, call := range r.array(m["tool_calls"]) {
+					calls = append(calls, call)
+				}
+				if present(m["function_call"]) {
+					calls = append(calls, rawJSONFunction(m["function_call"]))
+				}
+			}
+			add(m["content"])
+			add(m["refusal"])
+			if output && present(m["audio"]) {
+				err = errCaptureStream
+			}
+		}
+	case wire.Responses:
+		if !present(f["output"]) || (present(f["status"]) && r.str(f["status"]) != "completed") {
+			err = errCaptureStream
+		}
+		for _, raw := range r.array(f["output"]) {
+			item, _ := r.object(raw)
+			switch r.str(item["type"]) {
+			case "message":
+				add(item["content"])
+			case "function_call":
+				if tools {
+					calls = append(calls, raw)
+				}
+			case "reasoning":
+			default:
+				err = errCaptureStream
+			}
+		}
+	case wire.Anthropic:
+		if !present(f["content"]) || !captureCompleteReason(family, r.str(f["stop_reason"])) {
+			err = errCaptureStream
+		}
+		add(f["content"])
+		if tools {
+			for _, raw := range r.array(f["content"]) {
+				block, _ := r.object(raw)
+				if r.str(block["type"]) == "tool_use" {
+					calls = append(calls, raw)
+				}
+			}
+		}
+	case wire.Gemini, wire.GeminiStream:
+		if len(r.array(f["candidates"])) == 0 {
+			err = errCaptureStream
+		}
+		for _, raw := range r.array(f["candidates"]) {
+			c, _ := r.object(raw)
+			if !captureCompleteReason(family, r.str(c["finishReason"])) {
+				err = errCaptureStream
+			}
+			content, _ := r.object(c["content"])
+			for _, raw := range r.array(content["parts"]) {
+				p, _ := r.object(raw)
+				if tools && present(p["functionCall"]) {
+					calls = append(calls, p["functionCall"])
+				}
+				if string(p["thought"]) == "true" {
+					continue
+				}
+				if present(p["text"]) {
+					add(p["text"])
+				} else if !present(p["functionCall"]) && output {
+					err = errCaptureStream
+				}
+			}
+		}
+	case wire.Bedrock:
+		if !captureCompleteReason(family, r.str(f["stopReason"])) {
+			err = errCaptureStream
+		}
+		out, _ := r.object(f["output"])
+		m, _ := r.object(out["message"])
+		if m == nil {
+			err = errCaptureStream
+		}
+		for _, raw := range r.array(m["content"]) {
+			p, _ := r.object(raw)
+			if tools && present(p["toolUse"]) {
+				calls = append(calls, p["toolUse"])
+			}
+			if present(p["text"]) {
+				add(p["text"])
+			} else if !present(p["toolUse"]) && !present(p["reasoningContent"]) && output {
+				err = errCaptureStream
+			}
+		}
+	case wire.CohereChat:
+		if !captureCompleteReason(family, r.str(f["finish_reason"])) {
+			err = errCaptureStream
+		}
+		m, _ := r.object(f["message"])
+		if tools {
+			calls = append(calls, r.array(m["tool_calls"])...)
+		}
+		if m == nil {
+			err = errCaptureStream
+		}
+		add(m["content"])
+	default:
+		err = errCaptureStream
+	}
+	if r.invalid {
+		err = errCaptureStream
+	}
+	for _, call := range calls {
+		if !validCaptureCall(family, call) {
+			err = errCaptureStream
+		}
+	}
+	return strings.Join(texts, "\n"), calls, err
+}
+
+func captureCompleteReason(family wire.Format, reason string) bool {
+	switch family {
+	case wire.Chat, wire.MistralFIM:
+		return reason == "stop" || reason == "tool_calls" || reason == "function_call"
+	case wire.Anthropic, wire.Bedrock:
+		return reason == "end_turn" || reason == "tool_use" || reason == "stop_sequence"
+	case wire.Gemini, wire.GeminiStream:
+		return reason == "STOP"
+	case wire.CohereChat:
+		return reason == "COMPLETE" || reason == "TOOL_CALL" || reason == "STOP_SEQUENCE"
+	default:
+		return false
+	}
+}
+
+func captureResponseText(raw json.RawMessage) ([]string, error) {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil, errCaptureStream
+	}
+	if value == nil {
+		return nil, nil
+	}
+	if text, ok := value.(string); ok {
+		return []string{text}, nil
+	}
+	parts, ok := value.([]any)
+	if !ok {
+		return nil, errCaptureStream
+	}
+	var texts []string
+	for _, part := range parts {
+		p, ok := part.(map[string]any)
+		if !ok {
+			return nil, errCaptureStream
+		}
+		switch p["type"] {
+		case "text", "output_text":
+			text, ok := p["text"].(string)
+			if !ok {
+				return nil, errCaptureStream
+			}
+			texts = append(texts, text)
+		case "refusal":
+			text, ok := p["refusal"].(string)
+			if !ok {
+				return nil, errCaptureStream
+			}
+			texts = append(texts, text)
+		case "tool_use", "thinking", "redacted_thinking":
+		default:
+			return nil, errCaptureStream
+		}
+	}
+	return texts, nil
+}
+
+func rawJSONFunction(fn json.RawMessage) json.RawMessage {
+	raw, _ := json.Marshal(map[string]json.RawMessage{"function": fn})
+	return raw
+}
+
+func validCaptureCall(family wire.Format, raw json.RawMessage) bool {
+	r := &captureReader{}
+	call, err := r.object(raw)
+	if err != nil {
+		return false
+	}
+	var name string
+	var args json.RawMessage
+	switch family {
+	case wire.Chat, wire.MistralFIM, wire.CohereChat:
+		fn, _ := r.object(call["function"])
+		name = r.str(fn["name"])
+		args = []byte(r.str(fn["arguments"]))
+	case wire.Responses:
+		name = r.str(call["name"])
+		args = []byte(r.str(call["arguments"]))
+	case wire.Anthropic, wire.Bedrock:
+		name = r.str(call["name"])
+		args = call["input"]
+	case wire.Gemini, wire.GeminiStream:
+		name = r.str(call["name"])
+		args = call["args"]
+	default:
+		return false
+	}
+	return !r.invalid && name != "" && validCaptureJSON(args)
 }

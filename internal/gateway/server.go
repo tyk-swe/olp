@@ -669,6 +669,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		if s.Capture != nil && x.origin == "" && x.operationName() == "generation" {
+			x.captureContext = r.Context()
 			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 		}
 

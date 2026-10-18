@@ -178,16 +178,31 @@ func fixtureRoute(t *testing.T, h *accessHarness, slug string) {
 }
 
 func TestCaptureStalePolicyDropsQueuedRecord(t *testing.T) {
+	t.Run("unredacted", func(t *testing.T) { testCaptureStalePolicyDropsQueuedRecord(t, false) })
+	t.Run("redactor-refresh", func(t *testing.T) { testCaptureStalePolicyDropsQueuedRecord(t, true) })
+}
+
+func testCaptureStalePolicyDropsQueuedRecord(t *testing.T, redacted bool) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	fixtureRoute(t, h, "team-chat")
+	projectID := ""
+	redactors := []string{}
+	if redacted {
+		projectID = createProject(h, owner, "Capture stale redactors")
+		if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.routes SET project_id=$1 WHERE slug='team-chat'`, projectID); err != nil {
+			t.Fatal(err)
+		}
+		captureDefinition(t, h, owner, projectID, "private", "builtin.keywords", map[string]any{"words": []string{"sentinel"}}, true)
+		redactors = []string{"private"}
+	}
 	h.want(owner, "PATCH", "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(h.want(owner, "GET", "/api/v1/observability/capture", nil, nil, 200)), 200)
 	receiver, server := newExportReceiver(t, "", 204)
 	sink := h.want(owner, "POST", "/api/v1/observability/sinks", map[string]any{
 		"name": "capture-stale", "type": "https", "destination": server.URL, "streams": []string{"requests"}, "format": "json",
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	policy := h.want(owner, "POST", "/api/v1/observability/capture-policies", map[string]any{
-		"sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"output"}, "max_bytes": 1048576, "route_slug": "team-chat",
+		"sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"output"}, "max_bytes": 1048576, "route_slug": "team-chat", "redact": redactors,
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	block := make(chan struct{})
@@ -201,25 +216,30 @@ func TestCaptureStalePolicyDropsQueuedRecord(t *testing.T) {
 	done := make(chan struct{})
 	go func() { manager.Run(ctx); close(done) }()
 	time.Sleep(250 * time.Millisecond)
-	collector := manager.Resolve("", "team-chat", "", "", uuid.NewString())
+	collector := manager.Resolve(projectID, "team-chat", "", "", uuid.NewString())
 	if collector == nil {
 		t.Fatal("not sampled")
 	}
 	collector.CaptureText("output", "fresh-sentinel")
-	if !collector.Finish(export.CaptureIdentity{Route: "team-chat", Outcome: "success"}, time.Now()) {
+	if !collector.Finish(export.CaptureIdentity{Route: "team-chat", ProjectID: projectID, Outcome: "success"}, time.Now()) {
 		t.Fatal("not queued")
 	}
 	time.Sleep(100 * time.Millisecond)
 	// Updating the policy bumps its etag while the first record is mid-send;
 	// the second queued record resolves against the old etag and is dropped.
 	policyID := policy["id"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/capture-policies/"+policyID, map[string]any{"sample_ratio": "0.5"}, map[string]string{"If-Match": `"` + policy["etag"].(string) + `"`}, 200)
-	stale := manager.Resolve("", "team-chat", "", "", uuid.NewString())
+	update := map[string]any{"sample_ratio": "0.5"}
+	if redacted {
+		update = map[string]any{"redact": redactors}
+	}
+	h.want(owner, "PATCH", "/api/v1/observability/capture-policies/"+policyID, update, map[string]string{"If-Match": `"` + policy["etag"].(string) + `"`}, 200)
+	staleRequest := uuid.NewString()
+	stale := manager.Resolve(projectID, "team-chat", "", "", staleRequest)
 	if stale == nil {
 		t.Fatal("second request not sampled")
 	}
 	stale.CaptureText("output", "stale-sentinel")
-	if !stale.Finish(export.CaptureIdentity{Route: "team-chat", Outcome: "success"}, time.Now()) {
+	if !stale.Finish(export.CaptureIdentity{Route: "team-chat", ProjectID: projectID, Outcome: "success"}, time.Now()) {
 		t.Fatal("second record not queued")
 	}
 	releaseOnce.Do(func() { close(block) })
@@ -235,7 +255,7 @@ func TestCaptureStalePolicyDropsQueuedRecord(t *testing.T) {
 	envs := receiver.received()
 	var sawStale bool
 	for _, env := range envs {
-		if env["data"].(map[string]any)["output"] == "stale-sentinel" {
+		if env["source_id"] == staleRequest {
 			sawStale = true
 		}
 	}

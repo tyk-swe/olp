@@ -448,6 +448,30 @@ func (e CapturePolicyInclude) Valid() bool {
 	}
 }
 
+// Defines values for CaptureRedactorRevisionType.
+const (
+	CaptureRedactorRevisionTypeBuiltinKeywords CaptureRedactorRevisionType = "builtin.keywords"
+	CaptureRedactorRevisionTypeBuiltinPii      CaptureRedactorRevisionType = "builtin.pii"
+	CaptureRedactorRevisionTypeBuiltinRegex    CaptureRedactorRevisionType = "builtin.regex"
+	CaptureRedactorRevisionTypeBuiltinSecrets  CaptureRedactorRevisionType = "builtin.secrets"
+)
+
+// Valid indicates whether the value is a known member of the CaptureRedactorRevisionType enum.
+func (e CaptureRedactorRevisionType) Valid() bool {
+	switch e {
+	case CaptureRedactorRevisionTypeBuiltinKeywords:
+		return true
+	case CaptureRedactorRevisionTypeBuiltinPii:
+		return true
+	case CaptureRedactorRevisionTypeBuiltinRegex:
+		return true
+	case CaptureRedactorRevisionTypeBuiltinSecrets:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CaptureSinkOptionType.
 const (
 	CaptureSinkOptionTypeAzureBlob CaptureSinkOptionType = "azure_blob"
@@ -5542,10 +5566,15 @@ type CapturePolicy struct {
 	KeyIds         []openapi_types.UUID                  `json:"key_ids"`
 	MaxBytes       int32                                 `json:"max_bytes"`
 	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	Redact         []string                              `json:"redact"`
-	RouteSlug      nullable.Nullable[string]             `json:"route_slug"`
-	SampleRatio    string                                `json:"sample_ratio"`
-	Sink           openapi_types.UUID                    `json:"sink"`
+
+	// Redact Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture.
+	Redact []string `json:"redact"`
+
+	// RedactorRevisions Pinned detector metadata in execution order. Never includes detector configuration or captured content.
+	RedactorRevisions *[]CaptureRedactorRevision `json:"redactor_revisions,omitempty"`
+	RouteSlug         nullable.Nullable[string]  `json:"route_slug"`
+	SampleRatio       string                     `json:"sample_ratio"`
+	Sink              openapi_types.UUID         `json:"sink"`
 }
 
 // CapturePolicyInclude defines model for CapturePolicy.Include.
@@ -5556,6 +5585,18 @@ type CapturePolicyListResponse struct {
 	Items      []CapturePolicy           `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
+
+// CaptureRedactorRevision defines model for CaptureRedactorRevision.
+type CaptureRedactorRevision struct {
+	GuardrailId openapi_types.UUID          `json:"guardrail_id"`
+	Name        string                      `json:"name"`
+	Revision    int64                       `json:"revision"`
+	RevisionId  openapi_types.UUID          `json:"revision_id"`
+	Type        CaptureRedactorRevisionType `json:"type"`
+}
+
+// CaptureRedactorRevisionType defines model for CaptureRedactorRevision.Type.
+type CaptureRedactorRevisionType string
 
 // CaptureSinkOption defines model for CaptureSinkOption.
 type CaptureSinkOption struct {
@@ -6782,10 +6823,12 @@ type CreateCapturePolicyRequest struct {
 	KeyIds         *[]openapi_types.UUID                 `json:"key_ids,omitempty"`
 	MaxBytes       int32                                 `json:"max_bytes"`
 	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
-	Redact         *[]string                             `json:"redact,omitempty"`
-	RouteSlug      nullable.Nullable[string]             `json:"route_slug,omitempty"`
-	SampleRatio    string                                `json:"sample_ratio"`
-	Sink           openapi_types.UUID                    `json:"sink"`
+
+	// Redact Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture.
+	Redact      *[]string                 `json:"redact,omitempty"`
+	RouteSlug   nullable.Nullable[string] `json:"route_slug,omitempty"`
+	SampleRatio string                    `json:"sample_ratio"`
+	Sink        openapi_types.UUID        `json:"sink"`
 }
 
 // CreateCapturePolicyRequestInclude defines model for CreateCapturePolicyRequest.Include.
@@ -7367,9 +7410,13 @@ type FocusDataset struct {
 	EffectiveCost    nullable.Nullable[string]           `json:"effective_cost"`
 	GeneratedAt      nullable.Nullable[time.Time]        `json:"generated_at"`
 	LastErrorCode    nullable.Nullable[string]           `json:"last_error_code"`
-	PartCount        int32                               `json:"part_count"`
-	Revision         int32                               `json:"revision"`
-	RowCount         int64                               `json:"row_count"`
+
+	// PartCount Null until the dataset has been generated.
+	PartCount nullable.Nullable[int32] `json:"part_count"`
+	Revision  int32                    `json:"revision"`
+
+	// RowCount Null until the dataset has been generated.
+	RowCount nullable.Nullable[int64] `json:"row_count"`
 }
 
 // FocusDatasetListResponse defines model for FocusDatasetListResponse.
@@ -11947,9 +11994,11 @@ type UpdateCapturePolicyRequest struct {
 	Include        *[]UpdateCapturePolicyRequestInclude `json:"include,omitempty"`
 	KeyIds         *[]openapi_types.UUID                `json:"key_ids,omitempty"`
 	MaxBytes       *int32                               `json:"max_bytes,omitempty"`
-	Redact         *[]string                            `json:"redact,omitempty"`
-	SampleRatio    *string                              `json:"sample_ratio,omitempty"`
-	Sink           *openapi_types.UUID                  `json:"sink,omitempty"`
+
+	// Redact Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture.
+	Redact      *[]string           `json:"redact,omitempty"`
+	SampleRatio *string             `json:"sample_ratio,omitempty"`
+	Sink        *openapi_types.UUID `json:"sink,omitempty"`
 }
 
 // UpdateCapturePolicyRequestInclude defines model for UpdateCapturePolicyRequest.Include.

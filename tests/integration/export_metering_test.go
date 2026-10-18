@@ -72,7 +72,11 @@ func TestMeteringSinkManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	datasets = h.want(owner, "GET", "/api/v1/observability/sinks/"+commitmentSink["export_sink_id"].(string)+"/focus-datasets", nil, nil, 200)
-	got := datasets["items"].([]any)[0].(map[string]any)["commitment_totals"].(map[string]any)
+	pendingDataset := datasets["items"].([]any)[0].(map[string]any)
+	if pendingDataset["row_count"] != nil || pendingDataset["part_count"] != nil {
+		t.Fatalf("ungenerated dataset counts must be unknown: %v", pendingDataset)
+	}
+	got := pendingDataset["commitment_totals"].(map[string]any)
 	if got["purchased_cost"] != "12.345678901234" || got["unused_cost"] != "2.345678901234" {
 		t.Fatal(got)
 	}

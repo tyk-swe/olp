@@ -50,7 +50,10 @@ section toggles the owner-only installation switch, then lists metadata-only
 sink options for policies — sink id, name, and type, never destinations or
 credentials — and creates project policies with route, exact-string sample
 ratio, include sets (input/output/tool_calls), key and end-user selectors,
-byte limits, and enable/disable, all under ETag concurrency.
+byte limits, and enable/disable, all under ETag concurrency. Ordered local
+redactor selection shows immutable revision pins. Unrelated edits preserve them;
+**Refresh pinned revisions on save** explicitly adopts current active revisions.
+Empty lists are labelled unredacted; see [capture](payload-capture.md).
 
 ## Usage and requests
 
