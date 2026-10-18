@@ -382,8 +382,15 @@ func (s *CaptureStream) anthropic(f map[string]json.RawMessage) {
 			s.add(id, s.str(b["text"]), false, false)
 		case "tool_use":
 			args := ""
-			if present(b["input"]) && string(b["input"]) != "{}" {
-				args = string(b["input"])
+			if s.tools && present(b["input"]) {
+				input, err := s.object(b["input"])
+				if err != nil {
+					s.invalid = true
+					return
+				}
+				if len(input) != 0 {
+					args = string(b["input"])
+				}
 			}
 			s.tool(id, s.str(b["name"]), args, false, false)
 		case "thinking", "redacted_thinking":
