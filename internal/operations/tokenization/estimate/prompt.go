@@ -112,19 +112,32 @@ func (p *Prompt) input(c Counter) (Count, int64) {
 			return entry.count, entry.context
 		}
 	}
-	count := c.count(&p.in, false)
-	context := count.Tokens
+	var count Count
+	var context int64
+	batch := false
 	if p.request != nil && p.request.Family == wire.Completions {
 		prompt, _ := p.request.OIF().Document().Root().Lookup("prompt")
 		items := prompt.Elements()
 		if len(items) > 0 && (items[0].Kind() == oif.String || items[0].Kind() == oif.Array) {
-			context = 0
+			batch = true
+			budget := ExactBytes
 			for _, item := range items {
 				var single input
 				walker{&single}.embedding(valueNode(item))
-				context = max(context, c.count(&single, false).Tokens)
+				part := c.countWithBudget(&single, false, &budget)
+				context = max(context, part.Tokens)
+				count.Tokens = addBounded(count.Tokens, part.Tokens)
+				if count.Provenance == "" {
+					count.Provenance = part.Provenance
+				} else {
+					count.Provenance = Weaker(count.Provenance, part.Provenance)
+				}
 			}
 		}
+	}
+	if !batch {
+		count = c.count(&p.in, false)
+		context = count.Tokens
 	}
 	t.counted = append(t.counted, counted{family, count, context})
 	if t.observe != nil {
@@ -306,7 +319,19 @@ func rank(p Provenance) int {
 // adds the family's framing, without priming the reply again when primed says
 // another input already did. Flat charges stand outside both.
 func (c Counter) count(in *input, primed bool) Count {
+	return c.countWithBudget(in, primed, nil)
+}
+
+// A completion batch shares one exact-tokenization allowance across prompts.
+func (c Counter) countWithBudget(in *input, primed bool, budget *int) Count {
 	m := c.Meter()
+	if budget != nil {
+		m.budget = min(m.budget, *budget)
+		if m.budget == 0 {
+			m.encoding = nil
+		}
+		defer func() { *budget = m.budget }()
+	}
 	if m.encoding == nil {
 		tokens, provenance := c.scale(in.heuristic)
 		return Count{addBounded(tokens, in.flat), provenance}

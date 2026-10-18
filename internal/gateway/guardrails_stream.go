@@ -172,8 +172,13 @@ func (g *guardrailStream) finish(ctx context.Context) ([][]byte, error) {
 
 func terminalGuardrailFrame(family wire.Format, frame []byte) bool {
 	switch family {
-	case wire.Chat:
-		return bytes.Contains(frame, []byte("data: [DONE]"))
+	case wire.Chat, wire.Completions:
+		for line := range bytes.SplitSeq(frame, []byte("\n")) {
+			if bytes.HasPrefix(line, []byte("data:")) && bytes.Equal(bytes.TrimSpace(line[5:]), []byte("[DONE]")) {
+				return true
+			}
+		}
+		return false
 	case wire.Responses:
 		return bytes.Contains(frame, []byte("response.completed")) || bytes.Contains(frame, []byte("response.failed"))
 	case wire.Anthropic:

@@ -281,6 +281,38 @@ describe('basic composer', () => {
 });
 
 describe('advanced composer', () => {
+  it('restores the selected Basic surface after a Decisions template', async () => {
+    vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+    await establish();
+    radio('advanced').click();
+    flushSync();
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'openai-decisions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    radio('basic').click();
+    flushSync();
+    const surface = host.querySelector<HTMLSelectElement>(
+      '#playground-surface'
+    )!;
+    surface.value = 'anthropic';
+    surface.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Inspect plan')!
+      .click();
+    flushSync();
+    await settle(0);
+    expect(inspectRouting).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'generation', surface: 'anthropic' })
+    );
+  });
+
   it.each(['openai-decisions', 'systemone'])(
     'inspects %s on the public OpenAI surface',
     async (dialect) => {

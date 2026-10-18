@@ -14,6 +14,7 @@ import (
 type inspectionKeyContext struct {
 	id, reason         string
 	allowProviderState bool
+	authority          access.Authority
 }
 
 func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal access.Principal, selected *string, route routing.Route) (inspectionKeyContext, error) {
@@ -45,6 +46,7 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 		return key, err
 	}
 	key.allowProviderState = authority.Policy.AllowProviderState
+	key.authority = authority
 	if !authority.Allows("inference", route.Slug, route.ProjectID, time.Now()) {
 		key.reason = "api_key_not_authorized"
 		if allowed := authority.RouteAllowlist(); allowed != nil && !slices.Contains(allowed, route.Slug) {

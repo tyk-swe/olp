@@ -63,6 +63,19 @@ func TestLegacyCompletionBatchDoesNotShareDifferentContextBoundaries(t *testing.
 	}
 }
 
+func TestLegacyCompletionBatchSharesTokenizerBudget(t *testing.T) {
+	text := strings.Repeat("hello ", ExactBytes/6)
+	body, _ := json.Marshal(map[string]any{"model": "route", "prompt": []string{text, text, text}})
+	request, err := openai.Parse(wire.Completions, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := Walk(request).Estimate(ForModel("gpt-4o"), nil)
+	if e.Provenance == ProvenanceTokenizer || e.Provenance == "" {
+		t.Fatalf("batch reopened exact tokenizer budget: %+v", e)
+	}
+}
+
 func TestLegacyCompletionCandidatesDoNotMultiplyContext(t *testing.T) {
 	var input int64
 	for _, copies := range []int64{1, 2, 4} {

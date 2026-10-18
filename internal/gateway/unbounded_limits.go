@@ -8,13 +8,7 @@ import (
 // callerCostBudgeted checks the boundaries this request actually spends against.
 // A policy for another route or end user must not quarantine unlimited traffic.
 func callerCostBudgeted(authority *access.Authority, route string) bool {
-	return authority.Policy.AdmissionLimits().CostBudgeted() ||
-		authority.BudgetGroupID != nil && authority.GroupLimits().CostBudgeted() ||
-		authority.Policy.RouteLimits[route].CostBudgeted() ||
-		authority.Policy.EndUserPolicy.Limits(authority.EndUserDigest).CostBudgeted() ||
-		authority.ProjectEndUserPolicy.Limits(authority.EndUserDigest).CostBudgeted() ||
-		authority.InstallationBudget.Limited() || authority.OrganizationBudget.Limited() || authority.ProjectBudget.Limited() ||
-		authority.ProjectAttributionBudgets.Matches(authority.Attribution)
+	return authority.CostBudgetedForRoute(route)
 }
 
 // Batch jobs and Live sessions cannot bound their future consumption before
@@ -25,14 +19,7 @@ func unboundedWorkLimits(authority access.Authority, provider *routing.Provider,
 	if route != nil {
 		slug = route.Slug
 	}
-	if callerCostBudgeted(&authority, slug) || authority.Policy.TokensPerMinute != nil ||
-		authority.BudgetGroupID != nil && authority.BudgetGroupTPM != nil ||
-		authority.Policy.RouteLimits[slug].TokensPerMinute != nil ||
-		authority.Policy.EndUserPolicy.Limits(authority.EndUserDigest).TokensPerMinute != nil ||
-		authority.ProjectEndUserPolicy.Limits(authority.EndUserDigest).TokensPerMinute != nil ||
-		(route != nil && route.Budget != nil && (route.Budget.DailyCostLimit != nil || route.Budget.MonthlyCostLimit != nil)) ||
-		(provider != nil && provider.Limits != nil && (provider.Limits.TokensPerMinute != nil || provider.Limits.Costs() != nil)) ||
-		(slot != nil && (slot.TokensPerMinute != nil || slot.Costs() != nil)) {
+	if authority.UnboundedWorkBudgeted(slug) || routing.UnboundedWorkBudgeted(provider, slot, route) {
 		return invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
 	}
 	return nil

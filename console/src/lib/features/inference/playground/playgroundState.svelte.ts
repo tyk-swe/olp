@@ -260,7 +260,7 @@ export class PlaygroundState {
         route: this.model.trim(),
         operation: this.activeOperation,
         surface:
-          this.operation === 'decision'
+          this.activeOperation === 'decision'
             ? 'openai'
             : registeredNative
               ? 'native'

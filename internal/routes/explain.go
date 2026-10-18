@@ -132,6 +132,26 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
+	if input.Operation == "decision" {
+		prepare := accept
+		accept = func(provider routing.Provider, target routing.Target) error {
+			budgeted := key.authority.UnboundedWorkBudgeted(route.Slug) || routing.UnboundedWorkBudgeted(&provider, nil, &route)
+			for _, slot := range routing.SelectSlots(provider, target.ProviderModel, route, key.id, input.Operation, input.Surface, input.Mode, []byte(input.Seed)) {
+				if eligibility != nil && slot.CredentialID != nil && eligibility(*slot.CredentialID) != routing.Eligible {
+					continue
+				}
+				budgeted = budgeted || routing.UnboundedWorkBudgeted(&provider, &slot, &route)
+			}
+			if budgeted {
+				inspections[target.ID] = &interactionInspection{Status: "incompatible", Fidelity: route.Fidelity.Mode, Evidence: []string{}}
+				return &inspectionDiagnostic{"unbounded_work_budget", "/limits", "bounded_provider_work", "Decisions cannot enforce token or cost budgets."}
+			}
+			if prepare != nil {
+				return prepare(provider, target)
+			}
+			return nil
+		}
+	}
 	if mediaRequest != nil {
 		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
@@ -153,6 +173,9 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
 		WorstCost: func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+			if input.Operation == "decision" {
+				return usage.Cost{}, false
+			}
 			if provider.Commitment != nil {
 				return usage.Cost{}, true
 			}
@@ -165,6 +188,18 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 					seconds = *mediaRequest.Seconds
 				}
 				return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, now, true, discount)
+			}
+			if counted.prompt != nil {
+				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
+				to, ok := counted.estimates[target.ID]
+				if !ok {
+					to = from
+				}
+				if counted.output != nil {
+					from.Output, to.Output = counted.output, counted.output
+				}
+				output := max(from.Reply(), to.Reply())
+				return price.CostBound(max(from.InputExposure(), to.InputExposure()), output, output > 0, now, discount)
 			}
 			d := counted.fixed
 			if demand := counted.sourceDemand(); demand != nil {

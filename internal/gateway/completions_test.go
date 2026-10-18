@@ -1,11 +1,15 @@
 package gateway
 
 import (
+	"bufio"
+	"context"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -76,5 +80,59 @@ func TestLegacyCompletionsGateway(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLegacyCompletionOutputPolicy(t *testing.T) {
+	for _, action := range []string{contentpolicy.ActionBlock, contentpolicy.ActionRedact} {
+		t.Run(action, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			setRoutePolicy(h, contentpolicy.Rule{ID: "secret", Phase: contentpolicy.PhaseOutput, Pattern: "secret", Action: action, Replacement: "[REDACTED]"})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"id":"c","object":"chat.completion","model":"`+modelA+`","choices":[{"index":0,"message":{"role":"assistant","content":"secret"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+			})
+			resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":8}`), nil)
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if action == contentpolicy.ActionBlock {
+				if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "content_policy_blocked") {
+					t.Fatalf("output block: %d %s", resp.StatusCode, body)
+				}
+			} else if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "secret") || !strings.Contains(string(body), "[REDACTED]") {
+				t.Fatalf("output redaction: %d %s", resp.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestLegacyCompletionParallelGuardrailBlocksTerminalFrame(t *testing.T) {
+	h := newHarness(t, Config{})
+	installTestGuardrail(t, h, guardrails.InputParallel, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
+	release := make(chan struct{})
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(ctx context.Context, _ guardrails.Revision, _ guardrails.Evaluation) (guardrails.Verdict, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return guardrails.Verdict{}, ctx.Err()
+		}
+		return guardrails.Verdict{Action: "block"}, nil
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"started\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		w.(http.Flusher).Flush()
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":8,"stream":true}`), nil)
+	defer resp.Body.Close()
+	reader := bufio.NewReader(resp.Body)
+	first, err := reader.ReadString('\n')
+	close(release)
+	if err != nil || !strings.Contains(first, "started") {
+		t.Fatalf("first output: %s %v", first, err)
+	}
+	rest, _ := io.ReadAll(reader)
+	if strings.Contains(string(rest), "[DONE]") || !strings.Contains(string(rest), "guardrail_blocked") {
+		t.Fatalf("unsafe terminal delivery: %s", rest)
 	}
 }
