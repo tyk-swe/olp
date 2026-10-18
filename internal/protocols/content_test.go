@@ -95,3 +95,15 @@ func TestInspectOutputTextCompletions(t *testing.T) {
 		t.Fatalf("completion block surface missing: %v", err)
 	}
 }
+
+func TestInspectInputTextCompletions(t *testing.T) {
+	r := parse(t, wire.Completions, `{"model":"route","prompt":["s3cr3t","safe"]}`)
+	filtered, err := InspectInputText(r, redactSecret)
+	if err != nil || !strings.Contains(string(filtered.Document()["prompt"]), "[REDACTED]") {
+		t.Fatalf("completion prompt inspection: %v", err)
+	}
+	r = parse(t, wire.Completions, `{"model":"route","prompt":[1,2]}`)
+	if _, err := InspectInputText(r, redactSecret); err == nil {
+		t.Fatal("token IDs treated as inspected text")
+	}
+}

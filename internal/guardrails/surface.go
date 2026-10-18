@@ -23,13 +23,23 @@ type surfaceSlot struct {
 
 func NativeSurface(document oif.Document, output bool) (*Surface, error) {
 	s := &Surface{document: document}
-	fields := []string{"messages", "input", "inputs", "contents", "system", "systemInstruction", "instructions", "tools", "functions", "toolConfig", "tool_choice", "response_format", "generationConfig", "inferenceConfig", "text", "query", "documents", "instances", "inputText", "generateContentRequest"}
+	fields := []string{"messages", "input", "inputs", "prompt", "contents", "system", "systemInstruction", "instructions", "tools", "functions", "toolConfig", "tool_choice", "response_format", "generationConfig", "inferenceConfig", "text", "query", "documents", "instances", "inputText", "generateContentRequest"}
 	if output {
 		fields = []string{"choices", "output", "content", "candidates", "output_text", "refusal", "predictions", "results", "message", "generation", "generated_text", "completion", "text", "response"}
 	}
 	recognized := false
 	for _, field := range fields {
 		if v, ok := document.Root().Lookup(field); ok {
+			if !output && field == "prompt" && v.Kind() != oif.String {
+				if v.Kind() != oif.Array {
+					return nil, ErrSurface
+				}
+				for _, item := range v.Elements() {
+					if item.Kind() != oif.String {
+						return nil, ErrSurface
+					}
+				}
+			}
 			recognized = true
 			s.walk(v, oif.Pointer("", field), "", "", "")
 		}

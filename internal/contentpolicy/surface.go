@@ -10,7 +10,7 @@ import (
 // individual schema keys, scalar values, and decoded tool arguments.
 func InputTexts(document oif.Document) []string {
 	texts := []string{}
-	for _, name := range []string{"messages", "input", "contents", "system", "systemInstruction", "instructions", "tools", "toolConfig", "tool_choice", "response_format", "text", "generationConfig"} {
+	for _, name := range []string{"messages", "input", "prompt", "contents", "system", "systemInstruction", "instructions", "tools", "toolConfig", "tool_choice", "response_format", "text", "generationConfig"} {
 		if value, present := document.Root().Lookup(name); present {
 			collectPolicyText(value, &texts, name == "tools" || name == "toolConfig" || name == "response_format" || name == "text" || name == "generationConfig")
 		}

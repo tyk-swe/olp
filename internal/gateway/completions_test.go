@@ -147,6 +147,61 @@ func TestLegacyCompletionMappedDefaultReservation(t *testing.T) {
 	}
 }
 
+func TestLegacyCompletionNativePolicyCoverage(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		for _, phase := range []string{guardrails.Input, guardrails.Output} {
+			for _, blocked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("legacy=%v/%s/blocked=%v", legacy, phase, blocked), func(t *testing.T) {
+					h := strictHarness(t, func(s *routing.Snapshot) {
+						for id, p := range s.Providers {
+							p.Kind, p.VendorID, p.ProfileID = "openai", "openai", "openai-completions"
+							s.Providers[id] = p
+						}
+						if legacy {
+							r := s.Routes[routeSlug]
+							r.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "secret", Phase: phase, Action: contentpolicy.ActionBlock, Pattern: "secret"}}}
+							s.Routes[routeSlug] = r
+						}
+					})
+					if !legacy {
+						installTestGuardrail(t, h, phase, guardrails.Block, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`)
+					}
+					prompt, reply := "hello", "safe"
+					if blocked {
+						if phase == guardrails.Input {
+							prompt = "secret"
+						} else {
+							reply = "secret"
+						}
+					}
+					h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+						if r.URL.Path != "/a/v1/completions" {
+							t.Errorf("not native: %s", r.URL.Path)
+						}
+						w.Header().Set("Content-Type", "application/json")
+						body, _ := json.Marshal(map[string]any{"id": "c", "object": "text_completion", "model": modelA, "choices": []any{map[string]any{"index": 0, "text": reply, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}})
+						w.Write(body)
+					})
+					body, _ := json.Marshal(map[string]any{"model": routeSlug, "prompt": prompt, "max_tokens": 8})
+					resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, body, nil)
+					out, _ := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if blocked {
+						if resp.StatusCode < 400 {
+							t.Fatalf("policy bypass: %s", out)
+						}
+					} else if resp.StatusCode != http.StatusOK {
+						t.Fatalf("native text refused: %d %s", resp.StatusCode, out)
+					}
+					if blocked && phase == guardrails.Input && h.mock.count("a")+h.mock.count("b") != 0 {
+						t.Fatal("blocked input dispatched")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestLegacyCompletionOutputPolicy(t *testing.T) {
 	for _, action := range []string{contentpolicy.ActionBlock, contentpolicy.ActionRedact} {
 		t.Run(action, func(t *testing.T) {
