@@ -180,6 +180,64 @@ func TestCaptureGeminiOptionalIdentities(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureSupportedLifecycleAndFeedback(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		family wire.Format
+		frames []string
+	}{
+		{"responses-queued", wire.Responses, []string{
+			`{"type":"response.queued","response":{"status":"queued"}}`,
+			`{"type":"response.completed","response":{"status":"completed","output":[{"id":"m","type":"message","content":[{"type":"output_text","text":"secret"}]}]}}`,
+		}},
+		{"responses-omitted-status", wire.Responses, []string{
+			`{"type":"response.output_text.delta","item_id":"m","content_index":0,"delta":"secret"}`,
+			`{"type":"response.completed","response":{"output":[{"id":"m","type":"message","content":[{"type":"output_text","text":"secret"}]}]}}`,
+		}},
+		{"cohere-debug", wire.CohereChat, []string{
+			`{"type":"content-start","index":0}`,
+			`{"type":"content-delta","index":0,"delta":{"message":{"content":{"text":"secret"}}}}`,
+			`{"type":"debug","message":"diagnostic data must stay excluded"}`,
+			`{"type":"content-end","index":0}`,
+			`{"type":"message-end","delta":{"finish_reason":"COMPLETE"}}`,
+		}},
+		{"gemini-safety-ratings", wire.GeminiStream, []string{
+			`{"promptFeedback":{"safetyRatings":[{"category":"HARM_CATEGORY_DANGEROUS_CONTENT","probability":"NEGLIGIBLE"}]},"candidates":[{"content":{"parts":[{"text":"secret"}]},"finishReason":"STOP"}]}`,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewCaptureStream(tc.family, 65536, true, true)
+			for _, frame := range tc.frames {
+				if err := s.Push([]byte("data: " + frame + "\n\n")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			text, calls, err := s.Finish()
+			if err != nil || text != "secret" || len(calls) != 0 {
+				t.Fatalf("finish: %q %s %v", text, calls, err)
+			}
+		})
+	}
+	for _, status := range []string{`null`, `123`, `"in_progress"`, `"failed"`} {
+		s := NewCaptureStream(wire.Responses, 65536, true, true)
+		_ = s.Push([]byte(`data: {"type":"response.completed","response":{"status":` + status + `,"output":[]}}` + "\n\n"))
+		if _, _, err := s.Finish(); err == nil {
+			t.Fatalf("accepted invalid terminal status %s", status)
+		}
+	}
+	for _, frame := range []string{
+		`{"promptFeedback":{"blockReason":"SAFETY"}}`,
+		`{"promptFeedback":{"blockReason":"SAFETY"},"candidates":[{"content":{"parts":[{"text":"secret"}]},"finishReason":"STOP"}]}`,
+		`{"candidates":[{"content":{"parts":[{"text":"secret"}]},"finishReason":"SAFETY"}]}`,
+	} {
+		s := NewCaptureStream(wire.GeminiStream, 65536, true, true)
+		_ = s.Push([]byte("data: " + frame + "\n\n"))
+		if _, _, err := s.Finish(); err == nil {
+			t.Fatalf("accepted blocked Gemini response %s", frame)
+		}
+	}
+}
 func TestCaptureStreamDropsIncompleteMalformedAndBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

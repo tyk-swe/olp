@@ -339,7 +339,9 @@ func (s *CaptureStream) responses(f map[string]json.RawMessage) {
 		s.responseItem(f["item"], true)
 	case "response.completed":
 		r, err := s.object(f["response"])
-		if err != nil || s.str(r["status"]) != "completed" {
+		status, explicit := r["status"]
+		state := s.str(status)
+		if err != nil || (explicit && (!present(status) || (state != "" && state != "completed"))) {
 			s.invalid = true
 			return
 		}
@@ -349,7 +351,7 @@ func (s *CaptureStream) responses(f map[string]json.RawMessage) {
 		s.terminal = true
 	case "error", "response.failed", "response.incomplete":
 		s.invalid = true
-	case "response.created", "response.in_progress", "response.content_part.added", "response.content_part.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+	case "response.created", "response.queued", "response.in_progress", "response.content_part.added", "response.content_part.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
 	default:
 		s.invalid = true
 	}
@@ -416,10 +418,12 @@ func (s *CaptureStream) anthropic(f map[string]json.RawMessage) {
 	}
 }
 func (s *CaptureStream) gemini(f map[string]json.RawMessage) {
-	if present(f["error"]) || present(f["promptFeedback"]) {
+	candidates := s.array(f["candidates"])
+	feedback, _ := s.object(f["promptFeedback"])
+	if present(f["error"]) || (present(f["promptFeedback"]) && (len(candidates) == 0 || s.str(feedback["blockReason"]) != "")) {
 		s.invalid = true
 	}
-	for candidateIndex, raw := range s.array(f["candidates"]) {
+	for candidateIndex, raw := range candidates {
 		c, _ := s.object(raw)
 		id := captureIndex(c["index"])
 		if _, explicit := c["index"]; !explicit {
@@ -517,6 +521,9 @@ func (s *CaptureStream) bedrock(kind string, f map[string]json.RawMessage) {
 }
 func (s *CaptureStream) cohere(f map[string]json.RawMessage) {
 	typ := s.str(f["type"])
+	if typ == "debug" {
+		return
+	}
 	id := captureIndex(f["index"])
 	d, _ := s.object(f["delta"])
 	m, _ := s.object(d["message"])
