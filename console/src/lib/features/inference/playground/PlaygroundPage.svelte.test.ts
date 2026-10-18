@@ -292,6 +292,7 @@ describe('advanced composer', () => {
     const second: ActiveRoute = {
       ...first,
       id: 'second-route',
+      slug: 'second-route',
       latest_revision: { ...first.latest_revision!, slug: 'second-route' }
     };
     await establish([first, second]);
