@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -138,5 +139,44 @@ func TestDecisionInspectionRejectsUnboundedBudgets(t *testing.T) {
 				t.Fatalf("inspection budget %s: %+v", scope, d)
 			}
 		})
+	}
+}
+
+func TestDecisionInspectionKeepsNamedRouteAcrossLegs(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		snapshot, _ := estimateSnapshot("model")
+		for id, p := range snapshot.Providers {
+			p.Kind, p.VendorID, p.ProfileID, p.ProfileRevision = "openai", "openai", "openai-decisions", "1"
+			p.Capabilities = []routing.Capability{{Model: "model", Operation: "decision", Surface: "openai", Mode: "unary"}}
+			snapshot.Providers[id] = p
+		}
+		primary := snapshot.Routes["route"]
+		primary.Operations = []string{"decision"}
+		backup := primary
+		backup.ID = uuid.NewString()
+		backup.RoutingID = backup.ID
+		backup.Slug = "backup"
+		var demand *routing.TokenDemand
+		if fallback {
+			primary.Targets = append([]routing.Target(nil), primary.Targets...)
+			provider := snapshot.Providers[primary.Targets[0].ProviderID]
+			provider.ID = uuid.NewString()
+			provider.Models = map[string]json.RawMessage{"model": json.RawMessage(`{"context_length":1}`)}
+			snapshot.Providers[provider.ID] = provider
+			primary.Targets[0].ProviderID = provider.ID
+			primary.Fallbacks = []routing.Fallback{{Route: "backup", On: []string{routing.FallbackContextWindow}}}
+			demand = &routing.TokenDemand{EstimatedInputTokens: 2}
+		} else {
+			primary.Selectors = []routing.Selector{{ID: "delegate", Route: "backup"}}
+		}
+		snapshot.Routes["route"], snapshot.Routes["backup"] = primary, backup
+		input := simulationInput{Operation: "decision", Surface: "openai", Mode: "unary", Dialect: "openai-decisions", Request: json.RawMessage(`{"model":"route","input":"hello","questions":[{"type":"predicate","instructions":"Is this text?"}]}`)}
+		out, err := (&Server{Access: &access.Server{}}).explain(fixedSimulation(snapshot, input, demand), "route")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Legs) != 2 || out.Legs[1].Route != "backup" || len(out.Legs[1].Decisions) != 1 || !out.Legs[1].Decisions[0].Eligible {
+			t.Fatalf("fallback=%v lost named route: %+v", fallback, out)
+		}
 	}
 }

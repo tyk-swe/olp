@@ -37,7 +37,7 @@ func TestInspectionBudgetCoversUnaryAndMediaTargets(t *testing.T) {
 			for pass := range 2 {
 				var accept func(routing.Provider, routing.Target) error
 				if unary != nil {
-					accept, _, _ = inspectionUnaryAccept(route, *unary, interaction.Context{}, "", nil, budget)
+					accept, _, _ = inspectionUnaryAccept(route, route.Slug, *unary, interaction.Context{}, "", nil, budget)
 				} else {
 					accept, _, _ = inspectionMediaAccept(route, media, "", interaction.Context{}, "", nil, budget)
 				}

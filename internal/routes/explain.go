@@ -144,7 +144,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	counted := newSimulatedDemand(parsed, input, m.demand)
 	accept, effective, inspections := inspectionAccept(route, parsed, semantic, counted, &m.inspectionBudget)
 	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		accept, effective, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
 	if input.Operation == "decision" {
 		prepare := accept
