@@ -36,7 +36,8 @@ func TestCompletionInspectionPricesAggregateExposure(t *testing.T) {
 	}
 	e := estimate.Walk(parsed).Estimate(estimate.ForModel("gpt-4o"), nil)
 	want, ok := price.CostBound(e.InputExposure(), e.Reply(), true, time.Now(), nil)
-	if !ok || !d.Eligible || d.EstimatedCost == nil || d.EstimatedCost.Maximum != want.String() || d.EstimatedInputTokens == nil || *d.EstimatedInputTokens != e.ContextInput {
+	floor, floorOK := price.CostFloor(e.InputExposure(), time.Now(), nil)
+	if !ok || !floorOK || !d.Eligible || d.EstimatedCost == nil || d.EstimatedCost.Minimum != floor.String() || d.EstimatedCost.Maximum != want.String() || d.EstimatedInputTokens == nil || *d.EstimatedInputTokens != e.ContextInput {
 		t.Fatalf("aggregate pricing/context mismatch: %+v; want cost %s and context %d", d, want.String(), e.ContextInput)
 	}
 }
@@ -59,6 +60,28 @@ func TestCompletionAutomaticInspectionUsesTargetContext(t *testing.T) {
 	d := decisionFor(t, leg.Decisions, "gpt-4o")
 	if d.Eligible || d.Reason == nil || *d.Reason != "context_length_exceeded" {
 		t.Fatalf("mapped context not checked: %+v", d)
+	}
+}
+
+func TestCompletionInspectionUsesMappedDefaultCost(t *testing.T) {
+	snapshot := strictEstimateSnapshot("gpt-4o")
+	route := snapshot.Routes["route"]
+	route.Fidelity.Mode = routing.FidelityTransformed
+	snapshot.Routes["route"] = route
+	for id, p := range snapshot.Providers {
+		p.Kind, p.VendorID, p.ProfileID = "openai", "openai", ""
+		snapshot.Providers[id] = p
+	}
+	input := simulationInput{Operation: "generation", Surface: "openai", Mode: "unary", Dialect: "openai-completions", Request: json.RawMessage(`{"model":"route","prompt":"hello"}`)}
+	m := fixedSimulation(snapshot, input, nil)
+	m.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), Prices: []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai", Model: "gpt-4o", Operation: "generation", InputPerMillion: new("1"), OutputPerMillion: new("1")}}}}
+	leg, _, _, err := (&Server{Access: &access.Server{}}).leg(m, "route", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := decisionFor(t, leg.Decisions, "gpt-4o")
+	if !d.Eligible || d.EstimatedCost == nil || d.EstimatedCost.Maximum != "0.000024" {
+		t.Fatalf("mapped default cost: %+v", d)
 	}
 }
 

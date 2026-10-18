@@ -238,6 +238,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 				resolved = &routing.TokenDemand{MaxOutputTokens: output}
 				if prepared != nil {
 					resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
+					resolved.CostInputTokens = prepared.CostInputTokens
 					if output == nil {
 						resolved.MaxOutputTokens = prepared.MaxOutputTokens
 					}

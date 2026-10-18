@@ -17,6 +17,9 @@ import (
 type TokenDemand struct {
 	EstimatedInputTokens int64
 	MaxOutputTokens      *int64
+	// CostInputTokens includes all billed prompts/candidates when context
+	// demand describes only the largest individual prompt.
+	CostInputTokens *int64
 }
 
 // Names are the names of the controls a request uses. A policy that requires
@@ -292,7 +295,11 @@ func estimatedCost(provider Provider, price *usage.RoutingPrice, discount *usage
 	if !ok {
 		return nil
 	}
-	floor, ok := price.CostFloor(demand.EstimatedInputTokens, now, discount)
+	input := demand.EstimatedInputTokens
+	if demand.CostInputTokens != nil {
+		input = *demand.CostInputTokens
+	}
+	floor, ok := price.CostFloor(input, now, discount)
 	if !ok {
 		return nil
 	}

@@ -81,7 +81,7 @@ func (x *call) sourceDemand(model string) *routing.TokenDemand {
 }
 
 func demandOf(e estimate.Estimate) *routing.TokenDemand {
-	return &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output}
+	return &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 }
 
 func (x *call) strict() bool {
@@ -240,6 +240,12 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 		return admittedEstimate{reserve: to.Tokens(), input: to.InputExposure(), reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
 	}
 	from, to := source.prompt.Estimate(counter, nil), effective.prompt.Estimate(counter, nil)
+	// The qualified destination makes an omitted completion limit enforceable
+	// (including the 16-token Chat mapping default). Do not retain the generic
+	// unknown-output reservation once that effective bound is known.
+	if source.request != nil && source.request.Family == wire.Completions && from.Output == nil && to.Output != nil {
+		from.Output = to.Output
+	}
 	admitted := admittedEstimate{
 		reserve:    max(from.Tokens(), to.Tokens()),
 		input:      max(from.InputExposure(), to.InputExposure()),

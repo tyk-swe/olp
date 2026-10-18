@@ -125,6 +125,28 @@ func TestLegacyCompletionAutomaticUsesMappedEstimate(t *testing.T) {
 	}
 }
 
+func TestLegacyCompletionMappedDefaultReservation(t *testing.T) {
+	for _, field := range []string{"", `,"max_tokens":null`} {
+		source, err := protocols.Parse(wire.Completions, []byte(`{"model":"route","prompt":"hello"`+field+`}`), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, family, err := protocols.EncodeTarget(source, wire.Chat, "openai", "openai", "upstream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target, err := protocols.Parse(family, body, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := &call{generation: generationCall{parsed: source}}
+		admitted, demand := x.preparedEstimate("gpt-4o", x.summarize(target))
+		if admitted.reply != 16 || admitted.reserve > 100 || demand.MaxOutputTokens == nil || *demand.MaxOutputTokens != 16 {
+			t.Fatalf("mapped default over-reserved: %+v %+v", admitted, demand)
+		}
+	}
+}
+
 func TestLegacyCompletionOutputPolicy(t *testing.T) {
 	for _, action := range []string{contentpolicy.ActionBlock, contentpolicy.ActionRedact} {
 		t.Run(action, func(t *testing.T) {

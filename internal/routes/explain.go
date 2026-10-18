@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -211,6 +212,9 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 				}
 				if counted.output != nil {
 					from.Output, to.Output = counted.output, counted.output
+				}
+				if counted.prompt.Request().Family == wire.Completions && from.Output == nil && to.Output != nil {
+					from.Output = to.Output
 				}
 				output := max(from.Reply(), to.Reply())
 				return price.CostBound(max(from.InputExposure(), to.InputExposure()), output, output > 0, now, discount)
