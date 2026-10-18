@@ -193,12 +193,13 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 				incompatible = err
 				return err
 			}
-			for _, slot := range p.Slots {
-				if slot.Enabled {
-					if err := unboundedWorkLimits(authority, &p, &slot, x.route); err != nil {
-						incompatible = err
-						return err
-					}
+			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
+				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
+					continue
+				}
+				if err := unboundedWorkLimits(authority, &p, &slot, x.route); err != nil {
+					incompatible = err
+					return err
 				}
 			}
 		}

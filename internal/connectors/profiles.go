@@ -693,7 +693,7 @@ func completeProfileMetadata(p *Profile) {
 		p.OperationDialects[operation] = dialect
 		fields := map[string]any{}
 		for _, name := range defaultFields(dialect, operation) {
-			fields[name] = defaultControlSchema(operation, name)
+			fields[name] = defaultControlSchema(dialect, operation, name)
 			if codec, ok := operationregistry.Lookup(dialect); ok {
 				if field, found := codec.Defaults[name]; found {
 					fields[name] = field.Schema
@@ -757,7 +757,7 @@ func RegisterProfile(p Profile) error {
 	return nil
 }
 
-func defaultControlSchema(operation, name string) map[string]any {
+func defaultControlSchema(dialect, operation, name string) map[string]any {
 	kind := "string"
 	switch name {
 	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
@@ -788,6 +788,25 @@ func defaultControlSchema(operation, name string) map[string]any {
 	}
 	if kind == "integer" {
 		schema["minimum"] = 1
+	}
+	if dialect == "openai-completions" {
+		switch name {
+		case "logprobs":
+			schema["type"], schema["minimum"], schema["maximum"] = []string{"integer", "null"}, 0, 5
+		case "best_of":
+			schema["type"], schema["minimum"] = []string{"integer", "null"}, 1
+		case "seed":
+			schema["type"] = []string{"integer", "null"}
+		case "max_tokens":
+			schema["minimum"] = 0
+		case "echo":
+			schema["type"] = []string{"boolean", "null"}
+		case "logit_bias":
+			schema["type"] = []string{"object", "null"}
+		case "stop":
+			schema["type"] = []string{"string", "array", "null"}
+			schema["items"] = map[string]any{"type": "string"}
+		}
 	}
 	return schema
 }

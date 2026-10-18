@@ -6855,7 +6855,7 @@
         "PriceOperation": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_-]{0,95}$",
-          "description": "An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
+          "description": "An operation registered by this release, including generation, decision, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
         },
         "ProviderKind": {
           "enum": [
@@ -8341,7 +8341,7 @@
         "PriceOperation": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_-]{0,95}$",
-          "description": "An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
+          "description": "An operation registered by this release, including generation, decision, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
         },
         "ProviderKind": {
           "enum": [
@@ -24611,7 +24611,7 @@
         "PriceOperation": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_-]{0,95}$",
-          "description": "An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
+          "description": "An operation registered by this release, including generation, decision, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
         },
         "ProviderKind": {
           "enum": [
@@ -32679,7 +32679,10 @@
             "tei-classification",
             "tei-scoring",
             "bedrock-count-tokens",
-            "tei-tokenize"
+            "tei-tokenize",
+            "openai-completions",
+            "openai-decisions",
+            "systemone"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -33077,7 +33080,10 @@
             "tei-classification",
             "tei-scoring",
             "bedrock-count-tokens",
-            "tei-tokenize"
+            "tei-tokenize",
+            "openai-completions",
+            "openai-decisions",
+            "systemone"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },

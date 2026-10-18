@@ -281,6 +281,38 @@ describe('basic composer', () => {
 });
 
 describe('advanced composer', () => {
+  it.each(['openai-decisions', 'systemone'])(
+    'inspects %s on the public OpenAI surface',
+    async (dialect) => {
+      vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+      await establish();
+      radio('advanced').click();
+      flushSync();
+      const template = host.querySelector<HTMLSelectElement>(
+        '#playground-template'
+      )!;
+      template.value = dialect;
+      template.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      fill('#playground-model', 'chat-route');
+      host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+      [...host.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === 'Inspect plan')!
+        .click();
+      flushSync();
+      await settle(0);
+      expect(inspectRouting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'decision',
+          surface: 'openai',
+          mode: 'unary',
+          dialect,
+          request: expect.objectContaining({ model: 'chat-route' })
+        })
+      );
+    }
+  );
+
   it('applies a template and submits the raw request document', async () => {
     vi.mocked(runPlayground).mockResolvedValue({
       ...unaryReply,

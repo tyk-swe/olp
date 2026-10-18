@@ -47,3 +47,37 @@ func TestLegacyCompletionDefaultsRespectNativeTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyCompletionPublishedDefaultSchemas(t *testing.T) {
+	profile, err := LookupProfile("openai-completions", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Values struct {
+				Properties map[string]struct {
+					Type    []string `json:"type"`
+					Minimum *int     `json:"minimum"`
+					Maximum *int     `json:"maximum"`
+				} `json:"properties"`
+			} `json:"values"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(profile.DefaultSchemas["generation"], &schema); err != nil {
+		t.Fatal(err)
+	}
+	for field, kind := range map[string]string{"logprobs": "integer", "best_of": "integer", "seed": "integer", "echo": "boolean", "logit_bias": "object"} {
+		value := schema.Properties.Values.Properties[field]
+		if len(value.Type) != 2 || value.Type[0] != kind || value.Type[1] != "null" {
+			t.Errorf("%s schema: %+v", field, value)
+		}
+	}
+	logprobs := schema.Properties.Values.Properties["logprobs"]
+	if logprobs.Minimum == nil || *logprobs.Minimum != 0 || logprobs.Maximum == nil || *logprobs.Maximum != 5 {
+		t.Fatal("logprobs range is not 0..5")
+	}
+	if minimum := schema.Properties.Values.Properties["max_tokens"].Minimum; minimum == nil || *minimum != 0 {
+		t.Fatal("max_tokens must admit zero")
+	}
+}

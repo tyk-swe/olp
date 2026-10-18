@@ -259,7 +259,12 @@ export class PlaygroundState {
       const input: InspectRoutingInput = {
         route: this.model.trim(),
         operation: this.activeOperation,
-        surface: registeredNative ? 'native' : this.surface,
+        surface:
+          this.operation === 'decision'
+            ? 'openai'
+            : registeredNative
+              ? 'native'
+              : this.surface,
         mode:
           this.activeOperation === 'realtime'
             ? 'realtime'

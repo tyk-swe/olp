@@ -47,6 +47,9 @@ func MeaningfulFrame(family wire.Format, frame []byte) bool {
 			} else {
 				for _, v := range arr(f["choices"]) {
 					choice, _ := object(v)
+					if family == wire.Completions && str(choice["text"]) != "" {
+						return true
+					}
 					delta, _ := object(choice["delta"])
 					if str(delta["content"]) != "" || str(delta["refusal"]) != "" || len(arr(delta["tool_calls"])) > 0 {
 						return true

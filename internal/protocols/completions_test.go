@@ -177,3 +177,19 @@ func TestLegacyCompletionMappingPreservesDefaultLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyCompletionMeaningfulFrames(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{`{"choices":[{"index":0,"text":"hello","finish_reason":null}]}`, true},
+		{`{"choices":[{"index":0,"text":" ","finish_reason":null}]}`, true},
+		{`{"choices":[{"index":0,"text":"","finish_reason":"stop"}]}`, false},
+		{`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, false},
+	} {
+		if got := MeaningfulFrame(wire.Completions, []byte("data: "+tc.body+"\n\n")); got != tc.want {
+			t.Errorf("meaningful=%v for %s", got, tc.body)
+		}
+	}
+}

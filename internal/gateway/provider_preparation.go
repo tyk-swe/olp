@@ -81,7 +81,7 @@ func (x *call) sourceDemand(model string) *routing.TokenDemand {
 }
 
 func demandOf(e estimate.Estimate) *routing.TokenDemand {
-	return &routing.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	return &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output}
 }
 
 func (x *call) strict() bool {
