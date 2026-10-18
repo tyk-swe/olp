@@ -132,7 +132,7 @@ func (p *RoutingPrice) Scalar(operation string) *big.Rat {
 		return nil
 	}
 	amounts := []*string{p.UnitPrice}
-	if operation == "generation" {
+	if operation == "generation" || operation == "decision" {
 		amounts = []*string{p.InputPerMillion, p.OutputPerMillion}
 	}
 	if operation == "embeddings" {
