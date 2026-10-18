@@ -116,7 +116,7 @@ func projectChatCompletion(body []byte, streaming bool) ([]byte, error) {
 }
 
 func streamCompletionChat(r io.Reader, maxEvent int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
-	return openai.StreamMetadataEvents(wire.Chat, r, maxEvent, route, includeUsage, func(frame []byte) error {
+	return openai.StreamMetadataEvents(wire.Chat, wire.Completions, r, maxEvent, route, includeUsage, func(frame []byte) error {
 		return sse.Decode(strings.NewReader(string(frame)), max(len(frame), maxEvent), func(f sse.Frame) error {
 			if f.Data == "[DONE]" {
 				return emit(f.Encode())

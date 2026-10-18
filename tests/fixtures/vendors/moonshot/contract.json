@@ -15,7 +15,8 @@
         "input_tokens": 19,
         "output_tokens": 21,
         "total_tokens": 40,
-        "cached_input_tokens": 10
+        "cached_input_tokens": 10,
+        "cache_write_input_tokens": 0
       }
     }
   },

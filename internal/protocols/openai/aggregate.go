@@ -51,7 +51,7 @@ func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*wire.Complet
 	var terminal json.RawMessage
 	items := map[int64]json.RawMessage{}
 	retained := 0
-	c, err := StreamMetadataEvents(wire.Responses, r, maxEventBytes, "", true, func([]byte) error { return nil }, func(event oif.Event) error {
+	c, err := StreamMetadataEvents(wire.Responses, wire.Responses, r, maxEventBytes, "", true, func([]byte) error { return nil }, func(event oif.Event) error {
 		kind, _ := event.Source().Root().Lookup("type")
 		switch text, _ := kind.Text(); text {
 		case "response.output_item.done":

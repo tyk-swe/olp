@@ -123,7 +123,7 @@ func DecodeCompletions(body []byte, route string) (*wire.Completion, error) {
 			c.FinishReason = reason
 		}
 	}
-	c.Usage, err = chatUsage(fields)
+	c.Usage, err = chatUsage(fields, true)
 	if err != nil {
 		return nil, err
 	}

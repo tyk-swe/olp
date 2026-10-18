@@ -226,7 +226,8 @@ func errorObject(raw json.RawMessage) *wire.UpstreamError {
 }
 
 // DecodeChat validates a unary chat completion and rewrites its model to the route.
-func DecodeChat(body []byte, route string) (*wire.Completion, error) {
+// The target selects whether legacy completion usage totals must balance.
+func DecodeChat(body []byte, route string, target wire.Format) (*wire.Completion, error) {
 	source, err := liftResult(wire.Chat, body)
 	if err != nil {
 		return nil, err
@@ -300,7 +301,7 @@ func DecodeChat(body []byte, route string) (*wire.Completion, error) {
 			}
 		}
 	}
-	if c.Usage, err = chatUsage(fields); err != nil {
+	if c.Usage, err = chatUsage(fields, target == wire.Completions); err != nil {
 		return nil, err
 	}
 	if fields["model"], err = json.Marshal(route); err != nil {
@@ -324,7 +325,7 @@ func chatToolCall(call map[string]json.RawMessage) wire.ToolCall {
 	return tc
 }
 
-func chatUsage(fields map[string]json.RawMessage) (*wire.Usage, error) {
+func chatUsage(fields map[string]json.RawMessage, exactTotal bool) (*wire.Usage, error) {
 	raw, present := fields["usage"]
 	if !present || isNull(raw) {
 		return nil, nil
@@ -341,15 +342,22 @@ func chatUsage(fields map[string]json.RawMessage) (*wire.Usage, error) {
 	if u.OutputTokens, ok = int64Field(usage, "completion_tokens"); !ok {
 		return nil, &wire.ProtocolError{Detail: "usage.completion_tokens is not a non-negative integer"}
 	}
-	if u.OutputTokens > math.MaxInt64-u.InputTokens {
-		return nil, &wire.ProtocolError{Detail: "usage token total overflows"}
-	}
-	u.TotalTokens = u.InputTokens + u.OutputTokens
-	if total, present := usage["total_tokens"]; present && !isNull(total) {
-		value, ok := int64Field(usage, "total_tokens")
-		if !ok || value != u.TotalTokens {
-			return nil, &wire.ProtocolError{Detail: "usage.total_tokens is inconsistent"}
+	if exactTotal {
+		if u.OutputTokens > math.MaxInt64-u.InputTokens {
+			return nil, &wire.ProtocolError{Detail: "usage token total overflows"}
 		}
+		u.TotalTokens = u.InputTokens + u.OutputTokens
+		if total, present := usage["total_tokens"]; present && !isNull(total) {
+			value, ok := int64Field(usage, "total_tokens")
+			if !ok || value != u.TotalTokens {
+				return nil, &wire.ProtocolError{Detail: "usage.total_tokens is inconsistent"}
+			}
+		}
+	} else if u.TotalTokens, ok = int64Field(usage, "total_tokens"); !ok {
+		if u.OutputTokens > math.MaxInt64-u.InputTokens {
+			return nil, &wire.ProtocolError{Detail: "usage token total overflows"}
+		}
+		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 	u.CachedInputTokens = nestedCount(usage, "prompt_tokens_details", "cached_tokens")
 	if raw, present := usage["prompt_tokens_details"]; present && !isNull(raw) {

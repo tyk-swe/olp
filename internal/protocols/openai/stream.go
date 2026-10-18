@@ -41,21 +41,21 @@ func IsResponseProjectionError(err error) bool {
 // includeUsage controls client-visible chat usage; accounting always retains it.
 // On failure, the partial summary preserves usage observed before the error.
 func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, true, emit, nil)
+	return stream(family, family, r, maxEventBytes, route, includeUsage, true, emit, nil)
 }
 
 // StreamMetadata forwards the same validated frames as Stream, but retains only
 // completion metadata. The gateway must not accumulate output or tool arguments
 // for the lifetime of a stream; the unary response cap does not bound streams.
 func StreamMetadata(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, nil)
+	return stream(family, family, r, maxEventBytes, route, includeUsage, false, emit, nil)
 }
 
-func StreamMetadataEvents(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, observe)
+func StreamMetadataEvents(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+	return stream(family, target, r, maxEventBytes, route, includeUsage, false, emit, observe)
 }
 
-func stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+func stream(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
 	var s streamer
 	var encoded []byte
 	retain := func(frame []byte) error { encoded = frame; return nil }
@@ -63,7 +63,7 @@ func stream(family wire.Format, r io.Reader, maxEventBytes int, route string, in
 	case wire.Completions, wire.Chat, wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
-		s = &chatStream{legacy: family == wire.Completions, route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
+		s = &chatStream{legacy: family == wire.Completions, exactUsage: target == wire.Completions, route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
 	case wire.Responses:
 		s = &responsesStream{route: route, collect: collect, emit: retain}
 	default:
@@ -122,6 +122,7 @@ type streamer interface {
 
 type chatStream struct {
 	legacy       bool
+	exactUsage   bool
 	includeUsage bool
 	collect      bool
 	maxChoices   int
@@ -183,7 +184,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 			return err
 		}
 	}
-	usage, err := chatUsage(fields)
+	usage, err := chatUsage(fields, s.exactUsage)
 	if err != nil {
 		return err
 	}

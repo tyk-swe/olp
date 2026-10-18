@@ -269,3 +269,17 @@ func TestLegacyCompletionRejectsInconsistentUsageEverywhere(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletionUsageContractDoesNotConstrainNativeChat(t *testing.T) {
+	usage := `"usage":{"prompt_tokens":32,"completion_tokens":9,"total_tokens":135}`
+	body := `{"id":"c","object":"chat.completion","model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],` + usage + `}`
+	c, err := Decode(wire.Chat, wire.Chat, []byte(body), "route", "")
+	if err != nil || c.Usage.TotalTokens != 135 {
+		t.Fatalf("native vendor total changed: %+v %v", c, err)
+	}
+	stream := `data: {"object":"chat.completion.chunk","model":"upstream","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],` + usage + `}` + "\n\ndata: [DONE]\n\n"
+	c, err = Stream(wire.Chat, wire.Chat, strings.NewReader(stream), 4096, "route", true, func([]byte) error { return nil })
+	if err != nil || c.Usage.TotalTokens != 135 {
+		t.Fatalf("native vendor stream total changed: %+v %v", c, err)
+	}
+}

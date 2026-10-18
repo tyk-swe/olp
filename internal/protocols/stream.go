@@ -57,7 +57,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 	var err error
 	switch encodedWire {
 	case wire.Completions, wire.Chat, wire.Responses:
-		c, err = openai.StreamMetadataEvents(encodedWire, r, maxEvent, route, true, func(frame []byte) error {
+		c, err = openai.StreamMetadataEvents(encodedWire, target, r, maxEvent, route, true, func(frame []byte) error {
 			if native && (encodedWire == wire.Chat || encodedWire == wire.Completions) && !includeUsage {
 				var f Object
 				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
@@ -73,7 +73,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 		}, observe)
 	case wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
-		c, err = openai.StreamMetadataEvents(wire.MistralFIM, r, maxEvent, route, true, upstreamEmit, observe)
+		c, err = openai.StreamMetadataEvents(wire.MistralFIM, target, r, maxEvent, route, true, upstreamEmit, observe)
 	case wire.CohereChat:
 		c, err = streamCohereEvents(r, maxEvent, upstreamEmit, observe)
 	case wire.Anthropic:

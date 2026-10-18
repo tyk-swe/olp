@@ -58,7 +58,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 	case wire.Completions:
 		c, err = openai.DecodeCompletions(body, route)
 	case wire.Chat:
-		c, err = openai.DecodeChat(body, route)
+		c, err = openai.DecodeChat(body, route, target)
 	case wire.Responses:
 		var background bool
 		if request != nil && target == wire.Responses {
@@ -71,7 +71,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		}
 	case wire.MistralFIM:
 		// A fill-in-the-middle result is a chat completion.
-		c, err = openai.DecodeChat(body, route)
+		c, err = openai.DecodeChat(body, route, target)
 	case wire.CohereChat:
 		c, err = decodeCohereChat(body)
 	case wire.Anthropic:
