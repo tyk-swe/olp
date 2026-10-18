@@ -2,6 +2,7 @@ package protocols
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -190,6 +191,19 @@ func TestLegacyCompletionMeaningfulFrames(t *testing.T) {
 	} {
 		if got := MeaningfulFrame(wire.Completions, []byte("data: "+tc.body+"\n\n")); got != tc.want {
 			t.Errorf("meaningful=%v for %s", got, tc.body)
+		}
+	}
+}
+
+func TestLegacyCompletionParameterNamesExcludePrompt(t *testing.T) {
+	for _, prompt := range []string{`"hello"`, `["one","two"]`, `[1,2]`, `[[1],[2]]`} {
+		r, err := Parse(wire.Completions, []byte(`{"model":"route","prompt":`+prompt+`,"max_tokens":8,"extension":true}`), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := ParameterNames(r)
+		if slices.Contains(names, "prompt") || !slices.Contains(names, "max_output_tokens") || !slices.Contains(names, "extension") {
+			t.Fatalf("parameter names for %s: %v", prompt, names)
 		}
 	}
 }

@@ -389,6 +389,9 @@ func ParameterNames(r *wire.Request) []string {
 		names = append(names, "tools")
 	}
 	for _, p := range c.Extensions {
+		if r.Family == wire.Completions && p == "/prompt" {
+			continue // Validated native prompt forms are required input, not controls.
+		}
 		names = append(names, strings.TrimPrefix(p, "/"))
 	}
 	return names

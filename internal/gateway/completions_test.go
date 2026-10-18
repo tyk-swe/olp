@@ -270,6 +270,28 @@ func TestNativeCompletionOutputGuardrailsRefuseLogprobs(t *testing.T) {
 	}
 }
 
+func TestNativeCompletionPromptFormsRespectParameterPolicy(t *testing.T) {
+	for _, prompt := range []string{`"hello"`, `["one","two"]`, `[1,2]`, `[[1],[2]]`} {
+		h := strictHarness(t, func(s *routing.Snapshot) {
+			for id, p := range s.Providers {
+				p.Kind, p.VendorID, p.ProfileID = "openai", "openai", "openai-completions"
+				p.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"supported_parameters":["max_output_tokens"]}`), modelB: json.RawMessage(`{"supported_parameters":["max_output_tokens"]}`)}
+				s.Providers[id] = p
+			}
+		})
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"id":"c","object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"hello","finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+		})
+		resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":`+prompt+`,"max_tokens":8}`), map[string]string{routingHeader: `{"require_parameters":true}`})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("required input treated as a parameter for %s: %d %s", prompt, resp.StatusCode, body)
+		}
+	}
+}
+
 func TestLegacyCompletionOutputPolicy(t *testing.T) {
 	for _, action := range []string{contentpolicy.ActionBlock, contentpolicy.ActionRedact} {
 		t.Run(action, func(t *testing.T) {
