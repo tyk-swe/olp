@@ -281,6 +281,35 @@ describe('basic composer', () => {
 });
 
 describe('advanced composer', () => {
+  it('clears route-local completion credentials when the route changes', async () => {
+    const first: ActiveRoute = {
+      ...route,
+      latest_revision: {
+        ...route.latest_revision!,
+        fidelity: { mode: 'strict' }
+      }
+    };
+    const second: ActiveRoute = {
+      ...first,
+      id: 'second-route',
+      latest_revision: { ...first.latest_revision!, slug: 'second-route' }
+    };
+    await establish([first, second]);
+    radio('advanced').click();
+    flushSync();
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'legacy-completions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    fill('#native-operation-key', 'olp_fixture_key');
+    expect(input('#native-operation-key').value).toBe('olp_fixture_key');
+    fill('#playground-model', 'second-route');
+    expect(input('#native-operation-key').value).toBe('');
+  });
+
   it.each([false, true])(
     'binds the route and streaming=%s while inspecting completions',
     async (stream) => {

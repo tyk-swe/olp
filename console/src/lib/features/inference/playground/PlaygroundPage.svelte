@@ -586,12 +586,14 @@
 
 {#if (playground.strictSelected || playground.activeOperation === 'decision') && playground.activeOperation !== 'translation'}
   {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai' && playground.templateKey === 'legacy-completions'}
-    <NativeOperationPlayground
-      route={playground.model.trim()}
-      operation="completions"
-      requestText={playground.rawJson}
-      dialect="openai-completions"
-    />
+    {#key playground.model.trim()}
+      <NativeOperationPlayground
+        route={playground.model.trim()}
+        operation="completions"
+        requestText={playground.rawJson}
+        dialect="openai-completions"
+      />
+    {/key}
   {:else if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai'}
     {#key playground.model.trim()}
       <StrictToolPlayground
