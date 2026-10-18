@@ -14,7 +14,7 @@ import (
 
 var completionChatFields = strings.Fields("model prompt max_tokens temperature top_p n stop stream stream_options presence_penalty frequency_penalty logit_bias user seed")
 
-func encodeCompletionChat(r *wire.Request, target wire.Format, model string, defaults Object, applied *[]oif.Provenance) ([]byte, wire.Format, error) {
+func encodeCompletionChat(r *wire.Request, target wire.Format, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, wire.Format, error) {
 	if target != wire.Chat {
 		return nil, target, unsupported("completions_mapping")
 	}
@@ -49,9 +49,7 @@ func encodeCompletionChat(r *wire.Request, target wire.Format, model string, def
 	if err != nil {
 		return nil, target, err
 	}
-	encoded, provenance, err := openai.EncodeWithProvenance(parsed, model, defaults)
-	*applied = append(*applied, provenance...)
-	return encoded, target, err
+	return encodeTransformed(parsed, target, kind, vendor, model, defaults, applied)
 }
 
 // Project every candidate in place. A refusal or tool result has no text-
@@ -62,6 +60,9 @@ func projectChatCompletion(body []byte, streaming bool) ([]byte, error) {
 		return nil, err
 	}
 	for key := range f {
+		if streaming && key == "obfuscation" {
+			continue
+		}
 		if !slices.Contains(strings.Fields("id object created model choices usage system_fingerprint service_tier"), key) {
 			return nil, protocolError("unmapped chat completion field " + key)
 		}

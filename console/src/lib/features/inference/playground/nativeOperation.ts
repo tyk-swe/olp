@@ -122,7 +122,11 @@ export async function runNativeOperation(
   const response = await gatewayFetch(
     operation === 'completions'
       ? '/v1/completions'
-      : `/native/${dialect}/models/${encodeURIComponent(route)}`,
+      : operation === 'decision'
+        ? dialect === 'systemone'
+          ? '/v1/systemone'
+          : '/v1/decisions'
+        : `/native/${dialect}/models/${encodeURIComponent(route)}`,
     {
       method: 'POST',
       headers,

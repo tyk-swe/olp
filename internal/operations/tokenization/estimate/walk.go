@@ -595,6 +595,9 @@ func OutputBounds(request *wire.Request, defaults map[string]json.RawMessage) (o
 	field := func(name string) json.RawMessage { return fieldOf(request, defaults, name) }
 	candidates = 1
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
+	if request != nil && request.Family == wire.Completions {
+		outputFields = []string{"max_tokens"}
+	}
 	if request != nil && request.Family == wire.Responses {
 		outputFields = []string{"max_output_tokens"}
 	}

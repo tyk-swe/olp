@@ -270,7 +270,11 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
       model: '',
       input: 'The customer asks for a refund.',
       questions: [
-        { name: 'refund', type: 'predicate', instructions: 'Is a refund requested?' }
+        {
+          name: 'refund',
+          type: 'predicate',
+          instructions: 'Is a refund requested?'
+        }
       ]
     }
   },

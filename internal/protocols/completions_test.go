@@ -94,3 +94,57 @@ func TestLegacyCompletionCannotIntroduceRetainedState(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyCompletionMappingHonorsVendorContract(t *testing.T) {
+	for _, tc := range []struct {
+		vendor, field, value string
+	}{
+		{"deepseek", "presence_penalty", "0.5"},
+		{"together", "logit_bias", `{"1":1}`},
+		{"cohere", "n", "2"},
+	} {
+		t.Run(tc.vendor, func(t *testing.T) {
+			for _, useDefault := range []bool{false, true} {
+				body := `{"model":"route","prompt":"hello"`
+				var defaults Object
+				if useDefault {
+					defaults = Object{tc.field: json.RawMessage(tc.value)}
+				} else {
+					body += `,"` + tc.field + `":` + tc.value
+				}
+				r, err := Parse(wire.Completions, []byte(body+`}`), "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := EncodeTarget(r, wire.Chat, "openai_compatible", tc.vendor, "upstream", defaults); err == nil {
+					t.Fatalf("unsupported %s admitted (default=%v)", tc.field, useDefault)
+				}
+			}
+		})
+	}
+	r, err := Parse(wire.Completions, []byte(`{"model":"route","prompt":"hello","seed":7}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _, err := EncodeTarget(r, wire.Chat, "openai_compatible", "mistral", "upstream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields Object
+	if err := json.Unmarshal(body, &fields); err != nil || string(fields["random_seed"]) != "7" || fields["seed"] != nil {
+		t.Fatalf("seed rewrite: %s (%v)", body, err)
+	}
+}
+
+func TestLegacyCompletionMappedStreamPreservesObfuscation(t *testing.T) {
+	input := `data: {"object":"chat.completion.chunk","model":"upstream","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"obfuscation":"padding"}` + "\n\n" +
+		`data: {"object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3},"obfuscation":"usage-padding"}` + "\n\ndata: [DONE]\n\n"
+	var output strings.Builder
+	c, err := Stream(wire.Chat, wire.Completions, strings.NewReader(input), 4096, "route", true, func(b []byte) error {
+		output.Write(b)
+		return nil
+	})
+	if err != nil || c.Usage == nil || c.Usage.TotalTokens != 3 || !strings.Contains(output.String(), `"text":"hello"`) || !strings.Contains(output.String(), `"obfuscation":"padding"`) || !strings.Contains(output.String(), `"obfuscation":"usage-padding"`) || !strings.Contains(output.String(), "[DONE]") {
+		t.Fatalf("mapped stream: %s %+v %v", output.String(), c, err)
+	}
+}

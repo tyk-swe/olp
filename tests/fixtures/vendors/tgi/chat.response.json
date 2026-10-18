@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-evidence",
+  "object": "chat.completion",
+  "created": 1792281600,
+  "model": "model",
+  "system_fingerprint": "tgi",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello!"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 9,
+    "completion_tokens": 3,
+    "total_tokens": 12
+  }
+}

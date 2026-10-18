@@ -112,6 +112,8 @@ func (r *Route) Shadowed() bool {
 func EffectiveOutputLimit(request *wire.Request) *int64 {
 	paths := []string{"/max_completion_tokens", "/max_tokens"}
 	switch request.Family {
+	case wire.Completions:
+		paths = []string{"/max_tokens"}
 	case wire.Responses:
 		paths = []string{"/max_output_tokens"}
 	case wire.Bedrock:

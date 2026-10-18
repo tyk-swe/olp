@@ -316,13 +316,15 @@
           <label for="playground-inspect-dialect">Native request dialect</label>
           <select
             id="playground-inspect-dialect"
-            value={(playground.strictSelected || playground.operation === 'decision') &&
+            value={(playground.strictSelected ||
+              playground.operation === 'decision') &&
             nativeDialects(playground.operation).length
               ? playground.currentNativeDialect()
               : (playground.currentInspectDialect() ?? '')}
             onchange={(event) => {
               if (
-                (playground.strictSelected || playground.operation === 'decision') &&
+                (playground.strictSelected ||
+                  playground.operation === 'decision') &&
                 nativeDialects(playground.operation).length
               )
                 playground.nativeDialect = event.currentTarget.value;
