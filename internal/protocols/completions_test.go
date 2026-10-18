@@ -239,3 +239,33 @@ func TestLegacyCompletionPreservesCacheWriteUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyCompletionRejectsInconsistentUsageEverywhere(t *testing.T) {
+	for _, family := range []wire.Format{wire.Completions, wire.Chat} {
+		for _, usage := range []string{
+			`{"prompt_tokens":2,"completion_tokens":1,"total_tokens":100}`,
+			`{"prompt_tokens":2,"completion_tokens":1,"total_tokens":"bad"}`,
+			`{"prompt_tokens":9223372036854775807,"completion_tokens":1}`,
+		} {
+			choice := `{"index":0,"text":"hello","finish_reason":"stop"}`
+			object := "text_completion"
+			if family == wire.Chat {
+				choice = `{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}`
+				object = "chat.completion"
+			}
+			body := `{"object":"` + object + `","model":"upstream","choices":[` + choice + `],"usage":` + usage + `}`
+			if _, err := Decode(family, wire.Completions, []byte(body), "route", ""); err == nil {
+				t.Fatalf("unary %s accepted %s", family, usage)
+			}
+			chunk := strings.ReplaceAll(strings.ReplaceAll(choice, `"message"`, `"delta"`), `"role":"assistant",`, "")
+			if family == wire.Chat {
+				object = "chat.completion.chunk"
+			}
+			stream := `data: {"object":"` + object + `","model":"upstream","choices":[` + chunk + `],"usage":` + usage + `}` + "\n\ndata: [DONE]\n\n"
+			result, err := Stream(family, wire.Completions, strings.NewReader(stream), 4096, "route", true, func([]byte) error { return nil })
+			if err == nil || result != nil && result.UsageComplete {
+				t.Fatalf("stream %s accepted complete usage %s", family, usage)
+			}
+		}
+	}
+}

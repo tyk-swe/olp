@@ -3,7 +3,6 @@ package openai
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -127,9 +126,6 @@ func DecodeCompletions(body []byte, route string) (*wire.Completion, error) {
 	c.Usage, err = chatUsage(fields)
 	if err != nil {
 		return nil, err
-	}
-	if c.Usage != nil && (c.Usage.OutputTokens > math.MaxInt64-c.Usage.InputTokens || c.Usage.TotalTokens != c.Usage.InputTokens+c.Usage.OutputTokens) {
-		return nil, &wire.ProtocolError{Detail: "completion usage is inconsistent"}
 	}
 	model, _ := json.Marshal(route)
 	doc, err := oif.Apply(source.Source(), []oif.Change{{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "published route model"}})
