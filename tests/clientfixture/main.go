@@ -201,6 +201,7 @@ func (b backend) capabilities(surfaces []string) []routing.Capability {
 }
 
 var backends = map[string]backend{
+	"systemone": {name: "systemone", kind: "openai_compatible", vendor: "typesafe-jev", prefix: scripted.OpenAIPrefix, model: scripted.OpenAIModel, surface: "openai"},
 	"openai":    {name: "openai", kind: "openai", vendor: "openai", prefix: scripted.OpenAIPrefix, model: scripted.OpenAIModel, surface: "openai", embeddings: true},
 	"anthropic": {name: "anthropic", kind: "anthropic", vendor: "anthropic", prefix: scripted.AnthropicPrefix, model: scripted.AnthropicModel, surface: "anthropic"},
 	"gemini":    {name: "gemini", kind: "gemini", vendor: "gemini", prefix: scripted.GeminiPrefix, model: scripted.GeminiModel, surface: "gemini", embeddings: true},
@@ -222,6 +223,9 @@ type routeSpec struct {
 }
 
 var routeSpecs = []routeSpec{
+	{env: "OPENAI_COMPLETIONS", slug: "olp-openai-completions", backend: "openai", profiles: []string{"openai-completions"}, operations: []string{"generation"}},
+	{env: "OPENAI_DECISIONS", slug: "olp-openai-decisions", backend: "openai", profiles: []string{"openai-decisions"}, operations: []string{"decision"}},
+	{env: "SYSTEMONE", slug: "olp-systemone", backend: "systemone", profiles: []string{"systemone"}, operations: []string{"decision"}},
 	{env: "OPENAI", slug: "olp-openai", backend: "openai"},
 	{env: "ANTHROPIC", slug: "olp-anthropic", backend: "anthropic"},
 	{env: "GEMINI", slug: "olp-gemini", backend: "gemini"},
@@ -274,6 +278,9 @@ func fixtureRelease(upstreamURL string) (*runtime.Release, error) {
 					return nil, err
 				}
 				caps = slices.DeleteFunc(caps, func(c routing.Capability) bool { return !slices.Contains(declared.Operations, c.Operation) })
+				if slices.Contains(spec.operations, "decision") {
+					caps = append(caps, routing.Capability{Model: b.model, Operation: "decision", Surface: "openai", Mode: "unary"})
+				}
 			}
 			for _, c := range caps {
 				if !slices.Contains(route.Operations, c.Operation) {

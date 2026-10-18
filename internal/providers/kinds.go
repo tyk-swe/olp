@@ -213,7 +213,7 @@ func capabilityOptions() []CapabilityInput {
 		}
 		out = append(out, tuple("token_count", surface, "unary"))
 	}
-	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation"} {
+	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation", "decision"} {
 		out = append(out, tuple(operation, "openai", "unary"))
 	}
 	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
@@ -228,6 +228,7 @@ func capabilityOptions() []CapabilityInput {
 	}
 	// Native generation dialects, which only their profiles serve.
 	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"))
+	out = append(out, tuple("decision", "native", "unary"))
 	return out
 }
 

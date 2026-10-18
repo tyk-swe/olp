@@ -13,6 +13,8 @@ import (
 func inputFields(encodedWire wire.Format) []string {
 	common := "model stream tools tool_choice temperature top_p top_k max_tokens metadata"
 	switch encodedWire {
+	case wire.Completions:
+		return strings.Fields("model prompt stream stream_options temperature top_p max_tokens stop n best_of echo logprobs presence_penalty frequency_penalty logit_bias seed user")
 	case wire.Chat:
 		return strings.Fields(common + " messages max_completion_tokens stream_options stop n presence_penalty frequency_penalty logit_bias seed response_format parallel_tool_calls logprobs top_logprobs user service_tier store")
 	case wire.Responses:
@@ -55,7 +57,7 @@ func checkInputCoverage(encodedWire wire.Format, document oif.Document) error {
 	}
 	// Tool schemas and argument/result JSON are declared data, not opaque native
 	// state. Outside those positions, unknown message/part members fail closed.
-	for _, name := range []string{"messages", "contents", "input", "system", "systemInstruction"} {
+	for _, name := range []string{"messages", "contents", "input", "prompt", "system", "systemInstruction"} {
 		if value, present := document.Root().Lookup(name); present {
 			if err := inspectableContent(value, name == "input" && encodedWire == wire.Responses); err != nil {
 				return err

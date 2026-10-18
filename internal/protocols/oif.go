@@ -15,7 +15,7 @@ import (
 var contracts = buildContracts()
 
 func buildContracts() *oif.Registry {
-	families := []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, "bedrock_count", wire.Embeddings, wire.GeminiEmbeddings, wire.GeminiEmbeddingsBatch, wire.VertexEmbeddings, wire.BedrockEmbeddings, wire.Rerank, wire.BedrockRerank, wire.Moderation, wire.MistralFIM, wire.CohereChat}
+	families := []wire.Format{wire.Completions, wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, "bedrock_count", wire.Embeddings, wire.GeminiEmbeddings, wire.GeminiEmbeddingsBatch, wire.VertexEmbeddings, wire.BedrockEmbeddings, wire.Rerank, wire.BedrockRerank, wire.Moderation, wire.MistralFIM, wire.CohereChat}
 	operations := []oif.Operation{}
 	bindings := []oif.Binding{}
 	seen := map[oif.Identity]bool{}
@@ -34,7 +34,7 @@ func buildContracts() *oif.Registry {
 		if family == wire.GeminiCount {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/generateContentRequest/model", Origin: oif.IdentityBinding, Kind: oif.String})
 		}
-		if family == wire.Chat {
+		if family == wire.Chat || family == wire.Completions {
 			binding.IdentityRules = append(binding.IdentityRules,
 				oif.IdentityRule{Pointer: "/stream_options", Origin: oif.TransportOption, Kind: oif.Object, Validate: func(before, after oif.Value) bool {
 					return (before.Kind() == oif.Absent || before.Kind() == oif.Null) && len(after.Members()) == 1 && field(after, "include_usage").Raw() == "true"
@@ -110,7 +110,7 @@ func PrepareIdentity(r *wire.Request, model string) (oif.Prepared, error) {
 			changes = append(changes, oif.Change{Pointer: "/generateContentRequest/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "published route model binding"})
 		}
 	}
-	if r.Stream && r.Family == wire.Chat {
+	if r.Stream && (r.Family == wire.Chat || r.Family == wire.Completions) {
 		path, value := "/stream_options", `{"include_usage":true}`
 		if options, _ := r.OIF().Document().Lookup("/stream_options"); options.Kind() == oif.Object {
 			path, value = "/stream_options/include_usage", "true"

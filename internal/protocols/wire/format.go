@@ -9,6 +9,9 @@ type Format string
 
 const (
 	Chat               Format = "chat"
+	Completions        Format = "completions"
+	Decisions          Format = "decisions"
+	SystemOne          Format = "systemone"
 	Responses          Format = "responses"
 	InputTokens        Format = "input_tokens"
 	Embeddings         Format = "embeddings"
@@ -56,6 +59,8 @@ const (
 
 func (f Format) Operation() string {
 	switch f {
+	case Decisions, SystemOne:
+		return "decision"
 	case InputTokens, AnthropicCount, GeminiCount:
 		return "token_count"
 	case Embeddings, GeminiEmbeddings, GeminiEmbeddingsBatch,

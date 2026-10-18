@@ -26,6 +26,7 @@ suites=(
   'operator-env|node|suites/operator-env|'
   'ai-sdk|node|suites/ai-sdk|'
   'go-sdks|go|gosdk|'
+  'm9-go|go|m9sdk|'
   'claude-code|node|suites/claude-code|'
   'codex|node|suites/codex|'
   'gemini-cli|node|suites/gemini-cli|'

@@ -83,3 +83,27 @@ func TestInspectOutputTextGemini(t *testing.T) {
 		t.Fatalf("reasoning part inspected: %q", thoughtText)
 	}
 }
+
+func TestInspectOutputTextCompletions(t *testing.T) {
+	body := `{"choices":[{"index":0,"text":"first s3cr3t"},{"index":1,"text":"second s3cr3t"}],"usage":{"total_tokens":7}}`
+	out := outputText(t, wire.Completions, body)
+	if strings.Contains(string(out), "s3cr3t") || strings.Count(string(out), "[REDACTED]") != 2 || !strings.Contains(string(out), `"total_tokens":7`) {
+		t.Fatalf("completion inspection: %s", out)
+	}
+	seen := false
+	if _, err := InspectOutputText(wire.Completions, []byte(body), func(text string) (string, bool) { seen = seen || strings.Contains(text, "s3cr3t"); return text, seen }); err != nil || !seen {
+		t.Fatalf("completion block surface missing: %v", err)
+	}
+}
+
+func TestInspectInputTextCompletions(t *testing.T) {
+	r := parse(t, wire.Completions, `{"model":"route","prompt":["s3cr3t","safe"]}`)
+	filtered, err := InspectInputText(r, redactSecret)
+	if err != nil || !strings.Contains(string(filtered.Document()["prompt"]), "[REDACTED]") {
+		t.Fatalf("completion prompt inspection: %v", err)
+	}
+	r = parse(t, wire.Completions, `{"model":"route","prompt":[1,2]}`)
+	if _, err := InspectInputText(r, redactSecret); err == nil {
+		t.Fatal("token IDs treated as inspected text")
+	}
+}

@@ -46,7 +46,7 @@ func translateCandidates(encodedWire, target wire.Format, body []byte, route str
 		source[candidateField(encodedWire)] = raw([]Object{item})
 		var c *wire.Completion
 		if encodedWire == wire.Chat {
-			c, err = openai.DecodeChat(raw(source), route)
+			c, err = openai.DecodeChat(raw(source), route, target)
 		} else {
 			c, err = decodeGemini(raw(source), route, false)
 		}

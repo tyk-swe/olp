@@ -50,6 +50,14 @@ func InspectInputText(r *wire.Request, fn TextSlot) (*wire.Request, error) {
 // gate and the walk cannot drift apart.
 func (w *inspector) inputFields(family wire.Format, fields map[string]json.RawMessage) bool {
 	switch family {
+	case wire.Completions:
+		if fields != nil {
+			if _, ok := textInput(fields["prompt"]); !ok {
+				w.err = errors.New("token-ID completion prompts have no text inspection contract")
+				return true
+			}
+		}
+		w.field(fields, "prompt", w.stringOrList)
 	case wire.Chat:
 		w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
 			return w.messageList(raw, inspectOpenAIMessage)
@@ -243,6 +251,16 @@ func InspectOutputText(family wire.Format, body []byte, fn TextSlot) ([]byte, er
 	}
 	w := &inspector{fn: fn}
 	switch family {
+	case wire.Completions:
+		w.field(fields, "choices", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(choice *json.RawMessage) {
+				*choice = w.object(*choice, func(c map[string]json.RawMessage) {
+					if text, ok := c["text"]; ok {
+						c["text"] = w.text(text)
+					}
+				})
+			})
+		})
 	case wire.Chat:
 		w.field(fields, "choices", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(choice *json.RawMessage) {

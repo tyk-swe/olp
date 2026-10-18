@@ -264,6 +264,9 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 // dispatched attempt: the same worst case under the same pinned price and
 // discount, or false when the request cannot be bounded.
 func (x *call) targetCostBound(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+	if x.operationName() == "decision" {
+		return usage.Cost{}, false
+	}
 	if x.callerCostExempt() || price == nil {
 		return usage.Cost{}, false
 	}

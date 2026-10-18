@@ -24,6 +24,7 @@ var Label = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,95}$`)
 type Usage struct {
 	InputTokens, OutputTokens, TotalTokens *int64
 	CachedInputTokens                      *int64
+	CacheWriteInputTokens, ReasoningTokens *int64
 	// MediaUnits carries a provider's native non-token billed quantity (for
 	// example Cohere search_units or images) as exact decimal text.
 	MediaUnits *string

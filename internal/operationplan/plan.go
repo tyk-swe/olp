@@ -52,6 +52,7 @@ type Plan struct {
 }
 type Result struct {
 	Envelope  oif.Result
+	projected oif.Result
 	View      oif.View
 	Body      []byte
 	Usage     *operations.Usage
@@ -298,7 +299,7 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 	if p.template.codec.Usage != nil {
 		usage = p.template.codec.Usage(view)
 	}
-	decisions, err := p.checkOutput(envelope)
+	decisions, err := p.checkOutput(p.template.codec, envelope)
 	if err != nil {
 		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
 	}
@@ -315,5 +316,14 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 	if err != nil {
 		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
 	}
-	return Result{Envelope: envelope, View: view, Body: output.Bytes(), Usage: usage, Decisions: decisions}, nil
+	projected, _ := oif.NewResult(p.source.Descriptor(), output, oif.Complete)
+	if p.mapping != nil {
+		codec, _ := operationregistry.Lookup(p.source.Descriptor().Dialect.ID)
+		more, checkErr := p.checkOutput(codec, projected)
+		decisions = append(decisions, more...)
+		if checkErr != nil {
+			return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, checkErr
+		}
+	}
+	return Result{Envelope: envelope, projected: projected, View: view, Body: output.Bytes(), Usage: usage, Decisions: decisions}, nil
 }

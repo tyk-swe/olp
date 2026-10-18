@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -38,9 +39,10 @@ type vendorEvidence struct {
 	Unsupported []string          `json:"unsupported_parameters"`
 	// Responses are unary results by operation.
 	Responses map[string]struct {
-		File  string          `json:"file"`
-		Basis string          `json:"basis"`
-		Usage json.RawMessage `json:"usage"`
+		Request string          `json:"request,omitempty"`
+		File    string          `json:"file"`
+		Basis   string          `json:"basis"`
+		Usage   json.RawMessage `json:"usage"`
 	} `json:"responses"`
 	// Stream is a chat stream, when the vendor generates.
 	Stream *struct {
@@ -95,6 +97,7 @@ var operationFamilies = map[string]wire.Format{
 	"generation": wire.Chat,
 	"embeddings": wire.Embeddings,
 	"rerank":     wire.Rerank,
+	"decision":   wire.SystemOne,
 }
 
 // unsupportedSamples are valid OpenAI request values for the parameters a
@@ -251,6 +254,41 @@ func checkResponses(t *testing.T, contract vendors.Contract, evidence vendorEvid
 		}
 		checkBasis(t, operation+" result", documented.Basis)
 		body := vendorFixture(t, contract.ID, documented.File)
+		if operation == "decision" {
+			codec, registered := operationregistry.Lookup("systemone")
+			if !registered || !slices.Contains(contract.Dialects, codec.Identity.ID) {
+				t.Fatal("decision evidence requires its registered vendor dialect")
+			}
+			descriptor := oif.Descriptor{Operation: codec.Operation, Dialect: codec.Identity}
+			input, err := oif.ParseJSON(vendorFixture(t, contract.ID, documented.Request), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := oif.NewRequest(descriptor, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := codec.Request(request); err != nil {
+				t.Fatal(err)
+			}
+			output, err := oif.ParseJSON(body, oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := oif.NewResult(descriptor, output, oif.Complete)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := codec.Result(request, result)
+			if err != nil {
+				t.Fatalf("decision result does not decode: %v", err)
+			}
+			usage := codec.Usage(view)
+			if usage == nil || usage.InputTokens == nil || usage.OutputTokens == nil || usage.TotalTokens == nil || !sameUsage(&wire.Usage{InputTokens: *usage.InputTokens, OutputTokens: *usage.OutputTokens, TotalTokens: *usage.TotalTokens}, documented.Usage) {
+				t.Fatalf("decision usage = %+v, documented %s", usage, documented.Usage)
+			}
+			continue
+		}
 		if operation == "generation" {
 			family = generationWire(contract)
 		}

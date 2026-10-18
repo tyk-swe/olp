@@ -88,6 +88,30 @@ func TestGuardrailResponsesCompletionSnapshots(t *testing.T) {
 	}
 }
 
+func TestLegacyCompletionStreamGuardrails(t *testing.T) {
+	frames := []string{
+		`{"sequence":9007199254740993,"choices":[{"index":1,"text":"sec","finish_reason":""}]}`,
+		`{"choices":[{"index":1,"text":"ret","finish_reason":"stop"}]}`,
+	}
+	g := regressionGuardrailStream(t, wire.Completions, guardrails.Redact)
+	out := collectGuardrailStream(t, g, frames)
+	all := string(bytes.Join(out, nil))
+	if strings.Contains(all, "secret") || !strings.Contains(all, "[REDACTED]") || !strings.Contains(all, "9007199254740993") {
+		t.Fatalf("unsafe completion stream: %s", all)
+	}
+	g = regressionGuardrailStream(t, wire.Completions, guardrails.Block)
+	if _, err := g.push(t.Context(), []byte("data: "+frames[0]+"\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.push(t.Context(), []byte("data: "+frames[1]+"\n\n")); err == nil {
+		t.Fatal("split completion text bypassed blocking")
+	}
+	g = regressionGuardrailStream(t, wire.Completions, guardrails.Block)
+	if _, err := g.push(t.Context(), []byte(`data: {"choices":[{"index":0,"text":"safe","logprobs":{"tokens":["secret"]}}]}`+"\n\n")); err == nil {
+		t.Fatal("unsolicited logprobs bypassed surface refusal")
+	}
+}
+
 // Candidate identities survive changes in their array positions.
 
 func TestGuardrailToolRedactionPreservesNumbers(t *testing.T) {

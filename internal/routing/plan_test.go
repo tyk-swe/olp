@@ -98,5 +98,29 @@ func TestPricePriorityFallbackAndPerformanceShareOneOrdering(t *testing.T) {
 	}
 }
 
+func TestDecisionPriceStrategyUsesTokenRates(t *testing.T) {
+	s, slug, ids := planningFixture()
+	route := s.Routes[slug]
+	route.Operations = []string{"decision"}
+	s.Routes[slug] = route
+	for id, p := range s.Providers {
+		p.Capabilities[0].Operation = "decision"
+		s.Providers[id] = p
+	}
+	now := time.Now()
+	inputs := &usage.RoutingInputs{RefreshedAt: now}
+	for i, id := range ids[:2] {
+		amount := []string{"2", "1"}[i]
+		inputs.Prices = append(inputs.Prices, usage.RoutingPrice{Price: usage.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "decision", InputPerMillion: &amount, OutputPerMillion: &amount, Currency: "USD"}, EffectiveAt: now.Add(-time.Hour)})
+	}
+	if cheap, expensive := inputs.Prices[1].Scalar("decision"), inputs.Prices[0].Scalar("decision"); cheap == nil || expensive == nil || cheap.Cmp(expensive) >= 0 {
+		t.Fatal("decision token rates did not produce ordered scalar prices")
+	}
+	plan, err := Select(&s, slug, "decision", "openai", "unary", []byte("seed"), Options{Inputs: inputs, Now: now, Preferences: &Preferences{Strategy: ptr("price")}})
+	if err != nil || len(plan.Attempts) != 3 || plan.Attempts[0].ProviderID != ids[1] || plan.Attempts[2].ProviderID != ids[2] {
+		t.Fatalf("decision token-price order: %+v %v", plan, err)
+	}
+}
+
 // plan answers each decision's outcome by credential slot, or by provider
 // for a target with no slot to try: its attempt, or its reason.

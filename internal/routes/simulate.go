@@ -97,7 +97,7 @@ func (d *simulatedDemand) request() *routing.TokenDemand {
 		return d.fixed
 	}
 	e := d.prompt.Estimate(estimate.ForModel(""), nil)
-	demand := &routing.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	demand := &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 	if d.output != nil {
 		demand.MaxOutputTokens = d.output
 	}
@@ -135,7 +135,7 @@ func (d *simulatedDemand) prepared(target routing.Target, request *wire.Request)
 func (d *simulatedDemand) measure(target routing.Target, prompt *estimate.Prompt) *routing.TokenDemand {
 	e := prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
 	d.estimates[target.ID] = e
-	demand := &routing.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	demand := &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 	if d.output != nil {
 		demand.MaxOutputTokens = d.output
 	}

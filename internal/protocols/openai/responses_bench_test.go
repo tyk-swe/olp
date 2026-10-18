@@ -49,7 +49,7 @@ func BenchmarkResponsesMetadataStream(b *testing.B) {
 				reader.Reset(encodedWire)
 				frames, emittedBytes, observedFrames, nativeModels = 0, 0, 0, 0
 				if tc.observe {
-					return StreamMetadataEvents(wire.Responses, reader, 8192, "bench-route", true, emit, observe)
+					return StreamMetadataEvents(wire.Responses, wire.Responses, reader, 8192, "bench-route", true, emit, observe)
 				}
 				return StreamMetadata(wire.Responses, reader, 8192, "bench-route", true, emit)
 			}

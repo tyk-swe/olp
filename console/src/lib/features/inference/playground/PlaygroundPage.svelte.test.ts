@@ -141,8 +141,8 @@ function settle(ms = SERVER_DELAY + 20) {
   return vi.advanceTimersByTimeAsync(ms);
 }
 
-async function establish() {
-  vi.mocked(listRoutes).mockImplementation(() => deferred([route]));
+async function establish(routes: ActiveRoute[] = [route]) {
+  vi.mocked(listRoutes).mockImplementation(() => deferred(routes));
   vi.mocked(listApiKeys).mockImplementation(() => deferred([]));
   component = mount(PlaygroundProbe, {
     target: host,
@@ -281,6 +281,175 @@ describe('basic composer', () => {
 });
 
 describe('advanced composer', () => {
+  it('clears route-local completion credentials when the route changes', async () => {
+    const first: ActiveRoute = {
+      ...route,
+      latest_revision: {
+        ...route.latest_revision!,
+        fidelity: { mode: 'strict' }
+      }
+    };
+    const second: ActiveRoute = {
+      ...first,
+      id: 'second-route',
+      slug: 'second-route',
+      latest_revision: { ...first.latest_revision!, slug: 'second-route' }
+    };
+    await establish([first, second]);
+    radio('advanced').click();
+    flushSync();
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'legacy-completions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    fill('#native-operation-key', 'olp_fixture_key');
+    expect(input('#native-operation-key').value).toBe('olp_fixture_key');
+    fill('#playground-model', 'second-route');
+    expect(input('#native-operation-key').value).toBe('');
+  });
+
+  it.each([false, true])(
+    'binds the route and streaming=%s while inspecting completions',
+    async (stream) => {
+      vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+      vi.mocked(simulateRouting).mockResolvedValue([eligibleDecision]);
+      await establish();
+      radio('advanced').click();
+      flushSync();
+      const template = host.querySelector<HTMLSelectElement>(
+        '#playground-template'
+      )!;
+      template.value = 'legacy-completions';
+      template.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      fill('#playground-model', 'chat-route');
+      if (stream) {
+        streamToggle().click();
+        flushSync();
+        await settle(0);
+      }
+      host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+      [...host.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === 'Inspect plan')!
+        .click();
+      flushSync();
+      await settle(0);
+      expect(inspectRouting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dialect: 'openai-completions',
+          mode: stream ? 'streaming' : 'unary',
+          request: expect.objectContaining({
+            model: 'chat-route',
+            stream,
+            prompt: 'Explain an API gateway in one sentence.'
+          })
+        })
+      );
+    }
+  );
+
+  it('replaces the completions client when the operation changes', async () => {
+    await establish([
+      {
+        ...route,
+        latest_revision: {
+          ...route.latest_revision!,
+          fidelity: { mode: 'strict' },
+          operations: ['generation', 'decision']
+        }
+      }
+    ]);
+    radio('advanced').click();
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'legacy-completions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain(
+      'Run a registered completions operation'
+    );
+    const operation = host.querySelector<HTMLSelectElement>(
+      '#playground-operation'
+    )!;
+    operation.value = 'decision';
+    operation.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain(
+      'Run a registered completions operation'
+    );
+    expect(host.textContent).toContain('Run a registered decision operation');
+  });
+
+  it('restores the selected Basic surface after a Decisions template', async () => {
+    vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+    await establish();
+    radio('advanced').click();
+    flushSync();
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'openai-decisions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    radio('basic').click();
+    flushSync();
+    const surface = host.querySelector<HTMLSelectElement>(
+      '#playground-surface'
+    )!;
+    surface.value = 'anthropic';
+    surface.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Inspect plan')!
+      .click();
+    flushSync();
+    await settle(0);
+    expect(inspectRouting).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'generation', surface: 'anthropic' })
+    );
+  });
+
+  it.each(['openai-decisions', 'systemone'])(
+    'inspects %s on the public OpenAI surface',
+    async (dialect) => {
+      vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+      await establish();
+      radio('advanced').click();
+      flushSync();
+      const template = host.querySelector<HTMLSelectElement>(
+        '#playground-template'
+      )!;
+      template.value = dialect;
+      template.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      fill('#playground-model', 'chat-route');
+      host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+      [...host.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === 'Inspect plan')!
+        .click();
+      flushSync();
+      await settle(0);
+      expect(inspectRouting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'decision',
+          surface: 'openai',
+          mode: 'unary',
+          dialect,
+          request: expect.objectContaining({ model: 'chat-route' })
+        })
+      );
+    }
+  );
+
   it('applies a template and submits the raw request document', async () => {
     vi.mocked(runPlayground).mockResolvedValue({
       ...unaryReply,

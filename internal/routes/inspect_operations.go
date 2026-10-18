@@ -16,7 +16,7 @@ import (
 )
 
 func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
-	if !strict || operation == "generation" {
+	if !strict && operation != "decision" || operation == "generation" {
 		request, err := inspectorRequest(raw, operation, surface, mode, dialect, slug, strict)
 		return request, nil, nil, err
 	}
@@ -51,7 +51,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 		return nil, nil, request, nil
 	}
 	if dialect == "" {
-		defaults := map[string]string{"openai/embeddings": "openai-embeddings", "openai/rerank": "rerank", "openai/moderation": "openai-moderation", "openai/token_count": "openai-input-tokens", "anthropic/token_count": "anthropic-count-tokens", "gemini/token_count": "gemini-count-tokens", "gemini/embeddings": "gemini-embeddings", "bedrock/token_count": "bedrock-count-tokens"}
+		defaults := map[string]string{"openai/decision": "openai-decisions", "openai/embeddings": "openai-embeddings", "openai/rerank": "rerank", "openai/moderation": "openai-moderation", "openai/token_count": "openai-input-tokens", "anthropic/token_count": "anthropic-count-tokens", "gemini/token_count": "gemini-count-tokens", "gemini/embeddings": "gemini-embeddings", "bedrock/token_count": "bedrock-count-tokens"}
 		dialect = defaults[surface+"/"+operation]
 	}
 	codec, ok := operationregistry.Lookup(dialect)
@@ -64,7 +64,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	return nil, &request, nil, nil
 }
-func inspectionUnaryAccept(route routing.Route, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
+func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	plans := map[string]*operationplan.Plan{}
 	accept := func(provider routing.Provider, target routing.Target) error {
@@ -74,7 +74,7 @@ func inspectionUnaryAccept(route routing.Route, source oif.Request, context inte
 		if err != nil {
 			return safeInspectionError(err)
 		}
-		plan, err := template.Bind(source, operationplan.Context{Route: route.Slug, Headers: context.Headers, Query: context.Query, ClientContract: client})
+		plan, err := template.Bind(source, operationplan.Context{Route: sourceRoute, Headers: context.Headers, Query: context.Query, ClientContract: client})
 		if err != nil {
 			return safeInspectionError(err)
 		}

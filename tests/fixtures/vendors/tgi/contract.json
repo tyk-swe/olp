@@ -1,0 +1,42 @@
+{
+  "vendor": "tgi",
+  "documentation_url": "https://huggingface.co/docs/text-generation-inference/reference/api_reference",
+  "reviewed_at": "2026-10-18",
+  "notes": "Self-hosted text-only Chat Completions fixtures built from https://huggingface.github.io/text-generation-inference/openapi.json (3.3.6-dev0) and router/src/lib.rs at b4adbf2f6e2e721280bd0ea5f91d70f7d033f5ed. The published schema defines token usage and the error/error_type body. These are offline schema fixtures, not live-provider qualification.",
+  "endpoints": {
+    "generation": "https://tgi.example.internal/v1/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 422,
+    "envelope": {
+      "type": "",
+      "code": "",
+      "message": "Input validation failed"
+    },
+    "class": "upstream_client"
+  }
+}

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
@@ -52,8 +53,9 @@ type tally struct {
 }
 
 type counted struct {
-	family Family
-	count  Count
+	family  Family
+	count   Count
+	context int64
 }
 
 // Walk reads the prompt of a request. A nil request is a generation with no
@@ -85,6 +87,9 @@ func (p *Prompt) Observe(fn func(Family)) *Prompt {
 // request a provider receives is often the one the caller sent, in another
 // dialect, and counting it again would find the same tokens.
 func (p *Prompt) Follow(source *Prompt) {
+	if p.request != nil && source.request != nil && (p.request.Family == wire.Completions || source.request.Family == wire.Completions) && !bytes.Equal(p.request.Field("prompt"), source.request.Field("prompt")) {
+		return // Batch boundaries determine the largest per-prompt context.
+	}
 	if p != source && p.in.equal(&source.in) {
 		p.tally = source.tally
 	}
@@ -93,21 +98,52 @@ func (p *Prompt) Follow(source *Prompt) {
 // Input counts the prompt for a counter, caching the count by the counter's
 // family. It is the tokens of the input alone, without any allowed reply.
 func (p *Prompt) Input(c Counter) Count {
+	count, _ := p.input(c)
+	return count
+}
+
+func (p *Prompt) input(c Counter) (Count, int64) {
 	family := c.Family()
 	t := p.tally
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, entry := range t.counted {
 		if entry.family == family {
-			return entry.count
+			return entry.count, entry.context
 		}
 	}
-	count := c.count(&p.in, false)
-	t.counted = append(t.counted, counted{family, count})
+	var count Count
+	var context int64
+	batch := false
+	if p.request != nil && p.request.Family == wire.Completions {
+		prompt, _ := p.request.OIF().Document().Root().Lookup("prompt")
+		items := prompt.Elements()
+		if len(items) > 0 && (items[0].Kind() == oif.String || items[0].Kind() == oif.Array) {
+			batch = true
+			budget := ExactBytes
+			for _, item := range items {
+				var single input
+				walker{&single}.embedding(valueNode(item))
+				part := c.countWithBudget(&single, false, &budget)
+				context = max(context, part.Tokens)
+				count.Tokens = addBounded(count.Tokens, part.Tokens)
+				if count.Provenance == "" {
+					count.Provenance = part.Provenance
+				} else {
+					count.Provenance = Weaker(count.Provenance, part.Provenance)
+				}
+			}
+		}
+	}
+	if !batch {
+		count = c.count(&p.in, false)
+		context = count.Tokens
+	}
+	t.counted = append(t.counted, counted{family, count, context})
 	if t.observe != nil {
 		t.observe(family)
 	}
-	return count
+	return count, context
 }
 
 // Estimate is what admission reserves for one request on one model's counter.
@@ -115,6 +151,9 @@ type Estimate struct {
 	// Input is the tokens of the prompt, at least one for a request that is not
 	// a generation.
 	Input int64
+	// ContextInput is the largest individual prompt; batch totals are billed
+	// together but do not share a model context window.
+	ContextInput int64
 	// Output is the reply bound the request or its provider named, and nil when
 	// neither did. Candidates is how many replies it asked for.
 	Output     *int64
@@ -123,7 +162,8 @@ type Estimate struct {
 	Provenance Provenance
 	Family     Family
 
-	generation bool
+	generation  bool
+	inputCopies int64
 }
 
 // Tokens is what the request may consume, charged before the upstream reports
@@ -136,7 +176,13 @@ func (e Estimate) Tokens() int64 {
 	if !e.generation {
 		return max(e.Input, 1)
 	}
-	return max(addBounded(e.Input, e.Reply()), 1)
+	return max(addBounded(e.InputExposure(), e.Reply()), 1)
+}
+
+// InputExposure is the aggregate input charged across generated candidates.
+// Input remains the prompt size used to check each candidate's context window.
+func (e Estimate) InputExposure() int64 {
+	return multiplyBounded(e.Input, max(e.inputCopies, 1))
 }
 
 // Reply is the largest reply the request allows: for a generation, the bound it
@@ -159,19 +205,30 @@ func (e Estimate) Reply() int64 {
 // its candidates, and the text of an input field the caller omitted, or of a
 // member its generation config left out.
 func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estimate {
-	count := p.Input(c)
-	e := Estimate{Input: count.Tokens, Provenance: count.Provenance, Family: c.Family(), Candidates: 1, generation: p.generation}
+	count, context := p.input(c)
+	e := Estimate{Input: count.Tokens, ContextInput: context, Provenance: count.Provenance, Family: c.Family(), Candidates: 1, generation: p.generation}
 	if extra, ok := p.defaulted(defaults); ok {
 		// The reply is primed once, by whichever input has the first message.
 		more := c.count(&extra, p.in.messages > 0)
 		e.Input = addBounded(e.Input, more.Tokens)
+		e.ContextInput = addBounded(e.ContextInput, more.Tokens)
 		e.Provenance = Weaker(e.Provenance, more.Provenance)
 	}
 	if !p.generation {
 		e.Input = max(e.Input, 1)
+		e.ContextInput = max(e.ContextInput, 1)
 		return e
 	}
 	e.Output, e.Candidates = OutputBounds(p.request, defaults)
+	if p.request != nil && p.request.Family == wire.Completions {
+		copies := int64(1)
+		for _, name := range []string{"n", "best_of"} {
+			if n, ok := integerValue(fieldOf(p.request, defaults, name)); ok {
+				copies = max(copies, n)
+			}
+		}
+		e.inputCopies = copies
+	}
 	return e
 }
 
@@ -262,7 +319,19 @@ func rank(p Provenance) int {
 // adds the family's framing, without priming the reply again when primed says
 // another input already did. Flat charges stand outside both.
 func (c Counter) count(in *input, primed bool) Count {
+	return c.countWithBudget(in, primed, nil)
+}
+
+// A completion batch shares one exact-tokenization allowance across prompts.
+func (c Counter) countWithBudget(in *input, primed bool, budget *int) Count {
 	m := c.Meter()
+	if budget != nil {
+		m.budget = min(m.budget, *budget)
+		if m.budget == 0 {
+			m.encoding = nil
+		}
+		defer func() { *budget = m.budget }()
+	}
 	if m.encoding == nil {
 		tokens, provenance := c.scale(in.heuristic)
 		return Count{addBounded(tokens, in.flat), provenance}

@@ -83,6 +83,28 @@ func TestCaptureCompleteNativeStreams(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureCompletionStream(t *testing.T) {
+	stream := NewCaptureStream(wire.Completions, 1024, true, true)
+	for _, frame := range []string{
+		`{"choices":[{"index":0,"text":"he","finish_reason":""},{"index":1,"text":"world","finish_reason":"stop"}]}`,
+		`{"choices":[{"index":0,"text":"llo","finish_reason":"eos_token"}]}`,
+	} {
+		if err := stream.Push([]byte("data: " + frame + "\n\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := stream.Finish(); err == nil {
+		t.Fatal("completion capture accepted missing DONE")
+	}
+	if err := stream.Push([]byte("data:[DONE]\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	text, calls, err := stream.Finish()
+	if err != nil || text != "hello\nworld" || len(calls) != 0 {
+		t.Fatalf("completion stream: %q %v %v", text, calls, err)
+	}
+}
 func TestCaptureBedrockCompleteStream(t *testing.T) {
 	stream := NewCaptureStream(wire.Bedrock, 65536, true, true)
 	for _, event := range [][2]string{

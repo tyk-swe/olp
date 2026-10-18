@@ -174,7 +174,7 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	if _, canonical := fields["route"]; canonical {
 		return nil, access.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
 	}
-	families := []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiStream, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation, wire.Rerank, wire.MistralFIM, wire.CohereChat}
+	families := []wire.Format{wire.Chat, wire.Completions, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiStream, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation, wire.Rerank, wire.MistralFIM, wire.CohereChat}
 	var family wire.Format
 	for _, candidate := range families {
 		if candidate.Operation() != operation || candidate.Surface() != surface {
@@ -225,7 +225,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*wire.Request{}
 	var effective func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand)
-	if route.Fidelity.Strict() {
+	if route.Fidelity.Strict() || parsed.Family == wire.Completions {
 		effective = func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
 			request := effectiveRequests[target.ID]
 			delete(effectiveRequests, target.ID)
@@ -238,6 +238,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 				resolved = &routing.TokenDemand{MaxOutputTokens: output}
 				if prepared != nil {
 					resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
+					resolved.CostInputTokens = prepared.CostInputTokens
 					if output == nil {
 						resolved.MaxOutputTokens = prepared.MaxOutputTokens
 					}
@@ -262,6 +263,13 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			}
 			if err != nil {
 				return err
+			}
+			if parsed.Family == wire.Completions {
+				request, err := wire.NewRequest(invocation.Wire, parsed.Route, parsed.Stream, invocation.Prepared.Document())
+				if err != nil {
+					return err
+				}
+				effectiveRequests[target.ID] = request
 			}
 			result.Status, result.Class = routing.FidelityTransformed, fidelity
 			result.Operation = parsed.Family.Operation()

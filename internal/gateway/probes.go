@@ -143,6 +143,13 @@ func probeTargets(snapshot *routing.Snapshot) []probeTarget {
 // when no attempt reached the provider, which says nothing about its health.
 func (s *Server) probe(ctx context.Context, release *runtime.Release, target probeTarget) (limits.ProbeResult, bool) {
 	shape := probeRequests[target.operation]
+	if target.operation == operationGeneration {
+		provider := release.Snapshot.Providers[target.provider]
+		if family, err := provider.Connector().TargetFamily(wire.Chat); err == nil && family == wire.Completions {
+			shape.family = wire.Completions
+			shape.body = `{"model":%q,"prompt":"Reply with OK.","max_tokens":16}`
+		}
+	}
 	parsed, err := protocols.Parse(shape.family, fmt.Appendf(nil, shape.body, target.route.Slug), target.route.Slug)
 	if err != nil {
 		s.log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())

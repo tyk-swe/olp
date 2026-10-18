@@ -54,7 +54,7 @@ func (x *call) clientSurface() string {
 func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body []byte, pathModel string) (bool, error) {
 	explicit := dialect != ""
 	if !explicit {
-		ids := map[wire.Format]string{wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.Format("bedrock_count"): "bedrock-count-tokens"}
+		ids := map[wire.Format]string{wire.Decisions: "openai-decisions", wire.SystemOne: "systemone", wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.Format("bedrock_count"): "bedrock-count-tokens"}
 		dialect = ids[family]
 		if dialect == "" {
 			return false, nil
@@ -73,14 +73,15 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	// parser that takes any other request cannot read their bodies, so an
 	// unknown or transformed route is refused here with its own error.
 	nativeOnly := family == wire.GeminiEmbeddings || family == wire.GeminiEmbeddingsBatch
-	if !explicit && !nativeOnly && (!exists || !route.Fidelity.Strict()) {
+	decision := family == wire.Decisions || family == wire.SystemOne
+	if !explicit && !nativeOnly && !decision && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
 	if !exists {
 		return true, modelNotFound(model)
 	}
 	x.route = &route
-	if !x.strict() {
+	if !x.strict() && !decision {
 		return true, operations.Error("target_capability", "/route", "strict_native_operation", "Registered native operation endpoints require a strict route.")
 	}
 	codec, ok := operationregistry.Lookup(dialect)
@@ -181,9 +182,34 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
+	budgetRoute := *x.route
+	budgetRoute.CallerCostExempt = x.callerCostExempt()
+	if x.operationName() == "decision" {
+		if err := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
+			return err
+		}
+	}
 	var incompatible error
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p routing.Provider, t routing.Target) error {
+		// Decisions does not expose a provider-enforced output bound. An input
+		// estimate alone cannot enforce a token or spend cap on this request.
+		if x.operationName() == "decision" {
+			authority := x.admissionAuthority(x.authority)
+			if err := unboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
+				incompatible = err
+				return err
+			}
+			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
+				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
+					continue
+				}
+				if err := unboundedWorkLimits(authority, &p, &slot, &budgetRoute, x.limitRoute()); err != nil {
+					incompatible = err
+					return err
+				}
+			}
+		}
 		_, err := x.unaryAdmission(&p, t.ID, t.ProviderModel)
 		if err != nil {
 			incompatible = err
@@ -207,7 +233,11 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	x.adoptPlan(plan)
 	if len(plan.Attempts) == 0 {
 		if incompatible != nil {
-			return requestError(incompatible)
+			problem := requestError(incompatible)
+			if x.operationName() == "decision" && problem.Code == "target_capability" {
+				problem.Status = http.StatusUnprocessableEntity
+			}
+			return problem
 		}
 		x.noteCostExceeded(plan)
 		if x.costExcluded {

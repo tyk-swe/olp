@@ -10,9 +10,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -114,6 +116,18 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	input := m.input
+	if key.id != "" {
+		for name := range input.Attribution {
+			if !slices.Contains(key.authority.Policy.AllowedAttributionKeys, name) && key.authority.Policy.AttributionDefaults[name] == "" && key.authority.ProjectAttributionPolicy.Defaults[name] == "" {
+				return simulatedLeg{}, routing.Plan{}, false, access.Invalid("attribution", "An attribution label is not allowed by the selected key.")
+			}
+		}
+	}
+	labels, err := key.authority.ResolveAttribution(input.Attribution)
+	if err != nil {
+		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
+	}
+	key.authority.Attribution, input.Attribution = labels, labels
 	semantic, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
@@ -130,7 +144,29 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	counted := newSimulatedDemand(parsed, input, m.demand)
 	accept, effective, inspections := inspectionAccept(route, parsed, semantic, counted, &m.inspectionBudget)
 	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		accept, effective, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+	}
+	if input.Operation == "decision" {
+		prepare := accept
+		named := m.snapshot.Routes[cmp.Or(m.named, slug)]
+		accept = func(provider routing.Provider, target routing.Target) error {
+			costExempt := named.CallerCostExempt && provider.CredentialSource == "caller"
+			budgeted := key.authority.UnboundedWorkBudgeted(named.Slug, costExempt) || routing.UnboundedWorkBudgeted(nil, nil, &named, costExempt) || routing.UnboundedWorkBudgeted(&provider, nil, &route, costExempt)
+			for _, slot := range routing.SelectSlots(provider, target.ProviderModel, route, key.id, input.Operation, input.Surface, input.Mode, []byte(input.Seed)) {
+				if eligibility != nil && slot.CredentialID != nil && eligibility(*slot.CredentialID) != routing.Eligible {
+					continue
+				}
+				budgeted = budgeted || routing.UnboundedWorkBudgeted(&provider, &slot, &route, costExempt)
+			}
+			if budgeted {
+				inspections[target.ID] = &interactionInspection{Status: "incompatible", Fidelity: route.Fidelity.Mode, Evidence: []string{}}
+				return &inspectionDiagnostic{"unbounded_work_budget", "/limits", "bounded_provider_work", "Decisions cannot enforce token or cost budgets."}
+			}
+			if prepare != nil {
+				return prepare(provider, target)
+			}
+			return nil
+		}
 	}
 	if mediaRequest != nil {
 		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
@@ -153,6 +189,9 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
 		WorstCost: func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+			if input.Operation == "decision" {
+				return usage.Cost{}, false
+			}
 			if provider.Commitment != nil {
 				return usage.Cost{}, true
 			}
@@ -165,6 +204,21 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 					seconds = *mediaRequest.Seconds
 				}
 				return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, now, true, discount)
+			}
+			if counted.prompt != nil {
+				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
+				to, ok := counted.estimates[target.ID]
+				if !ok {
+					to = from
+				}
+				if counted.output != nil {
+					from.Output, to.Output = counted.output, counted.output
+				}
+				if counted.prompt.Request().Family == wire.Completions && from.Output == nil && to.Output != nil {
+					from.Output = to.Output
+				}
+				output := max(from.Reply(), to.Reply())
+				return price.CostBound(max(from.InputExposure(), to.InputExposure()), output, output > 0, now, discount)
 			}
 			d := counted.fixed
 			if demand := counted.sourceDemand(); demand != nil {

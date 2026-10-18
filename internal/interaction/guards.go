@@ -134,7 +134,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 		return guardFailure("/events", "event_dialect")
 	}
 	if event.Control() != "" {
-		if (p.Wire() == wire.Chat || p.Wire() == wire.Responses || p.Wire() == wire.MistralFIM) && event.Control() == "[DONE]" {
+		if (p.Wire() == wire.Completions || p.Wire() == wire.Chat || p.Wire() == wire.Responses || p.Wire() == wire.MistralFIM) && event.Control() == "[DONE]" {
 			return nil
 		}
 		return guardFailure("/events", "control_grammar")
@@ -172,7 +172,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 				return guardFailure("/events/delta", "message_delta")
 			}
 		}
-	case wire.Chat, wire.MistralFIM:
+	case wire.Completions, wire.Chat, wire.MistralFIM:
 		if choices, present := root.Lookup("choices"); present && choices.Kind() != oif.Array {
 			return guardFailure("/events/choices", "candidate_grammar")
 		}
@@ -206,6 +206,16 @@ func outputPolicyCoverage(encodedWire wire.Format, document oif.Document) error 
 	root := document.Root()
 	var contents []oif.Value
 	switch encodedWire {
+	case wire.Completions:
+		if !onlyMembers(root, "id object created model choices usage system_fingerprint service_tier") {
+			return fail()
+		}
+		for _, choice := range member(root, "choices").Elements() {
+			if !onlyMembers(choice, "index text finish_reason logprobs") || !emptyOptional(member(choice, "logprobs")) {
+				return fail()
+			}
+			contents = append(contents, member(choice, "text"))
+		}
 	case wire.Chat:
 		if !onlyMembers(root, "id object created model choices usage system_fingerprint service_tier") {
 			return fail()
@@ -280,14 +290,14 @@ func emptyOptional(value oif.Value) bool {
 	return value.Kind() == oif.Absent || value.Kind() == oif.Null || value.Kind() == oif.Array && len(value.Elements()) == 0
 }
 
-func outputRequestCoverage(document oif.Document) error {
+func outputRequestCoverage(encodedWire wire.Format, document oif.Document) error {
 	for _, path := range []string{"/tools", "/toolConfig", "/reasoning", "/reasoning_effort", "/thinking", "/generationConfig/thinkingConfig"} {
 		if value, present := document.Lookup(path); present && !emptyOptional(value) {
 			return incompatible("policy_conflict", path, "output_policy_coverage", "The requested native output or tool state has no complete inspection contract for this output policy.")
 		}
 	}
 	for _, path := range []string{"/logprobs", "/top_logprobs", "/generationConfig/responseLogprobs", "/generationConfig/logprobs"} {
-		if value, present := document.Lookup(path); present && value.Kind() != oif.Null && value.Raw() != "false" && value.Raw() != "0" {
+		if value, present := document.Lookup(path); present && value.Kind() != oif.Null && (encodedWire == wire.Completions && path == "/logprobs" || value.Raw() != "false" && value.Raw() != "0") {
 			return incompatible("policy_conflict", path, "output_policy_coverage", "Native token alternatives are outside this output policy's inspection contract.")
 		}
 	}

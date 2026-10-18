@@ -4242,11 +4242,14 @@ const (
 	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
 	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
 	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
+	SimulationDialectOpenaiCompletions        SimulationDialect = "openai-completions"
+	SimulationDialectOpenaiDecisions          SimulationDialect = "openai-decisions"
 	SimulationDialectOpenaiEmbeddings         SimulationDialect = "openai-embeddings"
 	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
 	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
 	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
 	SimulationDialectRerank                   SimulationDialect = "rerank"
+	SimulationDialectSystemone                SimulationDialect = "systemone"
 	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
 	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
 	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
@@ -4280,6 +4283,10 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectOpenaiChat:
 		return true
+	case SimulationDialectOpenaiCompletions:
+		return true
+	case SimulationDialectOpenaiDecisions:
+		return true
 	case SimulationDialectOpenaiEmbeddings:
 		return true
 	case SimulationDialectOpenaiInputTokens:
@@ -4289,6 +4296,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectOpenaiResponses:
 		return true
 	case SimulationDialectRerank:
+		return true
+	case SimulationDialectSystemone:
 		return true
 	case SimulationDialectTeiClassification:
 		return true
@@ -8892,7 +8901,7 @@ type PriceCeiling struct {
 	UnitPrice        nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
-// PriceOperation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+// PriceOperation An operation registered by this release, including generation, decision, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
 type PriceOperation = string
 
 // PriceRequest defines model for PriceRequest.
@@ -8937,7 +8946,7 @@ type PriceRequest struct {
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
 	Model                 string                    `json:"model"`
 
-	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+	// Operation An operation registered by this release, including generation, decision, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
 	Operation        PriceOperation            `json:"operation"`
 	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
 
@@ -10090,7 +10099,7 @@ type RateCardPriceEntry struct {
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
 	Model                 string                    `json:"model"`
 
-	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+	// Operation An operation registered by this release, including generation, decision, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
 	Operation        PriceOperation            `json:"operation"`
 	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
 

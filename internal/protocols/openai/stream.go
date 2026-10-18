@@ -41,29 +41,29 @@ func IsResponseProjectionError(err error) bool {
 // includeUsage controls client-visible chat usage; accounting always retains it.
 // On failure, the partial summary preserves usage observed before the error.
 func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, true, emit, nil)
+	return stream(family, family, r, maxEventBytes, route, includeUsage, true, emit, nil)
 }
 
 // StreamMetadata forwards the same validated frames as Stream, but retains only
 // completion metadata. The gateway must not accumulate output or tool arguments
 // for the lifetime of a stream; the unary response cap does not bound streams.
 func StreamMetadata(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, nil)
+	return stream(family, family, r, maxEventBytes, route, includeUsage, false, emit, nil)
 }
 
-func StreamMetadataEvents(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, observe)
+func StreamMetadataEvents(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+	return stream(family, target, r, maxEventBytes, route, includeUsage, false, emit, observe)
 }
 
-func stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+func stream(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
 	var s streamer
 	var encoded []byte
 	retain := func(frame []byte) error { encoded = frame; return nil }
 	switch family {
-	case wire.Chat, wire.MistralFIM:
+	case wire.Completions, wire.Chat, wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
-		s = &chatStream{route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
+		s = &chatStream{legacy: family == wire.Completions, exactUsage: target == wire.Completions, route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
 	case wire.Responses:
 		s = &responsesStream{route: route, collect: collect, emit: retain}
 	default:
@@ -121,6 +121,8 @@ type streamer interface {
 }
 
 type chatStream struct {
+	legacy       bool
+	exactUsage   bool
 	includeUsage bool
 	collect      bool
 	maxChoices   int
@@ -160,7 +162,11 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 			return upstream
 		}
 	}
-	if kind, ok := stringField(fields, "object"); ok && kind != "chat.completion.chunk" {
+	expected := "chat.completion.chunk"
+	if s.legacy {
+		expected = "text_completion"
+	}
+	if kind, ok := stringField(fields, "object"); ok && kind != expected {
 		return &wire.ProtocolError{Detail: "unexpected object " + kind}
 	}
 	if s.c.UpstreamID == "" {
@@ -178,7 +184,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 			return err
 		}
 	}
-	usage, err := chatUsage(fields)
+	usage, err := chatUsage(fields, s.exactUsage)
 	if err != nil {
 		return err
 	}
@@ -208,13 +214,17 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 		return &wire.ProtocolError{Detail: "choice is not an object"}
 	}
 	index, ok := int64Field(choice, "index")
-	if _, present := choice["index"]; present && !ok {
+	if _, present := choice["index"]; (present || s.legacy) && !ok {
 		return &wire.ProtocolError{Detail: "choice index is not a non-negative integer"}
 	}
 	if _, seen := s.finished[index]; !seen && len(s.finished) >= s.maxChoices {
 		return &wire.ProtocolError{Detail: "stream exceeds the choice tracking limit"}
 	}
 	finish, hasFinish := stringField(choice, "finish_reason")
+	// TGI uses an empty string on nonterminal legacy completion chunks.
+	if s.legacy && finish == "" {
+		hasFinish = false
+	}
 	delta := map[string]json.RawMessage{}
 	if raw, present := choice["delta"]; present && !isNull(raw) {
 		if delta, err = object(raw); err != nil {
@@ -222,6 +232,12 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 		}
 	}
 	content, hasContent := stringField(delta, "content")
+	if s.legacy {
+		content, hasContent = stringField(choice, "text")
+		if _, present := choice["text"]; present && !hasContent {
+			return &wire.ProtocolError{Detail: "completion text is not a string"}
+		}
+	}
 	refusal, hasRefusal := stringField(delta, "refusal")
 	calls, hasCalls := arrayField(delta, "tool_calls")
 	if s.finished[index] && (hasFinish || hasContent || hasRefusal || hasCalls) {

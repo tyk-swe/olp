@@ -11,6 +11,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // DefaultSet is owned by one operation/dialect contract. NativeOptions remains
@@ -52,6 +54,8 @@ func defaultFields(dialect, operation string) []string {
 	switch operation {
 	case "generation":
 		switch dialect {
+		case "openai-completions":
+			return strings.Fields("temperature top_p max_tokens frequency_penalty presence_penalty logit_bias seed stop stream_options n echo best_of logprobs")
 		case "openai-chat":
 			return strings.Fields("temperature top_p max_tokens max_completion_tokens frequency_penalty presence_penalty logit_bias seed stop response_format tools tool_choice parallel_tool_calls stream_options n reasoning_effort service_tier verbosity logprobs top_logprobs")
 		case "openai-responses":
@@ -111,6 +115,9 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		return errors.New("use at most 64 operation defaults")
 	}
 	for name, raw := range defaults.Values {
+		if p.ID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
+			return fmt.Errorf("TGI completions do not implement %s", name)
+		}
 		if !slices.Contains(defaultFields(defaults.Dialect, operation), name) {
 			return fmt.Errorf("control %s is outside the operation/dialect schema; explicit extensions belong in native_options", name)
 		}
@@ -122,6 +129,9 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		}
 	}
 	for name, raw := range defaults.NativeOptions {
+		if p.ID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
+			return fmt.Errorf("TGI completions do not implement %s", name)
+		}
 		if err := validateDialectDefaultValue(defaults.Dialect, operation, name, raw); err != nil {
 			return err
 		}
@@ -137,6 +147,19 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 }
 
 func validateDialectDefaultValue(dialect, operation, name string, raw json.RawMessage) error {
+	if dialect == "openai-completions" {
+		if reservedOption(operation, name) || name == "prompt" || name == "suffix" || len(raw) == 0 || len(raw) > 256<<10 {
+			return errors.New("completion default is outside its contract")
+		}
+		fields := map[string]json.RawMessage{"model": json.RawMessage(`"defaults-check"`), "prompt": json.RawMessage(`"check"`), name: raw}
+		body, err := json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+		_, err = openai.Parse(wire.Completions, body)
+		return err
+	}
+
 	if codec, ok := operationregistry.Lookup(dialect); ok {
 		if field, present := codec.Defaults[name]; present && field.Validate != nil {
 			if len(raw) == 0 || len(raw) > 256<<10 {

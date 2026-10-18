@@ -259,6 +259,12 @@ func countDefaults(encodedWire wire.Format, defaults Object) Object {
 }
 
 func encodeTransformed(r *wire.Request, encodedWire wire.Format, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, wire.Format, error) {
+	if r.Family == wire.Completions && encodedWire != wire.Completions {
+		return encodeCompletionChat(r, encodedWire, kind, vendor, model, defaults, applied)
+	}
+	if encodedWire == wire.Completions && r.Family != wire.Completions {
+		return nil, encodedWire, unsupported("completions_mapping")
+	}
 	if r.Family.Operation() == "token_count" {
 		defaults = countDefaults(encodedWire, defaults)
 	}
@@ -383,6 +389,9 @@ func ParameterNames(r *wire.Request) []string {
 		names = append(names, "tools")
 	}
 	for _, p := range c.Extensions {
+		if r.Family == wire.Completions && p == "/prompt" {
+			continue // Validated native prompt forms are required input, not controls.
+		}
 		names = append(names, strings.TrimPrefix(p, "/"))
 	}
 	return names

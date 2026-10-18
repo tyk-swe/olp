@@ -81,7 +81,7 @@ func (x *call) sourceDemand(model string) *routing.TokenDemand {
 }
 
 func demandOf(e estimate.Estimate) *routing.TokenDemand {
-	return &routing.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	return &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 }
 
 func (x *call) strict() bool {
@@ -237,12 +237,18 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 	counter := estimate.ForModel(model)
 	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
 		to := effective.prompt.Estimate(counter, nil)
-		return admittedEstimate{reserve: to.Tokens(), input: to.Input, reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
+		return admittedEstimate{reserve: to.Tokens(), input: to.InputExposure(), reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
 	}
 	from, to := source.prompt.Estimate(counter, nil), effective.prompt.Estimate(counter, nil)
+	// The qualified destination makes an omitted completion limit enforceable
+	// (including the 16-token Chat mapping default). Do not retain the generic
+	// unknown-output reservation once that effective bound is known.
+	if source.request != nil && source.request.Family == wire.Completions && from.Output == nil && to.Output != nil {
+		from.Output = to.Output
+	}
 	admitted := admittedEstimate{
 		reserve:    max(from.Tokens(), to.Tokens()),
-		input:      max(from.Input, to.Input),
+		input:      max(from.InputExposure(), to.InputExposure()),
 		reply:      max(from.Reply(), to.Reply()),
 		provenance: estimate.Weaker(from.Provenance, to.Provenance),
 		family:     to.Family,
@@ -254,7 +260,7 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 // parameter defaults applied, and nothing a profile, a strict contract or a
 // content policy would rewrite.
 func (x *call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
+	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
 }
 
 // encodedRequest is the body a provider that takes the caller's request as it
@@ -352,7 +358,7 @@ func (x *call) attemptEstimate(provider *routing.Provider, targetID, model strin
 		bounds := record.output
 		e := x.summarizeSource().prompt.Estimate(estimate.ForModel(model), provider.ParameterDefaults)
 		e.Output, e.Candidates = bounds.output, bounds.candidates
-		return admittedEstimate{reserve: e.Tokens(), input: e.Input, reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
+		return admittedEstimate{reserve: e.Tokens(), input: e.InputExposure(), reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
 	}
 	prepared, err := x.providerAdmission(provider, targetID, model)
 	if err != nil {

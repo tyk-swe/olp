@@ -187,7 +187,7 @@ func accountingUsage(value *operations.Usage) *wire.Usage {
 	if value == nil {
 		return nil
 	}
-	out := &wire.Usage{CachedInputTokens: value.CachedInputTokens}
+	out := &wire.Usage{CachedInputTokens: value.CachedInputTokens, CacheWriteInputTokens: value.CacheWriteInputTokens, ReasoningTokens: value.ReasoningTokens}
 	if value.InputTokens != nil {
 		out.InputTokens = *value.InputTokens
 	}

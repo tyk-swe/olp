@@ -247,6 +247,12 @@ func (c Config) URL(encodedWire wire.Format, model string, stream bool) (string,
 	}
 	path := "/chat/completions"
 	switch encodedWire {
+	case wire.Decisions:
+		path = "/decisions"
+	case wire.SystemOne:
+		path = "/systemone"
+	case wire.Completions:
+		path = "/completions"
 	case wire.Responses:
 		path = "/responses"
 	case wire.InputTokens:

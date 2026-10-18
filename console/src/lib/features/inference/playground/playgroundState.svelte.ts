@@ -6,7 +6,12 @@ import { hasOutputRules } from '$lib/features/routes/routeEditor';
 import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { listApiKeys } from '$lib/features/access/api-keys/api';
 import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+import {
+  nativeObject,
+  parseNativeJSON,
+  replaceNative,
+  type NativeObject
+} from '$lib/json/nativeJson';
 import { abortError, errorMessage } from '$lib/api/http';
 import {
   inspectRouting,
@@ -128,6 +133,7 @@ export class PlaygroundState {
     this.operation = template.operation;
     if (template.surface) this.surface = template.surface;
     this.nativeDialect = template.nativeDialect ?? '';
+    this.inspectDialect = template.inspectDialect ?? '';
     this.rawJson = JSON.stringify(template.request, null, 2);
   };
 
@@ -240,6 +246,17 @@ export class PlaygroundState {
     };
   }
 
+  private inspectionNativeRequest(dialect: string): NativeObject {
+    const request = nativeOperationRequest(
+      this.rawJson,
+      this.model.trim(),
+      dialect
+    );
+    return dialect === 'openai-completions'
+      ? (replaceNative(request, ['stream'], this.streamEnabled) as NativeObject)
+      : request;
+  }
+
   explain = async () => {
     this.simulationError = '';
     if (!this.model.trim()) {
@@ -249,7 +266,7 @@ export class PlaygroundState {
     try {
       const version = this.inspectionInputs();
       const registeredNative =
-        this.strictSelected &&
+        (this.strictSelected || this.operation === 'decision') &&
         this.composer === 'advanced' &&
         nativeDialects(this.operation).length > 0;
       const selectedDialect = registeredNative
@@ -258,7 +275,12 @@ export class PlaygroundState {
       const input: InspectRoutingInput = {
         route: this.model.trim(),
         operation: this.activeOperation,
-        surface: registeredNative ? 'native' : this.surface,
+        surface:
+          this.activeOperation === 'decision'
+            ? 'openai'
+            : registeredNative
+              ? 'native'
+              : this.surface,
         mode:
           this.activeOperation === 'realtime'
             ? 'realtime'
@@ -276,13 +298,10 @@ export class PlaygroundState {
             : undefined,
         ...(this.composer === 'advanced' && this.operation !== 'realtime'
           ? {
-              request: registeredNative
-                ? nativeOperationRequest(
-                    this.rawJson,
-                    this.model.trim(),
-                    selectedDialect!
-                  )
-                : this.advancedRequest(),
+              request:
+                registeredNative || selectedDialect === 'openai-completions'
+                  ? this.inspectionNativeRequest(selectedDialect!)
+                  : this.advancedRequest(),
               dialect: selectedDialect as
                 InspectRoutingInput['dialect'] | undefined
             }
@@ -377,11 +396,12 @@ export class PlaygroundState {
       return;
     }
     if (
+      this.activeOperation === 'decision' ||
       this.activeOperation === 'classification' ||
       this.activeOperation === 'scoring'
     ) {
       this.validationError =
-        'This operation requires a strict registered native route and the public client below.';
+        'Use the public native client below with a route certified for this operation.';
       return;
     }
     let request: PlaygroundRequest;

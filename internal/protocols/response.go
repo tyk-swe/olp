@@ -55,8 +55,10 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 	var c *wire.Completion
 	var err error
 	switch encodedWire {
+	case wire.Completions:
+		c, err = openai.DecodeCompletions(body, route)
 	case wire.Chat:
-		c, err = openai.DecodeChat(body, route)
+		c, err = openai.DecodeChat(body, route, target)
 	case wire.Responses:
 		var background bool
 		if request != nil && target == wire.Responses {
@@ -69,7 +71,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		}
 	case wire.MistralFIM:
 		// A fill-in-the-middle result is a chat completion.
-		c, err = openai.DecodeChat(body, route)
+		c, err = openai.DecodeChat(body, route, target)
 	case wire.CohereChat:
 		c, err = decodeCohereChat(body)
 	case wire.Anthropic:
@@ -165,6 +167,10 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		return nil, protocolError("unknown response family")
 	}
 	if err != nil {
+		return c, err
+	}
+	if encodedWire == wire.Chat && target == wire.Completions {
+		c.Body, err = projectChatCompletion(c.Body, false)
 		return c, err
 	}
 	if encodedWire != target && target.Operation() == "generation" {

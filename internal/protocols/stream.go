@@ -34,6 +34,9 @@ func Stream(encodedWire, target wire.Format, r io.Reader, maxEvent int, route st
 // expectedCandidates, when present, is the effective dispatched Gemini request's
 // candidate count. Without that request proof, Gemini totals await clean EOF.
 func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error, expectedCandidates ...int64) (*wire.Completion, error) {
+	if encodedWire == wire.Chat && target == wire.Completions {
+		return streamCompletionChat(r, maxEvent, route, includeUsage, emit, observe)
+	}
 	native := encodedWire == target || encodedWire == wire.Gemini && target == wire.GeminiStream
 	if encodedWire.Surface() == "native" && !native {
 		return nil, protocolError("a native generation dialect is never translated")
@@ -53,9 +56,9 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 	var c *wire.Completion
 	var err error
 	switch encodedWire {
-	case wire.Chat, wire.Responses:
-		c, err = openai.StreamMetadataEvents(encodedWire, r, maxEvent, route, true, func(frame []byte) error {
-			if native && encodedWire == wire.Chat && !includeUsage {
+	case wire.Completions, wire.Chat, wire.Responses:
+		c, err = openai.StreamMetadataEvents(encodedWire, target, r, maxEvent, route, true, func(frame []byte) error {
+			if native && (encodedWire == wire.Chat || encodedWire == wire.Completions) && !includeUsage {
 				var f Object
 				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
 				if json.Unmarshal([]byte(payload), &f) == nil {
@@ -70,7 +73,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 		}, observe)
 	case wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
-		c, err = openai.StreamMetadataEvents(wire.MistralFIM, r, maxEvent, route, true, upstreamEmit, observe)
+		c, err = openai.StreamMetadataEvents(wire.MistralFIM, target, r, maxEvent, route, true, upstreamEmit, observe)
 	case wire.CohereChat:
 		c, err = streamCohereEvents(r, maxEvent, upstreamEmit, observe)
 	case wire.Anthropic:

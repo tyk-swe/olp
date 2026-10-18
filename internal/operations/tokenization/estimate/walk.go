@@ -208,6 +208,8 @@ func requestFields(request *wire.Request) func(string) node {
 func walkInput(in *input, family wire.Format, field func(string) node) {
 	w := walker{in}
 	switch family {
+	case wire.Completions:
+		w.embedding(field("prompt"))
 	case wire.Chat:
 		w.items(field("messages"))
 	case wire.Embeddings:
@@ -593,6 +595,9 @@ func OutputBounds(request *wire.Request, defaults map[string]json.RawMessage) (o
 	field := func(name string) json.RawMessage { return fieldOf(request, defaults, name) }
 	candidates = 1
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
+	if request != nil && request.Family == wire.Completions {
+		outputFields = []string{"max_tokens"}
+	}
 	if request != nil && request.Family == wire.Responses {
 		outputFields = []string{"max_output_tokens"}
 	}
@@ -616,9 +621,18 @@ func OutputBounds(request *wire.Request, defaults map[string]json.RawMessage) (o
 			candidates = v
 		}
 	}
-	if request == nil || request.Family == wire.Chat {
+	if request == nil || request.Family == wire.Chat || request.Family == wire.Completions {
 		if value, ok := integerValue(field("n")); ok {
 			candidates = value
+		}
+	}
+	if request != nil && request.Family == wire.Completions {
+		if best, ok := integerValue(field("best_of")); ok {
+			candidates = max(candidates, best)
+		}
+		var prompts []json.RawMessage
+		if json.Unmarshal(field("prompt"), &prompts) == nil && len(prompts) > 0 && len(prompts[0]) > 0 && (prompts[0][0] == '"' || prompts[0][0] == '[') {
+			candidates = multiplyBounded(candidates, int64(len(prompts)))
 		}
 	}
 	return output, candidates

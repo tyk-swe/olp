@@ -1,0 +1,10 @@
+{
+  "model": "jev-latest",
+  "state": "A customer has a billing question.",
+  "questions": {
+    "billing": {
+      "type": "noul",
+      "instructions": "Does this concern billing?"
+    }
+  }
+}

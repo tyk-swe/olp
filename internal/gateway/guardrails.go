@@ -68,6 +68,15 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	if x.guardrailEngine == nil {
 		return nil
 	}
+	// Unary operation codecs expose inspection text but cannot apply rewritten
+	// segments to their typed request and result documents.
+	if x.unary != nil {
+		for _, phase := range []string{guardrails.Input, guardrails.Output, guardrails.OutputStream} {
+			if x.guardrailEngine.HasAction(phase, guardrails.Redact) || x.guardrailEngine.HasAction(phase, guardrails.Mask) {
+				return guardrailError(guardrails.ErrSurface)
+			}
+		}
+	}
 	x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
 	if x.guardrailMasks == nil {
 		x.guardrailMasks = &guardrails.Masking{}
@@ -97,11 +106,16 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 }
 
 func (x *call) guardrailStreamSurface(document oif.Document) error {
-	if x.family == wire.Chat && x.generation.parsed != nil && x.generation.parsed.Stream &&
+	if x.family == wire.Completions && (x.guardrailEngine.HasAction(guardrails.Output, guardrails.Block) || x.guardrailEngine.HasAction(guardrails.Output, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
+		if value, ok := document.Root().Lookup("logprobs"); ok && value.Kind() != oif.Null {
+			return guardrails.ErrSurface
+		}
+	}
+	if (x.family == wire.Chat || x.family == wire.Completions) && x.generation.parsed != nil && x.generation.parsed.Stream &&
 		(x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
 		// Log-probability alternatives and their byte encodings are separate
 		// output surfaces that cannot share the content delta's stream window.
-		if value, ok := document.Root().Lookup("logprobs"); ok && value.Raw() == "true" {
+		if value, ok := document.Root().Lookup("logprobs"); ok && (value.Raw() == "true" || x.family == wire.Completions && value.Kind() != oif.Null) {
 			return guardrails.ErrSurface
 		}
 	}
@@ -226,6 +240,21 @@ func (x *call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: guardrails.MaxContentBytes})
 	if err != nil {
 		return body, guardrails.ErrSurface
+	}
+	if x.family == wire.Completions {
+		choices, _ := doc.Root().Lookup("choices")
+		for _, choice := range choices.Elements() {
+			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
+				result, err := x.guardrailEngine.Unavailable(guardrails.Output)
+				x.recordGuardrails(result.Decisions)
+				if err != nil {
+					return body, err
+				}
+				if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+					return body, guardrails.ErrSurface
+				}
+			}
+		}
 	}
 	if x.strict() && x.guardrailEngine.HasLegacyOutput() {
 		if err := interaction.CheckLegacyOutputCoverage(x.family, doc); err != nil {

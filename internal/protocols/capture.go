@@ -37,6 +37,24 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 		}
 	}
 	switch family {
+	case wire.Completions:
+		choices := r.array(f["choices"])
+		if len(choices) == 0 {
+			err = errCaptureStream
+		}
+		for _, raw := range choices {
+			c, _ := r.object(raw)
+			if !captureCompleteReason(family, r.str(c["finish_reason"])) {
+				err = errCaptureStream
+			}
+			text := r.str(c["text"])
+			if !present(c["text"]) {
+				err = errCaptureStream
+			}
+			if output {
+				texts = append(texts, text)
+			}
+		}
 	case wire.Chat, wire.MistralFIM:
 		if len(r.array(f["choices"])) == 0 {
 			err = errCaptureStream
@@ -168,6 +186,8 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 
 func captureCompleteReason(family wire.Format, reason string) bool {
 	switch family {
+	case wire.Completions:
+		return reason == "stop" || reason == "eos_token" || reason == "stop_sequence"
 	case wire.Chat, wire.MistralFIM:
 		return reason == "stop" || reason == "tool_calls" || reason == "function_call"
 	case wire.Anthropic, wire.Bedrock:

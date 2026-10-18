@@ -63,6 +63,9 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 		return nil, err
 	}
 	effective := prepared.Document()
+	if err := config.ValidateCompletionRequest(effective); err != nil {
+		return nil, err
+	}
 	if err := checkAssetResources(effective, t.wire); err != nil {
 		return nil, err
 	}
@@ -73,7 +76,7 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
 	}
 	if t.policy != nil && t.policy.HasOutput() {
-		if err := outputRequestCoverage(effective); err != nil {
+		if err := outputRequestCoverage(t.wire, effective); err != nil {
 			return nil, err
 		}
 	}

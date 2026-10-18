@@ -9,6 +9,7 @@ pnpm install --frozen-lockfile        # the npm clients, once
 tests/clients/run.sh                  # every suite
 CLIENTS=harness,ai-sdk tests/clients/run.sh
 CLIENTS=operator-env,go-sdks tests/clients/run.sh
+CLIENTS=m9-go tests/clients/run.sh
 tests/clients/run.sh --list
 ```
 
@@ -37,6 +38,8 @@ fixture as part of the integration suite.
 | `lib/tap.mjs` | A recording proxy between a client and the gateway: what the client sent and what OLP answered |
 | `lib/relay.mjs` | `assertRelayed`, which holds the tap's recording against the upstream's, and the dialect helpers it uses |
 | `suites/<name>/*.test.mjs` | `node:test` suites; `harness` checks the harness itself, including the tap, the relay assertions, the helpers of `lib/cli.mjs`, the reporter and `lib/check-ran.sh`, the others are one client each |
+| `m9sdk/` | Focused pinned OpenAI SDK checks for legacy completions and Decisions, including the actual gateway and scripted System One target |
+| `m9-endpoints.json` | M9 scope, explicit refusals, frozen SDK references and per-tuple qualification status; pending is not a support claim |
 | `gosdk/` | Go SDK tests with the `integration` build tag, in the Go module of this directory: `harness_test.go` is the harness contract, one file per SDK, and `errors_test.go` holds the typed-error contracts |
 | `package.json`, `go.mod` | Exact pins of every client, as development dependencies |
 | `../clientfixture/` | The gateway host and, in `scripted/`, the scripted upstream |
@@ -85,6 +88,9 @@ the native invocation and needs a provider per explicit versioned profile.
 | `olp-openai` | Transformed | OpenAI | Chat Completions, Responses, input token counts and embeddings; Messages and `generateContent` by translation |
 | `olp-anthropic` | Transformed | Anthropic | Messages and `count_tokens`; Chat Completions, Responses and `generateContent` by translation |
 | `olp-gemini` | Transformed | Gemini | `generateContent`, `streamGenerateContent` and `countTokens`; Chat Completions and Messages by translation; `/v1/embeddings` through `embedContent` |
+| `olp-openai-completions` | Strict | OpenAI text profile | Legacy completions, unary and SSE |
+| `olp-openai-decisions` | Strict | OpenAI Decisions profile | Native text-only Decisions |
+| `olp-systemone` | Strict | TypeSafe System One profile | Native System One and restricted OpenAI Decisions mapping |
 | `olp-openai-strict` | Strict | OpenAI, profiles `openai-chat` and `openai-responses` | The same OpenAI endpoints, unchanged |
 | `olp-anthropic-strict` | Strict | Anthropic, profile `anthropic-messages` | Messages and `count_tokens`, with `anthropic-beta` forwarded |
 | `olp-gemini-strict` | Strict | Gemini, profile `gemini-generation` | Native Gemini generation and counting |

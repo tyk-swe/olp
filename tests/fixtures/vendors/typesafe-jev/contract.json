@@ -1,0 +1,29 @@
+{
+  "vendor": "typesafe-jev",
+  "documentation_url": "https://api.typesafe.ai/redoc",
+  "reviewed_at": "2026-10-18",
+  "notes": "Text-only subset of the published 0.2.0 schema at https://api.typesafe.ai/openapi.json. The noul response is the documented noul example; the request and validation error are schema-built. These are offline contract fixtures, not live-provider qualification.",
+  "endpoints": {
+    "decision": "https://api.typesafe.ai/v1/systemone"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "decision": {
+      "request": "decision.request.json",
+      "file": "decision.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 120,
+        "output_tokens": 12,
+        "total_tokens": 132
+      }
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 422,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}
