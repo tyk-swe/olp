@@ -281,6 +281,35 @@ describe('basic composer', () => {
 });
 
 describe('advanced composer', () => {
+  it('binds the selected route while inspecting the completions template', async () => {
+    vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+    await establish();
+    radio('advanced').click();
+    flushSync();
+    const template = host.querySelector<HTMLSelectElement>(
+      '#playground-template'
+    )!;
+    template.value = 'legacy-completions';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Inspect plan')!
+      .click();
+    flushSync();
+    await settle(0);
+    expect(inspectRouting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dialect: 'openai-completions',
+        request: expect.objectContaining({
+          model: 'chat-route',
+          prompt: 'Explain an API gateway in one sentence.'
+        })
+      })
+    );
+  });
+
   it('replaces the completions client when the operation changes', async () => {
     await establish([
       {

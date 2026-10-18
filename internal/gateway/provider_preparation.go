@@ -254,7 +254,7 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 // parameter defaults applied, and nothing a profile, a strict contract or a
 // content policy would rewrite.
 func (x *call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
+	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
 }
 
 // encodedRequest is the body a provider that takes the caller's request as it

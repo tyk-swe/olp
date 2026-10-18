@@ -225,7 +225,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*wire.Request{}
 	var effective func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand)
-	if route.Fidelity.Strict() {
+	if route.Fidelity.Strict() || parsed.Family == wire.Completions {
 		effective = func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
 			request := effectiveRequests[target.ID]
 			delete(effectiveRequests, target.ID)
@@ -262,6 +262,13 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			}
 			if err != nil {
 				return err
+			}
+			if parsed.Family == wire.Completions {
+				request, err := wire.NewRequest(invocation.Wire, parsed.Route, parsed.Stream, invocation.Prepared.Document())
+				if err != nil {
+					return err
+				}
+				effectiveRequests[target.ID] = request
 			}
 			result.Status, result.Class = routing.FidelityTransformed, fidelity
 			result.Operation = parsed.Family.Operation()

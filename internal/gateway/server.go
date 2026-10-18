@@ -836,7 +836,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		return x.sourceDemand(t.ProviderModel)
 	}
 	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
-		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil && x.guardrailEngine == nil {
+		if x.automatic(&p) {
 			return source.parameters, x.sourceDemand(t.ProviderModel)
 		}
 		prepared, err := x.preparedProvider(&p, t.ID, t.ProviderModel)
@@ -866,7 +866,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 			}
 		}
 		var e error
-		if p.ProfileID != "" || x.strict() || (route.ContentPolicy != nil || x.guardrailEngine != nil) {
+		if !x.automatic(&p) {
 			var prepared preparedProvider
 			prepared, e = x.preparedProvider(&p, t.ID, t.ProviderModel)
 			if e != nil {
@@ -881,11 +881,12 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		return e
 	}
 	if !x.strict() && route.ContentPolicy == nil && x.guardrailEngine == nil {
-		hasProfile := false
+		allAutomatic := true
 		for _, target := range route.Targets {
-			hasProfile = hasProfile || snapshot.Providers[target.ProviderID].ProfileID != ""
+			provider := snapshot.Providers[target.ProviderID]
+			allAutomatic = allAutomatic && x.automatic(&provider)
 		}
-		if !hasProfile {
+		if allAutomatic {
 			options.Effective = nil
 		}
 	}

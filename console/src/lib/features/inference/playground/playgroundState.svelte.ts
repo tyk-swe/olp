@@ -282,13 +282,14 @@ export class PlaygroundState {
             : undefined,
         ...(this.composer === 'advanced' && this.operation !== 'realtime'
           ? {
-              request: registeredNative
-                ? nativeOperationRequest(
-                    this.rawJson,
-                    this.model.trim(),
-                    selectedDialect!
-                  )
-                : this.advancedRequest(),
+              request:
+                registeredNative || selectedDialect === 'openai-completions'
+                  ? nativeOperationRequest(
+                      this.rawJson,
+                      this.model.trim(),
+                      selectedDialect!
+                    )
+                  : this.advancedRequest(),
               dialect: selectedDialect as
                 InspectRoutingInput['dialect'] | undefined
             }

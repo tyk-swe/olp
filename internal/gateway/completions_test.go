@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -79,6 +83,43 @@ func TestLegacyCompletionsGateway(t *testing.T) {
 				if resp.StatusCode < 400 || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
 					t.Fatalf("unmapped request dispatched: %d %s", resp.StatusCode, body)
 				}
+			}
+		})
+	}
+}
+
+func TestLegacyCompletionAutomaticUsesMappedEstimate(t *testing.T) {
+	for _, tightContext := range []bool{false, true} {
+		t.Run(fmt.Sprint(tightContext), func(t *testing.T) {
+			h := newHarness(t, Config{})
+			routeEstimateTargets(h, estimateTarget{name: "a", model: "gpt-4o", slots: 1})
+			if tightContext {
+				for id, p := range h.rt.release.Snapshot.Providers {
+					p.Models = map[string]json.RawMessage{"gpt-4o": json.RawMessage(`{"context_length":7}`)}
+					h.rt.release.Snapshot.Providers[id] = p
+				}
+			}
+			h.mock.set("a", completion("gpt-4o", "hello"))
+			resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":1}`), nil)
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if tightContext {
+				if resp.StatusCode < 400 || h.mock.count("a") != 0 {
+					t.Fatalf("mapped context not checked: %d %s", resp.StatusCode, body)
+				}
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("automatic completion: %d %s", resp.StatusCode, body)
+			}
+			mapped, err := protocols.Parse(wire.Chat, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"hello"}],"max_tokens":1}`), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := estimate.Walk(mapped).Estimate(estimate.ForModel("gpt-4o"), nil).Input
+			env := h.sink.last(t)
+			if len(env.Attempts) != 1 || env.Attempts[0].EstimatedInputTokens != want {
+				t.Fatalf("automatic estimate: %+v; want %d", env.Attempts, want)
 			}
 		})
 	}
