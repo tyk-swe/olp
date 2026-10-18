@@ -351,7 +351,7 @@ func (s *CaptureStream) responses(f map[string]json.RawMessage) {
 		s.terminal = true
 	case "error", "response.failed", "response.incomplete":
 		s.invalid = true
-	case "response.created", "response.queued", "response.in_progress", "response.content_part.added", "response.content_part.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+	case "response.created", "response.queued", "response.in_progress", "response.content_part.added", "response.content_part.done", "response.output_text.annotation.added", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
 	default:
 		s.invalid = true
 	}

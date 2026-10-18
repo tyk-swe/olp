@@ -193,6 +193,7 @@ func TestCaptureSupportedLifecycleAndFeedback(t *testing.T) {
 		}},
 		{"responses-omitted-status", wire.Responses, []string{
 			`{"type":"response.output_text.delta","item_id":"m","content_index":0,"delta":"secret"}`,
+			`{"type":"response.output_text.annotation.added","item_id":"m","content_index":0,"annotation_index":0,"annotation":{"type":"url_citation","url":"https://example.com","title":"excluded citation"}}`,
 			`{"type":"response.completed","response":{"output":[{"id":"m","type":"message","content":[{"type":"output_text","text":"secret"}]}]}}`,
 		}},
 		{"cohere-debug", wire.CohereChat, []string{
@@ -272,9 +273,9 @@ func TestCaptureUnaryNativeText(t *testing.T) {
 		family wire.Format
 		body   string
 	}{
-		{wire.Bedrock, `{"output":{"message":{"content":[{"text":"secret"}]}}}`},
-		{wire.CohereChat, `{"message":{"content":[{"type":"text","text":"secret"}]}}`},
-		{wire.MistralFIM, `{"choices":[{"message":{"content":"secret"}}]}`},
+		{wire.Bedrock, `{"stopReason":"end_turn","output":{"message":{"content":[{"text":"secret"}]}}}`},
+		{wire.CohereChat, `{"finish_reason":"COMPLETE","message":{"content":[{"type":"text","text":"secret"}]}}`},
+		{wire.MistralFIM, `{"choices":[{"finish_reason":"stop","message":{"content":"secret"}}]}`},
 	} {
 		text, _, err := CaptureResponse(tc.family, []byte(tc.body), true, true)
 		if err != nil || text != "secret" {

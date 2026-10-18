@@ -91,8 +91,10 @@ func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bo
 				return err
 			}
 			_, named := v["name"].(string)
-			arguments := toolArguments || key == "arguments" || (named && (key == "input" || key == "args"))
-			if !toolArguments && key == "arguments" {
+			// Bedrock json results and Gemini function responses contain arbitrary
+			// JSON, just like call arguments. Their property names are not protocol.
+			arguments := toolArguments || key == "json" || (named && (key == "arguments" || key == "input" || key == "args" || key == "response"))
+			if !toolArguments && named && key == "arguments" {
 				if raw, ok := child.(string); ok {
 					nested, err := captureJSON([]byte(raw))
 					if err != nil {

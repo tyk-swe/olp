@@ -132,6 +132,40 @@ func TestCaptureRedactsOrdinaryToolArgumentKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureRedactsStructuredToolResultJSON(t *testing.T) {
+	p := redactedPolicy(t)
+	for _, result := range []string{
+		`{"arguments":"--version secret"}`,
+		`{"name":"example","arguments":"--version secret","source":"secret","type":"image","image":{"data":"secret"}}`,
+	} {
+		for _, input := range []map[string]json.RawMessage{
+			{"messages": json.RawMessage(`[{"role":"user","content":[{"toolResult":{"toolUseId":"call","content":[{"json":` + result + `}]}}]}]`)},
+			{"contents": json.RawMessage(`[{"role":"user","parts":[{"functionResponse":{"name":"f","response":` + result + `}}]}]`)},
+		} {
+			redacted, _, _, err := redactCapture(t.Context(), p.redactor, input, "", nil)
+			if err != nil {
+				t.Fatalf("ordinary tool result dropped: %v", err)
+			}
+			for _, raw := range redacted {
+				if strings.Contains(string(raw), "secret") || !strings.Contains(string(raw), "--version [REMOVED]") || !json.Valid(raw) {
+					t.Fatalf("tool result not inspected: %s", raw)
+				}
+			}
+		}
+	}
+}
+
+func TestCaptureDropsTruncatedUnaryOutput(t *testing.T) {
+	p := redactedPolicy(t)
+	p.Include = []string{"output"}
+	m := testManager(p)
+	c := m.Resolve("project", "", "", "", "req")
+	c.CaptureResponse(wire.Chat, []byte(`{"choices":[{"index":0,"message":{"content":"sec"},"finish_reason":"length"}]}`))
+	if c.Finish(CaptureIdentity{ProjectID: "project"}, time.Now()) || len(m.queue) != 0 {
+		t.Fatal("truncated sensitive content queued")
+	}
+}
 func TestCaptureRedactionDropsMalformedUnavailableCancelledAndBounds(t *testing.T) {
 	for _, test := range []string{"malformed", "opaque", "missing", "field", "segments", "cancelled", "closed", "expanded"} {
 		t.Run(test, func(t *testing.T) {
@@ -143,7 +177,7 @@ func TestCaptureRedactionDropsMalformedUnavailableCancelledAndBounds(t *testing.
 			defer cancel()
 			switch test {
 			case "malformed":
-				c.CaptureToolCall(json.RawMessage(`{"arguments":"{broken"}`))
+				c.CaptureToolCall(json.RawMessage(`{"name":"f","arguments":"{broken"}`))
 			case "opaque":
 				c.CaptureDocument(map[string]json.RawMessage{"messages": json.RawMessage(`[{"content":[{"type":"image_url","image_url":"secret"}]}]`)})
 			case "missing":

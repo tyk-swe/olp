@@ -38,11 +38,14 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 	}
 	switch family {
 	case wire.Chat, wire.MistralFIM:
-		if !present(f["choices"]) {
+		if len(r.array(f["choices"])) == 0 {
 			err = errCaptureStream
 		}
 		for _, raw := range r.array(f["choices"]) {
 			c, _ := r.object(raw)
+			if !captureCompleteReason(family, r.str(c["finish_reason"])) {
+				err = errCaptureStream
+			}
 			m, _ := r.object(c["message"])
 			if m == nil {
 				err = errCaptureStream
@@ -80,7 +83,7 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 			}
 		}
 	case wire.Anthropic:
-		if !present(f["content"]) {
+		if !present(f["content"]) || !captureCompleteReason(family, r.str(f["stop_reason"])) {
 			err = errCaptureStream
 		}
 		add(f["content"])
@@ -93,11 +96,14 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 			}
 		}
 	case wire.Gemini, wire.GeminiStream:
-		if !present(f["candidates"]) {
+		if len(r.array(f["candidates"])) == 0 {
 			err = errCaptureStream
 		}
 		for _, raw := range r.array(f["candidates"]) {
 			c, _ := r.object(raw)
+			if !captureCompleteReason(family, r.str(c["finishReason"])) {
+				err = errCaptureStream
+			}
 			content, _ := r.object(c["content"])
 			for _, raw := range r.array(content["parts"]) {
 				p, _ := r.object(raw)
@@ -115,6 +121,9 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 			}
 		}
 	case wire.Bedrock:
+		if !captureCompleteReason(family, r.str(f["stopReason"])) {
+			err = errCaptureStream
+		}
 		out, _ := r.object(f["output"])
 		m, _ := r.object(out["message"])
 		if m == nil {
@@ -132,6 +141,9 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 			}
 		}
 	case wire.CohereChat:
+		if !captureCompleteReason(family, r.str(f["finish_reason"])) {
+			err = errCaptureStream
+		}
 		m, _ := r.object(f["message"])
 		if tools {
 			calls = append(calls, r.array(m["tool_calls"])...)
@@ -152,6 +164,21 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 		}
 	}
 	return strings.Join(texts, "\n"), calls, err
+}
+
+func captureCompleteReason(family wire.Format, reason string) bool {
+	switch family {
+	case wire.Chat, wire.MistralFIM:
+		return reason == "stop" || reason == "tool_calls" || reason == "function_call"
+	case wire.Anthropic, wire.Bedrock:
+		return reason == "end_turn" || reason == "tool_use" || reason == "stop_sequence"
+	case wire.Gemini, wire.GeminiStream:
+		return reason == "STOP"
+	case wire.CohereChat:
+		return reason == "COMPLETE" || reason == "TOOL_CALL" || reason == "STOP_SEQUENCE"
+	default:
+		return false
+	}
 }
 
 func captureResponseText(raw json.RawMessage) ([]string, error) {
