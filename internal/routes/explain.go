@@ -150,12 +150,13 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		prepare := accept
 		named := m.snapshot.Routes[cmp.Or(m.named, slug)]
 		accept = func(provider routing.Provider, target routing.Target) error {
-			budgeted := key.authority.UnboundedWorkBudgeted(named.Slug) || routing.UnboundedWorkBudgeted(nil, nil, &named) || routing.UnboundedWorkBudgeted(&provider, nil, &route)
+			costExempt := named.CallerCostExempt && provider.CredentialSource == "caller"
+			budgeted := key.authority.UnboundedWorkBudgeted(named.Slug, costExempt) || routing.UnboundedWorkBudgeted(nil, nil, &named, costExempt) || routing.UnboundedWorkBudgeted(&provider, nil, &route, costExempt)
 			for _, slot := range routing.SelectSlots(provider, target.ProviderModel, route, key.id, input.Operation, input.Surface, input.Mode, []byte(input.Seed)) {
 				if eligibility != nil && slot.CredentialID != nil && eligibility(*slot.CredentialID) != routing.Eligible {
 					continue
 				}
-				budgeted = budgeted || routing.UnboundedWorkBudgeted(&provider, &slot, &route)
+				budgeted = budgeted || routing.UnboundedWorkBudgeted(&provider, &slot, &route, costExempt)
 			}
 			if budgeted {
 				inspections[target.ID] = &interactionInspection{Status: "incompatible", Fidelity: route.Fidelity.Mode, Evidence: []string{}}

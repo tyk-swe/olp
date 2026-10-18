@@ -543,7 +543,13 @@ func inputText(r oif.Request) ([]operations.Text, error) {
 	if _, err := parseRequest(r); err != nil {
 		return nil, err
 	}
-	return collectText(r.Document().Root(), "", true), nil
+	input := "input"
+	if r.Descriptor().Dialect.ID == SystemOne {
+		input = "state"
+	}
+	root := r.Document().Root()
+	texts := collectText(member(root, input), "/"+input, false)
+	return append(texts, collectText(member(root, "questions"), "/questions", true)...), nil
 }
 func outputText(r oif.Result) ([]operations.Text, error) {
 	return collectText(member(r.Source().Root(), "answers"), "/answers", true), nil

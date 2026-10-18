@@ -23,7 +23,8 @@ func unboundedWorkLimits(authority access.Authority, provider *routing.Provider,
 	if len(callerRoute) > 0 {
 		slug = callerRoute[0]
 	}
-	if authority.UnboundedWorkBudgeted(slug) || routing.UnboundedWorkBudgeted(provider, slot, route) {
+	costExempt := route != nil && route.CallerCostExempt && (provider == nil || provider.CredentialSource == "caller")
+	if authority.UnboundedWorkBudgeted(slug, costExempt) || routing.UnboundedWorkBudgeted(provider, slot, route, costExempt) {
 		return invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
 	}
 	return nil

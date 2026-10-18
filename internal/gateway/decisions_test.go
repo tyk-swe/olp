@@ -75,6 +75,53 @@ func TestDecisionDelegationKeepsNamedRouteBudget(t *testing.T) {
 	}
 }
 
+func TestCallerPaidDecisionExemptsCostsButKeepsTokenCaps(t *testing.T) {
+	for _, scope := range []string{"costs", "key_tokens", "provider_tokens", "slot_tokens"} {
+		t.Run(scope, func(t *testing.T) {
+			h := strictHarness(t, func(s *routing.Snapshot) {
+				r := s.Routes[routeSlug]
+				r.Operations = []string{"decision"}
+				r.CallerCostExempt = true
+				r.Budget = &routing.CostLimits{DailyCostLimit: new("1")}
+				s.Routes[routeSlug] = r
+				for id, p := range s.Providers {
+					p.Kind, p.VendorID, p.ProfileID, p.CredentialSource = "openai", "openai", "openai-decisions", "caller"
+					p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "decision", Surface: "openai", Mode: "unary"}}
+					p.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: new("1")}}
+					p.Slots[0].Supply.DailyCostLimit = new("1")
+					if scope == "provider_tokens" {
+						p.Limits.TokensPerMinute = new(int64(1000))
+					}
+					if scope == "slot_tokens" {
+						p.Slots[0].TokensPerMinute = new(int64(1000))
+					}
+					s.Providers[id] = p
+				}
+			})
+			key := h.rt.keys[fullKey]
+			key.Policy.DailyCostLimit = new("1")
+			if scope == "key_tokens" {
+				key.Policy.TokensPerMinute = new(int64(1000))
+			}
+			h.rt.keys[fullKey] = key
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"model":"`+modelA+`","answers":[{"type":"predicate","probability":0.75}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			})
+			resp := h.do(t.Context(), http.MethodPost, "/v1/decisions", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hello","questions":[{"type":"predicate","instructions":"Is this text?"}]}`), map[string]string{callerCredentialHeader: "caller-test-secret"})
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if scope == "costs" {
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("caller-paid costs refused: %d %s", resp.StatusCode, body)
+				}
+			} else if resp.StatusCode < 400 || !strings.Contains(string(body), "unbounded_work_budget") || h.mock.count("a")+h.mock.count("b") != 0 {
+				t.Fatalf("token cap bypassed: %d %s", resp.StatusCode, body)
+			}
+		})
+	}
+}
+
 func TestDecisionIgnoresCappedSlotsOutsideRequestScope(t *testing.T) {
 	for _, scope := range []string{"model", "route", "key"} {
 		t.Run(scope, func(t *testing.T) {

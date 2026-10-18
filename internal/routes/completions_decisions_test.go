@@ -180,3 +180,37 @@ func TestDecisionInspectionKeepsNamedRouteAcrossLegs(t *testing.T) {
 		}
 	}
 }
+
+func TestCallerPaidDecisionInspectionPreservesTokenCaps(t *testing.T) {
+	for _, tokenCap := range []bool{false, true} {
+		snapshot, _ := estimateSnapshot("model")
+		r := snapshot.Routes["route"]
+		r.Operations = []string{"decision"}
+		r.CallerCostExempt = true
+		r.Budget = &routing.CostLimits{DailyCostLimit: new("1")}
+		snapshot.Routes["route"] = r
+		for id, p := range snapshot.Providers {
+			p.Kind, p.VendorID, p.ProfileID, p.ProfileRevision, p.CredentialSource = "openai", "openai", "openai-decisions", "1", "caller"
+			p.Capabilities = []routing.Capability{{Model: "model", Operation: "decision", Surface: "openai", Mode: "unary"}}
+			p.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: new("1")}}
+			p.Slots[0].Supply.DailyCostLimit = new("1")
+			if tokenCap {
+				p.Limits.TokensPerMinute = new(int64(1000))
+			}
+			snapshot.Providers[id] = p
+		}
+		input := simulationInput{Operation: "decision", Surface: "openai", Mode: "unary", Dialect: "openai-decisions", Request: json.RawMessage(`{"model":"route","input":"hello","questions":[{"type":"predicate","instructions":"Is this text?"}]}`)}
+		m := fixedSimulation(snapshot, input, nil)
+		m.key = func(routing.Route) (inspectionKeyContext, error) {
+			return inspectionKeyContext{authority: access.Authority{Policy: access.KeyPolicy{DailyCostLimit: new("1")}}}, nil
+		}
+		leg, _, _, err := (&Server{Access: &access.Server{}}).leg(m, "route", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := decisionFor(t, leg.Decisions, "model")
+		if d.Eligible == tokenCap {
+			t.Fatalf("caller-paid tokenCap=%v: %+v", tokenCap, d)
+		}
+	}
+}

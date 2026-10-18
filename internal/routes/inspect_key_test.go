@@ -72,7 +72,7 @@ func TestInspectionKeyLoadsInheritedDecisionBudgets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !key.authority.UnboundedWorkBudgeted("route") {
+			if !key.authority.UnboundedWorkBudgeted("route", false) {
 				t.Fatalf("%s budget was not loaded", scope)
 			}
 		})
@@ -102,7 +102,7 @@ func TestKeylessInspectionLoadsHierarchyBudgets(t *testing.T) {
 				t.Fatal(err)
 			}
 			key.authority.Attribution, err = key.authority.ResolveAttribution(nil)
-			if err != nil || !key.authority.UnboundedWorkBudgeted("route") {
+			if err != nil || !key.authority.UnboundedWorkBudgeted("route", false) {
 				t.Fatalf("keyless %s budget omitted: %v", scope, err)
 			}
 		})

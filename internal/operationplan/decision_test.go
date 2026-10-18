@@ -61,3 +61,22 @@ func TestMappedDecisionNamesRespectBlockingPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestDecisionInputPolicyIgnoresRoutingMetadata(t *testing.T) {
+	p := decisionPlan(t, &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "metadata", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Pattern: "^(vendor-model|route|model)$"}}})
+	if _, err := p.CheckInput(); err != nil {
+		t.Fatalf("routing metadata was treated as input: %v", err)
+	}
+	texts, err := p.GuardrailInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(texts, func(v operations.Text) bool {
+		return v.Value == "vendor-model" || v.Value == "route" || v.Value == "model"
+	}) {
+		t.Fatalf("routing metadata was exposed as text: %+v", texts)
+	}
+	if !slices.ContainsFunc(texts, func(v operations.Text) bool { return v.Value == "secret" }) {
+		t.Fatal("question name lost inspection coverage")
+	}
+}
