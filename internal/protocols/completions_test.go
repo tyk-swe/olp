@@ -207,3 +207,35 @@ func TestLegacyCompletionParameterNamesExcludePrompt(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyCompletionPreservesCacheWriteUsage(t *testing.T) {
+	usage := `"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10,"prompt_tokens_details":{"cached_tokens":2,"cache_write_tokens":3}}`
+	for _, family := range []wire.Format{wire.Completions, wire.Chat} {
+		choice := `{"index":0,"text":"hello","finish_reason":"stop"}`
+		object := "text_completion"
+		if family == wire.Chat {
+			choice = `{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}`
+			object = "chat.completion"
+		}
+		body := `{"object":"` + object + `","model":"upstream","choices":[` + choice + `],` + usage + `}`
+		result, err := Decode(family, wire.Completions, []byte(body), "route", "")
+		if err != nil || result.Usage.CacheWriteInputTokens == nil || *result.Usage.CacheWriteInputTokens != 3 {
+			t.Fatalf("unary %s cache write usage: %+v %v", family, result, err)
+		}
+		chunk := strings.ReplaceAll(strings.ReplaceAll(choice, `"message"`, `"delta"`), `"role":"assistant",`, "")
+		frame := `data: {"object":"text_completion","model":"upstream","choices":[` + chunk + `],` + usage + `}` + "\n\ndata: [DONE]\n\n"
+		if family == wire.Chat {
+			frame = strings.Replace(frame, `"object":"text_completion"`, `"object":"chat.completion.chunk"`, 1)
+		}
+		result, err = Stream(family, wire.Completions, strings.NewReader(frame), 4096, "route", true, func([]byte) error { return nil })
+		if err != nil || result.Usage.CacheWriteInputTokens == nil || *result.Usage.CacheWriteInputTokens != 3 {
+			t.Fatalf("stream %s cache write usage: %+v %v", family, result, err)
+		}
+		for _, invalid := range []string{"-1", "7", "9", `"three"`} {
+			bad := strings.Replace(body, `"cache_write_tokens":3`, `"cache_write_tokens":`+invalid, 1)
+			if _, err := Decode(family, wire.Completions, []byte(bad), "route", ""); err == nil {
+				t.Fatalf("accepted cache write count %s", invalid)
+			}
+		}
+	}
+}

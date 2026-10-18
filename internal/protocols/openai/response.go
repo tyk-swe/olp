@@ -345,6 +345,19 @@ func chatUsage(fields map[string]json.RawMessage) (*wire.Usage, error) {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 	u.CachedInputTokens = nestedCount(usage, "prompt_tokens_details", "cached_tokens")
+	if raw, present := usage["prompt_tokens_details"]; present && !isNull(raw) {
+		details, err := object(raw)
+		if err != nil {
+			return nil, &wire.ProtocolError{Detail: "usage.prompt_tokens_details is not an object"}
+		}
+		if raw, present := details["cache_write_tokens"]; present && !isNull(raw) {
+			count, ok := int64Field(details, "cache_write_tokens")
+			if !ok || count > u.InputTokens || u.CachedInputTokens != nil && *u.CachedInputTokens > u.InputTokens-count {
+				return nil, &wire.ProtocolError{Detail: "usage.prompt_tokens_details.cache_write_tokens is inconsistent"}
+			}
+			u.CacheWriteInputTokens = &count
+		}
+	}
 	u.AudioInputTokens = nestedCount(usage, "prompt_tokens_details", "audio_tokens")
 	u.AudioOutputTokens = nestedCount(usage, "completion_tokens_details", "audio_tokens")
 	u.ReasoningTokens = nestedCount(usage, "completion_tokens_details", "reasoning_tokens")
