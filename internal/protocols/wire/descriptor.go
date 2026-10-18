@@ -7,7 +7,7 @@ import "github.com/tyk-swe/olp/internal/oif"
 // provider's moving API or model alias is immutable. Format descriptors carry
 // the transformed codec profile until a provider profile binds the destination.
 var wireDialects = map[Format]string{
-	Chat: "openai-chat", Responses: "openai-responses", InputTokens: "openai-input-tokens",
+	Completions: "openai-completions", Chat: "openai-chat", Responses: "openai-responses", InputTokens: "openai-input-tokens",
 	Anthropic: "anthropic-messages", AnthropicCount: "anthropic-count-tokens",
 	Gemini: "gemini-generate-content", GeminiStream: "gemini-generate-content", GeminiCount: "gemini-count-tokens",
 	Embeddings: "openai-embeddings", Moderation: "openai-moderation", Rerank: "rerank", BedrockRerank: "bedrock-rerank",

@@ -18,6 +18,7 @@
   const playground = new PlaygroundState();
   const operations = [
     { value: 'generation', label: 'Generation' },
+    { value: 'decision', label: 'Decisions' },
     { value: 'token_count', label: 'Token count' },
     { value: 'embeddings', label: 'Embeddings' },
     { value: 'moderation', label: 'Moderation' },
@@ -315,13 +316,13 @@
           <label for="playground-inspect-dialect">Native request dialect</label>
           <select
             id="playground-inspect-dialect"
-            value={playground.strictSelected &&
+            value={(playground.strictSelected || playground.operation === 'decision') &&
             nativeDialects(playground.operation).length
               ? playground.currentNativeDialect()
               : (playground.currentInspectDialect() ?? '')}
             onchange={(event) => {
               if (
-                playground.strictSelected &&
+                (playground.strictSelected || playground.operation === 'decision') &&
                 nativeDialects(playground.operation).length
               )
                 playground.nativeDialect = event.currentTarget.value;
@@ -329,7 +330,7 @@
             }}
           >
             <option value="">Default for operation and surface</option>
-            {#each playground.strictSelected && nativeDialects(playground.operation).length ? nativeDialects(playground.operation) : inspectionDialects(playground.operation, playground.surface) as dialect (dialect)}
+            {#each (playground.strictSelected || playground.operation === 'decision') && nativeDialects(playground.operation).length ? nativeDialects(playground.operation) : inspectionDialects(playground.operation, playground.surface) as dialect (dialect)}
               <option value={dialect}>{dialect}</option>
             {/each}
           </select>
@@ -581,8 +582,15 @@
   </section>
 </div>
 
-{#if playground.strictSelected && playground.activeOperation !== 'translation'}
-  {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai'}
+{#if (playground.strictSelected || playground.activeOperation === 'decision') && playground.activeOperation !== 'translation'}
+  {#if playground.composer === 'advanced' && playground.templateKey === 'legacy-completions'}
+    <NativeOperationPlayground
+      route={playground.model.trim()}
+      operation="completions"
+      requestText={playground.rawJson}
+      dialect="openai-completions"
+    />
+  {:else if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai'}
     {#key playground.model.trim()}
       <StrictToolPlayground
         route={playground.model.trim()}

@@ -8,10 +8,13 @@ export function inspectionDialects(
   surface: string
 ): Dialect[] {
   if (operation === 'generation') {
-    if (surface === 'openai') return ['openai-chat', 'openai-responses'];
+    if (surface === 'openai')
+      return ['openai-chat', 'openai-responses', 'openai-completions'];
     if (surface === 'anthropic') return ['anthropic-messages'];
     if (surface === 'gemini') return ['gemini-generate-content'];
   }
+  if (operation === 'decision' && surface === 'openai')
+    return ['openai-decisions', 'systemone'];
   if (operation === 'token_count') {
     if (surface === 'openai') return ['openai-input-tokens'];
     if (surface === 'anthropic') return ['anthropic-count-tokens'];

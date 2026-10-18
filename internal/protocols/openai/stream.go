@@ -60,10 +60,10 @@ func stream(family wire.Format, r io.Reader, maxEventBytes int, route string, in
 	var encoded []byte
 	retain := func(frame []byte) error { encoded = frame; return nil }
 	switch family {
-	case wire.Chat, wire.MistralFIM:
+	case wire.Completions, wire.Chat, wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
-		s = &chatStream{route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
+		s = &chatStream{legacy: family == wire.Completions, route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
 	case wire.Responses:
 		s = &responsesStream{route: route, collect: collect, emit: retain}
 	default:
@@ -121,6 +121,7 @@ type streamer interface {
 }
 
 type chatStream struct {
+	legacy       bool
 	includeUsage bool
 	collect      bool
 	maxChoices   int
@@ -160,7 +161,11 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 			return upstream
 		}
 	}
-	if kind, ok := stringField(fields, "object"); ok && kind != "chat.completion.chunk" {
+	expected := "chat.completion.chunk"
+	if s.legacy {
+		expected = "text_completion"
+	}
+	if kind, ok := stringField(fields, "object"); ok && kind != expected {
 		return &wire.ProtocolError{Detail: "unexpected object " + kind}
 	}
 	if s.c.UpstreamID == "" {
@@ -208,7 +213,7 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 		return &wire.ProtocolError{Detail: "choice is not an object"}
 	}
 	index, ok := int64Field(choice, "index")
-	if _, present := choice["index"]; present && !ok {
+	if _, present := choice["index"]; (present || s.legacy) && !ok {
 		return &wire.ProtocolError{Detail: "choice index is not a non-negative integer"}
 	}
 	if _, seen := s.finished[index]; !seen && len(s.finished) >= s.maxChoices {
@@ -222,6 +227,12 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 		}
 	}
 	content, hasContent := stringField(delta, "content")
+	if s.legacy {
+		content, hasContent = stringField(choice, "text")
+		if _, present := choice["text"]; present && !hasContent {
+			return &wire.ProtocolError{Detail: "completion text is not a string"}
+		}
+	}
 	refusal, hasRefusal := stringField(delta, "refusal")
 	calls, hasCalls := arrayField(delta, "tool_calls")
 	if s.finished[index] && (hasFinish || hasContent || hasRefusal || hasCalls) {

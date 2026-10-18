@@ -46,6 +46,9 @@ func openAIType(status int) string {
 }
 
 func (f *Fixture) registerOpenAI() {
+	f.mux.HandleFunc("POST "+OpenAIPrefix+"/completions", f.handle(openAI, "openai.completions", f.legacyCompletions))
+	f.mux.HandleFunc("POST "+OpenAIPrefix+"/decisions", f.handle(openAI, "openai.decisions", f.decisions))
+	f.mux.HandleFunc("POST "+OpenAIPrefix+"/systemone", f.handle(openAI, "systemone", f.systemone))
 	f.mux.HandleFunc("POST "+OpenAIPrefix+"/chat/completions", f.handle(openAI, "openai.chat", f.chatCompletions))
 	f.mux.HandleFunc("POST "+OpenAIPrefix+"/responses", f.handle(openAI, "openai.responses", f.createResponse))
 	f.mux.HandleFunc("POST "+OpenAIPrefix+"/responses/input_tokens", f.handle(openAI, "openai.responses.input_tokens", f.responseInputTokens))

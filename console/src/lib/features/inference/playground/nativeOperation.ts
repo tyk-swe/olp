@@ -9,6 +9,8 @@ import {
 } from '$lib/json/nativeJson';
 
 export const nativeOperationDialects = {
+  completions: ['openai-completions'],
+  decision: ['openai-decisions', 'systemone'],
   embeddings: [
     'openai-embeddings',
     'voyage-embeddings',
@@ -36,6 +38,9 @@ export const nativeOperationDialects = {
 
 export type NativeOperation = keyof typeof nativeOperationDialects;
 const bodyModelDialects = new Set([
+  'openai-completions',
+  'openai-decisions',
+  'systemone',
   'openai-embeddings',
   'voyage-embeddings',
   'cohere-embed-v2',
@@ -97,6 +102,10 @@ export async function runNativeOperation(
   if (!key.startsWith('olp_') || key.length > 512)
     throw new Error('Enter an inference API key for this route.');
   const request = nativeOperationRequest(source, route, dialect);
+  if (operation === 'completions' && request.stream === true)
+    throw new Error(
+      'This public JSON form supports unary completions. Use the SDK for streaming.'
+    );
   const body = stringifyNativeJSON(request);
   if (new TextEncoder().encode(body).byteLength > 1 << 20)
     throw new Error(
@@ -111,7 +120,9 @@ export async function runNativeOperation(
   if (operation === 'embeddings')
     headers.set('X-OLP-Client-Contract', 'raw-vector-storage/1');
   const response = await gatewayFetch(
-    `/native/${dialect}/models/${encodeURIComponent(route)}`,
+    operation === 'completions'
+      ? '/v1/completions'
+      : `/native/${dialect}/models/${encodeURIComponent(route)}`,
     {
       method: 'POST',
       headers,

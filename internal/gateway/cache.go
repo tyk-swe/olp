@@ -62,6 +62,10 @@ func (x *call) cacheHeaders(h http.Header) {
 }
 
 func (s *Server) initializeCache(x *call) *Error {
+	// New endpoint contracts require explicit cache qualification.
+	if x.family == wire.Completions || x.operationName() == "decision" {
+		return nil
+	}
 	if x.route.Cache == nil && x.request.cacheDirectives == "" {
 		return nil
 	}

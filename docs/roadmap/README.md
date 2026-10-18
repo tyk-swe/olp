@@ -53,7 +53,7 @@ intent. Everything ships in the single AGPL product, without a feature paywall.
 
 ## Milestones
 
-M1–M6, M8 and M11 are implemented; M7 is in progress, and M9–M10 remain planned.
+M1–M6, M8 and M11 are implemented; M7 and M9 are in progress, and M10 remains planned.
 M6 has local verification; its full integration and benchmark qualification remain
 open as recorded in [the commitment evidence](m06-commitment-evidence.md). The
 [implementation review](m01-m04-implementation-review.md) records historical
@@ -74,7 +74,7 @@ identify the evidence needed before dependent behavior can ship.
 | M6 | [Cost management and chargeback](m06-cost-management.md) | Dimension-aware pricing, rate cards, cost estimation, complete commitment exports, and OpenAI/Anthropic invoice reconciliation. | M2, M4, M5 | Implemented |
 | M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | In progress |
 | M8 | [Response caching](m08-caching.md) | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation. | M7 | Implemented |
-| M9 | [API surface completion](m09-api-surface.md) | Legacy completions, cross-provider files and batches, fine-tuning, vector stores, Responses completion, realtime expansion, OCR, search, Decisions, provider-retained resources and governed pass-through. | M2; M4, M6, M7 per slice | Planned |
+| M9 | [API surface completion](m09-api-surface.md) | Legacy completions, cross-provider files and batches, fine-tuning, vector stores, Responses completion, realtime expansion, OCR, search, Decisions, provider-retained resources and governed pass-through. | M2; M4, M6, M7 per slice | In progress |
 | M10 | [Agent gateway](m10-agent-gateway.md) | An MCP gateway with pinned tools, gateway-executed tools, an A2A agent gateway, prompt registry, content-free agent traces and delegated identities. | M4, M5, M6, M7, M11.2 | Planned |
 | M11 | [Operator ecosystem](m11-operator-ecosystem.md) | A management CLI, a Terraform provider, KMS and external secret stores, a developer catalog, multi-region gateways and a management MCP server. | M4 | Implemented |
 

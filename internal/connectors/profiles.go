@@ -174,6 +174,7 @@ func init() {
 		completeProfileMetadata(p)
 	}
 	registerUnaryProfiles()
+	registerCompletionProfiles()
 }
 
 // Profiles returns detached catalogue metadata; registering a new hosting profile
@@ -338,7 +339,14 @@ func (c Config) ValidateProfile() error {
 			}
 		}
 	}
-	if _, generation := generationFamily(p.Dialect); generation && !vendors.Speaks(c.VendorID, p.Dialect) {
+	if p.Dialect == "openai-decisions" && c.VendorID != "openai" || p.Dialect == "systemone" && c.VendorID != "typesafe-jev" {
+		return errors.New("decision profile requires its reviewed vendor")
+	}
+	if p.Dialect == "openai-completions" {
+		if c.VendorID != strings.TrimSuffix(p.ID, "-completions") {
+			return errors.New("completions profile requires its reviewed vendor")
+		}
+	} else if _, generation := generationFamily(p.Dialect); generation && !vendors.Speaks(c.VendorID, p.Dialect) {
 		return errors.New("the vendor's reviewed contract does not include the profile's dialect")
 	}
 	if len(c.SemanticHeaders) > 16 || len(c.QuerySettings) > 16 {
@@ -392,6 +400,11 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		return "", errors.New("operation is outside the selected provider profile")
 	}
 	switch operation {
+	case "decision":
+		if p.OperationDialect(operation) == "systemone" {
+			return wire.SystemOne, nil
+		}
+		return wire.Decisions, nil
 	case "generation":
 		if family, ok := generationFamily(p.OperationDialect("generation")); ok {
 			return family, nil
@@ -431,6 +444,8 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 // generationFamily is the codec family of a dialect's generation requests.
 func generationFamily(dialect string) (wire.Format, bool) {
 	switch dialect {
+	case "openai-completions":
+		return wire.Completions, true
 	case "openai-chat":
 		return wire.Chat, true
 	case "openai-responses":

@@ -491,7 +491,9 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	families := []wire.Format{family}
 	if cfg.ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
 		profile, _ := cfg.transport().Profile()
-		if profile.Dialect == "openai-responses" {
+		if profile.Dialect == "openai-completions" {
+			families = []wire.Format{wire.Completions}
+		} else if profile.Dialect == "openai-responses" {
 			families = []wire.Format{wire.Responses}
 		}
 	}
@@ -500,7 +502,9 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	}
 	for _, family := range families {
 		current := payload
-		if family == wire.Responses {
+		if family == wire.Completions {
+			current = map[string]any{"model": "certification", "prompt": "Reply with OK.", "max_tokens": 16, "stream": tuple.Mode == ModeStreaming}
+		} else if family == wire.Responses {
 			current = map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": tuple.Mode == ModeStreaming}
 		}
 		data, _ := json.Marshal(current)

@@ -70,6 +70,9 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `POST /v1/completions` | generation | qualified | — | — | — | — | translated | reviewed |
+| `POST /v1/decisions` | decision | qualified | — | — | — | — | — | qualified |
+| `POST /v1/systemone` | decision | — | — | — | — | — | — | qualified |
 | `POST /v1/chat/completions` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses/input_tokens` | token_count | native | translated | translated | translated | translated | native | native |
@@ -114,6 +117,44 @@ and speech through Amazon Polly's engines; other models and every other
 media operation of these kinds remain refused.
 Native embeddings accept only the canonical input shapes described per provider
 below.
+
+### Legacy text completions and Decisions
+
+`POST /v1/completions` uses `generation` authorization. Native text completions
+require an explicit `openai-completions`, `vllm-completions`, `tgi-completions`,
+`fireworks-completions`, or `together-completions` profile and a certified model.
+Generic compatible hosting does not qualify the native endpoint. Unary and SSE
+results retain the native text-completion grammar, finish reasons and usage.
+The first native contract excludes `suffix`.
+
+Transformed Chat Completions targets accept one text prompt as one user message.
+Prompt arrays and token IDs, `echo`, `best_of`, `logprobs`, `suffix`, unknown
+fields, and defaults without an equivalent mapping are refused before dispatch.
+Every result candidate retains its index; tool calls and refusals without a
+text-completion representation fail projection. These endpoints do not use the
+response cache. Unsupported inspection surfaces refuse enforcing guardrails.
+
+`decision` is a separate operation with native `openai-decisions` and `systemone`
+profiles. The text-only contracts accept predicate/noul, choice and score
+questions, preserving names, order, typed choice values, native probabilities,
+score scales and OpenAI refusals. Images, box questions, streaming and unmodeled
+fields are excluded. The OpenAI shape is pinned to `openai-go/v3` 3.78.0;
+System One is pinned to TypeSafe OpenAPI 0.2.0. Exact tuple certification is
+required before publishing either profile.
+
+OpenAI Decisions can map to System One for a string input, choices whose typed
+values do not collide as string keys, and score levels without separate
+descriptions. Safety identifiers and other unmappable controls are refused.
+System One requests cannot map to OpenAI: its frozen response schema has no
+refusal variant. That direction returns `422 target_capability` before dispatch.
+Native System One remains available. No chat-generated probabilities are used.
+Because these contracts have no provider-enforced output bound, token/spend
+capped keys, routes, providers and slots are refused before dispatch. Observed
+usage is still priced and accounted on unlimited calls.
+
+Local evidence is the [M9 endpoint ledger](../tests/clients/m9-endpoints.json)
+and the focused `CLIENTS=m9-go tests/clients/run.sh` suite. Live-provider
+qualification remains required; this evidence does not qualify the rest of M9.
 
 ### Files, batches, realtime, and provider-retained state
 

@@ -57,7 +57,7 @@ func (a generationAdapter) LiftRequest(r oif.Request) (oif.View, error) {
 		for i, v := range field(root, "messages").Elements() {
 			add(v, fmt.Sprintf("/messages/%d", i), textField(v, "role"), "message")
 		}
-	case wire.MistralFIM:
+	case wire.Completions, wire.MistralFIM:
 		ignored["prompt"] = true
 		ignored["suffix"] = true
 		add(field(root, "prompt"), "/prompt", "user", "mistral-fim.prompt")
@@ -259,6 +259,12 @@ func (a generationAdapter) LiftResult(r oif.Result) (oif.View, error) {
 		result.Candidates = append(result.Candidates, generation.Candidate{ID: id, Pointer: path, Index: index, Source: v, Nodes: a.nodes(content, contentPath), FinishReason: finish})
 	}
 	switch a.family {
+	case wire.Completions:
+		for i, c := range field(root, "choices").Elements() {
+			path := fmt.Sprintf("/choices/%d", i)
+			index, _ := strconv.Atoi(field(c, "index").Raw())
+			add(c, path, index, field(c, "text"), path+"/text", textField(c, "finish_reason"))
+		}
 	case wire.Chat, wire.MistralFIM:
 		for i, c := range field(root, "choices").Elements() {
 			path := fmt.Sprintf("/choices/%d", i)

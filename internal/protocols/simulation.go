@@ -27,6 +27,9 @@ func SimulationRequest(data []byte, operation, surface, mode, route string) (*wi
 		family = wire.Rerank
 	}
 	if !canonical {
+		if operation == "generation" && present(f["prompt"]) {
+			family = wire.Completions
+		}
 		if surface == "anthropic" {
 			family = wire.Anthropic
 			if operation == "token_count" {

@@ -128,6 +128,7 @@ export class PlaygroundState {
     this.operation = template.operation;
     if (template.surface) this.surface = template.surface;
     this.nativeDialect = template.nativeDialect ?? '';
+    this.inspectDialect = template.inspectDialect ?? '';
     this.rawJson = JSON.stringify(template.request, null, 2);
   };
 
@@ -249,7 +250,7 @@ export class PlaygroundState {
     try {
       const version = this.inspectionInputs();
       const registeredNative =
-        this.strictSelected &&
+        (this.strictSelected || this.operation === 'decision') &&
         this.composer === 'advanced' &&
         nativeDialects(this.operation).length > 0;
       const selectedDialect = registeredNative
@@ -377,11 +378,12 @@ export class PlaygroundState {
       return;
     }
     if (
+      this.activeOperation === 'decision' ||
       this.activeOperation === 'classification' ||
       this.activeOperation === 'scoring'
     ) {
       this.validationError =
-        'This operation requires a strict registered native route and the public client below.';
+        'Use the public native client below with a route certified for this operation.';
       return;
     }
     let request: PlaygroundRequest;

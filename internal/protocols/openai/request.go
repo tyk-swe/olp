@@ -99,6 +99,8 @@ func validateFields(r *wire.Request, fields map[string]json.RawMessage, doc oif.
 		}
 	}
 	switch family {
+	case wire.Completions:
+		err = validateCompletions(r, fields)
 	case wire.Chat:
 		err = validateChat(r, fields, doc)
 	case wire.Responses:
@@ -592,7 +594,7 @@ func encodeFields(r *wire.Request, upstreamModel string, defaults map[string]jso
 			}})
 		}
 	}
-	if r.Stream && r.Family == wire.Chat {
+	if r.Stream && (r.Family == wire.Chat || r.Family == wire.Completions) {
 		options := map[string]json.RawMessage{}
 		if raw, present := out["stream_options"]; present && !isNull(raw) {
 			if options, err = object(raw); err != nil {

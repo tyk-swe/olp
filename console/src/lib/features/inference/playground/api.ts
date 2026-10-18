@@ -12,6 +12,7 @@ export type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
 
 export type PlaygroundOperation =
   | 'generation'
+  | 'decision'
   | 'token_count'
   | 'embeddings'
   | 'moderation'

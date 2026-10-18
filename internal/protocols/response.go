@@ -55,6 +55,8 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 	var c *wire.Completion
 	var err error
 	switch encodedWire {
+	case wire.Completions:
+		c, err = openai.DecodeCompletions(body, route)
 	case wire.Chat:
 		c, err = openai.DecodeChat(body, route)
 	case wire.Responses:
@@ -165,6 +167,10 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		return nil, protocolError("unknown response family")
 	}
 	if err != nil {
+		return c, err
+	}
+	if encodedWire == wire.Chat && target == wire.Completions {
+		c.Body, err = projectChatCompletion(c.Body, false)
 		return c, err
 	}
 	if encodedWire != target && target.Operation() == "generation" {

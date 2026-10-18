@@ -172,6 +172,15 @@ func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estima
 		return e
 	}
 	e.Output, e.Candidates = OutputBounds(p.request, defaults)
+	if p.request != nil && p.request.Family == wire.Completions {
+		copies := int64(1)
+		for _, name := range []string{"n", "best_of"} {
+			if n, ok := integerValue(fieldOf(p.request, defaults, name)); ok {
+				copies = max(copies, n)
+			}
+		}
+		e.Input = multiplyBounded(e.Input, copies)
+	}
 	return e
 }
 

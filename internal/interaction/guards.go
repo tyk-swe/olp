@@ -134,7 +134,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 		return guardFailure("/events", "event_dialect")
 	}
 	if event.Control() != "" {
-		if (p.Wire() == wire.Chat || p.Wire() == wire.Responses || p.Wire() == wire.MistralFIM) && event.Control() == "[DONE]" {
+		if (p.Wire() == wire.Completions || p.Wire() == wire.Chat || p.Wire() == wire.Responses || p.Wire() == wire.MistralFIM) && event.Control() == "[DONE]" {
 			return nil
 		}
 		return guardFailure("/events", "control_grammar")
@@ -172,7 +172,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 				return guardFailure("/events/delta", "message_delta")
 			}
 		}
-	case wire.Chat, wire.MistralFIM:
+	case wire.Completions, wire.Chat, wire.MistralFIM:
 		if choices, present := root.Lookup("choices"); present && choices.Kind() != oif.Array {
 			return guardFailure("/events/choices", "candidate_grammar")
 		}

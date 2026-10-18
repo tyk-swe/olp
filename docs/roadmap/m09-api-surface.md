@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M2](m02-provider-catalog.md); M4 authorization, M6 pricing and M7 inspection contracts for the relevant slices | [M10](m10-agent-gateway.md) retrieval tools; broader official-SDK coverage |
+| In progress | [M2](m02-provider-catalog.md); M4 authorization, M6 pricing and M7 inspection contracts for the relevant slices | [M10](m10-agent-gateway.md) retrieval tools; broader official-SDK coverage |
 
 OLP already serves generation, counting, embeddings, rerank, moderation, media,
 files, batches, realtime and retained generation resources in the
@@ -28,12 +28,18 @@ change, not an automatic expansion of this milestone.
 - Governed realtime supports revocation and metering; pass-through has explicit
   limits and makes no modeled-fidelity claim.
 
-M9 remains **Planned**. Existing anchors are `internal/resources/`,
-`internal/durablecontract/`, `internal/realtimecontract/`, the gateway's native
-and retained-generation handlers, and `internal/process/workers.go`. They do not
-implement the additional endpoint families or a batch-settlement worker.
-Existing OpenAI/Azure files and batches and native unary operation codecs are
-building blocks, not evidence that M9 is complete.
+M9 is **In progress**, not implemented. The endpoint ledger, legacy completions,
+native Decisions and a restricted OpenAI-to-System-One mapping now have focused
+local protocol/gateway and pinned SDK evidence. System-One-to-OpenAI translation
+is deliberately unavailable: the frozen System One response has no refusal
+variant, and incompatible mappings must remain unavailable.
+
+The additional retained-resource families, batch-settlement worker, expanded
+realtime, OCR/search and governed pass-through remain unimplemented. Existing
+OpenAI/Azure files and batches are building blocks, not M9 completion evidence.
+Console controls have been added for the initial codecs but are not yet locally
+qualified because the console dependencies/browser are absent in this checkout.
+See the local evidence below for the exact boundary.
 
 ## Baseline
 
@@ -395,3 +401,26 @@ pass, so rollback disables publication without deleting settlement state.
 - [ ] Compatibility, capabilities and parity rows reflect the qualified tuples
       and explicit exclusions. Unimplemented provider breadth remains `Partial`
       or `Gap`; no exclusion or connector registration is relabeled as parity.
+
+## Local implementation evidence
+
+The [machine-readable ledger](../../tests/clients/m9-endpoints.json) separates
+implemented, excluded, baseline-only and pending tuples. It must not be used to
+advertise pending methods. SDK locks were not changed.
+
+| Slice | Local evidence | Remaining acceptance |
+| --- | --- | --- |
+| M9.1 | `internal/protocols/completions_test.go`, `internal/gateway/completions_test.go`, `internal/connectors/completions_test.go`, token exposure test, `tests/clients/m9sdk/` | Console/browser qualification; each provider's live qualification; release performance gate |
+| M9.10 | `internal/operations/decision/decision_test.go`, `internal/gateway/decisions_test.go`, `tests/clients/m9sdk/`; native and one-way mapped questions, identity, usage and explicit refusals | Console/browser and configuration-promotion integration; per-provider live qualification |
+| M9.2–M9.9 | Ledger records planned scope only | Implementation and all slice-specific acceptance, including durable settlement and provider control |
+
+Focused SDK selection: `CLIENTS=m9-go tests/clients/run.sh`. This runs the locked
+OpenAI Go SDK against the actual gateway and a scripted upstream. It exercises
+unary and streaming completions, native Decisions, OpenAI-to-System-One
+translation, incompatible-mapping refusal, and credential-safe dispatch.
+
+Deferred console selection:
+`pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.svelte.test.ts`.
+Dependencies must already be installed. Chromium journeys and the dedicated M9
+resource/accounting integration selection do not yet exist and remain required;
+no exit criterion above is marked complete on the strength of the initial slice.

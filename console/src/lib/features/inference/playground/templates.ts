@@ -6,6 +6,7 @@ export type PlaygroundTemplate = {
   operation: PlaygroundOperation;
   surface?: 'openai' | 'anthropic' | 'gemini';
   nativeDialect?: string;
+  inspectDialect?: string;
   request: Record<string, unknown>;
 };
 
@@ -246,6 +247,44 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
         'A static asset is cached.'
       ],
       raw_scores: true
+    }
+  },
+  {
+    key: 'legacy-completions',
+    inspectDialect: 'openai-completions',
+    label: 'Generation · legacy text completions',
+    operation: 'generation',
+    surface: 'openai',
+    request: {
+      model: '',
+      prompt: 'Explain an API gateway in one sentence.',
+      max_tokens: 64
+    }
+  },
+  {
+    key: 'openai-decisions',
+    label: 'Decisions · OpenAI',
+    operation: 'decision',
+    nativeDialect: 'openai-decisions',
+    request: {
+      model: '',
+      input: 'The customer asks for a refund.',
+      questions: [
+        { name: 'refund', type: 'predicate', instructions: 'Is a refund requested?' }
+      ]
+    }
+  },
+  {
+    key: 'systemone',
+    label: 'Decisions · System One',
+    operation: 'decision',
+    nativeDialect: 'systemone',
+    request: {
+      model: '',
+      state: 'The customer asks for a refund.',
+      questions: {
+        refund: { type: 'noul', instructions: 'Is a refund requested?' }
+      }
     }
   },
   {

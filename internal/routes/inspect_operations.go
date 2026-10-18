@@ -16,7 +16,7 @@ import (
 )
 
 func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
-	if !strict || operation == "generation" {
+	if !strict && operation != "decision" || operation == "generation" {
 		request, err := inspectorRequest(raw, operation, surface, mode, dialect, slug, strict)
 		return request, nil, nil, err
 	}
@@ -51,7 +51,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 		return nil, nil, request, nil
 	}
 	if dialect == "" {
-		defaults := map[string]string{"openai/embeddings": "openai-embeddings", "openai/rerank": "rerank", "openai/moderation": "openai-moderation", "openai/token_count": "openai-input-tokens", "anthropic/token_count": "anthropic-count-tokens", "gemini/token_count": "gemini-count-tokens", "gemini/embeddings": "gemini-embeddings", "bedrock/token_count": "bedrock-count-tokens"}
+		defaults := map[string]string{"openai/decision": "openai-decisions", "openai/embeddings": "openai-embeddings", "openai/rerank": "rerank", "openai/moderation": "openai-moderation", "openai/token_count": "openai-input-tokens", "anthropic/token_count": "anthropic-count-tokens", "gemini/token_count": "gemini-count-tokens", "gemini/embeddings": "gemini-embeddings", "bedrock/token_count": "bedrock-count-tokens"}
 		dialect = defaults[surface+"/"+operation]
 	}
 	codec, ok := operationregistry.Lookup(dialect)

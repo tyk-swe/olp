@@ -15,7 +15,15 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 	r.parameter("max_tokens", "max_output_tokens")
 	r.parameter("max_completion_tokens", "max_output_tokens")
 	r.parameter("max_output_tokens", "max_output_tokens")
-	if family == wire.Chat {
+	if family == wire.Completions {
+		prompt := r.take("prompt")
+		var text string
+		if json.Unmarshal(prompt, &text) == nil {
+			c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
+		} else {
+			c.Extensions = append(c.Extensions, "/prompt")
+		}
+	} else if family == wire.Chat {
 		for i, v := range arr(r.take("messages")) {
 			m, e := decodeChatMessage(v, fmt.Sprintf("/messages/%d", i), c)
 			if e != nil {
@@ -98,7 +106,15 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 		if str(t.take("type")) != "function" {
 			c.Extensions = append(c.Extensions, p+"/type")
 		}
-		if family == wire.Chat {
+		if family == wire.Completions {
+			prompt := r.take("prompt")
+			var text string
+			if json.Unmarshal(prompt, &text) == nil {
+				c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
+			} else {
+				c.Extensions = append(c.Extensions, "/prompt")
+			}
+		} else if family == wire.Chat {
 			nested, e := read(t.take("function"), p+"/function", c)
 			if e != nil {
 				return e

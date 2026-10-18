@@ -130,11 +130,11 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 }
 
 func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
-	if !route.Fidelity.Strict() {
-		return nil, nil
-	}
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
+		if !route.Fidelity.Strict() && op != "decision" {
+			continue
+		}
 		if op == "generation" || op == "batch" || op == "realtime" || mediacontract.IsMediaOperation(op) {
 			continue
 		}

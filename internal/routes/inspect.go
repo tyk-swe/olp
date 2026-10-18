@@ -174,7 +174,7 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	if _, canonical := fields["route"]; canonical {
 		return nil, access.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
 	}
-	families := []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiStream, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation, wire.Rerank, wire.MistralFIM, wire.CohereChat}
+	families := []wire.Format{wire.Chat, wire.Completions, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiStream, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation, wire.Rerank, wire.MistralFIM, wire.CohereChat}
 	var family wire.Format
 	for _, candidate := range families {
 		if candidate.Operation() != operation || candidate.Surface() != surface {
