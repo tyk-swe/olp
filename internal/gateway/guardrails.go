@@ -106,7 +106,7 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 }
 
 func (x *call) guardrailStreamSurface(document oif.Document) error {
-	if x.family == wire.Completions && x.guardrailEngine.HasLegacyOutput() {
+	if x.family == wire.Completions && (x.guardrailEngine.HasAction(guardrails.Output, guardrails.Block) || x.guardrailEngine.HasAction(guardrails.Output, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
 		if value, ok := document.Root().Lookup("logprobs"); ok && value.Kind() != oif.Null {
 			return guardrails.ErrSurface
 		}
@@ -240,6 +240,21 @@ func (x *call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: guardrails.MaxContentBytes})
 	if err != nil {
 		return body, guardrails.ErrSurface
+	}
+	if x.family == wire.Completions {
+		choices, _ := doc.Root().Lookup("choices")
+		for _, choice := range choices.Elements() {
+			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
+				result, err := x.guardrailEngine.Unavailable(guardrails.Output)
+				x.recordGuardrails(result.Decisions)
+				if err != nil {
+					return body, err
+				}
+				if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+					return body, guardrails.ErrSurface
+				}
+			}
+		}
 	}
 	if x.strict() && x.guardrailEngine.HasLegacyOutput() {
 		if err := interaction.CheckLegacyOutputCoverage(x.family, doc); err != nil {

@@ -220,6 +220,10 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 		return &wire.ProtocolError{Detail: "stream exceeds the choice tracking limit"}
 	}
 	finish, hasFinish := stringField(choice, "finish_reason")
+	// TGI uses an empty string on nonterminal legacy completion chunks.
+	if s.legacy && finish == "" {
+		hasFinish = false
+	}
 	delta := map[string]json.RawMessage{}
 	if raw, present := choice["delta"]; present && !isNull(raw) {
 		if delta, err = object(raw); err != nil {

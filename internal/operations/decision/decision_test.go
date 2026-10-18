@@ -2,6 +2,7 @@ package decision
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -18,6 +19,20 @@ func request(t *testing.T, dialect, body string) oif.Request {
 		t.Fatal(err)
 	}
 	return r
+}
+
+func TestDecisionChoiceCountBoundaries(t *testing.T) {
+	for _, count := range []int{255, 256} {
+		choices := make([]any, count)
+		for i := range choices {
+			choices[i] = map[string]any{"value": strconv.Itoa(i)}
+		}
+		body, _ := json.Marshal(map[string]any{"model": "route", "input": "hello", "questions": []any{map[string]any{"type": "choice", "instructions": "Which?", "choices": choices}}})
+		_, err := parseRequest(request(t, OpenAI, string(body)))
+		if (err == nil) != (count == 255) {
+			t.Fatalf("%d choices: %v", count, err)
+		}
+	}
 }
 func result(t *testing.T, dialect, body string) oif.Result {
 	t.Helper()

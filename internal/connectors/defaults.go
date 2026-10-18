@@ -115,6 +115,9 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		return errors.New("use at most 64 operation defaults")
 	}
 	for name, raw := range defaults.Values {
+		if p.ID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
+			return fmt.Errorf("TGI completions do not implement %s", name)
+		}
 		if !slices.Contains(defaultFields(defaults.Dialect, operation), name) {
 			return fmt.Errorf("control %s is outside the operation/dialect schema; explicit extensions belong in native_options", name)
 		}
@@ -126,6 +129,9 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		}
 	}
 	for name, raw := range defaults.NativeOptions {
+		if p.ID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
+			return fmt.Errorf("TGI completions do not implement %s", name)
+		}
 		if err := validateDialectDefaultValue(defaults.Dialect, operation, name, raw); err != nil {
 			return err
 		}

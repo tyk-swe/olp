@@ -299,18 +299,12 @@
         "max_tokens",
         "temperature",
         "top_p",
-        "n",
         "stop",
         "stream",
         "stream_options",
-        "presence_penalty",
         "frequency_penalty",
-        "logit_bias",
-        "user",
         "seed",
-        "echo",
-        "best_of",
-        "logprobs"
+        "repetition_penalty"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -326,9 +320,11 @@
         "suffix on native profiles",
         "response caching",
         "unqualified guardrail surfaces",
-        "retained-state controls and file references"
+        "retained-state controls and file references",
+        "token-ID prompts",
+        "n, best_of, echo, logprobs and other unsupported TGI controls"
       ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
+      "reference_revision": "TGI@b4adbf2f6e2e721280bd0ea5f91d70f7d033f5ed; openai-go/v3@3.78.0"
     },
     {
       "slice": "M9.1",
@@ -352,18 +348,12 @@
         "max_tokens",
         "temperature",
         "top_p",
-        "n",
         "stop",
         "stream",
         "stream_options",
-        "presence_penalty",
         "frequency_penalty",
-        "logit_bias",
-        "user",
         "seed",
-        "echo",
-        "best_of",
-        "logprobs"
+        "repetition_penalty"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -379,9 +369,12 @@
         "suffix on native profiles",
         "response caching",
         "unqualified guardrail surfaces",
-        "retained-state controls and file references"
+        "retained-state controls and file references",
+        "token-ID prompts",
+        "n, best_of, echo, logprobs and other unsupported TGI controls",
+        "batched prompts without aggregate streaming usage"
       ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
+      "reference_revision": "TGI@b4adbf2f6e2e721280bd0ea5f91d70f7d033f5ed; openai-go/v3@3.78.0"
     },
     {
       "slice": "M9.1",

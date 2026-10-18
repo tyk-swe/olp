@@ -230,10 +230,17 @@ func question(v oif.Value, name string, sys bool) (Question, error) {
 		return q, nil
 	}
 	var values []oif.Value
+	max := 255
+	if q.Kind == "score" {
+		max = 10
+	}
 	if sys {
 		criteria := member(v, "criteria")
 		if q.Kind == "choice" {
 			if criteria.Kind() != oif.Object {
+				return q, invalid("criteria")
+			}
+			if len(criteria.Members()) < 2 || len(criteria.Members()) > max {
 				return q, invalid("criteria")
 			}
 			for _, m := range criteria.Members() {
@@ -244,6 +251,9 @@ func question(v oif.Value, name string, sys bool) (Question, error) {
 			}
 		} else {
 			if criteria.Kind() != oif.Array {
+				return q, invalid("criteria")
+			}
+			if len(criteria.Elements()) < 2 || len(criteria.Elements()) > max {
 				return q, invalid("criteria")
 			}
 			for _, v := range criteria.Elements() {
@@ -263,6 +273,9 @@ func question(v oif.Value, name string, sys bool) (Question, error) {
 			return q, invalid(field)
 		}
 		values = vs.Elements()
+		if len(values) < 2 || len(values) > max {
+			return q, invalid(field)
+		}
 		for _, v := range values {
 			if q.Kind == "choice" {
 				if err := known(v, "value description"); err != nil {
@@ -295,10 +308,6 @@ func question(v oif.Value, name string, sys bool) (Question, error) {
 	n := len(q.Labels)
 	if !sys && q.Kind == "choice" {
 		n = len(q.Values)
-	}
-	max := 255
-	if q.Kind == "score" {
-		max = 10
 	}
 	if n < 2 || n > max {
 		return q, invalid("criteria")

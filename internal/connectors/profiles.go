@@ -693,6 +693,9 @@ func completeProfileMetadata(p *Profile) {
 		p.OperationDialects[operation] = dialect
 		fields := map[string]any{}
 		for _, name := range defaultFields(dialect, operation) {
+			if p.ID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
+				continue
+			}
 			fields[name] = defaultControlSchema(dialect, operation, name)
 			if codec, ok := operationregistry.Lookup(dialect); ok {
 				if field, found := codec.Defaults[name]; found {

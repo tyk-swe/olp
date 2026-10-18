@@ -97,6 +97,9 @@ func Prepare(request *wire.Request, config connectors.Config, model string, para
 	if prepared, err = config.StreamRequest(prepared); err != nil {
 		return Invocation{}, profileError(err)
 	}
+	if err := config.ValidateCompletionRequest(prepared.Document()); err != nil {
+		return Invocation{}, err
+	}
 	body := prepared.Document().Bytes()
 	wrapped, err := config.WrapBody(body, encodedWire)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
@@ -31,6 +32,42 @@ func TestLegacyCompletionProfilesAreVendorBound(t *testing.T) {
 		if c.ValidateProfile() == nil {
 			t.Fatalf("%s can be impersonated", vendor)
 		}
+	}
+}
+
+func TestTGICompletionRequestSubset(t *testing.T) {
+	c := Config{ProfileID: "tgi-completions"}
+	for _, tc := range []struct {
+		fields string
+		valid  bool
+	}{
+		{`"prompt":"hello"`, true},
+		{`"prompt":["one","two"]`, true},
+		{`"prompt":"hello","stream":true,"stream_options":{"include_usage":true}`, true},
+		{`"prompt":["one","two"],"stream":true`, false},
+		{`"prompt":[1,2]`, false},
+		{`"prompt":"hello","n":1`, false},
+		{`"prompt":"hello","echo":false`, false},
+		{`"prompt":"hello","best_of":1`, false},
+		{`"prompt":"hello","logprobs":0`, false},
+		{`"prompt":"hello","max_tokens":4294967296`, false},
+		{`"prompt":"hello","seed":-1`, false},
+		{`"prompt":"hello","stop":"end"`, false},
+	} {
+		doc, err := oif.ParseJSON([]byte(`{"model":"route",`+tc.fields+`}`), oif.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = c.ValidateCompletionRequest(doc); (err == nil) != tc.valid {
+			t.Errorf("%s: %v", tc.fields, err)
+		}
+	}
+	p, err := LookupProfile("tgi-completions", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = validateDefaultSet(p, "generation", DefaultSet{Dialect: "openai-completions", Values: map[string]json.RawMessage{"n": json.RawMessage(`2`)}}); err == nil {
+		t.Fatal("TGI accepted an ignored provider default")
 	}
 }
 

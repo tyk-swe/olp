@@ -63,6 +63,9 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 		return nil, err
 	}
 	effective := prepared.Document()
+	if err := config.ValidateCompletionRequest(effective); err != nil {
+		return nil, err
+	}
 	if err := checkAssetResources(effective, t.wire); err != nil {
 		return nil, err
 	}

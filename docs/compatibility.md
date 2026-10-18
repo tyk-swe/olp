@@ -127,6 +127,13 @@ Generic compatible hosting does not qualify the native endpoint. Unary and SSE
 results retain the native text-completion grammar, finish reasons and usage.
 The first native contract excludes `suffix`.
 
+The `tgi-completions` profile accepts text prompts and unary text batches.
+Streaming is limited to one text prompt because TGI emits per-prompt usage
+instead of a request aggregate. Token-ID prompts and unsupported controls such
+as `n`, `best_of`, `echo`, `logprobs`, `presence_penalty`, `logit_bias`, and `user`
+are refused before dispatch. Its stream adapter accepts TGI's empty nonterminal
+finish reason and still requires a terminal finish reason and `[DONE]`.
+
 Transformed Chat Completions targets accept one text prompt as one user message.
 Prompt arrays and token IDs, `echo`, `best_of`, `logprobs`, `suffix`, unknown
 fields, and defaults without an equivalent mapping are refused before dispatch.

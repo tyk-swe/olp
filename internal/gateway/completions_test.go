@@ -202,6 +202,74 @@ func TestLegacyCompletionNativePolicyCoverage(t *testing.T) {
 	}
 }
 
+func tgiCompletionHarness(t *testing.T) *harness {
+	return strictHarness(t, func(s *routing.Snapshot) {
+		for id, p := range s.Providers {
+			p.Kind, p.VendorID, p.ProfileID = "openai_compatible", "tgi", "tgi-completions"
+			s.Providers[id] = p
+		}
+	})
+}
+
+func TestTGICompletionRefusalsBeforeDispatch(t *testing.T) {
+	for _, fields := range []string{`"prompt":"hello","n":2`, `"prompt":"hello","best_of":1`, `"prompt":"hello","echo":true`, `"prompt":"hello","logprobs":0`, `"prompt":["one","two"],"stream":true`} {
+		h := tgiCompletionHarness(t)
+		resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`",`+fields+`}`), nil)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("TGI request dispatched: %d %s", resp.StatusCode, body)
+		}
+	}
+}
+
+func TestTGICompletionStreamEmptyFinishReason(t *testing.T) {
+	h := tgiCompletionHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, `data: {"object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"hel","finish_reason":"","logprobs":null}]}`+"\n\n")
+		io.WriteString(w, `data: {"object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"lo","finish_reason":"eos_token","logprobs":null}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}`+"\n\ndata: [DONE]\n\n")
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":8,"stream":true}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"text":"hel"`) || !strings.Contains(string(body), `"text":"lo"`) || !strings.Contains(string(body), "[DONE]") {
+		t.Fatalf("TGI stream: %d %s", resp.StatusCode, body)
+	}
+	if usage := h.sink.last(t).Usage; usage == nil || usage.TotalTokens != 4 {
+		t.Fatalf("TGI usage: %+v", usage)
+	}
+}
+
+func TestNativeCompletionOutputGuardrailsRefuseLogprobs(t *testing.T) {
+	for _, requested := range []bool{true, false} {
+		h := strictHarness(t, func(s *routing.Snapshot) {
+			for id, p := range s.Providers {
+				p.Kind, p.VendorID, p.ProfileID = "openai", "openai", "openai-completions"
+				s.Providers[id] = p
+			}
+		})
+		installTestGuardrail(t, h, guardrails.Output, guardrails.Block, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`)
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"id":"c","object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"safe","finish_reason":"stop","logprobs":{"top_logprobs":[{"secret":-1}]}}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+		})
+		extra := ""
+		if requested {
+			extra = `,"logprobs":1`
+		}
+		resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":8`+extra+`}`), nil)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || strings.Contains(string(body), `"secret"`) {
+			t.Fatalf("token alternatives escaped output guardrail: %d %s", resp.StatusCode, body)
+		}
+		if requested && h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatal("unsupported requested logprobs dispatched")
+		}
+	}
+}
+
 func TestLegacyCompletionOutputPolicy(t *testing.T) {
 	for _, action := range []string{contentpolicy.ActionBlock, contentpolicy.ActionRedact} {
 		t.Run(action, func(t *testing.T) {
