@@ -17,11 +17,12 @@ content out of OLP's own storage.
 - Request, attempt, usage, guardrail and audit facts export durably to object
   storage, OTLP collectors and HTTP endpoints, per installation or per project.
 - Operators who need prompts and outputs for debugging or evaluation capture
-  them, sampled, directly to a sink they own — until M7 redaction lands,
-  capture exports unredacted content only.
+  them, sampled, directly to a sink they own. Custom capture redaction remains
+  unavailable; nonempty `redact` policies are refused.
 - Traces and metrics follow the OpenTelemetry GenAI semantic conventions, so
-  Langfuse, LangSmith, Arize Phoenix, Datadog and other OpenTelemetry-native
-  tools ingest OLP without custom integrations.
+  OpenTelemetry-native tools can ingest standard telemetry. Pinned Langfuse
+  and Arize Phoenix readback is verified; other collectors require their own
+  compatibility qualification.
 - Alerts reach Slack, Microsoft Teams, Discord, PagerDuty and email for budget,
   provider, latency, key and system events.
 
@@ -40,7 +41,10 @@ content out of OLP's own storage.
 ### M5.1 Export sinks
 
 A sink is a destination for durable facts, scoped to the installation or to a
-project with the same authorization as notification destinations.
+project with the same authorization as notification destinations. M5 uses
+`/api/v1/observability/sinks`. The narrower operator-managed `/api/v1/sinks`
+interface has independent definitions and delivery records; it is not an alias
+or a migration mechanism for these sinks.
 
 | Field | Contract |
 | --- | --- |
@@ -48,7 +52,7 @@ project with the same authorization as notification destinations.
 | `destination` | Endpoint, bucket or container, validated against the provider egress policy at creation and at every dial |
 | `credential` | Write-only, sealed under a new `sink_credential` purpose, or workload identity where the cloud supports it |
 | `streams` | Any of `requests`, `attempts`, `usage_rollups`, `guardrail_decisions`, `audit` |
-| `format` | JSON Lines for object stores; OTLP log records; JSON for HTTPS. Parquet is deferred to M6's FOCUS export. |
+| `format` | JSON Lines for object stores; OTLP log records; JSON for HTTPS. M6 FOCUS uses gzip-compressed CSV; Parquet is outside the agreed scope. |
 | `filter` | Optional project, route and outcome filters |
 
 - A worker task, `export_delivery`, delivers transactional fact snapshots from
@@ -85,9 +89,13 @@ A capture policy on a project or route opts into content export:
   object stores or HTTPS) through a bounded asynchronous queue. It is never
   written to PostgreSQL or Valkey. Overflow drops the capture and counts the
   loss, mirroring how metadata delivery protects request latency.
-- Redaction uses the [M7](m07-guardrails.md) detectors before content leaves
-  the gateway. Until M7 ships, only unredacted capture is available, and only to
-  operator-configured installation sinks, after the owner enables capture.
+- Only unredacted custom capture is available, and only to operator-configured
+  installation sinks after the owner enables capture. The
+  [M7 capture integration](m07-guardrails.md#m78-capture-redaction-integration)
+  detector engine does not by itself enable capture redaction: integrating
+  those detectors into this separate collector remains follow-up work.
+  Nonempty `redact` policies continue to fail closed until that integration has
+  input/output/tool coverage, privacy tests and bounded execution evidence.
 - Capture never changes the upstream invocation, so strict routes may use it.
 - Creating or widening a capture policy requires the `settings` operation for
   installation scope or project-manager access for a project, and writes an
@@ -164,17 +172,59 @@ A capture policy on a project or route opts into content export:
 
 ## Implementation decisions
 
-1. Object-store exports use JSON Lines. Parquet is deferred until M6's FOCUS
-   export needs it; M5 does not add a second serialization dependency.
+1. Object-store metadata exports use JSON Lines. M6's FOCUS datasets use
+   gzip-compressed CSV, so neither milestone requires Parquet.
 2. GenAI semantic conventions are pinned to schema `1.41.0`, as documented in
    the [configuration reference](../configuration.md). Attribute renames are
    breaking changes under the project's 0.x rules.
 3. An owner must enable capture installation-wide before project managers may
    create policies for their projects. Policies deliver only to enabled,
    operator-configured installation sinks.
-4. Redaction identifiers are reserved for M7. Nonempty redaction configurations
-   fail closed until those detectors are available; M5 never presents
-   unredacted content as redacted.
+4. Redaction identifiers are reserved for the M7 capture integration. Nonempty
+   redaction configurations fail closed until that integration is qualified;
+   M5 never presents unredacted content as redacted.
+5. **Delivery classes remain distinct.** Durable metadata exports retry at
+   least once, with event IDs for receiver deduplication and retention-expiry
+   gaps. Payload capture is best-effort memory-only delivery and cannot promise
+   durable replay. `payload_captured` means queued, not acknowledged by a sink.
+   Neither path may delay inference on a remote destination.
+6. **Capture is opt-in and bounded.** There is no capture without the owner
+   switch, enabled installation sink and enabled matching policy. Sampling is
+   deterministic per policy/request. A policy allows 1 KiB–1 MiB per record;
+   the gateway caps 256 collectors, 64 queued records and 4 MiB per project per
+   minute. Exceeding a bound drops the record rather than truncating it into
+   apparently complete evidence. See [operations](../operations.md#export-sinks-payload-capture-and-business-metrics).
+7. **Telemetry cannot become the accounting authority.** Prometheus money is
+   approximate and series are capped; exact scoped CSV/usage results come from
+   durable facts with completeness information. New GenAI attribute versions
+   require an explicit pin update and collector/privacy regression tests.
+
+## Qualification and follow-up order
+
+M4 project scope and authorization are a hard gate for tenant exports and
+capture. M3 health and M2 retirement signals supply their respective alert
+events; they do not make other transports depend on full-rate or live-provider
+qualification. M6 reuses durable export delivery for metering and object sinks.
+
+1. **Qualify the release candidate.** The observability maintainer reruns the
+   existing service, privacy, series-cap and pinned-collector suites against
+   the candidate revision. Preserve restart/redelivery/retention and negative
+   authorization results, plus the exact Langfuse/Phoenix versions. The release
+   maintainer links these to the image qualification record before `Shipped`.
+2. **Qualify deployment destinations when claimed.** For each live cloud or
+   SaaS destination advertised as tested, record account/region/authentication
+   mode, egress configuration, receive/readback evidence and secret-redaction
+   checks. Local wire fixtures establish protocol behavior but do not establish
+   access to a real S3/GCS/Azure/SMTP/chat account. Keep untested destinations
+   labelled fixture-qualified rather than blocking unrelated transports.
+3. **Integrate capture redaction as a separate increment.** Follow
+   [M7.8](m07-guardrails.md#m78-capture-redaction-integration)
+   after the required detector contract is ready, applying it before enqueueing
+   each selected input/output/tool field. Drop the entire capture on unsupported
+   surfaces or detector failure without failing the inference response. Prove
+   raw content cannot escape into a sink/log/database and retain the current
+   queue and latency bounds. Until those gates pass, the existing
+   unredacted opt-in contract remains the supported behavior.
 
 ## Exit criteria
 
@@ -193,6 +243,9 @@ A capture policy on a project or route opts into content export:
 - [x] Scoped usage/request CSV exports preserve exact values and completeness;
       session timelines and scheduled spend digests are available in the console.
 - [x] The [parity matrix](parity.md) observability rows are `Parity` or better.
+- [ ] Candidate-image qualification repeats the privacy, durable-delivery,
+      scoped-access and pinned-collector gates; claimed live destinations have
+      recorded receive/readback evidence, separate from local wire fixtures.
 
 ## Delivered and verified
 

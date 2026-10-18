@@ -1,11 +1,18 @@
 # Parity matrix
 
-Released LiteLLM gateway documentation reviewed 2026-10-13 is compared with OLP
-0.1.0 after M1–M6 and M11. This is the [roadmap](README.md)'s
-capability scope, not a live-provider/released-image qualification claim.
-OLP-only additions have no comparative row. Current counts: 23 Ahead,
-87 Parity, 10 Partial, 31 Gap, 2 Excluded (153 capabilities; legend rows
-excluded).
+The LiteLLM v1.105.0 gateway baseline reviewed 2026-10-13 is compared with
+the repository's OLP 0.1.0 implementation, reconciled 2026-10-18. This is the
+[roadmap](README.md)'s tracked capability scope, not a live-provider or released
+image qualification claim. OLP-only additions have no comparative row. Current
+counts: 23 Ahead, 101 Parity, 7 Partial, 20 Gap, 2 Excluded (153 capabilities;
+legend rows excluded). Coverage is 124/151 (82.1%).
+
+Each row describes the supported scope stated in its OLP column, not every
+possible provider/model combination. Native certification and declared declines
+still apply. `Parity` does not close a milestone's external or performance
+qualification gates. The milestone owns the detailed design and acceptance
+evidence; operator guides own current usage. Update the row and both scorecards
+when implementation evidence changes.
 
 | Status | Meaning |
 | --- | --- |
@@ -49,7 +56,7 @@ of [M3](m03-routing-resilience.md).
 | Web search | [/search](https://docs.litellm.ai/docs/search/), Perplexity request shape | Not available | `Gap` | M9.7 |
 | Containers, skills and evals | [/containers](https://docs.litellm.ai/docs/containers), [/skills](https://docs.litellm.ai/docs/skills), [/evals](https://docs.litellm.ai/docs/evals_api) | Not available | `Gap` | M9.8 |
 | Vendor pass-through endpoints | [Pass-through](https://docs.litellm.ai/docs/pass_through/intro) | Only registered surfaces | `Gap` | M9.9 |
-| Model listing | `/v1/models`, model info and [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) | Key-visible routes on each surface | `Partial` | M11.4 |
+| Model listing | `/v1/models`, model info and [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) | Native key-visible route lists and a [scoped catalog](../model-catalog.md) with facts, current prices and SDK samples; public disclosure is separately authorized | `Parity` | M11.4 |
 | Assistants API | [/assistants](https://docs.litellm.ai/docs/assistants) (retired by OpenAI) | Not served | `Excluded` | |
 | Key-value memory | [/memory](https://docs.litellm.ai/docs/memory_management) | Not served | `Excluded` | |
 
@@ -135,7 +142,7 @@ of [M3](m03-routing-resilience.md).
 | User and team budgets | [Team budgets](https://docs.litellm.ai/docs/proxy/team_budgets) | Shared groups, organization/project/installation caps and project templates, with independent reservations, calendar windows, system accounting and durable refusal levels | `Parity` | M4.2 |
 | Per-model limits on a key | [Model-specific budgets](https://docs.litellm.ai/docs/proxy/users) | Per-key route RPM, TPM, concurrency and day/week/month caps with shared fleet counters and historical accounting | `Parity` | M4.2 |
 | Tag budgets | [Enterprise](https://docs.litellm.ai/docs/proxy/tag_budgets) | Project label/value day/week/month caps, shared accounting, required/pinned labels and promotion | `Parity` | M4.2 |
-| Budget and limit tiers | [Enterprise](https://docs.litellm.ai/docs/proxy/rate_limit_tiers) | Not available | `Gap` | M4.2 |
+| Budget and limit tiers | [Enterprise](https://docs.litellm.ai/docs/proxy/rate_limit_tiers) | [Project limit templates](../access.md#project-limit-templates) for RPM, TPM, concurrency and day/week/month budgets; referencing principals retain independent counters and local limits may only tighten the template | `Parity` | M4.2 |
 | Temporary budget increases | [Enterprise](https://docs.litellm.ai/docs/proxy/temporary_budget_increase) | Audited additive increases with window-bounded expiry, replay, revocation, fleet enforcement and console controls | `Parity` | M4.2 |
 | Soft budget alerts | [Alerting](https://docs.litellm.ai/docs/proxy/alerting) | `budget.threshold` notification rules | `Parity` | |
 | Distributed enforcement | Redis counters | Valkey scripts on the server clock, PostgreSQL spend authority, reconciliation, fail-closed cost budgets, estimate-based cost reservation | `Ahead` | |
@@ -152,9 +159,9 @@ of [M3](m03-routing-resilience.md).
 | Discounts and margins | [Discounts](https://docs.litellm.ai/docs/proxy/provider_discounts), [margins](https://docs.litellm.ai/docs/proxy/provider_margins) | Effective-dated [discounts](../pricing.md#discounts) by connection, vendor or kind, and [rate cards](../pricing.md#rate-cards-and-charge) for the installation, organizations and projects with a markup or explicit rates; usage records carry cost and charge, and each budget enforces either | `Parity` | M6.2 |
 | Off-peak pricing | [Off-peak pricing](https://docs.litellm.ai/docs/proxy/off_peak_pricing) | Time-of-day and day-of-week [window multipliers](../pricing.md#windows) in an IANA time zone, priced exactly by accounting and admission | `Parity` | M6.1 |
 | Provisioned throughput costs | [PTU flat cost](https://docs.litellm.ai/docs/proxy/ptu_flat_cost) | Connection [commitments](../pricing.md#commitments) per UTC hour, day or month: zero marginal cost, allocated in usage reports by list-price-weighted share | `Parity` | M6.1 |
-| Pricing calculator | [Pricing calculator](https://docs.litellm.ai/docs/proxy/pricing_calculator) | Route simulation states each target's minimum and maximum cost, `max_cost` refuses requests whose worst case exceeds it before dispatch, and the console calculator prices routes and exact usage | `Parity` | M6.3 |
+| Pricing calculator | [Pricing calculator](https://docs.litellm.ai/docs/proxy/pricing_calculator) | Route simulation states each target's minimum and maximum estimated attempt cost; `max_cost` excludes candidates above that per-attempt bound; the console calculator prices routes and exact usage | `Parity` | M6.3 |
 | Billing integrations | [Lago](https://docs.litellm.ai/docs/observability/lago), [OpenMeter](https://docs.litellm.ai/docs/observability/openmeter), [billing](https://docs.litellm.ai/docs/proxy/billing) | [CloudEvents metering](../finops.md#cloudevents-sinks) for OpenMeter and other CloudEvents consumers, and [Stripe Billing meter events](../finops.md#stripe-meter-sinks) with idempotent identifiers and per-sink customer maps | `Parity` | M6.4 |
-| FOCUS cost export | [FOCUS](https://docs.litellm.ai/docs/observability/focus) | Daily [FOCUS 1.4](../finops.md#focus-14-datasets) gzip-CSV datasets on S3, GCS and Azure Blob in cost or charge basis, with revisioned restatement, conformance-checked against the 1.4 requirements model | `Parity` | M6.4 |
+| FOCUS cost export | [FOCUS](https://docs.litellm.ai/docs/observability/focus) | Daily [FOCUS 1.4](../finops.md#focus-14-datasets) gzip-CSV datasets on S3, GCS and Azure Blob with revisioned restatement and applicable static-rule checks; [unused commitment cost is omitted](../finops.md#commitments), and dynamic conformance remains unqualified | `Partial` | M6.4 |
 
 ## Guardrails
 
@@ -182,7 +189,7 @@ of [M3](m03-routing-resilience.md).
 | GenAI semantic conventions | [OpenTelemetry v2](https://docs.litellm.ai/docs/observability/opentelemetry_v2) | Schema 1.41.0 request/attempt model, operation and usage attributes; pinned Langfuse/Phoenix collector readback qualified | `Parity` | M5.3 |
 | Logging integrations | [About 50 destinations](https://docs.litellm.ai/docs/observability/callbacks) | Durable, retryable HTTPS, OTLP logs and S3/GCS/Azure Blob sinks; collector interoperability rather than bespoke callbacks | `Parity` | M5.1 |
 | Per-team logging destinations | [Enterprise](https://docs.litellm.ai/docs/proxy/team_logging) | Installation and project sinks with project-manager authorization, sealed credentials and scoped fact filters | `Parity` | M5.1 |
-| Opt-in prompt and response capture | [store_prompts_in_spend_logs](https://docs.litellm.ai/docs/proxy/ui_logs) | Owner-enabled, sampled, bounded memory-only capture to installation sinks; never stored in OLP, unredacted until M7 | `Parity` | M5.2 |
+| Opt-in prompt and response capture | [store_prompts_in_spend_logs](https://docs.litellm.ai/docs/proxy/ui_logs) | Owner-enabled, sampled, bounded memory-only capture to installation sinks; never persisted in OLP; capture-specific redaction remains an explicit M7 integration gate | `Parity` | M5.2, M7 |
 | Request log viewer | [UI logs](https://docs.litellm.ai/docs/proxy/ui_logs) | Request history with attempts, usage and policy decisions | `Parity` | |
 | Session grouping | [Sessions](https://docs.litellm.ai/docs/proxy/ui_logs_sessions) | Case-sensitive session attribution, scoped usage breakdowns, current-page chronological request timelines and detail links | `Parity` | M5.5 |
 | Alert channels | [Slack, Discord, Teams](https://docs.litellm.ai/docs/proxy/alerting), [PagerDuty](https://docs.litellm.ai/docs/proxy/pagerduty) | Signed webhooks, Slack, Teams Workflows, Discord, PagerDuty trigger/resolve and TLS SMTP | `Parity` | M5.4 |
@@ -195,8 +202,8 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| MCP gateway | [MCP](https://docs.litellm.ai/docs/mcp) | Not available | `Gap` | M10.1 |
-| MCP OAuth and per-user credentials | [MCP OAuth](https://docs.litellm.ai/docs/mcp_oauth), [per-user auth](https://docs.litellm.ai/docs/mcp_per_user_auth) | Grant enrollment and refresh exist for provider plugins | `Gap` | M10.1 |
+| MCP gateway | [MCP](https://docs.litellm.ai/docs/mcp) | [Registration, certified tool catalogs and immutable revisions](../mcp-servers.md) exist; serving discovery/invocation gateway remains unimplemented | `Gap` | M10.1 |
+| MCP OAuth and per-user credentials | [MCP OAuth](https://docs.litellm.ai/docs/mcp_oauth), [per-user auth](https://docs.litellm.ai/docs/mcp_per_user_auth) | Registration supports sealed static bearer credentials; provider-plugin grants exist but MCP OAuth and per-user execution grants do not | `Gap` | M10.1 |
 | MCP tools for every model | [MCP](https://docs.litellm.ai/docs/mcp) | Not available | `Gap` | M10.2 |
 | MCP cost tracking | [MCP cost](https://docs.litellm.ai/docs/mcp_cost) | Not available | `Gap` | M10.1 |
 | A2A agent gateway | [A2A](https://docs.litellm.ai/docs/a2a), with [iteration budgets](https://docs.litellm.ai/docs/a2a_iteration_budgets) and a [kill switch](https://docs.litellm.ai/docs/a2a_kill_switch) | Not available | `Gap` | M10.3 |

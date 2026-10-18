@@ -4,20 +4,22 @@
 | --- | --- | --- |
 | Implemented | None | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
 
-LiteLLM's largest advantage is breadth: about 170 provider pages and a model
-cost map covering thousands of models. OLP reaches seven native connector kinds,
-13 OpenAI-compatible presets and operator-installed plugins. This milestone
-closes the breadth gap without giving up certification: every new provider is
-reachable through one of three qualification tiers, and a signed reference
-catalog replaces hand-entered model facts and prices.
+The planning comparison counted about 170 LiteLLM provider pages; that is a
+documentation inventory, not a count of independent adapters or an executable
+coverage target. M2 implements the reviewed provider set below, with fifty
+compatible presets, first-party compositions and an operator plugin path.
+Every served operation retains exact-tuple certification, and a signed reference
+catalog supplies reviewed model facts and prices. `Implemented` records code
+and fixture coverage; external and release qualification remain open.
 
 ## Outcome
 
-- Every provider family LiteLLM serves in production is reachable through a
-  reviewed preset, a first-party profile or codec, or a plugin, and each is
-  certified per exact tuple before it serves traffic.
-- Azure OpenAI and the major media vendors serve image, speech, transcription
-  and video operations.
+- Every candidate named in this milestone has a reviewed implementation or an
+  explicit decline. Operators can add other hosting/authentication compositions
+  through plugins for existing dialects. Neither a plugin path nor a provider
+  page establishes universal provider coverage.
+- Supported media vendors serve the operation set in M2.3; declined vendors and
+  operations remain explicit rather than implied by a provider-wide claim.
 - A signed catalog of model facts and list prices ships with every release and
   feeds discovery, routing facts, token calibration and pricing.
 
@@ -48,8 +50,8 @@ the server.
 
 ### M2.1 Reviewed presets
 
-Add presets for vendors that document an OpenAI-compatible Chat Completions,
-Responses or embeddings API. Each preset ships only after its contract test
+The reviewed preset inventory covers vendors that document an OpenAI-compatible
+Chat Completions, Responses or embeddings API. Each preset ships only after its contract test
 passes against the vendor's documentation, which the preset records as
 `documentation_url`. Candidates, in priority order:
 
@@ -86,8 +88,9 @@ vendor stays reachable through **Custom endpoint** or a plugin.
 
 ### M2.2 First-party profiles and codecs
 
-Cloud platforms and APIs that no existing composition expresses get first-party
-support:
+The initial candidate set below records the intended compositions. The
+[settled outcomes](#settled-during-implementation) supersede it where a vendor
+contract required a different profile, kind or decline.
 
 | Target | Work |
 | --- | --- |
@@ -121,10 +124,12 @@ Reviewed on 2026-10-05 against each vendor's own documentation.
 
 ### M2.3 Media, embedding and rerank providers
 
-`certifiable` in [`kinds.go`](../../internal/providers/kinds.go) limits media
-operations to `openai`, `vertex_ai` and `bedrock`. This workstream adds reviewed
-media contracts and the codecs that translate OpenAI media requests for them on
-transformed routes:
+At the planning baseline, `certifiable` in
+[`kinds.go`](../../internal/providers/kinds.go) limited media operations to
+`openai`, `vertex_ai` and `bedrock`. This workstream adds reviewed media
+contracts and transformed-route codecs for the candidate set below. The
+[settled outcomes](#settled-during-implementation-1) define which combinations
+are served and which were declined.
 
 | Operation | Providers |
 | --- | --- |
@@ -161,7 +166,7 @@ Reviewed on 2026-10-05 against each vendor's own documentation.
 
 ### M2.4 Reference catalog
 
-A first-party catalog, `openllmproxy.dev/catalog/v1`, describes models by
+A first-party catalog, `openllmproxy.dev/catalog/v2`, describes models by
 vendor:
 
 - canonical model identity and aliases;
@@ -212,16 +217,32 @@ The catalog is advisory and never authoritative on its own:
 - Letting a plugin define a dialect. New dialects remain first-party codecs
   with conformance evidence.
 
-## Decisions to settle
+## Decisions settled
 
-1. Catalog signing: an in-repository Ed25519 key with a documented rotation
-   procedure, or Sigstore keyless signing (recommended: Ed25519, because
-   verification then needs no network access).
-2. Catalog maintenance: a scheduled job that proposes changes from vendor
-   pricing pages as pull requests, with human review before merge
-   (recommended).
-3. The minimum media set for Azure OpenAI that unblocks most deployments
-   (recommended: image generation, speech and transcription first).
+1. **Signing uses Ed25519 with offline verification.** Release builds trust
+   compiled release public keys only; development builds may trust the committed
+   development key. The release workflow supplies the private seed and signs
+   both catalog and plugin index. Rotation overlaps keys and signatures as
+   specified in [catalog signing](../catalog.md#signing-keys). A development
+   signature is never release-signing evidence.
+2. **Maintenance reports drift and requires reviewed edits.** The weekly
+   [catalog drift workflow](../../.github/workflows/catalog-drift.yml) opens or
+   updates an issue from vendor model listings. It does not scrape prices into
+   publication or auto-merge changes. A maintainer verifies vendor source pages,
+   updates provenance, runs catalog checks and submits a re-signed change.
+3. **Azure media scope is image generation, speech and transcription.**
+   Certification uses the smallest real operation when no costless proof exists.
+   The declined video and other candidates above remain outside delivered scope;
+   provider counts must not silently include them.
+4. **Catalog facts and prices remain advisory.** Facts require explicit operator
+   acceptance and re-certification; prices require source/snapshot review and
+   publication. Unknown model facts or missing list prices do not authorize a
+   route or manufacture zero cost. Strict v2 decoding refuses older consumers.
+5. **Calibration is evidence, not a vendor default.** A family has factor `1`
+   until `tests/fixtures/tokens/calibrate.py` records a vendor count over the
+   checked-in corpus. Publish the measured model, endpoint, time, totals and
+   upward-rounded factor with catalog provenance. A factor does not claim
+   per-request exactness or generalize a live certification to other models.
 
 ## Delivered
 
@@ -275,6 +296,34 @@ unconfined permission remain explicit owner actions.
 - Translation on vendor speech-to-text APIs, streaming from vendor media
   codecs, and image variations beyond OpenAI.
 
+## Remaining delivery order
+
+M2 has no implementation dependency on another milestone. M6 consumes its
+published v2 prices; M1 consumes measured estimation factors; M9 consumes
+certified provider operations. Those consumers may proceed with fixtures and
+explicitly missing prices/factors, but cannot claim live provider coverage from
+M2's local tests.
+
+1. **Qualify implemented tuples.** The provider maintainer runs the existing
+   `liveproviders` cases for each supported M2.2 composition with a named
+   model/deployment, region, operation and credential mode. Record the commit,
+   vendor API version, pass/skip result, usage evidence and cleanup. A skipped
+   case is pending; a successful probe covers only that exact tuple. Start with
+   Azure/Vertex, then Bedrock/SageMaker, then watsonx and native Cohere/Mistral.
+2. **Publish measured calibration.** Collect Anthropic and Gemini count results,
+   review the corpus ratios and publish provenance-tagged factors through the
+   signed catalog workflow. Until then the factor-1 fallback remains explicit.
+3. **Qualify the signed release artifact.** The release maintainer verifies
+   both embedded and downloadable catalog/index bytes with release trust,
+   verifies tamper and rollback refusal, and records startup/doctor results for
+   the candidate image. Do not infer availability of CI secrets from workflow
+   declarations or committed public keys.
+4. **Review deferred breadth separately.** Reopen a declined candidate only with
+   a documented wire contract, representable usage/pricing and an executable
+   certification path. Retain its previous decision as dated evidence; add
+   fixtures, live-test entry points and catalog coverage before claiming the
+   new operation. Catalog drift alone does not expand supported dialects.
+
 ## Exit criteria
 
 Implementation and fixture evidence are complete. Paid-provider and release
@@ -291,9 +340,9 @@ unrun external results.
       its [settled outcome](#settled-during-implementation) names, and has a
       live-provider case. *Remaining:* the live cases compile but have not run
       against the vendors (see [open items](#open-items)).
-- [x] Every provider in the M2.3 table can be certified for its listed
-      operations on transformed routes, with conformance fixtures and pricing
-      coverage.
+- [x] Every served provider/operation in M2.3 can be certified on transformed
+      routes, with conformance fixtures and pricing coverage; the rest have
+      explicit declines.
       *Evidence:* each served vendor has fixtures in `tests/fixtures/vendors/`,
       codec tests, an integration test through the gateway and catalog prices;
       the providers and operations not served are declined with their reasons
@@ -316,5 +365,11 @@ unrun external results.
       provenance-tagged operator facts.
       *Evidence:* the catalog-suggestions API and console, storing
       `catalog@<sha256>` facts and invalidating certification.
+- [ ] Measured Anthropic and Gemini estimation factors carry reproducible
+      vendor-count evidence and signed catalog provenance; unmeasured families
+      remain explicitly heuristic.
+- [ ] The candidate release verifies embedded and published artifacts using
+      release keys, starts successfully and passes tamper/rollback refusal.
+      Checked-in signing code and development signatures do not close this gate.
 - [x] The [parity matrix](parity.md) provider and media rows are `Parity` or
       better.

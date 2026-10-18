@@ -5,8 +5,9 @@ lives in a separate repository. Projects,
 providers, credential slots, routes, routing policies, guardrails, export sinks, keys, budget groups,
 notification destinations, notification rules and upstream MCP servers have
 live create, update, import and destroy qualification with Terraform 1.16.5 and
-OpenTofu 1.13.1. All twelve M11 resource types are represented; the milestone also requires its
-remaining client and final end-to-end qualification.
+OpenTofu 1.13.1. All twelve M11 resource types are represented. The
+[M11 roadmap](roadmap/m11-operator-ecosystem.md) records the completed client and
+integration evidence separately from remaining release-candidate qualification.
 
 Connect with `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`. The provider
 uses the generated management contract and reads the private token file for

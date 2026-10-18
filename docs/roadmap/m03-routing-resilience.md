@@ -4,20 +4,19 @@
 | --- | --- | --- |
 | Implemented | [M1](m01-measured-advantage.md) | Cost-optimized and capacity-aware deployments |
 
-OLP's planner already orders attempts by priority, preferred order and strategy
-under hard policy constraints, and explains the result through simulation. It
-lacks the adaptive behaviors LiteLLM offers: cross-model fallbacks,
-capacity-aware selection, queueing, supply-side budgets, proactive health,
-mirroring and automatic request routing. This milestone adds them inside the
-existing planner, so every new behavior is deterministic, bounded and visible in
-route simulation and plan decisions.
+M3 adds cross-route fallbacks, capacity-aware selection, priority queueing,
+supply-side budgets, shared health, shadow traffic and request selectors to the
+existing planner. These controls are implemented and explained by simulation
+and plan decisions. `Implemented` records service-level evidence; full-rate
+performance qualification remains coupled to M1 and does not follow from local
+smoke measurements.
 
 ## Outcome
 
 - Routes declare fallbacks to other routes for named failure classes.
 - Selection can prefer the credential slots with the most remaining capacity,
   and keep a session on the target that holds its prompt cache.
-- Saturated gateways queue work by priority instead of refusing it, and
+- Saturated gateways can opt into bounded priority queueing, and
   provider capacity can be reserved per priority.
 - Connections and slots carry spend caps that remove them from selection.
 - Health is proactive and shared across the gateway fleet.
@@ -80,7 +79,10 @@ A route revision gains an ordered `fallbacks` list:
 - The primary route's overall deadline and attempt budget bound the whole
   request, fallbacks included.
 - Fallback graphs must be acyclic, stay within one project boundary and be at
-  most three routes deep. Publication rejects anything else.
+  most three serving routes deep, primary included. The same graph validation
+  checks selector delegation and classifier edges for cycles and project
+  boundaries; serving edges must preserve strict fidelity. Caller access is
+  checked at execution. Publication rejects invalid graphs.
 
 ### M3.2 Capacity-aware selection and session affinity
 
@@ -103,7 +105,8 @@ A route revision gains an ordered `fallbacks` list:
   starved. A queued request waits at most
   `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` and never beyond its route deadline, then
   receives today's 503. Queue depth is bounded by
-  `OLP_HTTP_ADMISSION_QUEUE_DEPTH`.
+  `OLP_HTTP_ADMISSION_QUEUE_DEPTH`, default `0` (disabled); the wait defaults
+  to `2s`. Both are installation controls, not caller overrides.
 - **Priority source.** A key policy sets a default priority and a
   `max_priority`. Requests may choose a class up to that ceiling through
   `X-OLP-Routing`, for example `{"priority":"high"}`; a higher value is refused
@@ -168,11 +171,14 @@ another route:
 - **Predicates** use features the gateway already computes during admission:
   operation, estimated input tokens, requested output tokens, streaming, tool
   presence, input modalities, structured-output requests and reasoning effort.
-  Attribution labels never take part, keeping labels free of routing effect.
-- **Classifier predicates** send the request text to an OLP classification or
-  generation route, for example a TEI classifier, and test the returned label.
-  The classifier call is an accounted request with its own deadline; a
-  classifier failure falls through to the next selector.
+  Attribution labels are not selector predicates; explicit session affinity
+  may use a label as described in M3.2.
+- **Classifier predicates** send at most 32 KiB of request text to an OLP
+  classification or generation route and test the returned label. The call
+  needs caller access to that route, has its own key reservation and deadline,
+  and is cached once per classifier route per request. A classifier failure
+  falls through to the next selector. Simulation uses supplied classifier
+  labels and never sends content to a provider.
 - **Plugin predicates** run a confined WebAssembly function from an approved
   [plugin](../plugins.md) over the same features. A plugin predicate can only
   narrow the candidate set.
@@ -221,6 +227,53 @@ are recorded as attempts.
    within five, matching key-authority polling.
 3. Shadow targets are targets of the route they mirror, so they never cross a
    project boundary.
+4. **Disabled is the default.** Routes without adaptive fields retain their
+   existing behavior. Missing retry rules add no same-target retry; admission
+   queue depth is zero; affinity, selectors, probes and shadows require explicit
+   configuration. Key priority defaults to `normal`, with its ceiling defaulting
+   to the chosen priority.
+5. **Bounds are part of the contract.** A route has at most four fallbacks,
+   sixteen selectors and eight tags per target/selector. Same-target retries
+   accept `connect`, `timeout`, `rate_limit` and `upstream_server` only, with
+   1–10 retries per configured class and 1–60000 ms configured jitter limits.
+   Honored `Retry-After` still consumes the primary deadline. The primary
+   attempt/deadline budget stops execution. Classifier timeouts are at
+   most 30 seconds and plugin predicates at most 250 ms.
+6. **Failure policies differ by signal.** Unreadable required quota or spend
+   state removes the affected candidate; it never grants capacity. An unreadable
+   fleet-health read discards that shared view and leaves local circuits in
+   charge. Unknown headroom ranks after known headroom. Health remains an
+   ordering signal, not authority to bypass hard constraints.
+7. **Affinity is best effort.** An absent affinity value falls back to ordinary
+   selection; a full, unhealthy or ineligible target may move the session.
+   Attribution does not drive selector predicates; a route may explicitly opt
+   into one attribution label for affinity. Affinity promises neither session
+   storage nor a provider prompt-cache hit.
+8. **Mirroring is bounded and separately accounted.** The shadow pool defaults
+   to sixteen in-flight requests per gateway, drops excess work and permits one
+   attempt per mirror. Primary responses never await mirror completion. Shadow
+   spend still consumes applicable system/supply budgets, even though it is
+   excluded from caller key budgets. The performance gate is preservation of
+   M1's S1 limits with no statistically significant regression above 10% against
+   the same workload without shadows, not a literal zero-latency claim.
+
+## Remaining delivery order
+
+1. **Preserve semantic regression gates.** Routing changes retain configuration
+   round-trips, graph validation, committed-stream/ambiguous-creation refusal,
+   caller narrowing, shared quota concurrency and fleet-health propagation tests.
+   Run the existing service tests named below whenever these contracts change.
+2. **Qualify under M1's frozen topology.** Run full-rate S1 with and without
+   sampled shadows, reporting primary latency and mirror start/drop/completion
+   counts. Exercise configured capacity selection across two gateways; preserve
+   its single pipelined Valkey read and verify hard quotas during saturation.
+   Report the shadow rate and pool size, so dropped mirrors cannot make an
+   apparent performance pass look like full mirroring.
+3. **Close release evidence.** Attach the unconfigured-feature allocation gate,
+   full-rate comparisons and M1 candidate-image record. The routing maintainer
+   owns semantic/scale evidence; the release maintainer links the shared M1 run
+   before promoting M3 to `Shipped`. No extra provider adapter work is required
+   to exercise these controls against deterministic peers.
 
 ## Exit criteria
 
@@ -245,8 +298,9 @@ performance remains open and is not implied by local smoke measurements.
 - [x] A circuit opened on one gateway is honored by another within the staleness
       bound. *Done:* `TestCircuitOpenedOnOneGatewayIsHonoredByAnother` and
       `TestActiveProbesShareTheirVerdictWithTheFleet`.
-- [ ] **Reference qualification pending:** Shadow attempts never change caller-visible latency in benchmark S1 and
-      are excluded from key budgets. *Done:* the S1-shadow scenario mirrors
+- [ ] **Reference qualification pending:** Shadow attempts preserve S1's latency
+      targets and stay within the 10% regression budget above; they are excluded
+      from key budgets. *Done:* the S1-shadow scenario mirrors
       every request and holds S1's targets at 30% of its rate on a development
       host (added latency 1.14, 1.58 and 2.26 ms at p50, p95 and p99, against
       S1's 1.20, 2.29 and 1.01 ms in the same session), and shadow requests carry

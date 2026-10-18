@@ -4,16 +4,17 @@
 | --- | --- | --- |
 | Implemented | None | [M3](m03-routing-resilience.md), [M7](m07-guardrails.md), and the performance gate of every milestone |
 
-OLP's architecture should make it faster and more correct than LiteLLM, but at
-0.1.0 nothing in the repository measured either claim. This milestone makes
+At the 0.1.0 planning baseline, the repository did not measure OLP's performance
+or compatibility claims against LiteLLM. This milestone makes
 both measurable, publishes the results, and turns them into regression gates
 that every later milestone must pass.
 
 The benchmark harness, the LiteLLM comparison, the regression gate, the token
 estimates, the client qualification suites and the response metadata are
 [delivered](#delivered). The full-rate scenarios have not been run on reference
-hardware and no reference results are published, so the milestone stays in
-progress until the [open exit criteria](#exit-criteria) close.
+hardware and no reference results are published. `Implemented` records the
+code and fixture evidence; promotion to `Shipped` requires the
+[open exit criteria](#exit-criteria) and release qualification below.
 
 ## Outcome
 
@@ -26,9 +27,9 @@ progress until the [open exit criteria](#exit-criteria) close.
   calibrated elsewhere, so limits, budgets and context-window checks rest on
   accurate numbers. As built, exact covers the first 32 KiB of a request's text,
   the rest is calibrated from that part, and the families without a public
-  tokenizer keep the four-character heuristic until
-  [M2.4](m02-provider-catalog.md#m24-reference-catalog) supplies their factors
-  ([decision 3](#decisions-to-settle)).
+  tokenizer keep the four-character heuristic until measured factors enter
+  [M2.4](m02-provider-catalog.md#m24-reference-catalog)
+  ([decision 3](#decisions-and-qualification-policy)).
 - The coding agents and frameworks LiteLLM documents run against OLP under a
   qualification suite.
 - Responses carry standard rate-limit headers and opt-in gateway metadata.
@@ -198,20 +199,24 @@ before users notice.
   fail-closed guarantees in [deployment](../deployment.md).
 - Calling provider token-counting endpoints on the admission path.
 
-## Decisions to settle
+## Decisions and qualification policy
 
 Each decision below records what was decided and why. Decisions 1 to 3 are the
 ones this specification listed; the rest were made during implementation because
 the specification text did not settle them.
 
-1. **The reference hardware for published results: not yet named.** It is named
-   in the [record of a reference run](../performance.md#record-of-a-reference-run)
-   when a reference run is published, because the choice has to fit what S3
-   needs and no full-rate run has measured that. The recommendation stands: one
-   general-purpose cloud instance family, with the gateway, the mock upstream and
-   the load generator pinned to CPUs of their own. Until then every figure in
-   [performance](../performance.md) is a labelled smoke figure from a shared
-   8-vCPU virtual machine.
+1. **Reference hardware is a frozen qualification input.** Use dedicated Linux
+   hosts from one general-purpose instance family, with disjoint CPU sets for
+   gateway, mock, load generator and state services. S1 assigns exactly two
+   vCPUs to the gateway. Size S3 and S6 in a preliminary capacity run, then
+   freeze the instance SKU, CPU allocation, memory, kernel/socket settings and
+   PostgreSQL/Valkey topology before comparing either gateway. Record those
+   values in the [reference-run manifest](../performance.md#record-of-a-reference-run).
+   A capacity run is not a qualifying result; changing the frozen topology
+   requires rerunning both gateways and their direct baselines. This avoids
+   selecting hardware from whichever comparison wins. Until such a manifest
+   and run exist, all figures in [performance](../performance.md) remain
+   labelled smoke results from a shared 8-vCPU virtual machine.
 2. **The pinned LiteLLM release and its configuration: settled.** The comparison
    runs `ghcr.io/berriai/litellm:v1.103.2`, pinned by the digest of its
    multi-architecture index,
@@ -287,8 +292,8 @@ the specification text did not settle them.
    GitHub-hosted runners with a 45-minute job limit, where six scenarios at full
    rate cannot finish and the numbers would mean nothing, so an unconditional run
    would break the release. Qualification on reference hardware sets the
-   variable, pins the CPUs and sets `OLP_BENCH_ENFORCE=1`. That line has never
-   been executed, because it needs a candidate image.
+   variable, pins the CPUs and sets `OLP_BENCH_ENFORCE=1`. No reference-qualified
+   candidate-image run is recorded here.
 9. **Cost reservation at admission is in this milestone's scope.** The
    specification said budgets reserve cost from the estimate, but at 0.1.0 they
    compared accrued spend only. Reserving at admission, with the estimate that
@@ -373,6 +378,38 @@ with contract, console and gateway tests. See [response headers](../gateway.md#r
 Current engineering/qualification boundaries live in [clients](../clients.md),
 [performance](../performance.md) and [code-mode qualification](../qualification/code-mode.md),
 not the historical implementation timing diary.
+
+## Remaining delivery order
+
+The benchmark maintainer owns the run manifest and comparisons; the release
+maintainer owns candidate-image qualification. Neither depends on completing
+M2, M3 or later feature milestones. M2 calibration improves estimates, while M3
+adds a shadow variant to the same reference run.
+
+1. **Freeze inputs.** Record the commit and candidate-image digest, the pinned
+   LiteLLM tag/digest, topology, workload, all tuning and the S4/S5 comparison
+   differences. Retain the existing LiteLLM pin until an explicit rebaseline
+   changes tag and digest together. The roadmap's newer documentation baseline
+   is not permission to silently change a historical benchmark comparator.
+2. **Qualify capacity and correctness.** Run full-rate S1–S6 with isolated
+   peers, healthy state services and enforced validity. S3 must accrue budget
+   spend and deliver all admitted-request metadata; S6 must hold the requested
+   streams concurrently, not merely open then expire them. A missed target
+   triggers profiling and a rerun on the frozen setup, not a reduced rate.
+3. **Publish reproducible comparisons.** Run S1–S5 for both gateways with their
+   own direct baselines and the declared drift allowance. Preserve raw results,
+   validity failures, commands, resource use and target verdicts. Repeat from a
+   clean checkout. S6 remains an OLP capacity result; S4 is a circuit workload
+   and S5 is a documented cross-endpoint workload, so neither supports a broader
+   claim about every retry or translation path.
+4. **Close external accuracy evidence.** Run the pinned OpenAI prompt-count
+   test on the exact-prefix corpus and attach model/version, counts and errors.
+   Run M2's Anthropic/Gemini calibration separately; lack of a factor continues
+   to mean `heuristic`, never `exact` or a measured calibration.
+5. **Qualify the release image.** Run `scripts/qualify-image.sh` with
+   `OLP_QUALIFY_BENCH=1` and `OLP_BENCH_ENFORCE=1` on the frozen hardware, and
+   link its results plus the clean-checkout reproduction before marking M1
+   `Shipped`. A default CI or reduced-rate pass cannot satisfy this gate.
 
 ## Exit criteria
 

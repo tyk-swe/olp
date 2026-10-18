@@ -8,12 +8,15 @@
 already provide bounded input/unary block/redact with metadata-only evidence.
 This milestone adds broader attachments, streaming detectors, PII/secrets/tool
 policies, vendor integrations, signed webhooks and confined WASM guardrails.
-Registrations alone do not implement that execution platform.
+The execution platform is now present in code; remaining work is release
+qualification and explicitly bounded vendor coverage. Registrations alone do
+not establish execution support. [Guardrails](../guardrails.md) is the operator
+contract; the decisions below are binding on remaining work.
 
 ## Outcome
 
-- One engine evaluates every guardrail, at every attachment scope, in every
-  phase including streaming output.
+- One engine composes guardrails at every attachment scope and admits only
+  phases and surfaces on which each configured action can be enforced.
 - Built-in detectors cover PII and secrets with no external service.
 - Vendor guardrails, model-based guardrails, webhook guardrails and plugin
   guardrails share one contract and one evidence format.
@@ -40,49 +43,65 @@ Planning-time comparison; shipped behavior is authoritative in the
 - **Resources.** A guardrail is a named, project-scoped definition with a type,
   configuration and failure policy. A guardrail policy is an ordered list of
   guardrails with phases and actions. Both are versioned with drafts and
-  immutable revisions, and publish into the runtime snapshot so that every
-  request pins one policy revision.
+  immutable revisions, and publish into the runtime snapshot. Each request pins
+  the complete release and its ordered effective set of policy and definition
+  revisions, including during retries and retained-resource follow-ups.
 - **Attachment.** Policies attach to the installation, an organization, a
   project, a route and a key. All attached policies apply, broadest first, and a
   guardrail marked `mandatory` cannot be detached at a narrower scope.
 - **Content policy.** Today's route `content_policy` becomes a guardrail of type
   `builtin.regex` with the same bounds and semantics. Configuration export and
-  apply move to the new shape in one release, as 0.x permits.
+  apply use configuration v2. Version 1 imports are explicitly normalized; mixed
+  old and new shapes are rejected. Historical rows remain immutable.
 
 | Phase | Behavior |
 | --- | --- |
-| `input` | Before token estimation and dispatch; may block or transform |
-| `input_parallel` | Concurrently with the upstream call; a violation cancels the attempt before commitment, or ends a committed stream in-band |
+| `input` | Inspect effective provider input after defaults and rewriting, before token estimation and dispatch; may block or transform |
+| `input_parallel` | Concurrent with upstream work; may block or annotate, never change dispatched input. A violation cancels the attempt before commitment or ends a committed stream in-band; observed usage remains billable |
 | `output` | After a unary response is decoded and accounted, before it is written |
 | `output_stream` | Over a streamed response through a holdback window of configured size; text is released only after inspection, and a violation ends the stream with an in-band error |
-| `monitor` | Any of the above in evaluation-only mode: decisions are recorded and never acted on |
+
+`monitor: true` is an entry flag on any phase, not a fifth phase. It records
+results without acting. Ordered transformations feed the next entry; the first
+enforced refusal stops evaluation.
 
 | Action | Contract |
 | --- | --- |
 | `block` | Refuse with `400 guardrail_blocked`, or end a stream in-band |
 | `redact` | Replace matched spans; transformed routes only |
-| `mask` | Replace entities with placeholders before dispatch and restore them in the response; transformed routes only, with the mapping held in request memory |
+| `mask` | Synchronous `input` only on transformed routes; replace entities with randomized placeholders, reuse one request-local map across retries, restore before output inspection |
 | `annotate` | Record the decision and continue |
 
-- **Fidelity.** Strict routes accept `block`, `annotate` and `monitor` in every
-  phase, because none of them change a successful native invocation. `redact`
-  and `mask` require transformed routes, as `redact` does today.
+- **Fidelity.** Strict routes permit enforcing `block` and `annotate`, and
+  evaluation-only entries, only on inspectable surfaces. Enforcing `redact` and
+  `mask` require transformed routes; successful strict response frames retain
+  their bytes. Detectors must supply valid spans to transform content.
 - **Failure policy.** Each guardrail declares a timeout, which cannot exceed the
   route deadline, and `on_error: fail_closed | fail_open`. External guardrails
-  have their own circuit breakers.
+  have per-revision circuit breakers: five failures open the circuit, then one
+  probe is allowed after 30 seconds. Missing capability is a pre-dispatch 422,
+  not a service failure that `fail_open` can silently excuse. Timeouts, invalid
+  verdicts and service failures record `failed_open` or `failed_closed`; an
+  enforcing fail-closed result uses `400 guardrail_blocked`. Monitoring never
+  blocks.
 - **Surfaces.** Guardrails inspect the same canonical text as content policy,
   plus tool-call arguments and tool results. Surfaces that cannot be inspected
-  keep answering `422 content_policy_surface_unavailable`, renamed
-  `guardrail_surface_unavailable`.
+  return `422 guardrail_surface_unavailable` for enforcing actions; evaluation-
+  only entries record unavailable coverage. Historical content-policy codes
+  remain decodable. Stored/background Responses refuse output enforcement or
+  input masking; opaque media and realtime require their own inspection
+  contracts. Input-only policies continue to apply to retained continuations.
 - **Evidence.** Each decision records `{guardrail_id, revision, phase, action,
   outcome, categories, latency_ms}` on the request and attempt records and in
   the `guardrail_decisions` export stream. Matched text, offsets, patterns and
-  replacements are never recorded. Keys may opt into an `X-OLP-Guardrails`
-  response header listing the guardrails that acted.
+  replacements are never recorded. `X-OLP-Guardrails: true` requests bounded
+  response metadata listing acting guardrails; late decisions use trailers.
+  Header truncation never truncates enforcement.
 
 ### M7.2 Built-in detectors
 
-Deterministic, linear-time detectors run in process:
+Bounded deterministic detectors run in process; pattern scanning uses RE2 and
+a compiled keyword automaton:
 
 - **PII:** email addresses, phone numbers in E.164 and common national formats,
   payment card numbers with Luhn validation, IBANs with checksum validation,
@@ -96,7 +115,10 @@ Deterministic, linear-time detectors run in process:
 - **Schema:** JSON Schema validation of structured outputs and tool arguments.
 
 Detectors report categories (`pii.email`, `secret.aws_access_key`), never
-values.
+values. Checksums validate a matched format; they do not establish that a
+credential is live. JWT detection recognizes structure, not signature validity.
+The labelled corpus is the coverage contract, not a guarantee of detecting all
+PII or unprefixed secrets. JSON Schema cannot load remote references.
 
 ### M7.3 Webhook guardrails
 
@@ -124,7 +146,12 @@ Requests are signed with `X-OLP-Signature`, pass the egress policy, carry a
 bounded body and timeout, and may use mutual TLS through the provider network
 credential mechanism. Because content leaves OLP, a webhook guardrail requires
 an explicit `content_egress: true` acknowledgement, recorded in audit and shown
-in capabilities.
+in capabilities. Redaction offsets are UTF-8 byte offsets into the exact
+submitted segment. Unknown segments, overlapping/out-of-bounds spans, invalid
+UTF-8 boundaries and malformed verdicts follow `on_error`. The signature is
+`t=<unix-seconds>,v1=<HMAC-SHA256>` over timestamp, a dot, and exact body bytes;
+receiver replay checks are required. Credentials and signing keys are never
+exported with portable configuration.
 
 ### M7.4 Vendor and model guardrails
 
@@ -137,25 +164,32 @@ in capabilities.
   (moderation, classification or generation) and maps its result to a verdict
   through a declared rule. This serves OpenAI moderation, Llama Guard,
   ShieldGemma and judge prompts through providers already certified in OLP,
-  with their usage accounted as attempts attributed to the guardrail.
+  with usage in child requests attributed to the parent and guardrail. Evaluator
+  calls use the caller's route authorization, end-user identity, deadline and
+  budgets. They resolve from the pinned release and skip model guardrails to
+  prevent recursion. Keyless playground evaluation reserves installation,
+  organization and project budgets and refuses unaccountable evaluator work.
 
 ### M7.5 Plugin guardrails
 
 The [plugin ABI](../plugin-authoring.md#abi-reference) gains a `guardrail`
 capability: a function that receives segments and returns a verdict in the
 webhook contract's shape. It runs on wazero within the existing time and memory
-limits, reaches only its approved origins, and is installed, reviewed and
-approved like any plugin. Custom guardrails therefore never run inside the
-gateway process.
+limits, with no HTTP capability in the guardrail call. Modules are installed,
+reviewed, approved and preloaded with the release. They run as confined WASM
+inside the host, never as arbitrary native extension code; diagnostics from
+content-bearing evaluations are suppressed.
 
 ### M7.6 Tool governance
 
 A `builtin.tools` guardrail governs tools in requests and responses:
 
-- allow and deny lists of tool names, with glob patterns, per scope;
+- allow and deny lists of tool names, with glob patterns, per scope; deny wins;
 - JSON Schema constraints on tool-call arguments returned by the model;
 - a trust rule that refuses to send output from tools marked `untrusted` into
-  tools marked `privileged` within one request.
+  tools marked `privileged` within one request. Unattributed tool results are
+  handled conservatively. This is request-local provenance enforcement, not
+  cross-request taint tracking or permission to execute tools.
 
 [M10](m10-agent-gateway.md) applies the same guardrail to MCP tool calls.
 
@@ -164,46 +198,120 @@ A `builtin.tools` guardrail governs tools in requests and responses:
 `POST /v1/guardrails/apply` evaluates a named guardrail policy against supplied
 text, for applications that guard content outside a model call. It requires a
 new API key scope, `guardrails`, records a request with operation `guardrail`,
-and is subject to the key's limits. The console offers the same evaluation as a
-guardrail playground that stores nothing.
+and is subject to the key's limits and project visibility. The input names an
+immutable `policy_revision_id`, phase and bounded segments; a completed policy
+refusal returns a successful evaluation with `blocked: true`, while malformed
+input, authentication and infrastructure errors retain their normal error
+status. The console playground uses the same engine and stores no entered
+content; external policies still send content to their declared services.
+
+### M7.8 Capture redaction integration
+
+[M5.2](m05-observability.md#m52-payload-capture) still rejects nonempty `redact`
+configuration in `internal/export/capture_policy.go`. Serving-time guardrails do
+not establish that captured input, output or tool arguments were redacted. This
+adapter is an explicit remaining deliverable, owned jointly by export and
+guardrail maintainers.
+
+Resolve each capture policy's named redactors to immutable local definition
+revisions at publication. The first adapter accepts span-producing built-in
+regex, PII, secret and keyword detectors only; external/model/plugin evaluation
+and masking/restoration are excluded. Inspect each complete selected capture
+field in bounded request memory before serialization and enqueue. Captured
+original input requires its own pass even when serving input was transformed;
+output and tool arguments use the corresponding capture surfaces.
+
+Capture redaction always fails closed for the **capture**: malformed spans,
+timeout, unavailable surface, incomplete stream or exhausted memory drops the
+whole capture, increments a content-free failure counter and records no payload.
+It does not alter an already accepted inference result or fail open by sending
+raw content. Never enqueue original bytes alongside a redacted copy, and never
+use PostgreSQL/Valkey for intermediate or retry storage. Preserve M5's explicit
+owner opt-in, sink restrictions and queue/drop semantics. Nonempty `redact`
+remains rejected until publication validation, unary/stream/tool fixtures and
+sink readback prove this contract.
 
 ## Change map
 
 | Change | Start here |
 | --- | --- |
-| Engine, detectors, policies | `internal/contentpolicy/` becomes `internal/guardrails/` |
+| Engine, detectors, policies and retained legacy adapter | `internal/guardrails/`, `internal/contentpolicy/`, `internal/routing/guardrails.go` |
 | Phases in the request path | `internal/gateway/policy.go`, `internal/gateway/executor.go` |
 | Webhook and vendor adapters | `internal/guardrails/`, `internal/egress/` |
 | Plugin capability | `sdk/plugin/abi/`, `internal/plugins/` |
-| Console | new `console/src/lib/features/guardrails/` |
+| Console | `console/src/lib/features/guardrails/` |
+| Capture-specific redaction adapter (remaining) | `internal/export/capture_policy.go`, `internal/gateway/events.go` |
 
-## Confirmed execution choices
+## Binding bounds and qualification order
 
-Streaming holdback is byte-bounded. Mask mappings and randomized placeholders
-exist only in request memory. The vendor set is the six adapters named above;
-webhooks and confined plugins cover additional integrations. Enforcing a rule
-that needs a complete result refuses streaming with `422`.
+The engine allows at most 128 effective entries, 2,048 segments, 8 MiB of text,
+4,096 findings and 256 KiB of evidence. Definition timeouts are 1–300,000 ms
+and cannot exceed the route deadline. Stream holdback defaults to 65,536 bytes
+and is capped at 1,048,576 bytes; UTF-8 and split-chunk matches are preserved.
+Whole-result schema checks, unbounded regex requirements and enforcing external
+evaluators require unary delivery when they cannot fit that contract. Tool
+arguments are withheld until complete and validated within the same byte bound.
+
+| Order | Owner and remaining deliverable | Acceptance artifact |
+| --- | --- | --- |
+| 1 | Guardrail/runtime maintainers: preserve the engine, migration, scope ordering and immutable-release contracts | Existing unit, integration and configuration fixtures; no regression in historical revisions |
+| 2 | Gateway maintainers: qualify the surface/action matrix, cancellation, accounting, logprobs and retained-response exclusions | Unary/stream protocol corpus, failure injection and authorization/isolation sweeps |
+| 3 | Connector/plugin maintainers: qualify each of six named adapters and WASM invocation | Local-fake contracts plus opt-in live-service smoke evidence by adapter and version |
+| 4 | Export/guardrail maintainers: add M7.8 capture redaction without durable payload staging | Publication refusals and redacted sink readback across unary/stream/tool fixtures |
+| 5 | Performance maintainers: run the built-in and streaming workload on M1 reference hardware | S3 latency, throughput, allocations and memory artifacts with no configured guardrails as control |
+| 6 | Guardrail/connector maintainers: freeze the pinned reference vendor inventory and reconcile each entry | Name/version, adapter status, supported actions, local/live evidence and any specifically approved exclusion; aggregate row stays `Partial` while gaps remain |
+
+The six built-in external adapters are Bedrock, Azure Content Safety, Azure
+Prompt Shields, Model Armor, Lakera and Presidio. Webhooks and WASM permit custom
+integrations but do not count as qualification of unnamed vendors. Broader
+vendor parity remains `Partial` unless a separately reviewed catalog expansion
+closes it; this milestone does not manufacture parity by renaming the subset.
+The guardrail maintainer owns that inventory and a follow-on adapter backlog.
+Every reference vendor starts as unsupported until its named adapter and live
+contract evidence exist. New adapters reuse M7.3's existing credential, egress,
+verdict and failure contracts; no new in-process extension model is permitted.
+An explicit exclusion must identify the vendor and rationale in the parity
+record; a generic webhook option is not an exclusion or proof of support.
+M8 depends on the implemented pinning, input enforcement and response contracts,
+not completion of M7's capture, live-service or performance qualification. M10 depends
+on tool governance and must add enforcement at its own execution boundary.
 
 ## Exit criteria
 
 - [x] Existing content-policy fixtures pass unchanged as `builtin.regex`
       guardrails.
-- [x] Every phase and action has unary and streaming tests, including
-      `input_parallel` cancellation before and after commitment.
+- [x] Supported phase/action combinations have unary and streaming fixtures;
+      unsupported combinations refuse explicitly, including parallel
+      transformation and whole-result streaming enforcement.
 - [x] Strict routes refuse `redact` and `mask` at validation, activation and
       configuration plan.
-- [x] Built-in detectors pass a labelled corpus with no false negatives on
-      checksum-validated formats.
+- [x] Built-in detectors pass the labelled positive/negative corpus, including
+      checksum-validated formats; this is bounded corpus coverage.
 - [x] Each vendor adapter and the webhook contract pass integration tests
       against local fakes, including timeouts under both failure policies.
 - [x] A WebAssembly guardrail built with the SDK runs in the conformance suite.
 - [x] Evidence contains no matched text in any record, export or log.
+- [ ] Capture redaction resolves immutable local detectors, redacts before
+      enqueue and drops incomplete/failed captures without raw-content
+      fallback; unary, split-stream, tool and sink-readback fixtures prove it.
 - [ ] Built-in detectors on 100K-token inputs stay within the
       [performance budget](m01-measured-advantage.md#performance-budget) for
       scenario S3.
-- [ ] The [parity matrix](parity.md) guardrail rows are `Parity` or better.
+- [ ] Each named external adapter has recorded live-service qualification,
+      including authentication, supported actions and deadline behavior; local
+      fakes alone do not check this box.
+- [ ] Release review records a pinned, enumerated reference vendor inventory,
+      the remaining vendor `Partial` row, named support/exclusion decisions and
+      the owned adapter backlog, with all guardrail claims matched to evidence.
+      Overall LiteLLM parity remains open while that row is `Partial`.
 
 ## Implementation and qualification notes
+
+Checked items above record existing focused implementation evidence, not a new
+qualification run during roadmap review. The code anchors include
+`internal/guardrails/engine_test.go`, `registry_test.go`, `external_test.go`,
+`internal/gateway/guardrails*_test.go` and configuration v2 fixtures. Unchecked
+items above remain release work; the status stays **In progress**.
 
 The platform implementation now includes immutable definitions and policies,
 additive attachments, snapshot compilation, built-in detectors, signed webhooks,
