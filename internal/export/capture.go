@@ -475,6 +475,11 @@ func (c *Collector) FinishContext(ctx context.Context, identity CaptureIdentity,
 	c.finished = true
 	oversized := c.oversized
 	invalid := c.invalid
+	// The serving decoder can reject native framing or usage after the last
+	// captured content. Its terminal outcome is required even for input-only capture.
+	if identity.Mode == "streaming" && identity.Outcome != "success" {
+		invalid = true
+	}
 	input, output, tools := c.input, c.output.String(), c.toolCalls
 	if identity.Mode == "streaming" && (c.includes("output") || c.includes("tool_calls")) {
 		if c.stream == nil {

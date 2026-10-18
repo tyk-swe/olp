@@ -166,6 +166,22 @@ func TestCaptureDropsTruncatedUnaryOutput(t *testing.T) {
 		t.Fatal("truncated sensitive content queued")
 	}
 }
+
+func TestCaptureDropsFailedStreamsEvenWithCompleteSelectedContent(t *testing.T) {
+	for _, include := range [][]string{{"input"}, {"input", "output"}} {
+		for _, outcome := range []string{"failure", "cancelled", ""} {
+			p := redactedPolicy(t)
+			p.Include = include
+			m := testManager(p)
+			c := m.Resolve("project", "", "", "", "req")
+			c.CaptureDocument(map[string]json.RawMessage{"messages": json.RawMessage(`[{"role":"user","content":"secret"}]`)})
+			c.CaptureStreamFrame(wire.Chat, []byte("data: "+`{"choices":[{"index":0,"delta":{"content":"secret"},"finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n"))
+			if c.Finish(CaptureIdentity{ProjectID: "project", Mode: "streaming", Outcome: outcome}, time.Now()) || len(m.queue) != 0 {
+				t.Fatalf("stream outcome %q queued selected content %v", outcome, include)
+			}
+		}
+	}
+}
 func TestCaptureRedactionDropsMalformedUnavailableCancelledAndBounds(t *testing.T) {
 	for _, test := range []string{"malformed", "opaque", "missing", "field", "segments", "cancelled", "closed", "expanded"} {
 		t.Run(test, func(t *testing.T) {
@@ -248,7 +264,8 @@ func TestCaptureRedactionSplitStreamAndTerminalSnapshots(t *testing.T) {
 	for _, frame := range frames {
 		c.CaptureStreamFrame(wire.Chat, []byte("data: "+frame+"\n\n"))
 	}
-	if !c.Finish(CaptureIdentity{Mode: "streaming"}, time.Now()) {
+	c.CaptureStreamFrame(wire.Chat, []byte("data: [DONE]\n\n"))
+	if !c.Finish(CaptureIdentity{Mode: "streaming", Outcome: "success"}, time.Now()) {
 		t.Fatal("complete split stream dropped")
 	}
 	raw := (<-m.queue).record

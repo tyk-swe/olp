@@ -14,7 +14,7 @@ import (
 var errCaptureStream = errors.New("capture stream unavailable or incomplete")
 
 type capturePart struct {
-	text, name string
+	text, name strings.Builder
 	done       bool
 }
 
@@ -65,21 +65,23 @@ func (s *CaptureStream) add(id, value string, tool, snapshot bool) {
 	if snapshot {
 		// A terminal snapshot may supply content absent from deltas, but must agree
 		// with a previously assembled value. Repeated snapshots are not appended.
-		if p.text != "" && p.text != value {
+		if p.text.Len() != 0 && p.text.String() != value {
 			s.invalid = true
 			return
 		}
-		p.text = value
+		if p.text.Len() == 0 {
+			p.text.WriteString(value)
+		}
 	} else {
 		if p.done && value != "" {
 			s.invalid = true
 			return
 		}
-		if len(p.text)+len(value) > s.limit {
+		if p.text.Len()+len(value) > s.limit {
 			s.invalid = true
 			return
 		}
-		p.text += value
+		p.text.WriteString(value)
 	}
 	_ = s.bounds()
 }
@@ -90,11 +92,11 @@ func (s *CaptureStream) tool(id, name, args string, snapshot, done bool) {
 	p := s.part(id, true)
 	if name != "" {
 		if !snapshot && (s.family == wire.Chat || s.family == wire.MistralFIM) {
-			p.name += name
-		} else if p.name != "" && p.name != name {
+			p.name.WriteString(name)
+		} else if p.name.Len() != 0 && p.name.String() != name {
 			s.invalid = true
-		} else {
-			p.name = name
+		} else if p.name.Len() == 0 {
+			p.name.WriteString(name)
 		}
 	}
 	s.add(id, args, true, snapshot)
@@ -111,10 +113,10 @@ func (s *CaptureStream) done(id string) {
 func (s *CaptureStream) bounds() error {
 	textSize, toolSize := 0, 0
 	for id, p := range s.text {
-		textSize += len(p.text) + len(id)
+		textSize += p.text.Len() + len(id)
 	}
 	for id, p := range s.calls {
-		toolSize += len(p.text) + len(p.name) + len(id)
+		toolSize += p.text.Len() + p.name.Len() + len(id)
 	}
 	if s.invalid || textSize > s.limit || toolSize > s.limit || len(s.groups) > 2048 {
 		s.invalid = true
@@ -169,6 +171,14 @@ func (s *CaptureStream) Push(frame []byte) error {
 			data := bytes.Join(lines, []byte("\n"))
 			if bytes.Equal(data, []byte("[DONE]")) {
 				if s.family == wire.Chat || s.family == wire.MistralFIM {
+					if len(s.groups) == 0 {
+						s.invalid = true
+					}
+					for _, done := range s.groups {
+						if !done {
+							s.invalid = true
+						}
+					}
 					s.terminal = true
 					continue
 				}
@@ -400,8 +410,8 @@ func (s *CaptureStream) anthropic(f map[string]json.RawMessage) {
 			s.invalid = true
 		}
 		s.groups[id] = true
-		if p := s.calls[id]; p != nil && p.text == "" {
-			p.text = "{}"
+		if p := s.calls[id]; p != nil && p.text.Len() == 0 {
+			p.text.WriteString("{}")
 		}
 		s.done(id)
 	case "message_delta":
@@ -581,27 +591,28 @@ func (s *CaptureStream) Finish() (string, []json.RawMessage, error) {
 		if len(s.groups) == 0 {
 			return "", nil, errCaptureStream
 		}
-	} else if !s.terminal {
+	}
+	if s.family != wire.Gemini && s.family != wire.GeminiStream && !s.terminal {
 		return "", nil, errCaptureStream
 	}
 	var texts []string
 	for _, id := range s.textOrder {
 		p := s.text[id]
-		if !utf8.ValidString(p.text) || (s.family == wire.Responses && !p.done) {
+		if !utf8.ValidString(p.text.String()) || (s.family == wire.Responses && !p.done) {
 			return "", nil, errCaptureStream
 		}
-		if p.text != "" {
-			texts = append(texts, p.text)
+		if p.text.Len() != 0 {
+			texts = append(texts, p.text.String())
 		}
 	}
 	var calls []json.RawMessage
 	size := 0
 	for _, id := range s.callOrder {
 		p := s.calls[id]
-		if !p.done || p.name == "" || !utf8.ValidString(p.text) || !validCaptureJSON([]byte(p.text)) {
+		if !p.done || p.name.Len() == 0 || !utf8.ValidString(p.text.String()) || !validCaptureJSON([]byte(p.text.String())) {
 			return "", nil, errCaptureStream
 		}
-		raw, err := json.Marshal(map[string]any{"id": id, "name": p.name, "arguments": json.RawMessage(p.text)})
+		raw, err := json.Marshal(map[string]any{"id": id, "name": p.name.String(), "arguments": json.RawMessage(p.text.String())})
 		size += len(raw)
 		if err != nil || size > s.limit {
 			return "", nil, errCaptureStream

@@ -66,6 +66,11 @@ func TestCaptureCompleteNativeStreams(t *testing.T) {
 					t.Fatal("inference frame changed")
 				}
 			}
+			if tc.family == wire.Chat || tc.family == wire.MistralFIM {
+				if err := stream.Push([]byte("data: [DONE]\n\n")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			text, calls, err := stream.Finish()
 			if err != nil || text != tc.text || len(calls) != tc.tools {
 				t.Fatalf("finish text=%q calls=%d err=%v", text, len(calls), err)
@@ -127,6 +132,9 @@ func TestCaptureFragmentedChatToolNames(t *testing.T) {
 					if err := s.Push(append(append([]byte("data: "), raw...), '\n', '\n')); err != nil {
 						t.Fatal(err)
 					}
+				}
+				if err := s.Push([]byte("data: [DONE]\n\n")); err != nil {
+					t.Fatal(err)
 				}
 				_, calls, err := s.Finish()
 				if err != nil || len(calls) != 1 || !strings.Contains(string(calls[0]), `"name":"weather"`) {
@@ -247,6 +255,9 @@ func TestCaptureStreamDropsIncompleteMalformedAndBounds(t *testing.T) {
 		limit  int
 	}{
 		{"no-finish", wire.Chat, []string{`{"choices":[{"index":0,"delta":{"content":"sec"}}]}`}, 65536},
+		{"no-terminal", wire.Chat, []string{`{"choices":[{"index":0,"delta":{"content":"secret"},"finish_reason":"stop"}]}`}, 65536},
+		{"mistral-no-terminal", wire.MistralFIM, []string{`{"choices":[{"index":0,"delta":{"content":"secret"},"finish_reason":"stop"}]}`}, 65536},
+		{"early-terminal", wire.Chat, []string{`[DONE]`, `{"choices":[{"index":0,"delta":{"content":"secret"},"finish_reason":"stop"}]}`}, 65536},
 		{"done-without-choice-finish", wire.Chat, []string{`{"choices":[{"index":0,"delta":{"content":"sec"}}]}`, `[DONE]`}, 65536},
 		{"malformed", wire.Chat, []string{`{broken`}, 65536},
 		{"truncated", wire.Chat, []string{`{"choices":[{"index":0,"delta":{"content":"sec"},"finish_reason":"length"}]}`}, 65536},
@@ -266,6 +277,29 @@ func TestCaptureStreamDropsIncompleteMalformedAndBounds(t *testing.T) {
 				t.Fatal("unsafe capture accepted")
 			}
 		})
+	}
+}
+
+func BenchmarkCaptureStreamSmallFragments(b *testing.B) {
+	const outputSize = 60 << 10
+	frame := []byte("data: " + `{"choices":[{"index":0,"delta":{"content":"text"}}]}` + "\n\n")
+	end := []byte("data: " + `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n")
+	b.ReportAllocs()
+	b.SetBytes(outputSize)
+	for b.Loop() {
+		s := NewCaptureStream(wire.Chat, 65536, true, false)
+		for range outputSize / 4 {
+			if err := s.Push(frame); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := s.Push(end); err != nil {
+			b.Fatal(err)
+		}
+		text, _, err := s.Finish()
+		if err != nil || len(text) != outputSize {
+			b.Fatalf("incomplete capture: %d %v", len(text), err)
+		}
 	}
 }
 func TestCaptureUnaryNativeText(t *testing.T) {
