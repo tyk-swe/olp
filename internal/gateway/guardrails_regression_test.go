@@ -90,7 +90,7 @@ func TestGuardrailResponsesCompletionSnapshots(t *testing.T) {
 
 func TestLegacyCompletionStreamGuardrails(t *testing.T) {
 	frames := []string{
-		`{"sequence":9007199254740993,"choices":[{"index":1,"text":"sec","finish_reason":null}]}`,
+		`{"sequence":9007199254740993,"choices":[{"index":1,"text":"sec","finish_reason":""}]}`,
 		`{"choices":[{"index":1,"text":"ret","finish_reason":"stop"}]}`,
 	}
 	g := regressionGuardrailStream(t, wire.Completions, guardrails.Redact)

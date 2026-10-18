@@ -87,7 +87,7 @@ func guardrailDocumentFields(family wire.Format, doc oif.Document) ([]guardrailS
 			}
 			prefix := "completions_" + index(choice, i) + "_"
 			add(prefix+"text", "/choices/"+strconv.Itoa(i)+"/text", false)
-			if reason, ok := choice.Lookup("finish_reason"); ok && reason.Kind() == oif.String {
+			if reason, ok := choice.Lookup("finish_reason"); ok && reason.Kind() == oif.String && reason.Raw() != `""` {
 				fields = append(fields, guardrailStreamField{id: prefix, complete: true})
 			}
 		}
