@@ -305,6 +305,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" commitment_weight::numeric AS commitment_weight," +
 		" commitment_amount::numeric AS commitment_amount," +
 		" commitment_period," +
+		" da.allocated_cost AS durable_allocation," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, observed_at AT TIME ZONE 'UTC')" +
 		" END AS commitment_bucket," +
 		// Reconciliation attributes spend only to operator-cost rows: caller
@@ -319,7 +320,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" THEN 1 ELSE 0 END::bigint AS reconcil_incomplete_attempts," +
 		" CASE WHEN NOT response_cache AND charge_status <> 'not_billable' AND (caller_credential OR budget_exempt)" +
 		" THEN 1 ELSE 0 END::bigint AS reconcil_caller_attempts" +
-		" FROM olp.attempt_usage_facts WHERE true")
+		" FROM olp.attempt_usage_facts LEFT JOIN (SELECT u.attempt_id,COALESCE(a.allocated_cost,0) allocated_cost FROM olp.commitment_usage u JOIN olp.commitment_periods cp ON cp.id=u.period_id AND NOT cp.legacy LEFT JOIN olp.commitment_allocations a ON a.attempt_id=u.attempt_id) da USING (attempt_id) WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)
 	q.pushBind(" AND observed_at < ", f.End)
 	f.dimensions(q)
@@ -333,7 +334,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" media_units, estimated_cost, charge, uncharged_attempt_count, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
 		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
-		" commitment_amount, commitment_period," +
+		" commitment_amount, commitment_period, olp.commitment_hourly_allocation(attempt_usage_hourly)," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, bucket AT TIME ZONE 'UTC')" +
 		" END, budget_exempt, false," +
 		// Hourly rows keep only request-grain counts beyond unpriced attempts:
@@ -362,7 +363,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" CROSS JOIN LATERAL (" + commitmentShareLateral() + ") w)")
 	q.push(", report_rows AS (" +
 		" SELECT usage_rows.*," +
-		" round(shares.latest_amount * usage_rows.commitment_weight / NULLIF(shares.period_weight, 0), 12)" +
+		" COALESCE(usage_rows.durable_allocation,round(shares.latest_amount * usage_rows.commitment_weight / NULLIF(shares.period_weight, 0), 12))" +
 		" AS allocated_commitment" +
 		" FROM usage_rows" +
 		" LEFT JOIN commitment_shares shares" +

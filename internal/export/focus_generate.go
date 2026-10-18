@@ -47,20 +47,21 @@ func focusRowsSQL(costBasis string) string {
 			NULL::timestamp AS commitment_bucket, NULL::numeric AS period_weight, NULL::numeric AS latest_amount
 			WHERE false)`
 	}
-	return `WITH facts AS (
-	SELECT f.attempt_id::text, f.provider_id, f.route_slug, f.api_key_id::text,
+	source := focusSourceSQL(costBasis)
+	return `WITH source AS (` + source + `), facts AS (
+	SELECT f.attempt_id::text, f.provider_id, f.route_slug, f.api_key_id::text, src.allocated, src.schedule_id,
 		f.upstream_model, f.operation, f.attribution::text,
 		f.commitment_period,
 		CASE WHEN f.commitment_period IS NULL THEN NULL
-			ELSE date_trunc(f.commitment_period, f.observed_at AT TIME ZONE 'UTC') END AS commitment_bucket,
-		COALESCE(k.project_id, pr.project_id, rt.project_id)::text AS consumer,
-		pj.name AS consumer_name,
-		pr.name AS connection_name, pr.kind,
-		pr.configuration#>>'{options,vendor_id}' AS vendor_id,
-		pr.project_id::text AS provider_project,
+			ELSE COALESCE(f.commitment_bucket AT TIME ZONE 'UTC',date_trunc(f.commitment_period, f.observed_at AT TIME ZONE 'UTC')) END AS commitment_bucket,
+		CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END AS consumer,
+        CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer_name' ELSE pj.name END AS consumer_name,
+        COALESCE(src.doc->>'connection_name',pr.name) AS connection_name, COALESCE(src.doc->>'provider_kind',pr.kind) AS kind,
+        CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'vendor_id' ELSE pr.configuration#>>'{options,vendor_id}' END AS vendor_id,
+        CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'provider_project' ELSE pr.project_id::text END AS provider_project,
 		f.` + fallbackColumn + ` IS NULL AS any_fallback,
 		` + lines + ` AS lines
-	FROM olp.attempt_usage_facts f
+	FROM source src CROSS JOIN LATERAL jsonb_populate_record(NULL::olp.attempt_usage_facts,src.doc) f
 	LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
 	LEFT JOIN olp.providers pr ON pr.id=f.provider_id
 	LEFT JOIN olp.routes rt ON rt.slug=f.route_slug
@@ -68,9 +69,15 @@ func focusRowsSQL(costBasis string) string {
 	WHERE f.observed_at >= $1::date AND f.observed_at < ($1::date + 1)::timestamptz
 		AND f.charge_status='billable' AND f.usage_complete
 		AND ` + basis + `
-		AND ($2::text IS NULL OR COALESCE(k.project_id, pr.project_id, rt.project_id)::text = $2)
-		AND ($3::text IS NULL OR COALESCE(k.project_id, pr.project_id, rt.project_id)::text = $3)
-		AND ($4::text IS NULL OR f.route_slug = $4))` + shares + `
+		AND ($2::text IS NULL OR (CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END) = $2)
+		AND ($3::text IS NULL OR (CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END) = $3)
+		AND ($4::text IS NULL OR f.route_slug = $4))` + shares + `, expanded AS (
+ SELECT f.*,line,
+  CASE WHEN allocated IS NOT NULL THEN CASE WHEN SUM((line->>'quantity')::numeric*(line->>'list_unit_price')::numeric) OVER (PARTITION BY attempt_id)>0 THEN
+   round(allocated*SUM((line->>'quantity')::numeric*(line->>'list_unit_price')::numeric) OVER (PARTITION BY attempt_id ORDER BY ord)/SUM((line->>'quantity')::numeric*(line->>'list_unit_price')::numeric) OVER (PARTITION BY attempt_id),12)
+   -round(allocated*(SUM((line->>'quantity')::numeric*(line->>'list_unit_price')::numeric) OVER (PARTITION BY attempt_id ORDER BY ord)-(line->>'quantity')::numeric*(line->>'list_unit_price')::numeric)/SUM((line->>'quantity')::numeric*(line->>'list_unit_price')::numeric) OVER (PARTITION BY attempt_id),12)
+   ELSE 0 END END AS line_allocation
+ FROM facts f CROSS JOIN LATERAL jsonb_array_elements(f.lines) WITH ORDINALITY x(line,ord))
 SELECT f.consumer, COALESCE(f.consumer_name,''), f.provider_id::text, COALESCE(f.connection_name,''),
 	COALESCE(f.vendor_id,''), f.kind, COALESCE(f.provider_project,''),
 	f.upstream_model, f.operation, COALESCE(f.route_slug,''), COALESCE(f.api_key_id,''),
@@ -85,16 +92,15 @@ SELECT f.consumer, COALESCE(f.consumer_name,''), f.provider_id::text, COALESCE(f
 	trim_scale(SUM((line->>'quantity')::numeric * (line->>'contracted_unit_price')::numeric))::text AS contracted_cost,
 	s.period_weight::text, s.latest_amount::text,
 	count(DISTINCT f.attempt_id) AS attempts,
-	count(DISTINCT f.attempt_id) FILTER (WHERE f.any_fallback) AS fallback_attempts
-FROM facts f
-CROSS JOIN LATERAL jsonb_array_elements(f.lines) line
+	count(DISTINCT f.attempt_id) FILTER (WHERE f.any_fallback) AS fallback_attempts, f.schedule_id::text, SUM(f.line_allocation)::text
+FROM expanded f
 LEFT JOIN commitment_shares s ON s.provider_id=f.provider_id AND s.commitment_period=f.commitment_period
 	AND s.commitment_bucket=f.commitment_bucket
 GROUP BY f.consumer, f.consumer_name, f.provider_id, f.connection_name, f.vendor_id, f.kind,
 	f.provider_project, f.upstream_model, f.operation, f.route_slug, f.api_key_id, f.attribution,
 	f.commitment_period IS NOT NULL, f.commitment_period, f.commitment_bucket,
 	line->>'component', line->>'tier', line->>'unit',
-	line->>'list_unit_price', line->>'contracted_unit_price', s.period_weight, s.latest_amount
+	line->>'list_unit_price', line->>'contracted_unit_price', s.period_weight, s.latest_amount, f.schedule_id
 ORDER BY 1,3,8,9,10,11,12,13,14,15,16,17,18,19,20,21`
 }
 
@@ -105,23 +111,13 @@ ORDER BY 1,3,8,9,10,11,12,13,14,15,16,17,18,19,20,21`
 //
 // Binds: $1 day, $2 sink project, $3 filter project.
 func focusPurchasesSQL() string {
-	return `WITH buckets AS (
-	SELECT DISTINCT f.provider_id, f.commitment_period,
-		date_trunc(f.commitment_period, f.observed_at AT TIME ZONE 'UTC') AS commitment_bucket
-	FROM olp.attempt_usage_facts f
-	WHERE f.commitment_period IS NOT NULL
-		AND f.observed_at >= $1::date AND f.observed_at < ($1::date + interval '1 month')
-		AND date_trunc(f.commitment_period, f.observed_at AT TIME ZONE 'UTC')::date = $1::date),
-purchases AS (
-	SELECT p.provider_id, p.commitment_period, p.commitment_bucket, w.period_weight, w.latest_amount
-	FROM buckets p CROSS JOIN LATERAL (` + usage.CommitmentSharesLateral() + `) w
-	WHERE COALESCE(w.period_weight,0) <> 0)
-SELECT p.provider_id::text, p.commitment_period, p.commitment_bucket::text, p.latest_amount::text,
-	pr.name, pr.configuration#>>'{options,vendor_id}', pr.kind, pr.project_id::text, COALESCE(pj.name,'')
-FROM purchases p JOIN olp.providers pr ON pr.id=p.provider_id
-LEFT JOIN olp.projects pj ON pj.id=pr.project_id
-WHERE ($2::text IS NULL OR pr.project_id::text=$2) AND ($3::text IS NULL OR pr.project_id::text=$3)
-ORDER BY 1,2,3`
+	return `SELECT s.provider_id::text,s.period,(p.bucket_start AT TIME ZONE 'UTC')::text,p.amount::text,
+ s.provider_name,s.vendor_id,s.provider_kind,s.project_id::text,COALESCE(s.project_name,''),s.id::text,
+ (p.amount-COALESCE((SELECT SUM(allocated_cost) FROM olp.commitment_allocations a WHERE a.period_id=p.id),0))::text
+ FROM olp.commitment_periods p JOIN olp.commitment_schedules s ON s.id=p.schedule_id
+ WHERE p.bucket_start >= $1::date AND p.bucket_start < ($1::date+1)::timestamptz
+ AND ($2::text IS NULL OR s.project_id::text=$2) AND ($3::text IS NULL OR s.project_id::text=$3)
+ ORDER BY p.bucket_start,s.id`
 }
 
 // focusCompletenessSQL counts the day's billable facts in scope by category,
@@ -138,7 +134,7 @@ func focusCompletenessSQL(costBasis, fallbackColumn string) string {
 		includedPredicate = `f.charge IS NOT NULL`
 		callerPaid = `false`
 	}
-	return `SELECT
+	return `WITH source AS (` + focusSourceSQL(costBasis) + `) SELECT
 		count(*) FILTER (WHERE f.usage_complete AND (` + includedPredicate + `)) AS included_attempts,
 		count(*) FILTER (WHERE f.usage_complete AND (` + includedPredicate + `) AND f.` + fallbackColumn + ` IS NULL) AS fallback_line_attempts,
 		count(*) FILTER (WHERE f.unpriced) AS unpriced_attempts,
@@ -147,14 +143,14 @@ func focusCompletenessSQL(costBasis, fallbackColumn string) string {
 		count(*) FILTER (WHERE ` + callerPaid + `) AS caller_paid_excluded_attempts,
 		EXISTS(SELECT 1 FROM olp.request_metadata_ingestion_gaps g
 			WHERE g.first_observed_at < ($1::date + 1)::timestamptz AND g.last_observed_at >= $1::date) AS ingestion_gap
-	FROM olp.attempt_usage_facts f
+	FROM source src CROSS JOIN LATERAL jsonb_populate_record(NULL::olp.attempt_usage_facts,src.doc) f
 	LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
 	LEFT JOIN olp.providers pr ON pr.id=f.provider_id
 	LEFT JOIN olp.routes rt ON rt.slug=f.route_slug
 	WHERE f.observed_at >= $1::date AND f.observed_at < ($1::date + 1)::timestamptz
 		AND f.charge_status='billable'
-		AND ($2::text IS NULL OR COALESCE(k.project_id, pr.project_id, rt.project_id)::text = $2)
-		AND ($3::text IS NULL OR COALESCE(k.project_id, pr.project_id, rt.project_id)::text = $3)
+		AND ($2::text IS NULL OR (CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END) = $2)
+		AND ($3::text IS NULL OR (CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END) = $3)
 		AND ($4::text IS NULL OR f.route_slug = $4)`
 }
 
@@ -169,17 +165,30 @@ func focusAccountingSQL(costBasis string) string {
 		predicate = `f.charge IS NOT NULL`
 		sum = `trim_scale(SUM(f.charge))::text`
 	}
-	return `SELECT ` + sum + `
-	FROM olp.attempt_usage_facts f
+	return `WITH source AS (` + focusSourceSQL(costBasis) + `) SELECT ` + sum + `
+	FROM source src CROSS JOIN LATERAL jsonb_populate_record(NULL::olp.attempt_usage_facts,src.doc) f
 	LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
 	LEFT JOIN olp.providers pr ON pr.id=f.provider_id
 	LEFT JOIN olp.routes rt ON rt.slug=f.route_slug
 	WHERE f.observed_at >= $1::date AND f.observed_at < ($1::date + 1)::timestamptz
 		AND f.charge_status='billable' AND f.usage_complete
 		AND ` + predicate + `
-		AND ($2::text IS NULL OR COALESCE(k.project_id, pr.project_id, rt.project_id)::text = $2)
-		AND ($3::text IS NULL OR COALESCE(k.project_id, pr.project_id, rt.project_id)::text = $3)
+		AND ($2::text IS NULL OR (CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END) = $2)
+		AND ($3::text IS NULL OR (CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'consumer' ELSE COALESCE(k.project_id, pr.project_id, rt.project_id)::text END) = $3)
 		AND ($4::text IS NULL OR f.route_slug = $4)`
+}
+
+// focusSourceSQL retains committed price and ownership evidence across fact retention.
+func focusSourceSQL(costBasis string) string {
+	source := `SELECT to_jsonb(f) AS doc, NULL::numeric AS allocated, NULL::uuid AS schedule_id
+ FROM olp.attempt_usage_facts f WHERE f.observed_at >= $1::date AND f.observed_at < $1::date+1 AND NOT EXISTS(SELECT 1 FROM olp.commitment_usage u WHERE u.attempt_id=f.attempt_id)`
+	if costBasis == "cost" {
+		source += ` UNION ALL SELECT u.payload,COALESCE(a.allocated_cost,0),p.schedule_id FROM olp.commitment_usage u
+ JOIN olp.commitment_periods p ON p.id=u.period_id LEFT JOIN olp.commitment_allocations a ON a.attempt_id=u.attempt_id WHERE u.observed_at >= $1::date AND u.observed_at < $1::date+1`
+	} else {
+		source = `SELECT to_jsonb(f) AS doc,NULL::numeric AS allocated,NULL::uuid AS schedule_id FROM olp.attempt_usage_facts f WHERE f.observed_at >= $1::date AND f.observed_at < $1::date+1`
+	}
+	return source
 }
 
 // generateDay reads the day's dataset from one repeatable-read snapshot and
@@ -241,16 +250,21 @@ func (w *FocusWorker) generateDay(ctx context.Context, sink focusSink, day time.
 		var tier *string
 		var listPrice, contractedPrice string
 		var quantity, listCost, contractedCost string
-		var periodWeight, latestAmount *string
+		var periodWeight, latestAmount, scheduleID, allocated *string
 		if err := rows.Scan(&consumer, &consumerName, &r.providerID, &connectionName,
 			&vendorID, &kind, &providerProject,
 			&model, &operation, &route, &apiKeyID, &attribution,
 			&committed, &commitmentPeriod, &commitmentBucket,
 			&component, &tier, &unit, &listPrice, &contractedPrice,
 			&quantity, &listCost, &contractedCost, &periodWeight, &latestAmount,
-			&r.attempts, &r.fallbackAttempts); err != nil {
+			&r.attempts, &r.fallbackAttempts, &scheduleID, &allocated); err != nil {
 			rows.Close()
 			return nil, generationError{err}
+		}
+		r.commitmentID = deref(scheduleID)
+		if allocated != nil {
+			v := decimal.RequireFromString(*allocated)
+			r.allocatedCost = &v
 		}
 		r.consumer = deref(consumer)
 		r.consumerName = deref(consumerName)
@@ -291,7 +305,7 @@ func (w *FocusWorker) generateDay(ctx context.Context, sink focusSink, day time.
 
 	// Purchase rows ride the bucket-start day's dataset, cost basis only, and
 	// only when the sink's scope admits the provider's project.
-	if sink.costBasis == "cost" && sink.filterRoute == nil {
+	if sink.costBasis == "cost" && sink.filterRoute == nil && sink.ProjectID == nil && sink.filterProject == nil {
 		scopeProject := sink.ProjectID
 		if sink.filterProject != nil {
 			scopeProject = sink.filterProject
@@ -302,16 +316,23 @@ func (w *FocusWorker) generateDay(ctx context.Context, sink focusSink, day time.
 			return nil, generationError{err}
 		}
 		for purchases.Next() {
-			var providerID, period, bucket, amount, connectionName string
+			var providerID, period, bucket, amount, connectionName, scheduleID, unused string
 			var vendorID, kind, providerProject, providerProjectName *string
 			if err := purchases.Scan(&providerID, &period, &bucket, &amount,
-				&connectionName, &vendorID, &kind, &providerProject, &providerProjectName); err != nil {
+				&connectionName, &vendorID, &kind, &providerProject, &providerProjectName, &scheduleID, &unused); err != nil {
 				purchases.Close()
 				return nil, generationError{err}
 			}
-			csvRows = append(csvRows, purchaseRow(fc, providerID, connectionName,
+			purchase := purchaseRow(fc, providerID, connectionName,
 				deref(vendorID), deref(kind), deref(providerProject), deref(providerProjectName),
-				period, bucket, decimal.RequireFromString(amount)))
+				period, bucket, decimal.RequireFromString(amount))
+			purchase[slices.Index(focusColumns, "CommitmentDiscountId")] = "olp:commitment:" + scheduleID
+			purchase[slices.Index(focusColumns, "SubAccountId")] = ""
+			purchase[slices.Index(focusColumns, "SubAccountName")] = ""
+			csvRows = append(csvRows, purchase)
+			if v := decimal.RequireFromString(unused); v.IsPositive() {
+				csvRows = append(csvRows, unusedRow(purchase, v))
+			}
 		}
 		purchases.Close()
 		if err := purchases.Err(); err != nil {
@@ -334,6 +355,10 @@ func (w *FocusWorker) generateDay(ctx context.Context, sink focusSink, day time.
 	var accounting *string
 	if err := tx.QueryRow(ctx, focusAccountingSQL(sink.costBasis), day.Format("2006-01-02"),
 		textOrNil(sink.ProjectID), textOrNil(sink.filterProject), textOrNil(sink.filterRoute)).Scan(&accounting); err != nil {
+		return nil, generationError{err}
+	}
+	commitments, err := readCommitmentTotals(ctx, tx, sink, day, w.now())
+	if err != nil {
 		return nil, generationError{err}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -374,6 +399,7 @@ func (w *FocusWorker) generateDay(ctx context.Context, sink focusSink, day time.
 		callerExcluded: callerExcluded,
 		ingestionGap:   ingestionGap,
 		accounting:     accounting,
+		commitments:    commitments,
 	})
 	if err != nil {
 		return nil, generationError{err}
@@ -387,6 +413,7 @@ func (w *FocusWorker) generateDay(ctx context.Context, sink focusSink, day time.
 		billed:       totals.billed,
 		effective:    totals.effective,
 		objects:      objects,
+		commitments:  commitments,
 	}, nil
 }
 
@@ -398,6 +425,7 @@ type result struct {
 	included, fallbackLines, unpriced, incomplete, uncharged, callerExcluded int64
 	ingestionGap                                                             bool
 	accounting                                                               *string
+	commitments                                                              *CommitmentTotals
 }
 
 // focusPart is one compressed CSV object and its checksum.

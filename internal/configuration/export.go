@@ -72,7 +72,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	}
 	providersRows, err := q.Query(ctx, `SELECT p.id::text,p.name,pr.name,p.state,r.configuration,r.models,r.slots
         FROM olp.providers p LEFT JOIN olp.projects pr ON pr.id=p.project_id
-        LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id AND p.state='active'
+        LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id AND p.state IN ('active','disabled')
         ORDER BY lower(p.name),p.name`)
 	if err != nil {
 		return nil, err

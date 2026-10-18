@@ -160,6 +160,13 @@ const focusSink: ExportSink = {
 const focusDatasets = [
   {
     charge_date: '2026-10-08',
+    commitment_totals: {
+      purchased_cost: '10',
+      allocated_cost: '7.5',
+      unused_cost: '2.5',
+      provisional: true,
+      complete: false
+    },
     revision: 2,
     generated_at: '2026-10-09T03:00:00Z',
     delivered_at: '2026-10-09T03:05:00Z',
@@ -173,6 +180,7 @@ const focusDatasets = [
   },
   {
     charge_date: '2026-10-07',
+    commitment_totals: null,
     revision: 1,
     generated_at: null,
     delivered_at: null,
@@ -918,6 +926,11 @@ it('shows a FOCUS sink settings summary and its datasets table', async () => {
   expect(text).toContain('Current');
   expect(text).toContain('status');
   expect(text).toContain('128');
+  expect(text).toContain('Purchased: 10');
+  expect(text).toContain('Allocated: 7.5');
+  expect(text).toContain('Unused: 2.5');
+  expect(text).toContain('Provisional');
+  expect(text).toContain('Incomplete coverage');
   expect(listExportSinkFocusDatasets).toHaveBeenCalledWith(
     focusSink.export_sink_id,
     expect.any(AbortSignal)

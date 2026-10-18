@@ -45,7 +45,7 @@ const sinkStatusSQL = `SELECT CASE WHEN st.stream='focus' THEN
 const focusDatasetsSQL = `SELECT jsonb_build_object('charge_date',fd.charge_date::text,'revision',fd.revision,
  'generated_at',fd.generated_at,'delivered_at',fd.delivered_at,'row_count',fd.row_count,'part_count',fd.part_count,
  'billed_cost',trim_scale(fd.billed_cost)::text,'effective_cost',trim_scale(fd.effective_cost)::text,
- 'attempts',fd.attempts,'last_error_code',fd.last_error_code,
+ 'commitment_totals',fd.commitment_totals,'attempts',fd.attempts,'last_error_code',fd.last_error_code,
  'current',fd.delivered_at IS NOT NULL AND fd.dirty_version=COALESCE(dd.version,0))
  FROM olp.focus_datasets fd LEFT JOIN olp.focus_dirty_days dd ON dd.day=fd.charge_date
  WHERE fd.sink_id=$1::uuid AND fd.charge_date < $2::date ORDER BY fd.charge_date DESC LIMIT $3`

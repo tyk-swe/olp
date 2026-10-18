@@ -6065,6 +6065,15 @@ type Commitment struct {
 // CommitmentPeriod The UTC calendar period the amount covers.
 type CommitmentPeriod string
 
+// CommitmentTotals Exact commitment totals for periods touching this dataset. Scoped exports disclose only their allocated cost; purchase and unused totals are zero. Completeness includes historical evidence and export-window coverage.
+type CommitmentTotals struct {
+	AllocatedCost string `json:"allocated_cost"`
+	Complete      bool   `json:"complete"`
+	Provisional   bool   `json:"provisional"`
+	PurchasedCost string `json:"purchased_cost"`
+	UnusedCost    string `json:"unused_cost"`
+}
+
 // ConfigurationBillingImport defines model for ConfigurationBillingImport.
 type ConfigurationBillingImport struct {
 	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
@@ -7347,17 +7356,20 @@ type FallbackStep struct {
 
 // FocusDataset defines model for FocusDataset.
 type FocusDataset struct {
-	Attempts      int32                        `json:"attempts"`
-	BilledCost    nullable.Nullable[string]    `json:"billed_cost"`
-	ChargeDate    openapi_types.Date           `json:"charge_date"`
-	Current       bool                         `json:"current"`
-	DeliveredAt   nullable.Nullable[time.Time] `json:"delivered_at"`
-	EffectiveCost nullable.Nullable[string]    `json:"effective_cost"`
-	GeneratedAt   nullable.Nullable[time.Time] `json:"generated_at"`
-	LastErrorCode nullable.Nullable[string]    `json:"last_error_code"`
-	PartCount     int32                        `json:"part_count"`
-	Revision      int32                        `json:"revision"`
-	RowCount      int64                        `json:"row_count"`
+	Attempts   int32                     `json:"attempts"`
+	BilledCost nullable.Nullable[string] `json:"billed_cost"`
+	ChargeDate openapi_types.Date        `json:"charge_date"`
+
+	// CommitmentTotals Null for legacy datasets awaiting regeneration and charge-basis datasets.
+	CommitmentTotals nullable.Nullable[CommitmentTotals] `json:"commitment_totals"`
+	Current          bool                                `json:"current"`
+	DeliveredAt      nullable.Nullable[time.Time]        `json:"delivered_at"`
+	EffectiveCost    nullable.Nullable[string]           `json:"effective_cost"`
+	GeneratedAt      nullable.Nullable[time.Time]        `json:"generated_at"`
+	LastErrorCode    nullable.Nullable[string]           `json:"last_error_code"`
+	PartCount        int32                               `json:"part_count"`
+	Revision         int32                               `json:"revision"`
+	RowCount         int64                               `json:"row_count"`
 }
 
 // FocusDatasetListResponse defines model for FocusDatasetListResponse.

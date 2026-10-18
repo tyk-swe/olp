@@ -2,19 +2,20 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
+| Implemented | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
 
 OLP already has exact-decimal pinned prices, fail-closed hierarchical budgets,
 completeness evidence and M5 metadata exports. This milestone adds remaining
 price structures, chargeback, standalone cost estimates and FinOps/billing formats;
 it does not replace existing admission estimates or sink delivery.
 
-The pricing, metering, active-commitment export and OpenAI/Anthropic import
-paths have fixture and integration evidence. M6 remains **In progress** because
-FOCUS export omits the cost of commitment periods without usage. Completing
-that scoped obligation is distinct from deferred cloud invoice adapters and
-uncollected live billing/metering qualification. Existing evidence is retained
-below; it does not establish full invoice coverage or release qualification.
+The pricing, metering, durable commitment export and OpenAI/Anthropic import
+paths have fixture and integration evidence. The commitment implementation now
+includes empty periods, exact allocation, retained provenance and the existing
+console dataset view. Completed local checks and unrun extended checks are recorded in
+[the current evidence record](m06-commitment-evidence.md);
+cloud invoice adapters, live billing/metering qualification and candidate-image
+performance remain distinct gates.
 
 ## Outcome
 
@@ -217,11 +218,12 @@ The implemented scope uses the following settled contracts.
    after its previous delivery, as the next revision under `revision=NNNN`
    keys; retries rewrite the same revision so revisions never gap, and the
    manifest is always the last object written.
-7. **Commitments in FOCUS.** Covered usage reports `CommitmentDiscountStatus`
-   `Used` with an allocated `EffectiveCost`, and each bucket with committed
-   usage adds one `Purchase` row on its start date. A period with no committed
-   usage produces no rows, so `CAU-CostAndUsage-D-082-C` (unused commitment
-   charges) is not met — the documented limitation.
+7. **Commitments in FOCUS.** Published schedules incur durable periods even
+   without usage. The original bucket-start day carries one Purchase and, for
+   unallocated cost, an installation-scoped `Unused` row. Eligible usage receives
+   exact 12-decimal allocation before consumer filtering. Effective/pending
+   schedules are pinned at attempt start; disabled connections retain obligations.
+   See [lifecycle and coverage rules](../finops.md#commitments).
 8. **Reconciliation compare.** `capture_rate` divides attributed cost over
    covered days only (`attributed_cost_covered`) by invoiced cost; daily
    `unavailable_reason` distinguishes `not_imported`, `zero_invoice` and
@@ -262,12 +264,12 @@ and tested, but no supported surface currently produces batch usage.
    Qualify a CloudEvents receiver, a Stripe test meter and each claimed object
    transport with readback and redelivery. Test credentials and redacted results
    stay outside the repository; missing credentials leave these gates open.
-3. **Close the commitment completeness gap.** The follow-up must retain unused
-   cost at installation scope for a period with no usage, with commitment price
-   and ownership provenance, rather than inventing consumer usage. Reconcile
-   allocated plus unallocated effective cost to the purchase amount. Until
-   then retain the documented FOCUS `D-082-C` limitation and do not call the
-   datasets universally conformant.
+3. **Qualify commitment lifecycle changes.** Keep regression coverage for
+   hourly/daily/monthly boundaries, replaced pending edits, disabled connections,
+   empty and excluded-only periods, exact allocation, late facts, retained history,
+   backup/restore, scoped API access and console accessibility. Dynamic FOCUS
+   checks cover unused cost and period reconciliation; other dynamic rules must
+   still be qualified before claiming universal conformance.
 4. **Extend cloud reconciliation as separate adapters.** Implement AWS CUR,
    Google billing export and Azure Cost Management one at a time using the same
    daily report contract. Each adapter must specify authoritative account/scope,
@@ -292,10 +294,10 @@ and tested, but no supported surface currently produces batch usage.
       CloudEvents and Stripe meter deliveries are idempotent under redelivery.
 - [x] Reconciliation reports a capture rate for OpenAI and Anthropic
       connections against recorded fixtures.
-- [ ] Empty commitment periods export their full purchase/unused cost at
+- [x] Empty commitment periods export their full purchase/unused cost at
       installation scope; allocated plus unallocated effective cost reconciles
       to the obligation, including restatements and retention boundaries.
-- [ ] The [parity matrix](parity.md) cost rows are `Parity` or better, with the
+- [x] The [parity matrix](parity.md) cost rows are `Parity` or better, with the
       FOCUS commitment gap closed and applicable conformance evidence recorded.
 - [ ] Candidate-image qualification reruns exact pricing, budget enforcement,
       export/reconciliation integration and the M1 performance gate, with
@@ -307,8 +309,9 @@ and tested, but no supported surface currently produces batch usage.
 ## Delivered and verified
 
 The implemented M6.1–M6.4 paths and M6.5's OpenAI/Anthropic adapters have the
-historical branch verification below. The unused-commitment omission remains
-open; these results neither close it nor represent a fresh candidate-image run.
+historical branch verification below. [Current commitment verification](m06-commitment-evidence.md)
+records the completion changes and their source fingerprint. Historical branch
+results do not represent a fresh candidate-image run.
 
 - **Price components.** Pricing revisions, price-list sources, catalog
   snapshots and configuration documents carry modality and cached-modality
@@ -327,12 +330,13 @@ open; these results neither close it nor represent a fresh candidate-image run.
   and redelivery integration tests prove no double reporting.
 - **FOCUS 1.4.** Object sinks deliver daily gzip-CSV cost-and-usage datasets
   in cost or charge basis with a last-written manifest, revisioned
-  restatement, commitment `Used` allocations plus Purchase rows and a
-  completeness record. `internal/export/focusspec` interprets the pinned 1.4
+  restatement, commitment `Used` allocations, Purchase and `Unused` rows and
+  explicit completeness totals. `internal/export/focusspec` interprets the pinned 1.4
   requirements model; generated parts in the integration corpus validate with
   zero applicable static-rule violations (302 rules evaluated, 135 dynamic
   rules not machine-checkable, 48 not applicable). This does not establish the
-  dynamic rules or the disclosed unused-commitment requirement.
+  all dynamic rules. Current cross-row unused-commitment checks are additional
+  evidence, not universal FOCUS certification.
 - **Discounts, rate cards and charge.** Usage records carry cost and charge
   with their provenance; reports, exports and request history show both, and
   every consumer budget enforces either.
@@ -346,7 +350,8 @@ open; these results neither close it nor represent a fresh candidate-image run.
   configuration and the panel.
 - **Commitments.** Connection commitments bill nothing per attempt and are
   allocated in usage reports by list-price-weighted share; FOCUS reports them
-  as commitment-discount `Used` rows and Purchase rows.
+  as commitment-discount `Used`, Purchase and `Unused` rows, with durable
+  publication provenance and exact period reconciliation.
 - **Reference catalog v2.** Every component the catalog listed as
   unrepresentable in a structure OLP now prices is transcribed, independently
   checked against the vendor figures it came from; what remains carries an

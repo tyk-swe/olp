@@ -139,6 +139,21 @@ func (w *FocusWorker) Pass(ctx context.Context) (bool, error) {
 	if _, err := w.Pool.Exec(ctx, `DELETE FROM olp.focus_dirty_days WHERE day < $1`, retentionSafe); err != nil {
 		return false, err
 	}
+	if _, err := w.Pool.Exec(ctx, `SELECT olp.materialize_commitments($1,$2,512)`, now, retentionSafe); err != nil {
+		return false, err
+	}
+	// Backfill retained evidence in bounded batches; drafts cannot create schedules.
+	if _, err := w.Pool.Exec(ctx, `WITH batch AS (
+  SELECT f.ctid FROM olp.attempt_usage_facts f WHERE f.commitment_schedule_id IS NULL
+   AND EXISTS(SELECT 1 FROM olp.commitment_schedules s
+    WHERE s.provider_id=f.provider_id AND f.observed_at>=olp.commitment_bucket(s.period,$1::timestamptz) AND s.effective_at<=f.observed_at AND (s.ends_at IS NULL OR s.ends_at>f.observed_at))
+  ORDER BY f.observed_at LIMIT 512 FOR UPDATE SKIP LOCKED)
+  UPDATE olp.attempt_usage_facts f SET commitment_weight=f.commitment_weight FROM batch WHERE f.ctid=batch.ctid`, retentionSafe); err != nil {
+		return false, err
+	}
+	if _, err := w.Pool.Exec(ctx, `SELECT olp.backfill_commitment_hours(512,$1)`, retentionSafe); err != nil {
+		return false, err
+	}
 	sinks, err := w.focusSinks(ctx)
 	if err != nil {
 		return false, err
@@ -242,9 +257,12 @@ func (w *FocusWorker) dueDays(ctx context.Context, sink focusSink, now, retentio
 		WHERE fd.sink_id=$3::uuid AND fd.delivered_at IS NOT NULL
 		  AND fd.delivered_at <= now() - interval '1 hour'
 		  AND fd.next_attempt_at <= now()
-		  AND COALESCE(dd.version,0) IS DISTINCT FROM fd.dirty_version
+		  AND (COALESCE(dd.version,0) IS DISTINCT FROM fd.dirty_version OR ($5::boolean AND fd.commitment_totals IS NULL) OR
+   (fd.commitment_totals->>'provisional'='true' AND NOT EXISTS(
+    SELECT 1 FROM olp.commitment_periods p WHERE p.bucket_start<fd.charge_date+1 AND p.bucket_end>fd.charge_date
+     AND p.bucket_end>now()-interval '2 hours')))
 		  AND fd.charge_date >= $1::date AND fd.charge_date <= $2::date
-		ORDER BY 1 LIMIT $4`, first.Format("2006-01-02"), last.Format("2006-01-02"), sink.ID, focusDaysPerSink)
+		ORDER BY 1 LIMIT $4`, first.Format("2006-01-02"), last.Format("2006-01-02"), sink.ID, focusDaysPerSink, sink.costBasis == "cost")
 	if err != nil {
 		return nil, err
 	}
@@ -341,11 +359,11 @@ func (w *FocusWorker) finishDay(ctx context.Context, sink focusSink, day time.Ti
 		// finisher whose lease lapsed matches no row and writes nothing.
 		_, err = tx.Exec(ctx, `UPDATE olp.focus_datasets SET revision=revision+1, dirty_version=$3,
 			generated_at=$4, delivered_at=now(), row_count=$5, part_count=$6,
-			billed_cost=$7::numeric, effective_cost=$8::numeric,
+			billed_cost=$7::numeric, effective_cost=$8::numeric, commitment_totals=$10::jsonb,
 			last_error_code=NULL, failures=0, next_attempt_at=now()
 			WHERE sink_id=$1::uuid AND charge_date=$2::date AND attempts=$9`,
 			sink.ID, day.Format("2006-01-02"), result.dirtyVersion, result.generatedAt,
-			result.rowCount, result.partCount, result.billed.String(), result.effective.String(), attempts)
+			result.rowCount, result.partCount, result.billed.String(), result.effective.String(), attempts, commitmentTotalsJSON(result.commitments))
 	} else {
 		// Backoff keys off the failure streak: failures+1 is the new value.
 		_, err = tx.Exec(ctx, `UPDATE olp.focus_datasets SET last_error_code=$3, failures=failures+1,
@@ -386,6 +404,7 @@ type focusObject struct {
 
 // dayResult carries a generated day's objects and totals.
 type dayResult struct {
+	commitments  *CommitmentTotals
 	dirtyVersion int64
 	generatedAt  time.Time
 	rowCount     int64
@@ -425,4 +444,12 @@ func (w *FocusWorker) generateAndSend(ctx context.Context, sink focusSink, day t
 		}
 	}
 	return result, nil
+}
+
+func commitmentTotalsJSON(t *CommitmentTotals) any {
+	if t == nil {
+		return nil
+	}
+	b, _ := json.Marshal(t)
+	return b
 }

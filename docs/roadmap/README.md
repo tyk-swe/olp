@@ -36,7 +36,7 @@ exact attempt accounting, confined plugins and content-free diagnostics.
 ### Where it falls short
 
 Remaining work includes measured non-OpenAI token calibration, invoice
-reconciliation beyond OpenAI and Anthropic, unused-commitment cost exports,
+reconciliation beyond OpenAI and Anthropic, commitment release qualification,
 guardrail vendor breadth and
 capture-redaction integration, API-surface completion, and agent/tool execution.
 M1's harness/gate exists, but full-rate reference-hardware results remain
@@ -53,7 +53,9 @@ intent. Everything ships in the single AGPL product, without a feature paywall.
 
 ## Milestones
 
-M1–M5, M8 and M11 are implemented; M6–M7 are in progress, and M9–M10 remain planned. The
+M1–M6, M8 and M11 are implemented; M7 is in progress, and M9–M10 remain planned.
+M6 has local verification; its full integration and benchmark qualification remain
+open as recorded in [the commitment evidence](m06-commitment-evidence.md). The
 [implementation review](m01-m04-implementation-review.md) records historical
 focused evidence and the [architecture review](../architecture-review.md) records
 later integrated qualification. Neither establishes uncollected full-rate,
@@ -69,7 +71,7 @@ identify the evidence needed before dependent behavior can ship.
 | M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | Implemented |
 | M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Implemented |
 | M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Implemented |
-| M6 | [Cost management and chargeback](m06-cost-management.md) | Dimension-aware pricing, rate cards, cost estimation, complete commitment exports, and OpenAI/Anthropic invoice reconciliation. | M2, M4, M5 | In progress |
+| M6 | [Cost management and chargeback](m06-cost-management.md) | Dimension-aware pricing, rate cards, cost estimation, complete commitment exports, and OpenAI/Anthropic invoice reconciliation. | M2, M4, M5 | Implemented |
 | M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | In progress |
 | M8 | [Response caching](m08-caching.md) | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation. | M7 | Implemented |
 | M9 | [API surface completion](m09-api-surface.md) | Legacy completions, cross-provider files and batches, fine-tuning, vector stores, Responses completion, realtime expansion, OCR, search, Decisions, provider-retained resources and governed pass-through. | M2; M4, M6, M7 per slice | Planned |
@@ -87,7 +89,7 @@ taking a slice owns it through qualification.
 | --- | --- | --- | --- |
 | 1 · qualification | M1 full-rate results and remaining M2–M6/M11 external checks | Existing implementation and reproducible pinned fixtures | Runtime/qualification owner; benchmark artifacts, provider/identity results and explicit unsupported tuples, tied to the tested revision |
 | 1 · guardrails | Close M7 vendor coverage decisions and capture-redaction integration | Existing immutable engine, streaming holdback and M5 capture boundary | Guardrails/export owners; named adapter contracts, capture leakage/failure tests and M7 exit evidence |
-| 1 · accounting | M2.4 calibration and M6 unused-commitment exports; additional invoice adapters follow | Signed calibration provenance and the existing commitment/invoice ledgers | Catalog/billing owners; measured family corpus, total commitment-cost reconciliation and provider-specific import fixtures |
+| 1 · accounting | M2.4 calibration and M6 live billing/sink qualification; additional invoice adapters follow | Signed calibration provenance and the existing commitment/invoice ledgers | Catalog/billing owners; measured family corpus, total commitment-cost reconciliation and provider-specific import fixtures |
 | 2 · stateless APIs | M9 completions and Decisions first; OCR/search after the shared contracts | M2 certification; M7 inspection contract and M6 units for each supported surface | Protocol/connector owners; explicit operation/provider ledger, native fixtures and SDK qualification |
 | 2 · retained APIs | M9 resource lifecycle and files/batches, then fine-tuning, vector stores, Responses and other retained families | Historical target/credential authority, cancellation and usage-settlement contract | Resource/worker owners; cross-project denial, replay, ambiguous-create, cleanup and late-usage tests |
 | 2 · realtime | M9 realtime expansion | Transport-specific inspection, accounting and revocation controls are demonstrable | Realtime owner; connection teardown, reconnect and usage-completeness qualification before enabling each transport |

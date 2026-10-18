@@ -24108,6 +24108,17 @@
           },
           "current": {
             "type": "boolean"
+          },
+          "commitment_totals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitmentTotals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for legacy datasets awaiting regeneration and charge-basis datasets."
           }
         },
         "required": [
@@ -24121,7 +24132,8 @@
           "effective_cost",
           "attempts",
           "last_error_code",
-          "current"
+          "current",
+          "commitment_totals"
         ]
       },
       "FocusDatasetListResponse": {
@@ -24830,6 +24842,34 @@
         "required": [
           "result",
           "age_seconds"
+        ]
+      },
+      "CommitmentTotals": {
+        "type": "object",
+        "description": "Exact commitment totals for periods touching this dataset. Scoped exports disclose only their allocated cost; purchase and unused totals are zero. Completeness includes historical evidence and export-window coverage.",
+        "properties": {
+          "purchased_cost": {
+            "type": "string"
+          },
+          "allocated_cost": {
+            "type": "string"
+          },
+          "unused_cost": {
+            "type": "string"
+          },
+          "provisional": {
+            "type": "boolean"
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "purchased_cost",
+          "allocated_cost",
+          "unused_cost",
+          "provisional",
+          "complete"
         ]
       }
     },

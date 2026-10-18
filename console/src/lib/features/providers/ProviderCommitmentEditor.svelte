@@ -52,8 +52,11 @@
   />
   <small
     >Provisioned capacity: attempts that settle under a price cost zero, and the
-    commitment allocates across the period's priced usage. Empty means no
-    commitment.</small
+    commitment allocates across the period's priced usage. Disabling traffic
+    retains the commitment. Published amount changes and removal apply after the
+    current UTC period; period changes wait for a boundary shared by both
+    periods. First activation incurs the full current period without proration.
+    Empty queues removal.</small
   >
 </div>
 <div class="form-field">

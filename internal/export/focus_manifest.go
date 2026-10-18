@@ -32,6 +32,7 @@ type focusManifestDoc struct {
 	CorrectionHandling    string              `json:"correction_handling"`
 	Parts                 []focusManifestPart `json:"parts"`
 	Totals                focusTotals         `json:"totals"`
+	CommitmentTotals      *CommitmentTotals   `json:"commitment_totals"`
 	AccountingTotals      focusAccounting     `json:"accounting_totals"`
 	Completeness          focusCompleteness   `json:"completeness"`
 	Metadata              focusMetadata       `json:"metadata"`
@@ -181,6 +182,7 @@ func focusManifest(w *FocusWorker, sink focusSink, fc *focusContext, revision in
 			Contracted: decimalOrZero(r.totals.contracted),
 		},
 		AccountingTotals: accounting,
+		CommitmentTotals: r.commitments,
 		Completeness: focusCompleteness{
 			IncludedAttempts:           r.included,
 			FallbackLineAttempts:       r.fallbackLines,
@@ -201,7 +203,7 @@ func focusManifest(w *FocusWorker, sink focusSink, fc *focusContext, revision in
 				DatasetInstanceID:          instanceID,
 				RecencyLastUpdateDate:      now.Format("2006-01-02T15:04:05Z"),
 				DatasetInstanceLastUpdated: now.Format("2006-01-02T15:04:05Z"),
-				DatasetInstanceComplete:    !r.ingestionGap,
+				DatasetInstanceComplete:    !r.ingestionGap && r.incomplete == 0 && r.unpriced == 0 && (r.commitments == nil || r.commitments.Complete && !r.commitments.Provisional),
 			},
 			Schema: focusSchema{
 				SchemaID:             focusSchemaID(),

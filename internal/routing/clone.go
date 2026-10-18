@@ -16,7 +16,15 @@ func (s *Snapshot) Clone() *Snapshot {
 	if s == nil {
 		return nil
 	}
-	out := &Snapshot{Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	for id, values := range out.Commitments {
+		values = slices.Clone(values)
+		for i := range values {
+			values[i].EffectiveAt = copyPointer(values[i].EffectiveAt)
+			values[i].EndsAt = copyPointer(values[i].EndsAt)
+		}
+		out.Commitments[id] = values
+	}
 	for id, p := range out.Providers {
 		out.Providers[id] = cloneProvider(p)
 	}
@@ -126,6 +134,15 @@ func cloneProvider(p Provider) Provider {
 	p.ProjectID = copyPointer(p.ProjectID)
 	p.Limits = cloneLimits(p.Limits)
 	p.Commitment = copyPointer(p.Commitment)
+	if p.Commitment != nil {
+		p.Commitment.EffectiveAt = copyPointer(p.Commitment.EffectiveAt)
+		p.Commitment.EndsAt = copyPointer(p.Commitment.EndsAt)
+	}
+	p.PendingCommitment = copyPointer(p.PendingCommitment)
+	if p.PendingCommitment != nil {
+		p.PendingCommitment.EffectiveAt = copyPointer(p.PendingCommitment.EffectiveAt)
+		p.PendingCommitment.EndsAt = copyPointer(p.PendingCommitment.EndsAt)
+	}
 	p.HealthProbe = copyPointer(p.HealthProbe)
 	p.Slots = slices.Clone(p.Slots)
 	for i := range p.Slots {

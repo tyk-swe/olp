@@ -131,7 +131,7 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
          tool_calls, batch, pricing_components,
          commitment_weight, commitment_amount, commitment_period,
          discount_id, charge, rate_card_revision_id,
-         list_cost, contracted_cost, caller_credential, cost_lines, charge_lines)
+         list_cost, contracted_cost, caller_credential, cost_lines, charge_lines, commitment_schedule_id, commitment_bucket)
     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULLIF($6, '')::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
             false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb,
@@ -139,7 +139,7 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
             $36, $37, $38, $39, $40, $41, $42::jsonb, $43, $44::text[],
             $45::numeric, $46::numeric, $47,
             $48::uuid, $49::numeric, $50::uuid,
-            $51::numeric, $52::numeric, $53, $54::jsonb, $55::jsonb)
+            $51::numeric, $52::numeric, $53, $54::jsonb, $55::jsonb, $56::uuid, $57::timestamptz)
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -462,7 +462,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		pricing.discountID, pricing.charge, pricing.rateCardRevisionID,
 		pricing.listCost, pricing.contractedCost,
 		attempt.Attempt.Routing != nil && attempt.Attempt.Routing.CredentialSource == "caller",
-		pricing.costLines, pricing.chargeLines,
+		pricing.costLines, pricing.chargeLines, pricing.commitmentScheduleID, pricing.commitmentBucket,
 	); err != nil {
 		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
 	}

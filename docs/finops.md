@@ -133,6 +133,7 @@ revision's part keys.
   "parts": [{ "key": "…", "rows": 3, "bytes": 1182, "sha256": "…" }],
   "totals": { "billed_cost": "…", "effective_cost": "…", "list_cost": "…", "contracted_cost": "…" },
   "accounting_totals": { "cost": "…", "charge": null },
+  "commitment_totals": { "purchased_cost": "10", "allocated_cost": "7", "unused_cost": "3", "provisional": false, "complete": true },
   "completeness": {
     "included_attempts": 0, "fallback_line_attempts": 0, "unpriced_attempts": 0,
     "incomplete_attempts": 0, "uncharged_attempts": 0,
@@ -234,20 +235,46 @@ name for service names.
 
 ### Commitments
 
-A committed usage group carries `CommitmentDiscountId`
-`olp:commitment:<provider>:<period>`, `Name` `<connection> <period>
-commitment`, `Category` `Spend`, `Type` `Provisioned capacity`, `Status`
-`Used`, `Quantity` the allocated `EffectiveCost` and `Unit` the currency, with
-`EffectiveCost = round(ListCost × amount / W, 12)` where W is the bucket's
-total allocation weight and `BilledCost` `0`. One `Purchase` row per
-(provider, commitment period, bucket) appears on the bucket's start date:
-`BilledCost = ListCost = ContractedCost = amount`, `EffectiveCost` `0`,
-`PricingQuantity` `1`, `PricingUnit` `Commitments`,
-`SkuId` `olp/commitment/<period>`.
+Commitment schedules and period records are independent of request facts.
+Publication and lifecycle rules are described in [pricing](pricing.md#commitments).
+A period is purchased even when the connection is disabled or has no usage.
+Its `CommitmentDiscountId` names the durable schedule; ownership, connection
+name, provider revision, amount and currency retain their publication provenance.
 
-Known limitation: periods with no committed usage produce no rows, so FOCUS
-requirement `CAU-CostAndUsage-D-082-C` (unused commitment charges) is not
-met; idle capacity is not attributed, matching usage reports.
+The full amount is allocated globally by eligible list-price weight. Cumulative
+12-decimal allocation assigns rounding residuals deterministically, including
+when a single attempt contains several price lines. Caller-paid and budget-exempt
+attempts receive no installation allocation. A positive total weight allocates
+the full obligation; a zero weight leaves the full amount unallocated.
+
+Unfiltered installation cost exports emit one `Purchase` per durable period on
+its original UTC bucket-start date, and a `Usage` row with
+`CommitmentDiscountStatus=Unused` for any unallocated amount. Unused rows carry
+commitment and resource identity, zero billed cost and the unallocated effective
+cost. Consumer, route, API key and consumed-usage fields are empty. Scoped exports
+contain allocated usage only; charge exports contain consumer charges.
+
+`commitment_totals` in the manifest and dataset API contains exact-string
+`purchased_cost`, `allocated_cost`, `unused_cost`, plus `provisional` and `complete`.
+Installation totals cover entire periods touching the day, so monthly period
+totals repeat on each day's manifest and must not be summed across days.
+Scoped totals disclose that day's allocated share, with purchased/unused set to
+zero. Charge-basis and legacy datasets awaiting regeneration return null.
+
+A purchase outside the export window stays on its original date; it is never
+moved into a later day's dataset. `complete=false` discloses partial window
+coverage, insufficient historical evidence, ingestion gaps or missing pricing
+or metering. `provisional=true` identifies periods still open or within the
+two-hour closing delay. Unallocated money is not proof of confirmed idle capacity.
+The console dataset table displays all five fields.
+
+The worker materializes at most 512 periods and backfills at most 512 facts and
+512 historical hourly summaries per pass. Uniqueness constraints and transaction
+locks make retries and concurrent workers idempotent. Retained summaries preserve
+monthly allocation after detailed facts expire. Changes dirty affected days;
+leases, retry revision identity and manifest-last delivery remain authoritative.
+Historical backfill uses published snapshots, never draft configuration, and
+retains incomplete coverage when evidence cannot be reconstructed.
 
 ### Conformance
 
@@ -263,9 +290,10 @@ PUBLIC_PRICE_LIST_SUPPORTED, SUB_ACCOUNT_SUPPORTED, TAGGING_SUPPORTED,
 UNIT_PRICING_SUPPORTED, USAGE_MEASUREMENT_SUPPORTED
 ```
 
-The integration suite validates every generated part with zero violations
-(302 rules evaluated, 135 dynamic rules not machine-checkable, 48 not
-applicable). The checker skips the deprecated ProviderName/PublisherName
+The integration suite validates generated parts against the pinned static
+model, including unused rows and resource fields. Explicit cross-row checks also
+verify exact period reconciliation and `CAU-CostAndUsage-D-082-C`; other dynamic
+rules still require qualification. The checker skips the deprecated ProviderName/PublisherName
 presence rules the 1.4 model still ships and applies null-safe requirement
 comparisons. The official focus-validator 2.2.1 cannot validate these
 datasets: it crashes on a dependency cycle through the Dynamic

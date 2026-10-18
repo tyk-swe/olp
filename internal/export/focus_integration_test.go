@@ -107,6 +107,9 @@ func seedFocusFixture(t *testing.T, pool *pgxpool.Pool, day time.Time) focusFixt
 	provider(f.discount, "discount", `{"kind":"openai","auth_mode":"api_key","endpoint":"https://127.0.0.1:9","options":{"vendor_id":"openai"}}`)
 	provider(f.committed, "committed", `{"kind":"openai","auth_mode":"api_key","endpoint":"https://127.0.0.1:9","options":{"vendor_id":"openai","commitment":{"amount":"10","period":"day"}}}`)
 
+	if _, err := pool.Exec(t.Context(), `SELECT olp.publish_commitments($1)`, f.effective); err != nil {
+		t.Fatal(err)
+	}
 	// Prices: input 3 + output 12 + audio 6 + tool fee for the plain provider;
 	// input 2 for the committed one; the discounted provider shares plain's
 	// rates with a 0.5 multiplier; tiered rates exercise the tier branch.
@@ -768,7 +771,7 @@ func TestIntegrationFocusLifecycle(t *testing.T) {
 		t.Fatalf("manifest accounting cost %v, want %s", accounting["cost"], *fullSum)
 	}
 
-	// Empty day: D+1 inside the window generates a header-only part.
+	// Empty day: the durable obligation produces a purchase and unused row.
 	emptyDay := day.AddDate(0, 0, 1)
 	workerNow = emptyDay.Add(27 * time.Hour)
 	if _, err := worker.Pass(ctx); err != nil {
@@ -782,8 +785,11 @@ func TestIntegrationFocusLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			emptyRows = append(emptyRows, fmt.Sprint(len(data)))
-			if len(data) != 1 {
-				t.Fatalf("empty day has %d rows", len(data))
+			if len(data) != 3 {
+				t.Fatalf("empty day has %d rows, want header, purchase and unused", len(data))
+			}
+			if cell(data[1], "ChargeCategory") != "Purchase" || cell(data[2], "CommitmentDiscountStatus") != "Unused" || cell(data[2], "EffectiveCost") != "10" {
+				t.Fatalf("empty period obligation: %v", data)
 			}
 		}
 	}

@@ -4,6 +4,27 @@ Availability, monitoring, recovery, version, incident, and key-rotation
 procedures for production OpenLLMProxy. Keep this runbook with the deployed
 release; deployment topology is in [`deployment.md`](deployment.md).
 
+## Commitment accounting recovery
+
+Connection disablement stops traffic while retaining published commitments.
+Check the existing FOCUS dataset view for purchased, allocated and unused totals,
+provisional state and incomplete coverage. Pending edits apply at UTC period
+boundaries; removing a draft amount does not cancel the current obligation.
+
+Migration 0073 recovers supported history from published runtime snapshots and
+retained facts/hourly evidence. The FOCUS worker catches up in bounded batches;
+incomplete historical or partial export coverage is reported explicitly. Keep
+`commitment_schedules`, `commitment_periods` and `commitment_usage` in the normal
+whole-schema backup. Allocation context remains available for the lifetime of retained hourly
+reporting, including periods outside the FOCUS export window. Restore preserves the originating installation history;
+configuration promotion carries desired settings, and the destination establishes
+its own obligations when it publishes. Do not copy period rows during promotion.
+
+Late facts restate affected days under the existing delivery lease and retry
+rules. Read the manifest last, deduplicate by day and revision, and replace the
+previous dataset revision. Never move an out-of-window purchase forward to make
+a partial export appear complete. See [FinOps](finops.md#commitments).
+
 ## Objectives and monitoring
 
 Measure public-listener availability/added latency and accounting/recovery

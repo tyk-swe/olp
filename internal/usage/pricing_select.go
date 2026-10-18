@@ -29,9 +29,11 @@ type attemptPricing struct {
 	components []string
 	// commitmentWeight is the list cost a committed attempt divides its
 	// period's commitment amount by; amount and period travel with it.
-	commitmentWeight *string
-	commitmentAmount *string
-	commitmentPeriod *string
+	commitmentWeight     *string
+	commitmentAmount     *string
+	commitmentPeriod     *string
+	commitmentScheduleID *string
+	commitmentBucket     *time.Time
 	// listCost is the undiscounted, uncommitted price the charge and weight
 	// are measured from; contractedCost is the discounted provider cost
 	// before a commitment zeroes what is estimated.
@@ -55,6 +57,8 @@ type attemptPricing struct {
 
 // routingPin is the pricing provenance the gateway recorded for one attempt.
 type routingPin struct {
+	commitmentPinned   bool
+	commitmentID       *string
 	pricingRevisionID  *string
 	providerRevisionID *string
 	pinned             bool
@@ -84,6 +88,10 @@ func attemptRouting(attempt *Attempt) (routingPin, error) {
 		return pin, nil
 	}
 	var policy struct {
+		CommitmentPinned bool `json:"commitment_pinned"`
+		Commitment       *struct {
+			ID string `json:"id"`
+		} `json:"commitment"`
 		PricingPinned      *bool   `json:"pricing_pinned"`
 		VendorID           *string `json:"vendor_id"`
 		DiscountPinned     *bool   `json:"discount_pinned"`
@@ -96,6 +104,10 @@ func attemptRouting(attempt *Attempt) (routingPin, error) {
 	}
 	if policy.PricingPinned != nil && *policy.PricingPinned {
 		pin.pinned = true
+	}
+	pin.commitmentPinned = policy.CommitmentPinned
+	if policy.Commitment != nil && policy.Commitment.ID != "" {
+		pin.commitmentID = &policy.Commitment.ID
 	}
 	pin.vendorID = policy.VendorID
 	if policy.DiscountPinned != nil && *policy.DiscountPinned {
@@ -158,7 +170,7 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         priced.list_cost::text,
         priced.cost::text,
         priced_lines.lines,
-        charge_lines.lines
+        charge_lines.lines, commitment.id::text, olp.commitment_bucket(commitment.period,$6::timestamptz)
     FROM olp.providers provider
     LEFT JOIN olp.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($9::uuid, provider.active_revision_id)
@@ -211,13 +223,15 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         SELECT olp.price_usage_lines(selected.price_doc, $5::jsonb, $6::timestamptz,
                                      $7::boolean, COALESCE(discount.multiplier, 1)) AS lines
     ) priced_lines
+    LEFT JOIN LATERAL (
+        SELECT s.id,s.period,jsonb_build_object('amount',s.amount::text,'period',s.period) AS commitment
+        FROM olp.commitment_schedules s
+        WHERE s.provider_id=provider.id AND
+          (($20::boolean AND s.id=$21::uuid) OR (NOT $20::boolean AND s.effective_at <= $6 AND (s.ends_at IS NULL OR s.ends_at > $6)))
+        ORDER BY s.effective_at DESC LIMIT 1
+    ) commitment ON true
     CROSS JOIN LATERAL (
-        SELECT CASE WHEN provider_revision.id IS NOT NULL
-                    THEN provider_revision.configuration->'options'->'commitment'
-                    ELSE provider.configuration->'options'->'commitment' END AS commitment
-    ) commitment
-    CROSS JOIN LATERAL (
-        SELECT jsonb_typeof(commitment.commitment::jsonb) = 'object' AS present
+        SELECT COALESCE(jsonb_typeof(commitment.commitment::jsonb) = 'object',false) AS present
     ) committed
     CROSS JOIN LATERAL (
         SELECT CASE WHEN $18::boolean
@@ -359,11 +373,11 @@ func priceUsageQuoted(ctx context.Context, tx pgx.Tx, event *Event, usage Attemp
 		string(document), startedAt, successful,
 		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
 		pin.discountPinned, pin.discountID, pin.rateCardPinned, pin.rateCardRevisionID,
-		event.APIKeyID, event.RouteSlug, consumer.set, consumer.project,
+		event.APIKeyID, event.RouteSlug, consumer.set, consumer.project, pin.commitmentPinned, pin.commitmentID,
 	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost,
 		&pricing.components, &pricing.commitmentWeight, &pricing.commitmentAmount, &pricing.commitmentPeriod,
 		&pricing.discountID, &pricing.rateCardRevisionID, &pricing.charge, &pricing.listCost, &contracted,
-		&costLines, &chargeLines)
+		&costLines, &chargeLines, &pricing.commitmentScheduleID, &pricing.commitmentBucket)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}

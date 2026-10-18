@@ -43,6 +43,15 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
         (singleton, pending_events, lag_events, oldest_pending_at, checked_at) VALUES(true,0,0,NULL,now())`); err != nil {
 		t.Fatal(err)
 	}
+	// Durable obligations and allocation evidence survive a full replacement restore.
+	commitmentID, periodID := uuid.NewString(), uuid.NewString()
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules(id,provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at)
+ VALUES($1,$2,$3,'Retained commitment','openai',12.345678901234,'USD','month','2026-01-01')`, commitmentID, uuid.NewString(), uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.commitment_periods(id,schedule_id,bucket_start,bucket_end,amount) VALUES($1,$2,'2026-01-01','2026-02-01',12.345678901234)`, periodID, commitmentID); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	root, _ := filepath.Abs("../..")
 	write := func(name, data string) string {
@@ -143,6 +152,10 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 			if failure == "valid" {
 				if err != nil {
 					t.Fatalf("restore: %v: %s", err, out)
+				}
+				var restoredAmount string
+				if err := target.QueryRow(t.Context(), `SELECT amount::text FROM olp.commitment_periods WHERE id=$1`, periodID).Scan(&restoredAmount); err != nil || restoredAmount != "12.345678901234" {
+					t.Fatalf("commitment history lost: %s %v", restoredAmount, err)
 				}
 				id, err := database.Installation(t.Context(), target)
 				if err != nil || id != h.Server.Installation {

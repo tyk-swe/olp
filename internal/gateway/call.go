@@ -25,6 +25,7 @@ import (
 // call owns authority, accounting and the shared attempt loop for one request.
 // Route changes replace routeLeg; operation state lives independently.
 type call struct {
+	currentCommitments   *routing.Snapshot
 	cache                *responseCacheCall
 	cacheRateLease       *limits.Lease
 	evaluatorGuardrailID string

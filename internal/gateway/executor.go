@@ -458,6 +458,19 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true
 	}
+	fact.CommitmentPinned = known
+	if known {
+		timeline := x.snapshot()
+		if s.Runtime != nil {
+			if release := s.Runtime.Release(); release != nil {
+				timeline = release.Snapshot
+			}
+		}
+		fact.Commitment = timeline.CommitmentAt(a.ProviderID, fact.StartedAt)
+		if fact.Commitment != nil && fact.Commitment.ID == "" {
+			fact.CommitmentPinned = false
+		}
+	}
 	if known && provider.CredentialSource == "caller" && x.origin != "probe" {
 		fact.CredentialSource = "caller"
 		fact.BudgetExempt = x.callerCostExempt()
@@ -1306,7 +1319,7 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 					// A committed attempt prices but owes nothing: record its
 					// zero marginal cost rather than skipping the metric.
 					if amount, err := strconv.ParseFloat(cost.String(), 64); err == nil {
-						if x.committed(fact.ProviderID) {
+						if x.factCommitted(fact) {
 							amount = 0
 						}
 						s.Business.Cost(labels, fact.Price.Currency, amount)

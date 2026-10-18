@@ -170,14 +170,29 @@ the list price — its list cost becomes `commitment_weight`, the share of the
 commitment it consumed — and `commitment` joins its `pricing_components`. An
 attempt whose usage cannot be priced is unpriced as usual and gets no weight.
 
-Usage reports allocate the commitment across the period's committed usage by
-list-cost weight: each usage row earns `amount × weight / W`, where `W` is the
-total weight of *every* committed fact and retained hourly row in that
-provider's `(period, UTC bucket)` — regardless of the report's own filters —
-and `amount` is the commitment the bucket's latest row recorded. A report that
-fully covers a closed period allocates the whole amount; a period still open
-allocates provisionally; a period with no committed usage allocates nothing —
-idle capacity is not attributed to anyone.
+Publication establishes a durable installation obligation. First activation
+incurs the full current UTC period without proration. Disabling traffic retains
+the obligation. Amount changes and removal apply after the current period;
+changing between hours, days and months waits for the next boundary shared by
+both periods. The latest publication replaces pending intent, and republishing
+unchanged terms creates no additional obligation. Unpublished drafts incur none.
+The runtime snapshot carries effective and pending schedules. Each attempt pins
+coverage at its start, so a boundary crossed during inference does not change
+settlement or require an inference-time database lookup.
+
+Usage reports allocate the full commitment by eligible list-price weight across
+the entire period, before project or route filtering. Caller-paid and budget-exempt
+attempts are excluded. Cumulative allocation at 12 decimal places assigns every
+rounding residual deterministically. With no positive eligible weight, the full
+amount remains unallocated installation cost; [FOCUS exports](finops.md#commitments)
+report it as `Unused`. This is monetary allocation, not physical utilization.
+Unpriced or incomplete metering keeps coverage incomplete, even when all cost is
+currently unallocated. Open periods remain provisional.
+
+Migration 0073 preserves the existing report calculation for historical periods.
+Published snapshots and retained accounting evidence support historical FOCUS
+regeneration; missing historical evidence is explicitly incomplete. Full-period
+allocation context remains available for retained hourly reporting.
 
 ## Discounts
 

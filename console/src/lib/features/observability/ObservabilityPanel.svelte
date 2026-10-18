@@ -1021,8 +1021,8 @@
                           ><th scope="col">Delivered</th><th scope="col"
                             >Rows</th
                           ><th scope="col">Billed cost</th><th scope="col"
-                            >Status</th
-                          ></tr
+                            >Commitments</th
+                          ><th scope="col">Status</th></tr
                         ></thead
                       ><tbody>
                         {#each focusDatasets.data ?? [] as dataset (dataset.charge_date)}
@@ -1035,6 +1035,29 @@
                                 : 'pending'}</td
                             ><td>{dataset.row_count}</td><td
                               >{formatCost(dataset.billed_cost, null)}</td
+                            ><td
+                              >{#if dataset.commitment_totals}
+                                <div>
+                                  Purchased: {dataset.commitment_totals
+                                    .purchased_cost}
+                                </div>
+                                <div>
+                                  Allocated: {dataset.commitment_totals
+                                    .allocated_cost}
+                                </div>
+                                <div>
+                                  Unused: {dataset.commitment_totals
+                                    .unused_cost}
+                                </div>
+                                <div>
+                                  {dataset.commitment_totals.provisional
+                                    ? 'Provisional'
+                                    : 'Closed'} · {dataset.commitment_totals
+                                    .complete
+                                    ? 'Complete'
+                                    : 'Incomplete coverage'}
+                                </div>
+                              {:else}Unavailable{/if}</td
                             ><td>{focusDatasetStatus(dataset)}</td></tr
                           >
                         {/each}

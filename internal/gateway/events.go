@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -74,6 +75,8 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
+	Commitment         *routing.Commitment
+	CommitmentPinned   bool
 	Cache              *usage.CacheEvidence
 	GuardrailDecisions []guardrails.Evidence
 	BudgetExempt       bool

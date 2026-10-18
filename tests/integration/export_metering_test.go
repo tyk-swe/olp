@@ -64,6 +64,25 @@ func TestMeteringSinkManagement(t *testing.T) {
 		t.Fatalf("focus stream status: %v", focus["status"])
 	}
 
+	// Nullable commitment totals are exact strings and obey the sink's existing
+	// management boundary, including assigned-project users.
+	commitmentSink := postSink(h, owner, map[string]any{"name": "commitment totals", "type": "s3", "destination": "https://objects.example.test/commitments", "streams": []string{"focus"}, "format": "csv_gzip", "enabled": false, "settings": map[string]any{"cost_basis": "cost"}}, 201)
+	totals := `{"purchased_cost":"12.345678901234","allocated_cost":"10","unused_cost":"2.345678901234","provisional":false,"complete":true}`
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.focus_datasets(sink_id,charge_date,commitment_totals) VALUES($1,current_date-1,$2::jsonb)`, commitmentSink["export_sink_id"], totals); err != nil {
+		t.Fatal(err)
+	}
+	datasets = h.want(owner, "GET", "/api/v1/observability/sinks/"+commitmentSink["export_sink_id"].(string)+"/focus-datasets", nil, nil, 200)
+	got := datasets["items"].([]any)[0].(map[string]any)["commitment_totals"].(map[string]any)
+	if got["purchased_cost"] != "12.345678901234" || got["unused_cost"] != "2.345678901234" {
+		t.Fatal(got)
+	}
+	manager := h.invite(owner, "commitment-manager@example.com", "developer")
+	profile := h.want(manager, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
+	addMember(h, owner, project, profile["id"].(string), "manager")
+	manager = login(h, "commitment-manager@example.com")
+	h.want(manager, "GET", "/api/v1/observability/sinks/"+commitmentSink["export_sink_id"].(string)+"/focus-datasets", nil, nil, 404)
+
 	// A cloudevents sink on the metering stream is accepted and its resolved
 	// settings are reported back.
 	ce := postSink(h, owner, map[string]any{"name": "cloudevents", "type": "https",

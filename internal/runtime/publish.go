@@ -27,6 +27,9 @@ type Published struct {
 // caused it. Republishing unchanged configuration is harmless: it records a
 // new sequence with the same digest.
 func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
+	if _, err := tx.Exec(ctx, "SELECT olp.publish_commitments(clock_timestamp())"); err != nil {
+		return Published{}, err
+	}
 	snapshot, err := ReadSnapshot(ctx, tx)
 	if err != nil {
 		return Published{}, err
@@ -60,7 +63,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 // state never appears here: providers serve their active revision and routes
 // their latest published revision.
 func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
-	snapshot := &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
+	snapshot := &routing.Snapshot{Commitments: map[string][]routing.Commitment{}, Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
 	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
 	if err != nil {
 		return nil, err
@@ -78,6 +81,38 @@ func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 		}
 		provider.Limits = provider.Limits.Configured()
 		snapshot.Providers[provider.ID] = provider
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = tx.Query(ctx, `SELECT provider_id::text,id::text,amount::text,period,effective_at,ends_at
+ FROM olp.commitment_schedules WHERE ends_at IS NULL OR ends_at>clock_timestamp() ORDER BY effective_at`)
+	if err != nil {
+		return nil, err
+	}
+	for id, p := range snapshot.Providers {
+		p.Commitment = nil
+		snapshot.Providers[id] = p
+	}
+	for rows.Next() {
+		var id string
+		var c routing.Commitment
+		if err = rows.Scan(&id, &c.ID, &c.Amount, &c.Period, &c.EffectiveAt, &c.EndsAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		snapshot.Commitments[id] = append(snapshot.Commitments[id], c)
+		p, ok := snapshot.Providers[id]
+		if !ok {
+			continue
+		}
+		if c.EffectiveAt.After(time.Now()) {
+			p.PendingCommitment = &c
+		} else {
+			p.Commitment = &c
+		}
+		snapshot.Providers[id] = p
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {

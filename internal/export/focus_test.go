@@ -201,3 +201,35 @@ func TestFocusManifest(t *testing.T) {
 
 // A plugin provider keeps "plugin" as the SkuId prefix and the connection
 // name as the service names.
+
+func TestUnusedCommitmentConformance(t *testing.T) {
+	fc := testFocusContext("cost")
+	purchase := purchaseRow(fc, "capacity", "Reserved connection", "openai", "openai", "", "", "day", "2026-04-15 00:00:00", dec("1.000000000001"))
+	unused := unusedRow(purchase, dec("1.000000000001"))
+	for _, k := range []string{"SubAccountId", "SubAccountName", "ConsumedQuantity", "ConsumedUnit", "x_Route", "x_ApiKeyId", "x_Attempts"} {
+		if v := cell(unused, k); v != "" {
+			t.Errorf("unused %s=%q", k, v)
+		}
+	}
+	if cell(unused, "EffectiveCost") != cell(purchase, "BilledCost") {
+		t.Fatal("unused commitment did not reconcile")
+	}
+	for _, k := range []string{"ResourceId", "ResourceName", "ResourceType", "CommitmentDiscountId"} {
+		if cell(unused, k) == "" {
+			t.Fatalf("missing %s", k)
+		}
+	}
+	var csvData bytes.Buffer
+	writer := csv.NewWriter(&csvData)
+	_ = writer.Write(focusColumns)
+	_ = writer.Write(purchase)
+	_ = writer.Write(unused)
+	writer.Flush()
+	report, err := focusspec.Validate(bytes.NewReader(csvData.Bytes()), FocusCriteria)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() {
+		t.Fatalf("unused conformance: %v", report.Violations)
+	}
+}

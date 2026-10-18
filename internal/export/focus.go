@@ -22,7 +22,7 @@ var focusColumns = []string{
 	"CommitmentDiscountUnit", "ConsumedQuantity", "ConsumedUnit", "ContractedCost",
 	"ContractedUnitPrice", "EffectiveCost", "HostProviderName", "InvoiceIssuerName",
 	"ListCost", "ListUnitPrice", "PricingCategory", "PricingQuantity", "PricingUnit",
-	"ServiceCategory", "ServiceName", "ServiceProviderName", "ServiceSubcategory",
+	"ResourceId", "ResourceName", "ResourceType", "ServiceCategory", "ServiceName", "ServiceProviderName", "ServiceSubcategory",
 	"SkuId", "SkuMeter", "SkuPriceDetails", "SkuPriceId", "SubAccountId",
 	"SubAccountName", "Tags", "x_ApiKeyId", "x_Attempts", "x_ConnectionId",
 	"x_ConnectionName", "x_Model", "x_Operation", "x_PriceComponent", "x_PriceTier",
@@ -102,6 +102,8 @@ type focusRow struct {
 	apiKeyID                   string
 	attribution                string
 	committed                  bool
+	commitmentID               string
+	allocatedCost              *decimal.Decimal
 	commitmentPeriod           string
 	commitmentBucket           string
 	component                  string
@@ -235,14 +237,25 @@ func (r *focusRow) render(ctx *focusContext) []string {
 		set("BilledCost", r.contractedCost.String())
 		set("EffectiveCost", r.contractedCost.String())
 		set("PricingCategory", "Standard")
-	} else if r.committed && r.latestAmount != nil && r.periodWeight != nil && !r.periodWeight.IsZero() {
+	} else if r.committed && (r.allocatedCost != nil || r.latestAmount != nil && r.periodWeight != nil && !r.periodWeight.IsZero()) {
 		// Committed rows bill nothing at list; their effective cost is the
 		// group's ListCost share of the bucket's amount.
-		allocated := r.listCost.Mul(*r.latestAmount).Div(*r.periodWeight).Round(12)
+		allocated := decimal.Zero
+		if r.allocatedCost != nil {
+			allocated = *r.allocatedCost
+		} else {
+			allocated = r.listCost.Mul(*r.latestAmount).Div(*r.periodWeight).Round(12)
+		}
 		set("BilledCost", "0")
 		set("EffectiveCost", allocated.String())
 		set("PricingCategory", "Committed")
 		set("CommitmentDiscountId", fmt.Sprintf("olp:commitment:%s:%s", r.providerID, r.commitmentPeriod))
+		if r.commitmentID != "" {
+			set("CommitmentDiscountId", "olp:commitment:"+r.commitmentID)
+		}
+		set("ResourceId", "olp:connection:"+r.providerID)
+		set("ResourceName", r.connectionName)
+		set("ResourceType", "AI connection")
 		set("CommitmentDiscountName", fmt.Sprintf("%s %s commitment", r.connectionName, r.commitmentPeriod))
 		set("CommitmentDiscountCategory", "Spend")
 		set("CommitmentDiscountType", "Provisioned capacity")
@@ -345,4 +358,30 @@ func serviceFieldsFor(vendorID, kind, connectionName string) (service, provider 
 		provider = connectionName
 	}
 	return service, provider
+}
+
+// unusedRow is installation spend without a consumer or measured consumption.
+func unusedRow(purchase []string, amount decimal.Decimal) []string {
+	row := slices.Clone(purchase)
+	set := func(k, v string) { row[slices.Index(focusColumns, k)] = v }
+	set("ChargeCategory", "Usage")
+	set("ChargeFrequency", "Usage-Based")
+	set("ChargeDescription", "Unallocated provisioned capacity commitment")
+	set("BilledCost", "0")
+	set("EffectiveCost", amount.String())
+	set("ListCost", "0")
+	set("ContractedCost", "0")
+	set("ListUnitPrice", "0")
+	set("ContractedUnitPrice", "0")
+	set("PricingQuantity", "0")
+	set("PricingCategory", "Committed")
+	set("CommitmentDiscountStatus", "Unused")
+	set("CommitmentDiscountQuantity", amount.String())
+	set("ResourceId", "olp:connection:"+cell(purchase, "x_ConnectionId"))
+	set("ResourceName", cell(purchase, "x_ConnectionName"))
+	set("ResourceType", "AI connection")
+	set("SubAccountId", "")
+	set("SubAccountName", "")
+	set("x_Attempts", "")
+	return row
 }

@@ -64,6 +64,11 @@ func (x *call) attemptCostReservation(authority access.Authority, attempt routin
 // included, so the bound is their sum; it is replaced by the cost of what was
 // actually dispatched.
 func (s *Server) costReservation(x *call, authority access.Authority) costReservation {
+	if s.Runtime != nil {
+		if release := s.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot
+		}
+	}
 	if !x.costBudgeted(authority) {
 		return costReservation{}
 	}
@@ -114,6 +119,11 @@ func (s *Server) routeBound(x *call, boundOf func(routing.Attempt) usage.Cost) u
 // reserveFallbackCost covers the remaining route's work alongside the bound
 // already dispatched, even when an earlier attempt could not report its usage.
 func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
+	if s.Runtime != nil {
+		if release := s.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot
+		}
+	}
 	if x.lease == nil || !x.costBudgeted(x.authority) {
 		return nil
 	}
@@ -130,6 +140,11 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
 // A session admits apart from choosing its target, so the hold follows the
 // selection, before the provider is dialled.
 func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt, ttl time.Duration) *Error {
+	if s.Runtime != nil {
+		if release := s.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot
+		}
+	}
 	if x.routingInputs == nil && s.Runtime != nil {
 		x.routingInputs = s.Runtime.RoutingInputs()
 	}
@@ -294,8 +309,10 @@ func (x *call) committed(providerID string) bool {
 	if snapshot == nil {
 		return false
 	}
-	provider, ok := snapshot.Providers[providerID]
-	return ok && provider.Commitment != nil
+	if x.currentCommitments != nil {
+		snapshot = x.currentCommitments
+	}
+	return snapshot.CommitmentAt(providerID, time.Now()) != nil
 }
 
 // settledCost is what the request cost, from the attempts that reported usage,
@@ -318,7 +335,7 @@ func (x *call) costOf(owner string) usage.Cost {
 			continue
 		}
 		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
-			if !x.committed(fact.ProviderID) {
+			if !x.factCommitted(fact) {
 				total = total.Add(cost)
 			}
 		}
@@ -358,7 +375,7 @@ func (x *call) responseCost() (usage.Cost, bool) {
 		if !ok {
 			return usage.Cost{}, false
 		}
-		if !x.committed(fact.ProviderID) {
+		if !x.factCommitted(fact) {
 			total = total.Add(cost)
 		}
 	}
@@ -412,7 +429,7 @@ func (s *Server) settledCharge(x *call) usage.Cost {
 		if fact.Price != nil {
 			if priced, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
 				cost = priced
-				if x.committed(fact.ProviderID) {
+				if x.factCommitted(fact) {
 					cost = usage.Cost{}
 				}
 				costPtr = &cost
@@ -470,4 +487,16 @@ func (s *Server) recordCost(x *call) {
 	if x.dispatched && x.lease.HasCostReservation() {
 		x.lease.SetActualCost(x.settledCost().String(), s.settledCharge(x).String())
 	}
+}
+
+func (x *call) factCommitted(fact *AttemptFact) bool {
+	if fact.CommitmentPinned {
+		return fact.Commitment != nil
+	}
+	snapshot := x.snapshot()
+	if snapshot == nil {
+		return false
+	}
+	p, ok := snapshot.Providers[fact.ProviderID]
+	return ok && p.CommitmentAt(fact.StartedAt) != nil
 }

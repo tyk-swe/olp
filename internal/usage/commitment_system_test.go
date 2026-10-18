@@ -27,6 +27,9 @@ func seedCommittedProvider(t *testing.T, pool *pgxpool.Pool, owner, amount, peri
 		revision, provider, "provider-"+provider, configuration, uuid.NewString(), owner); err != nil {
 		t.Fatalf("seed committed provider revision: %v", err)
 	}
+	if _, err := pool.Exec(t.Context(), `SELECT olp.publish_commitments('2020-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
 	return provider
 }
 

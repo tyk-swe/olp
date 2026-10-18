@@ -91,8 +91,11 @@ var CommitmentPeriods = map[string]bool{"hour": true, "day": true, "month": true
 // each UTC calendar period, allocated across priced attempts in proportion to
 // their list cost.
 type Commitment struct {
-	Amount string `json:"amount"`
-	Period string `json:"period"`
+	ID          string     `json:"id,omitempty"`
+	EffectiveAt *time.Time `json:"effective_at,omitempty"`
+	EndsAt      *time.Time `json:"ends_at,omitempty"`
+	Amount      string     `json:"amount"`
+	Period      string     `json:"period"`
 }
 
 // Provider is the serving view of one active provider revision.
@@ -137,7 +140,8 @@ type Provider struct {
 	// Commitment is the provisioned capacity this connection pays for: its
 	// attempts price at zero marginal cost and share the commitment amount
 	// across each calendar period by list-cost weight.
-	Commitment *Commitment `json:"commitment,omitempty"`
+	Commitment        *Commitment `json:"commitment,omitempty"`
+	PendingCommitment *Commitment `json:"pending_commitment,omitempty"`
 	// HealthProbe, when set, opts the connection into active probing.
 	HealthProbe *HealthProbe `json:"health_probe,omitempty"`
 	Slots       []Slot       `json:"slots,omitempty"`
@@ -186,7 +190,8 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
-	Guardrails         *guardrails.Registry `json:"guardrails,omitempty"`
+	Commitments        map[string][]Commitment `json:"commitments,omitempty"`
+	Guardrails         *guardrails.Registry    `json:"guardrails,omitempty"`
 	guardrailEngines   map[string]*guardrails.Engine
 	hasBodyLimits      bool
 	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
@@ -209,6 +214,7 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
+		Commitments        map[string][]Commitment   `json:"commitments,omitempty"`
 		Guardrails         *guardrails.Registry      `json:"guardrails,omitempty"`
 		CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
 		CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
@@ -216,7 +222,7 @@ func (s *Snapshot) Digest() (string, error) {
 		Routes             map[string]Route          `json:"routes"`
 		InstallationPolicy *Policy                   `json:"installation_policy,omitempty"`
 		KeyPolicies        map[string]*Policy        `json:"key_policies,omitempty"`
-	}{s.Guardrails, s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
+	}{s.Commitments, s.Guardrails, s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err
 	}
@@ -390,3 +396,31 @@ func (p *Provider) Connector() connectors.Config {
 
 // HasBodyLimits reports whether ingress needs byte measurements for ordinary routes.
 func (s *Snapshot) HasBodyLimits() bool { return s != nil && s.hasBodyLimits }
+
+// CommitmentAt resolves published effective and pending obligations without IO.
+func (p Provider) CommitmentAt(at time.Time) *Commitment {
+	for _, c := range []*Commitment{p.PendingCommitment, p.Commitment} {
+		if c != nil && (c.EffectiveAt == nil || !at.Before(*c.EffectiveAt)) && (c.EndsAt == nil || at.Before(*c.EndsAt)) {
+			return c
+		}
+	}
+	return nil
+}
+
+// CommitmentAt also resolves obligations of removed connections, which can
+// remain payable after their serving configuration has disappeared.
+func (s *Snapshot) CommitmentAt(providerID string, at time.Time) *Commitment {
+	if s == nil {
+		return nil
+	}
+	if s.Commitments != nil {
+		for i := range s.Commitments[providerID] {
+			c := &s.Commitments[providerID][i]
+			if (c.EffectiveAt == nil || !at.Before(*c.EffectiveAt)) && (c.EndsAt == nil || at.Before(*c.EndsAt)) {
+				return c
+			}
+		}
+		return nil
+	}
+	return s.Providers[providerID].CommitmentAt(at)
+}

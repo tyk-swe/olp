@@ -285,7 +285,7 @@ func estimatedCost(provider Provider, price *usage.RoutingPrice, discount *usage
 		return nil
 	}
 	estimated := &EstimatedCost{Minimum: "0", Maximum: "0", Currency: price.Currency}
-	if provider.Commitment != nil {
+	if provider.CommitmentAt(now) != nil {
 		return estimated
 	}
 	bound, ok := worst(provider, target, price, discount)
@@ -428,7 +428,7 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 				}
 			}
 		}
-		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.Commitment == nil {
+		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.CommitmentAt(now) == nil {
 			bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
 			if !ok || !lessOrEqual(strptr(bound.String()), policy.MaxCost) {
 				reason = "cost_limit_exceeded"
