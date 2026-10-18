@@ -51,7 +51,7 @@ func captureJSON(raw []byte) (any, error) {
 	return value, nil
 }
 
-func (t *captureTree) walk(value any, set func(any), depth int) error {
+func (t *captureTree) walk(value any, set func(any), depth int, toolArguments bool) error {
 	if depth > 64 {
 		return errCaptureRedaction
 	}
@@ -66,22 +66,20 @@ func (t *captureTree) walk(value any, set func(any), depth int) error {
 		})
 	case []any:
 		for i, child := range v {
-			if err := t.walk(child, func(x any) { v[i] = x }, depth+1); err != nil {
+			if err := t.walk(child, func(x any) { v[i] = x }, depth+1, toolArguments); err != nil {
 				return err
 			}
 		}
 	case map[string]any:
+		if !toolArguments && captureOpaqueMedia(v) {
+			return errCaptureRedaction
+		}
 		keys := make([]string, 0, len(v))
 		for key := range v {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			// Opaque media is not a text inspection surface.
-			switch key {
-			case "image_url", "image", "audio", "input_audio", "file_data", "file_id", "inlineData", "inline_data", "fileData", "file_data_uri", "source", "document", "video":
-				return errCaptureRedaction
-			}
 			child := v[key]
 			// Keys can contain user content too. A changed key is applied after values
 			// below; collision is checked when rebuilding the final document.
@@ -92,7 +90,9 @@ func (t *captureTree) walk(value any, set func(any), depth int) error {
 			}); err != nil {
 				return err
 			}
-			if key == "arguments" {
+			_, named := v["name"].(string)
+			arguments := toolArguments || key == "arguments" || (named && (key == "input" || key == "args"))
+			if !toolArguments && key == "arguments" {
 				if raw, ok := child.(string); ok {
 					nested, err := captureJSON([]byte(raw))
 					if err != nil {
@@ -100,7 +100,7 @@ func (t *captureTree) walk(value any, set func(any), depth int) error {
 					}
 					v[key] = &captureArguments{value: nested}
 					box := v[key].(*captureArguments)
-					if err := t.walk(nested, func(x any) { box.value = x }, depth+1); err != nil {
+					if err := t.walk(nested, func(x any) { box.value = x }, depth+1, true); err != nil {
 						return err
 					}
 					continue
@@ -109,12 +109,30 @@ func (t *captureTree) walk(value any, set func(any), depth int) error {
 			if strings.HasPrefix(key, "\x00capture-key:") {
 				return errCaptureRedaction
 			}
-			if err := t.walk(child, func(x any) { v[key] = x }, depth+1); err != nil {
+			if err := t.walk(child, func(x any) { v[key] = x }, depth+1, arguments); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// Protocol media blocks are opaque inspection surfaces. Argument objects may
+// use the same field names for ordinary JSON and are inspected as text instead.
+func captureOpaqueMedia(value map[string]any) bool {
+	if kind, ok := value["type"].(string); ok {
+		switch kind {
+		case "image_url", "image", "input_image", "audio", "input_audio", "output_audio", "file", "input_file", "document", "video":
+			return true
+		}
+	}
+	// Gemini and Bedrock use structural media members without a type tag.
+	for _, key := range []string{"inlineData", "inline_data", "fileData", "file_data", "image", "audio", "document", "video"} {
+		if _, ok := value[key].(map[string]any); ok {
+			return true
+		}
+	}
+	return false
 }
 
 type captureArguments struct{ value any }
@@ -182,7 +200,7 @@ func redactCapture(ctx context.Context, engine *guardrails.Engine, input map[str
 			return nil, "", nil, err
 		}
 		values[key] = value
-		if err := tree.walk(value, func(x any) { values[key] = x }, 0); err != nil {
+		if err := tree.walk(value, func(x any) { values[key] = x }, 0, false); err != nil {
 			return nil, "", nil, err
 		}
 	}
@@ -196,7 +214,7 @@ func redactCapture(ctx context.Context, engine *guardrails.Engine, input map[str
 			return nil, "", nil, err
 		}
 		tools[i] = value
-		if err := tree.walk(value, func(x any) { tools[i] = x }, 0); err != nil {
+		if err := tree.walk(value, func(x any) { tools[i] = x }, 0, false); err != nil {
 			return nil, "", nil, err
 		}
 	}

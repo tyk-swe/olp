@@ -97,6 +97,41 @@ func TestCaptureRedactionEligibilityAndBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureRedactsOrdinaryToolArgumentKeys(t *testing.T) {
+	p := redactedPolicy(t)
+	arguments := `{"source":"secret","document":{"image":"secret"},"audio":"secret","arguments":"secret","type":"image","inlineData":{"data":"secret"}}`
+	encoded, _ := json.Marshal(arguments)
+	for _, call := range []string{
+		`{"function":{"name":"f","arguments":` + string(encoded) + `}}`,
+		`{"name":"f","arguments":` + arguments + `}`,
+		`{"type":"tool_use","name":"f","input":` + arguments + `}`,
+		`{"name":"f","args":` + arguments + `}`,
+	} {
+		input := map[string]json.RawMessage{"messages": json.RawMessage(`[{"role":"assistant","tool_calls":[` + call + `]}]`)}
+		redacted, _, calls, err := redactCapture(t.Context(), p.redactor, input, "", []json.RawMessage{json.RawMessage(call)})
+		if err != nil || len(calls) != 1 {
+			t.Fatalf("inspectable arguments dropped: %s: %v", call, err)
+		}
+		for _, raw := range []json.RawMessage{redacted["messages"], calls[0]} {
+			if strings.Contains(string(raw), "secret") || strings.Count(string(raw), "[REMOVED]") != 5 || !json.Valid(raw) {
+				t.Fatalf("arguments not redacted: %s", raw)
+			}
+		}
+	}
+	for _, block := range []string{
+		`{"type":"image_url","image_url":{"url":"secret"}}`,
+		`{"type":"image","source":{"type":"base64","data":"secret"}}`,
+		`{"type":"input_file","file_data":"secret"}`,
+		`{"inlineData":{"mimeType":"image/png","data":"secret"}}`,
+		`{"image":{"format":"png","source":{"bytes":"secret"}}}`,
+	} {
+		input := map[string]json.RawMessage{"messages": json.RawMessage(`[{"content":[` + block + `]}]`)}
+		if _, _, _, err := redactCapture(t.Context(), p.redactor, input, "", nil); err == nil {
+			t.Fatalf("opaque media accepted: %s", block)
+		}
+	}
+}
 func TestCaptureRedactionDropsMalformedUnavailableCancelledAndBounds(t *testing.T) {
 	for _, test := range []string{"malformed", "opaque", "missing", "field", "segments", "cancelled", "closed", "expanded"} {
 		t.Run(test, func(t *testing.T) {

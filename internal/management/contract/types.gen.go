@@ -7410,9 +7410,13 @@ type FocusDataset struct {
 	EffectiveCost    nullable.Nullable[string]           `json:"effective_cost"`
 	GeneratedAt      nullable.Nullable[time.Time]        `json:"generated_at"`
 	LastErrorCode    nullable.Nullable[string]           `json:"last_error_code"`
-	PartCount        int32                               `json:"part_count"`
-	Revision         int32                               `json:"revision"`
-	RowCount         int64                               `json:"row_count"`
+
+	// PartCount Null until the dataset has been generated.
+	PartCount nullable.Nullable[int32] `json:"part_count"`
+	Revision  int32                    `json:"revision"`
+
+	// RowCount Null until the dataset has been generated.
+	RowCount nullable.Nullable[int64] `json:"row_count"`
 }
 
 // FocusDatasetListResponse defines model for FocusDatasetListResponse.

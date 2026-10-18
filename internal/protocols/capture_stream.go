@@ -29,6 +29,7 @@ type CaptureStream struct {
 	textOrder, callOrder []string
 	groups               map[string]bool
 	terminal             bool
+	geminiCallSequence   uint64
 	captureReader
 }
 
@@ -88,10 +89,13 @@ func (s *CaptureStream) tool(id, name, args string, snapshot, done bool) {
 	}
 	p := s.part(id, true)
 	if name != "" {
-		if p.name != "" && p.name != name {
+		if !snapshot && (s.family == wire.Chat || s.family == wire.MistralFIM) {
+			p.name += name
+		} else if p.name != "" && p.name != name {
 			s.invalid = true
+		} else {
+			p.name = name
 		}
-		p.name = name
 	}
 	s.add(id, args, true, snapshot)
 	p.done = p.done || done
@@ -200,7 +204,7 @@ func (s *CaptureStream) Push(frame []byte) error {
 }
 func captureIndex(raw json.RawMessage) string {
 	var n int
-	if json.Unmarshal(raw, &n) != nil || n < 0 {
+	if !present(raw) || json.Unmarshal(raw, &n) != nil || n < 0 {
 		return ""
 	}
 	return fmt.Sprint(n)
@@ -415,9 +419,12 @@ func (s *CaptureStream) gemini(f map[string]json.RawMessage) {
 	if present(f["error"]) || present(f["promptFeedback"]) {
 		s.invalid = true
 	}
-	for _, raw := range s.array(f["candidates"]) {
+	for candidateIndex, raw := range s.array(f["candidates"]) {
 		c, _ := s.object(raw)
 		id := captureIndex(c["index"])
+		if _, explicit := c["index"]; !explicit {
+			id = fmt.Sprint(candidateIndex)
+		}
 		if id == "" {
 			s.invalid = true
 			return
@@ -428,7 +435,7 @@ func (s *CaptureStream) gemini(f map[string]json.RawMessage) {
 		}
 		s.groups[id] = false
 		content, _ := s.object(c["content"])
-		for i, raw := range s.array(content["parts"]) {
+		for _, raw := range s.array(content["parts"]) {
 			p, _ := s.object(raw)
 			if string(p["thought"]) == "true" {
 				continue
@@ -437,9 +444,10 @@ func (s *CaptureStream) gemini(f map[string]json.RawMessage) {
 				s.add(id+"/text", s.str(p["text"]), false, false)
 			}
 			if fn, err := s.object(p["functionCall"]); err == nil {
-				key := id + "/" + s.str(fn["id"])
+				key := id + "/id/" + s.str(fn["id"])
 				if s.str(fn["id"]) == "" {
-					key = fmt.Sprintf("%s/%d", id, i)
+					key = fmt.Sprintf("%s/anonymous/%d", id, s.geminiCallSequence)
+					s.geminiCallSequence++
 				}
 				// Gemini emits complete functionCall objects. Repeated identities must
 				// agree; partial/streaming argument extensions are unsupported.

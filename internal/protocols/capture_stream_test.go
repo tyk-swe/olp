@@ -105,6 +105,81 @@ func TestCaptureBedrockCompleteStream(t *testing.T) {
 		t.Fatalf("bedrock text=%q calls=%s err=%v", text, calls, err)
 	}
 }
+
+func TestCaptureFragmentedChatToolNames(t *testing.T) {
+	for _, family := range []wire.Format{wire.Chat, wire.MistralFIM} {
+		for _, field := range []string{"tool_calls", "function_call"} {
+			t.Run(string(family)+"/"+field, func(t *testing.T) {
+				s := NewCaptureStream(family, 65536, false, true)
+				for i, name := range []string{"wea", "ther"} {
+					function := map[string]any{"name": name}
+					choice := map[string]any{"index": 0}
+					if i == 1 {
+						function["arguments"] = `{}`
+						choice["finish_reason"] = field
+					}
+					var call any = function
+					if field == "tool_calls" {
+						call = []any{map[string]any{"index": 0, "function": function}}
+					}
+					choice["delta"] = map[string]any{field: call}
+					raw, _ := json.Marshal(map[string]any{"choices": []any{choice}})
+					if err := s.Push(append(append([]byte("data: "), raw...), '\n', '\n')); err != nil {
+						t.Fatal(err)
+					}
+				}
+				_, calls, err := s.Finish()
+				if err != nil || len(calls) != 1 || !strings.Contains(string(calls[0]), `"name":"weather"`) {
+					t.Fatalf("fragmented name: %s %v", calls, err)
+				}
+			})
+		}
+	}
+}
+
+func TestCaptureGeminiOptionalIdentities(t *testing.T) {
+	for _, same := range []bool{false, true} {
+		s := NewCaptureStream(wire.GeminiStream, 65536, true, true)
+		for i := range 3 {
+			argument := i
+			if same {
+				argument = 0
+			}
+			call := map[string]any{"name": "f", "args": map[string]any{"n": argument}}
+			if i == 2 {
+				// An explicit ID cannot collide with an anonymous call's identity.
+				call["id"] = "anonymous/0"
+			}
+			candidate := map[string]any{"content": map[string]any{"parts": []any{map[string]any{"functionCall": call}}}}
+			if i == 2 {
+				candidate["finishReason"] = "STOP"
+			}
+			raw, _ := json.Marshal(map[string]any{"candidates": []any{candidate}})
+			if err := s.Push(append(append([]byte("data: "), raw...), '\n', '\n')); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, calls, err := s.Finish()
+		if err != nil || len(calls) != 3 {
+			t.Fatalf("same=%t: calls=%s err=%v", same, calls, err)
+		}
+		seen := map[string]bool{}
+		for _, raw := range calls {
+			var call struct{ ID string }
+			if err := json.Unmarshal(raw, &call); err != nil || seen[call.ID] {
+				t.Fatalf("duplicate or malformed call: %s", raw)
+			}
+			seen[call.ID] = true
+		}
+	}
+	for _, index := range []string{`null`, `"0"`, `-1`, `0.5`} {
+		s := NewCaptureStream(wire.GeminiStream, 65536, true, false)
+		_ = s.Push([]byte(`data: {"candidates":[{"index":` + index + `,"content":{"parts":[{"text":"bad"}]},"finishReason":"STOP"}]}` + "\n\n"))
+		if _, _, err := s.Finish(); err == nil {
+			t.Fatalf("accepted malformed explicit index %s", index)
+		}
+	}
+}
 func TestCaptureStreamDropsIncompleteMalformedAndBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
