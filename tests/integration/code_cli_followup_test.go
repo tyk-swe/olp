@@ -6,14 +6,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -64,10 +61,8 @@ func followupClient(t *testing.T, f *codeFleet, ws bool) (*codecli.Client, *cliI
 	t.Cleanup(server.Close)
 	client := codecli.New(t, server.URL+"/code/qualification", f.key, ws)
 	configuration := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route["id"].(string)+"/client-config?gateway_url="+url.QueryEscape(server.URL), nil, nil, 200)
-	if err := os.WriteFile(filepath.Join(client.Home, "config.toml"), []byte(configuration["configuration"].(string)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	flags := []string{"-c", `approval_policy="never"`, "-c", `sandbox_mode="read-only"`, "-c", `web_search="disabled"`, "-c", fmt.Sprintf("model_providers.olp.supports_websockets=%t", ws)}
+	client.UseConfiguration(t, configuration["configuration"].(string))
+	flags := codecli.ControlledFlags(ws)
 	return client, capture, flags
 }
 

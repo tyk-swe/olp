@@ -5,8 +5,6 @@ package codecli_test
 import (
 	"bytes"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,9 +26,7 @@ func TestOfficialCodexModelSelectionHintAndOverride(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(client.Home, "config.toml"), []byte(config.Configuration), 0600); err != nil {
-				t.Fatal(err)
-			}
+			client.UseConfiguration(t, config.Configuration)
 			args := []string{"Complete the controlled model selection task."}
 			if selected == "gpt-5.4" {
 				args = append([]string{"-m", "gpt-5.3-codex"}, args...)

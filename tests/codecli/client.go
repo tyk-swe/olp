@@ -1,4 +1,3 @@
-// Package codecli drives the pinned, unmodified official Codex executable.
 package codecli
 
 import (
@@ -7,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -71,13 +71,28 @@ base_url = %q
 env_key = "OLP_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
-supports_websockets = %t
+supports_websockets = %s
 stream_idle_timeout_ms = 5000
-`, Model, baseURL, websocket)
+`, Model, baseURL, strconv.FormatBool(websocket))
 	if err := os.WriteFile(filepath.Join(c.Home, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// UseConfiguration replaces the generated config.toml with a caller-provided
+// client configuration (typically one OLP generated for a route).
+func (c *Client) UseConfiguration(t testing.TB, configuration string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(c.Home, "config.toml"), []byte(configuration), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ControlledFlags is the standard -c flag set every qualification run
+// appends journey-specific flags on top of.
+func ControlledFlags(ws bool) []string {
+	return []string{"-c", `approval_policy="never"`, "-c", `sandbox_mode="read-only"`, "-c", `web_search="disabled"`, "-c", "model_providers.olp.supports_websockets=" + strconv.FormatBool(ws)}
 }
 
 func (c *Client) Command(ctx context.Context, args ...string) *exec.Cmd {

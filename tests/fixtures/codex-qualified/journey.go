@@ -79,6 +79,33 @@ func (j *Journey) Reply(ctx context.Context, headers http.Header, body []byte) [
 				item = `{"type":"compaction","encrypted_content":"OLP_CONTROLLED_COMPACT"}`
 			}
 		}
+	case "official-tool":
+		item = `{"type":"message","role":"assistant","id":"msg-controlled","content":[{"type":"output_text","text":"controlled fixture complete"}]}`
+		if turn == 1 {
+			item = `{"type":"function_call","call_id":"call-controlled","name":"exec_command","arguments":"{\"cmd\":\"printf OLP_CONTROLLED_TOOL\",\"max_output_tokens\":100}"}`
+		}
+	case "official-child":
+		item = `{"type":"message","role":"assistant","id":"msg-controlled","content":[{"type":"output_text","text":"controlled fixture complete"}]}`
+		if headers.Get("X-Codex-Parent-Thread-Id") != "" {
+			j.childOnce.Do(func() { close(j.childDone) })
+		} else if turn == 1 {
+			item = `{"type":"function_call","call_id":"spawn-controlled","namespace":"collaboration","name":"spawn_agent","arguments":"{\"message\":\"Inspect the controlled fixture only.\",\"task_name\":\"controlled_child\"}"}`
+		} else {
+			select {
+			case <-j.childDone:
+			case <-ctx.Done():
+			}
+		}
+	case "official-compact":
+		item = `{"type":"message","role":"assistant","id":"msg-controlled","content":[{"type":"output_text","text":"controlled fixture complete"}]}`
+		if turn == 1 {
+			total = 20004
+		}
+		for _, input := range request.Input {
+			if input.Type == "compaction_trigger" {
+				item = `{"type":"compaction","encrypted_content":"OLP_CONTROLLED_COMPACT"}`
+			}
+		}
 	}
 	return [][]byte{
 		[]byte(fmt.Sprintf(`{"type":"response.created","response":{"id":%q}}`, id)),
