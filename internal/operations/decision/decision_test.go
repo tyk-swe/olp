@@ -3,6 +3,7 @@ package decision
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -19,6 +20,29 @@ func request(t *testing.T, dialect, body string) oif.Request {
 		t.Fatal(err)
 	}
 	return r
+}
+
+func TestDecisionEmptyLabelsRequireStringIdentity(t *testing.T) {
+	for _, tc := range []struct{ dialect, source, good, needle, missing string }{
+		{SystemOne, `{"model":"route","state":"hello","questions":{"q":{"type":"choice","instructions":"Which?","criteria":{"":"empty","x":"other"}}}}`, `{"model":"m","answers":{"q":{"type":"choice","choice":"","confidence":0.5,"probabilities":{"":0.5,"x":0.5}}},"usage":{"input_tokens":1,"output_tokens":1}}`, `"choice":""`, `"other":""`},
+		{SystemOne, `{"model":"route","state":"hello","questions":{"q":{"type":"score","instructions":"How?","criteria":["","high"]}}}`, `{"model":"m","answers":{"q":{"type":"score","score":0.5,"confidence":0.5,"legend":{"0":"","1":"high"},"probabilities":{"0":0.5,"1":0.5}}},"usage":{"input_tokens":1,"output_tokens":1}}`, `"0":""`, `"other":""`},
+		{OpenAI, `{"model":"route","input":"hello","questions":[{"type":"score","instructions":"How?","levels":[{"label":""},{"label":"high"}]}]}`, `{"model":"m","answers":[{"type":"score","score":0.5,"confidence":0.5,"probabilities":[{"value":0,"label":"","probability":0.5},{"value":1,"label":"high","probability":0.5}]}],"usage":{"input_tokens":1,"output_tokens":1}}`, `"label":""`, `"other":""`},
+	} {
+		r := request(t, tc.dialect, tc.source)
+		if _, err := parseResult(r, result(t, tc.dialect, tc.good)); err != nil {
+			t.Fatalf("valid empty label: %v", err)
+		}
+		field := strings.SplitN(tc.needle, ":", 2)[0]
+		missing := strings.Replace(tc.good, tc.needle+",", "", 1)
+		if tc.needle == `"0":""` {
+			missing = strings.Replace(tc.good, tc.needle, tc.missing, 1)
+		}
+		for _, body := range []string{strings.Replace(tc.good, tc.needle, field+`:null`, 1), strings.Replace(tc.good, tc.needle, field+`:0`, 1), missing} {
+			if _, err := parseResult(r, result(t, tc.dialect, body)); err == nil {
+				t.Fatalf("accepted missing/non-string identity: %s", body)
+			}
+		}
+	}
 }
 
 func TestDecisionChoiceCountBoundaries(t *testing.T) {

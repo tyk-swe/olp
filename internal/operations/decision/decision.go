@@ -425,9 +425,13 @@ func parseResult(request oif.Request, source oif.Result) (oif.View, error) {
 					}
 				}
 				if kind == "choice" {
+					selected := member(a, "choice")
+					if selected.Kind() != oif.String {
+						return fail()
+					}
 					found := false
 					for _, v := range q.Labels {
-						found = found || text(member(a, "choice")) == v
+						found = found || text(selected) == v
 					}
 					if !found {
 						return fail()
@@ -438,7 +442,8 @@ func parseResult(request oif.Request, source oif.Result) (oif.View, error) {
 						return fail()
 					}
 					for j, label := range q.Labels {
-						if text(member(legend, strconv.Itoa(j))) != label {
+						value := member(legend, strconv.Itoa(j))
+						if value.Kind() != oif.String || text(value) != label {
 							return fail()
 						}
 					}
@@ -456,7 +461,7 @@ func parseResult(request oif.Request, source oif.Result) (oif.View, error) {
 							return fail()
 						}
 					} else {
-						if known(p, "label value probability") != nil || text(member(p, "label")) != q.Labels[j] {
+						if known(p, "label value probability") != nil || member(p, "label").Kind() != oif.String || text(member(p, "label")) != q.Labels[j] {
 							return fail()
 						}
 						v, ok := operations.Int(member(p, "value"))
