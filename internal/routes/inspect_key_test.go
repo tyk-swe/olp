@@ -78,3 +78,33 @@ func TestInspectionKeyLoadsInheritedDecisionBudgets(t *testing.T) {
 		})
 	}
 }
+
+func TestKeylessInspectionLoadsHierarchyBudgets(t *testing.T) {
+	for _, scope := range []string{"project", "organization", "installation", "attribution"} {
+		t.Run(scope, func(t *testing.T) {
+			project := uuid.NewString()
+			values := make([]any, 6)
+			budget := &access.BudgetPolicy{DailyCostLimit: new("1")}
+			switch scope {
+			case "project":
+				values[0] = budget
+			case "organization":
+				values[1] = uuid.NewString()
+				values[2] = budget
+			case "installation":
+				values[5] = budget
+			case "attribution":
+				values[3] = access.AttributionBudgets{"team": {"core": *budget}}
+				values[4] = map[string]any{"attribution_defaults": map[string]string{"team": "core"}}
+			}
+			key, err := (&Server{}).inspectionKey(httptest.NewRequest("POST", "/", nil), inspectionKeyQuery{values: values}, access.Principal{AllProjects: true}, nil, routing.Route{Slug: "route", ProjectID: &project})
+			if err != nil {
+				t.Fatal(err)
+			}
+			key.authority.Attribution, err = key.authority.ResolveAttribution(nil)
+			if err != nil || !key.authority.UnboundedWorkBudgeted("route") {
+				t.Fatalf("keyless %s budget omitted: %v", scope, err)
+			}
+		})
+	}
+}

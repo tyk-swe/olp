@@ -20,7 +20,17 @@ type inspectionKeyContext struct {
 func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal access.Principal, selected *string, route routing.Route) (inspectionKeyContext, error) {
 	key := inspectionKeyContext{}
 	if selected == nil {
-		return key, nil
+		if err := principal.Project(route.ProjectID, access.View); err != nil {
+			return key, err
+		}
+		key.authority.ProjectID = route.ProjectID
+		err := q.QueryRow(r.Context(), `SELECT p.budget_policy,p.organization_id::text,o.budget_policy,
+COALESCE(p.attribution_budgets,'{}'::jsonb),COALESCE(p.attribution_policy,'{}'::jsonb),i.budget_policy
+FROM olp.installation i LEFT JOIN olp.projects p ON p.id=$1::uuid
+LEFT JOIN olp.organizations o ON o.id=p.organization_id WHERE i.singleton`, route.ProjectID).Scan(
+			&key.authority.ProjectBudget, &key.authority.OrganizationID, &key.authority.OrganizationBudget,
+			&key.authority.ProjectAttributionBudgets, &key.authority.ProjectAttributionPolicy, &key.authority.InstallationBudget)
+		return key, err
 	}
 	var err error
 	key.id, err = access.ParseUUID(*selected)
