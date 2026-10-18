@@ -3,6 +3,7 @@ package gateway
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -134,5 +135,34 @@ func TestLegacyCompletionParallelGuardrailBlocksTerminalFrame(t *testing.T) {
 	rest, _ := io.ReadAll(reader)
 	if strings.Contains(string(rest), "[DONE]") || !strings.Contains(string(rest), "guardrail_blocked") {
 		t.Fatalf("unsafe terminal delivery: %s", rest)
+	}
+}
+
+func TestLegacyCompletionStreamRestoresInputMask(t *testing.T) {
+	h := newHarness(t, Config{})
+	installTestGuardrail(t, h, guardrails.Input, guardrails.Mask, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if len(request.Messages) != 1 || strings.Contains(request.Messages[0].Content, "secret") {
+			t.Errorf("unmasked upstream body: %+v", request)
+			return
+		}
+		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": request.Messages[0].Content}, "finish_reason": "stop"}}})
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: "+string(body)+"\n\ndata: [DONE]\n\n")
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"a secret","max_tokens":16,"stream":true}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "secret") || strings.Contains(string(body), "[OLP_") || !strings.Contains(string(body), "[DONE]") {
+		t.Fatalf("mask restoration: %d %s", resp.StatusCode, body)
 	}
 }

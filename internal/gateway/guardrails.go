@@ -106,11 +106,11 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 }
 
 func (x *call) guardrailStreamSurface(document oif.Document) error {
-	if x.family == wire.Chat && x.generation.parsed != nil && x.generation.parsed.Stream &&
+	if (x.family == wire.Chat || x.family == wire.Completions) && x.generation.parsed != nil && x.generation.parsed.Stream &&
 		(x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
 		// Log-probability alternatives and their byte encodings are separate
 		// output surfaces that cannot share the content delta's stream window.
-		if value, ok := document.Root().Lookup("logprobs"); ok && value.Raw() == "true" {
+		if value, ok := document.Root().Lookup("logprobs"); ok && (value.Raw() == "true" || x.family == wire.Completions && value.Kind() != oif.Null) {
 			return guardrails.ErrSurface
 		}
 	}

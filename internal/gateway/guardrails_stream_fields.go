@@ -79,6 +79,18 @@ func guardrailDocumentFields(family wire.Format, doc oif.Document) ([]guardrailS
 		return strconv.Itoa(fallback)
 	}
 	switch family {
+	case wire.Completions:
+		choices, _ := doc.Root().Lookup("choices")
+		for i, choice := range choices.Elements() {
+			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
+				return nil, guardrails.ErrSurface
+			}
+			prefix := "completions_" + index(choice, i) + "_"
+			add(prefix+"text", "/choices/"+strconv.Itoa(i)+"/text", false)
+			if reason, ok := choice.Lookup("finish_reason"); ok && reason.Kind() == oif.String {
+				fields = append(fields, guardrailStreamField{id: prefix, complete: true})
+			}
+		}
 	case wire.Chat:
 		choices, _ := doc.Root().Lookup("choices")
 		for i, choice := range choices.Elements() {

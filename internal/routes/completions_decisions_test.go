@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -41,7 +42,7 @@ func TestCompletionInspectionPricesAggregateExposure(t *testing.T) {
 }
 
 func TestDecisionInspectionRejectsUnboundedBudgets(t *testing.T) {
-	for _, scope := range []string{"none", "provider", "slot", "unrelated_slot", "key"} {
+	for _, scope := range []string{"none", "provider", "slot", "unrelated_slot", "key", "attribution", "key_default", "project_default"} {
 		t.Run(scope, func(t *testing.T) {
 			snapshot, _ := estimateSnapshot("model")
 			route := snapshot.Routes["route"]
@@ -70,6 +71,18 @@ func TestDecisionInspectionRejectsUnboundedBudgets(t *testing.T) {
 				m.key = func(routing.Route) (inspectionKeyContext, error) {
 					return inspectionKeyContext{authority: access.Authority{Policy: access.KeyPolicy{TokensPerMinute: new(int64(1000))}}}, nil
 				}
+			}
+			if scope == "attribution" || scope == "key_default" || scope == "project_default" {
+				a := access.Authority{ProjectAttributionBudgets: access.AttributionBudgets{"team": {"core": {DailyCostLimit: new("1")}}}}
+				switch scope {
+				case "attribution":
+					m.input.Attribution = map[string]string{"team": "core"}
+				case "key_default":
+					a.Policy.AttributionDefaults = map[string]string{"team": "core"}
+				case "project_default":
+					a.ProjectAttributionPolicy = attribution.Policy{Defaults: map[string]string{"team": "core"}}
+				}
+				m.key = func(routing.Route) (inspectionKeyContext, error) { return inspectionKeyContext{authority: a}, nil }
 			}
 			leg, _, _, err := (&Server{Access: &access.Server{}}).leg(m, "route", "")
 			if err != nil {

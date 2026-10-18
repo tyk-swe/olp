@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -114,6 +115,18 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	input := m.input
+	if key.id != "" {
+		for name := range input.Attribution {
+			if !slices.Contains(key.authority.Policy.AllowedAttributionKeys, name) && key.authority.Policy.AttributionDefaults[name] == "" && key.authority.ProjectAttributionPolicy.Defaults[name] == "" {
+				return simulatedLeg{}, routing.Plan{}, false, access.Invalid("attribution", "An attribution label is not allowed by the selected key.")
+			}
+		}
+	}
+	labels, err := key.authority.ResolveAttribution(input.Attribution)
+	if err != nil {
+		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
+	}
+	key.authority.Attribution, input.Attribution = labels, labels
 	semantic, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
