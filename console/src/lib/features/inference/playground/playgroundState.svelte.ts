@@ -6,7 +6,12 @@ import { hasOutputRules } from '$lib/features/routes/routeEditor';
 import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { listApiKeys } from '$lib/features/access/api-keys/api';
 import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+import {
+  nativeObject,
+  parseNativeJSON,
+  replaceNative,
+  type NativeObject
+} from '$lib/json/nativeJson';
 import { abortError, errorMessage } from '$lib/api/http';
 import {
   inspectRouting,
@@ -241,6 +246,17 @@ export class PlaygroundState {
     };
   }
 
+  private inspectionNativeRequest(dialect: string): NativeObject {
+    const request = nativeOperationRequest(
+      this.rawJson,
+      this.model.trim(),
+      dialect
+    );
+    return dialect === 'openai-completions'
+      ? (replaceNative(request, ['stream'], this.streamEnabled) as NativeObject)
+      : request;
+  }
+
   explain = async () => {
     this.simulationError = '';
     if (!this.model.trim()) {
@@ -284,11 +300,7 @@ export class PlaygroundState {
           ? {
               request:
                 registeredNative || selectedDialect === 'openai-completions'
-                  ? nativeOperationRequest(
-                      this.rawJson,
-                      this.model.trim(),
-                      selectedDialect!
-                    )
+                  ? this.inspectionNativeRequest(selectedDialect!)
                   : this.advancedRequest(),
               dialect: selectedDialect as
                 InspectRoutingInput['dialect'] | undefined

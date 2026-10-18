@@ -213,6 +213,30 @@ func TestCaptureDropsTruncatedUnaryOutput(t *testing.T) {
 	}
 }
 
+func TestCompletionCaptureRetainsInputAndRedactsOutput(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		p := redactedPolicy(t)
+		p.Include = []string{"input", "output", "tool_calls"}
+		m := testManager(p)
+		c := m.Resolve("project", "", "", "", "req")
+		c.CaptureDocument(map[string]json.RawMessage{"prompt": json.RawMessage(`"input secret"`)})
+		mode := "unary"
+		if stream {
+			mode = "streaming"
+			c.CaptureStreamFrame(wire.Completions, []byte("data: "+`{"choices":[{"index":0,"text":"output secret","finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n"))
+		} else {
+			c.CaptureResponse(wire.Completions, []byte(`{"choices":[{"index":0,"text":"output secret","finish_reason":"stop"}]}`))
+		}
+		if !c.Finish(CaptureIdentity{ProjectID: "project", Mode: mode, Outcome: "success"}, time.Now()) {
+			t.Fatalf("%s completion capture dropped", mode)
+		}
+		raw := string((<-m.queue).record)
+		if strings.Contains(raw, "secret") || !strings.Contains(raw, "input [REMOVED]") || !strings.Contains(raw, "output [REMOVED]") {
+			t.Fatalf("%s completion capture: %s", mode, raw)
+		}
+	}
+}
+
 func TestCaptureDropsFailedStreamsEvenWithCompleteSelectedContent(t *testing.T) {
 	for _, include := range [][]string{{"input"}, {"input", "output"}} {
 		for _, outcome := range []string{"failure", "cancelled", ""} {

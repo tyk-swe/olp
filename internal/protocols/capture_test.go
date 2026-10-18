@@ -2,10 +2,28 @@ package protocols
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
+
+func TestCaptureCompletions(t *testing.T) {
+	body := []byte(`{"choices":[{"index":0,"text":"one","finish_reason":"stop"},{"index":1,"text":"two","finish_reason":"eos_token"}]}`)
+	for _, output := range []bool{false, true} {
+		text, calls, err := CaptureResponse(wire.Completions, body, output, true)
+		want := ""
+		if output {
+			want = "one\ntwo"
+		}
+		if err != nil || text != want || len(calls) != 0 {
+			t.Fatalf("completion capture: %q %v %v", text, calls, err)
+		}
+	}
+	if _, _, err := CaptureResponse(wire.Completions, []byte(strings.Replace(string(body), `"stop"`, `"length"`, 1)), true, true); err == nil {
+		t.Fatal("truncated completion captured")
+	}
+}
 
 func TestCaptureDocumentToolCallsFamilies(t *testing.T) {
 	for _, tc := range []struct {

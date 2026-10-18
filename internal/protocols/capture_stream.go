@@ -170,7 +170,7 @@ func (s *CaptureStream) Push(frame []byte) error {
 			}
 			data := bytes.Join(lines, []byte("\n"))
 			if bytes.Equal(data, []byte("[DONE]")) {
-				if s.family == wire.Chat || s.family == wire.MistralFIM {
+				if s.family == wire.Completions || s.family == wire.Chat || s.family == wire.MistralFIM {
 					if len(s.groups) == 0 {
 						s.invalid = true
 					}
@@ -195,6 +195,8 @@ func (s *CaptureStream) Push(frame []byte) error {
 				break
 			}
 			switch s.family {
+			case wire.Completions:
+				s.completions(f)
 			case wire.Chat, wire.MistralFIM:
 				s.chat(f)
 			case wire.Responses:
@@ -211,6 +213,39 @@ func (s *CaptureStream) Push(frame []byte) error {
 		}
 	}
 	return s.bounds()
+}
+
+func (s *CaptureStream) completions(f map[string]json.RawMessage) {
+	if present(f["error"]) {
+		s.invalid = true
+	}
+	for _, raw := range s.array(f["choices"]) {
+		choice, err := s.object(raw)
+		if err != nil {
+			s.invalid = true
+			return
+		}
+		id := captureIndex(choice["index"])
+		if id == "" {
+			s.invalid = true
+			return
+		}
+		text := s.str(choice["text"])
+		if s.groups[id] && text != "" {
+			s.invalid = true
+		}
+		if _, ok := s.groups[id]; !ok {
+			s.groups[id] = false
+		}
+		s.add(id+"/text", text, false, false)
+		if reason := s.str(choice["finish_reason"]); reason != "" {
+			if !captureCompleteReason(wire.Completions, reason) {
+				s.invalid = true
+			}
+			s.groups[id] = true
+			s.done(id + "/text")
+		}
+	}
 }
 func captureIndex(raw json.RawMessage) string {
 	var n int
@@ -594,7 +629,7 @@ func (s *CaptureStream) Finish() (string, []json.RawMessage, error) {
 			return "", nil, errCaptureStream
 		}
 	}
-	if s.family == wire.Chat || s.family == wire.MistralFIM || s.family == wire.Gemini || s.family == wire.GeminiStream {
+	if s.family == wire.Completions || s.family == wire.Chat || s.family == wire.MistralFIM || s.family == wire.Gemini || s.family == wire.GeminiStream {
 		if len(s.groups) == 0 {
 			return "", nil, errCaptureStream
 		}
