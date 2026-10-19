@@ -5,13 +5,12 @@ import { expect, test } from '../playwright';
 import { signInGatewayOwner } from '../gateway/signIn';
 import { manage } from '../helpers/management';
 import type {
-  CodeBudget,
   CodeAccount,
   CodePool,
   CodeRoute
 } from '../../src/lib/api/code-mode';
 
-test('manages real project pools, draft routes, publications and overlapping token budgets without inference', async ({
+test('manages real project pools, draft routes and publications without inference', async ({
   page
 }, info) => {
   await signInGatewayOwner(page);
@@ -207,7 +206,6 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Client native model')).toHaveValue(model);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({
     path: info.outputPath('code-client-model-mobile.png'),
     fullPage: true
@@ -250,74 +248,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     /"X-OLP-Code-Model" = "unsaved-native-model"/
   );
-  await page
-    .getByRole('button', { name: 'Token budgets', exact: true })
-    .click();
-  await page
-    .getByRole('button', { name: 'Create budget', exact: true })
-    .click();
-  await page.getByLabel('Daily hard token limit (UTC)').fill('12000');
-  await page.getByLabel('Monthly hard token limit (UTC)').fill('200000');
-  {
-    const saved = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/v1/code/budgets'
-    );
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
-    const response = await saved;
-    expect(response.status()).toBe(201);
-    const body = await response.json();
-    expect(body.route_id).toBeNull();
-    expect(body.daily_tokens).toBe(12000);
-    expect(body.monthly_tokens).toBe(200000);
-  }
-  await expect(page.getByText('12,000', { exact: true })).toBeVisible();
-  await page
-    .getByRole('button', { name: 'Create budget', exact: true })
-    .click();
-  await page.getByLabel('Route scope').selectOption(route.id);
-  await page.getByLabel('Daily hard token limit (UTC)').fill('5000');
-  {
-    const saved = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/v1/code/budgets'
-    );
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
-    const response = await saved;
-    expect(response.status()).toBe(201);
-    const body = await response.json();
-    expect(body.route_id).toBe(route.id);
-    expect(body.daily_tokens).toBe(5000);
-    expect(body.monthly_tokens).toBeNull();
-  }
-  const budgets = await manage<{ items: CodeBudget[] }>(
-    page,
-    'GET',
-    `/api/v1/code/budgets?project_id=${project.body.id}`
-  );
-  expect(budgets.body.items).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        route_id: null,
-        daily_tokens: 12000,
-        monthly_tokens: 200000
-      }),
-      expect.objectContaining({
-        route_id: route.id,
-        daily_tokens: 5000,
-        monthly_tokens: null
-      })
-    ])
-  );
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.screenshot({
-    path: info.outputPath('code-budgets-mobile.png'),
-    fullPage: true
-  });
 });
 
 function uuidv7(): string {

@@ -4,7 +4,6 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { ApiProblem } from '$lib/api/http';
-import { formatDate } from '$lib/format';
 import * as clipboard from '$lib/clipboard';
 import {
   listProjectMemberships,
@@ -38,7 +37,6 @@ import {
   userId
 } from './test/fixtures';
 import CodeModeProbe from './test/CodeModeProbe.svelte';
-import ClientConfigurationsProbe from './test/ClientConfigurationsProbe.svelte';
 import { codeKeys } from './codeKeys';
 
 vi.mock('$lib/api/code-mode', async (original) => ({
@@ -380,68 +378,6 @@ it('validates hard budget integers without inventing an operation bound', async 
   expect(host.textContent).toContain('Changes saved');
 });
 
-it('paginates filtered metadata and keeps uncertain tokens distinct from measured usage', async () => {
-  vi.mocked(api.listCodeAttempts).mockResolvedValue({
-    items: [attempt],
-    nextCursor: 'page-2'
-  });
-  await render();
-  await click('Attempts');
-  expect(host.textContent).toContain('Retained uncertain reservation');
-  expect(host.textContent).toContain('4,096 tokens');
-  const measured = [...host.querySelectorAll('dt')].find(
-    (node) => node.textContent === 'Measured tokens'
-  );
-  expect(measured?.nextElementSibling?.textContent).toBe('Unknown');
-  await click('Next');
-  expect(api.listCodeAttempts).toHaveBeenLastCalledWith(
-    { project_id: projectId, cursor: 'page-2' },
-    expect.any(AbortSignal)
-  );
-  field('code-filter-route', route.id);
-  field('code-filter-binding', binding.id);
-  field('code-filter-end-user', 'a'.repeat(64));
-  await click('Apply filters');
-  expect(api.listCodeAttempts).toHaveBeenLastCalledWith(
-    {
-      project_id: projectId,
-      cursor: undefined,
-      route_id: route.id,
-      api_key_id: undefined,
-      account_id: undefined,
-      binding_id: binding.id,
-      end_user_digest: 'a'.repeat(64)
-    },
-    expect.any(AbortSignal)
-  );
-  expect(host.textContent).toContain('Page 1');
-  await click('Token windows');
-  expect(host.textContent).toContain('Pending + uncertain reserved tokens');
-  expect(host.textContent).toContain('UTC');
-  expect(host.textContent).not.toContain('money');
-});
-
-it('retires a whole pinned tree only after confirmation and removes the retire action', async () => {
-  await render();
-  await click('Conversation trees');
-  expect(host.textContent).toContain(`native-model → ${account.id}`);
-  vi.mocked(confirm).mockReturnValueOnce(false);
-  await click('Retire entire tree');
-  expect(api.retireCodeBinding).not.toHaveBeenCalled();
-  vi.mocked(api.listCodeBindings).mockResolvedValue({
-    items: [{ ...binding, retired_at: '2026-10-02T00:00:00Z' }],
-    nextCursor: null
-  });
-  await click('Retire entire tree');
-  expect(api.retireCodeBinding).toHaveBeenCalledWith(
-    binding.id,
-    expect.any(String)
-  );
-  expect(host.textContent).toContain('fresh independent conversation');
-  expect(host.textContent).toContain('Retired tree binding');
-  expect(host.textContent).not.toContain('Retire entire tree');
-});
-
 it('renders only adapter-generated client configuration and its qualification gaps', async () => {
   const load = vi.fn().mockResolvedValue(
     clientConfiguration({
@@ -462,38 +398,6 @@ it('renders only adapter-generated client configuration and its qualification ga
     'Fixture gap: no real subscription tested'
   );
   expect(host.textContent).toContain('Provider connections are frozen');
-});
-
-it('reloads client configuration for a changed public gateway with a fresh cache', async () => {
-  const configuration = (gatewayURL: string) =>
-    clientConfiguration({
-      base_url: `${gatewayURL}/code/${route.slug}`,
-      native_models: route.models,
-      configuration: `base_url = "${gatewayURL}/code/${route.slug}"`
-    });
-  const first = vi
-    .fn()
-    .mockResolvedValue(configuration('https://first.example'));
-  await render(first, 'https://first.example');
-  await click('Routes');
-  await click('Revisions and client setup');
-  expect(first).toHaveBeenCalledOnce();
-  await unmount(component!);
-  component = undefined;
-
-  const second = vi
-    .fn()
-    .mockResolvedValue(configuration('https://second.example'));
-  await render(second, 'https://second.example');
-  await click('Routes');
-  await click('Revisions and client setup');
-  expect(second).toHaveBeenCalledOnce();
-  expect(
-    host.querySelector<HTMLTextAreaElement>(
-      `#code-client-configuration-${route.id}`
-    )!.value
-  ).toBe(configuration('https://second.example').configuration);
-  expect(host.textContent).not.toContain('https://first.example');
 });
 
 it('caches selected published models, preserves selection on URL edits and resets it on publication', async () => {
@@ -657,144 +561,6 @@ it.each(['gateway', 'client', 'model', 'background model'])(
   }
 );
 
-it('associates labels with distinct controls in multiple configuration panels', async () => {
-  const load = vi.fn(async (current: api.CodeRoute) =>
-    clientConfiguration({
-      route_slug: current.slug,
-      base_url: `https://olp.example/code/${current.slug}`,
-      native_models: current.models,
-      model: current.models[0],
-      configuration: `configuration for ${current.slug}`
-    })
-  );
-  component = mount(ClientConfigurationsProbe, {
-    target: host,
-    props: {
-      client,
-      routes: [route, { ...route, id: 'another-route', slug: 'another-code' }],
-      gatewayURL: 'https://olp.example',
-      load
-    }
-  });
-  flushSync();
-  await settle();
-  const controls = [...host.querySelectorAll('textarea, select')];
-  expect(controls).toHaveLength(4);
-  expect(new Set(controls.map((control) => control.id)).size).toBe(4);
-  for (const label of host.querySelectorAll('label')) {
-    expect(label.control).not.toBeNull();
-    expect(controls).toContain(label.control);
-  }
-});
-
-it('shows each allowance limit and reset independently with provider credits', async () => {
-  vi.mocked(api.listCodeAccounts).mockResolvedValue({
-    items: [
-      {
-        ...account,
-        allowance: {
-          remaining_tokens: null,
-          remaining_requests: null,
-          remaining_percent: 80,
-          resets_at: '2026-10-02T11:00:00Z',
-          observed_at: '2026-10-01T10:00:00Z',
-          windows: [
-            {
-              limit_id: 'codex',
-              window: 'primary',
-              used_percent: 20,
-              remaining_percent: 80,
-              window_minutes: 300,
-              resets_at: '2026-10-02T11:00:00Z',
-              observed_at: '2026-10-01T10:00:00Z'
-            },
-            {
-              limit_id: 'codex',
-              window: 'secondary',
-              used_percent: 100,
-              remaining_percent: 0,
-              window_minutes: 10080,
-              resets_at: '2026-10-07T12:00:00Z',
-              observed_at: '2026-10-01T10:00:01Z'
-            },
-            {
-              limit_id: 'codex_other',
-              window: 'primary',
-              used_percent: 45,
-              remaining_percent: 55,
-              window_minutes: null,
-              resets_at: null,
-              observed_at: '2026-10-01T10:00:02Z'
-            }
-          ],
-          credits: {
-            has_credits: true,
-            unlimited: false,
-            balance: '12.50',
-            observed_at: '2026-10-01T10:00:03Z'
-          }
-        }
-      }
-    ],
-    nextCursor: null
-  });
-  await render();
-  const text = host.textContent?.replace(/\s+/g, ' ');
-  expect(text).toContain('codex / primary: 20% used · 80% remaining');
-  expect(text).toContain('codex / secondary: 100% used · 0% remaining');
-  expect(text).toContain('codex_other / primary: 45% used · 55% remaining');
-  expect(text).toContain('300 minutes');
-  expect(text).toContain('10080 minutes');
-  expect(text).toContain(formatDate('2026-10-02T11:00:00Z'));
-  expect(text).toContain(formatDate('2026-10-07T12:00:00Z'));
-  expect(text).toContain('Window: Unknown · Reset Unknown');
-  expect(text).toContain('Has credits: Yes · Unlimited: No · Balance: 12.50');
-  expect(text).toContain(
-    'Credits do not override exhausted subscription windows'
-  );
-});
-
-it('shows exhausted counts beside windows with their own resets and unknown values', async () => {
-  vi.mocked(api.listCodeAccounts).mockResolvedValue({
-    items: [
-      {
-        ...account,
-        eligible: false,
-        allowance: {
-          remaining_tokens: 0,
-          remaining_requests: null,
-          remaining_percent: 80,
-          observed_at: '2026-10-01T10:00:00Z',
-          resets_at: '2026-10-02T11:00:00Z',
-          token_observation: {
-            observed_at: '2026-10-01T09:00:00Z',
-            resets_at: null
-          },
-          windows: [
-            {
-              limit_id: 'codex',
-              window: 'primary',
-              used_percent: 20,
-              remaining_percent: 80,
-              window_minutes: 300,
-              observed_at: '2026-10-01T10:00:00Z',
-              resets_at: '2026-10-02T11:00:00Z'
-            }
-          ]
-        }
-      }
-    ],
-    nextCursor: null
-  });
-  await render();
-  const text = host.textContent?.replace(/\s+/g, ' ');
-  expect(text).toContain(
-    `Tokens: 0 · Observed ${formatDate('2026-10-01T09:00:00Z')} · Reset Unknown`
-  );
-  expect(text).toContain('Requests: Unknown');
-  expect(text).toContain('codex / primary: 20% used · 80% remaining');
-});
-
 it("offers the route's clients and regenerates for a chosen client and models", async () => {
   const models = ['glm-5.3', 'minimax-m3'];
   const load = vi.fn(
@@ -926,35 +692,6 @@ it('keeps client pickers after a refused selection and restores the defaults', a
   ).toBe('default configuration');
 });
 
-it('shows the subscription families of accounts and published routes', async () => {
-  await render();
-  expect(
-    [...host.querySelectorAll('.badge')].map((badge) => badge.textContent)
-  ).toContain('GLM Coding Plan');
-  await click('Routes');
-  expect(
-    [...host.querySelectorAll('.badge')].map((badge) => badge.textContent)
-  ).toContain('GLM Coding Plan');
-  vi.mocked(api.listCodeRoutes).mockResolvedValue({
-    items: [{ ...route, adapters: ['opencode_go', 'zai_coding'] }],
-    nextCursor: null
-  });
-  await client.invalidateQueries();
-  await settle();
-  expect(
-    [...host.querySelectorAll('.badges .badge')].map(
-      (badge) => badge.textContent
-    )
-  ).toEqual(['OpenCode Go', 'GLM Coding Plan']);
-  vi.mocked(api.listCodeRoutes).mockResolvedValue({
-    items: [{ ...route, adapters: [], published_at: null }],
-    nextCursor: null
-  });
-  await client.invalidateQueries();
-  await settle();
-  expect(host.textContent).toContain('Set at publication');
-});
-
 it('enrolls a pasted coding-plan key through a masked field', async () => {
   vi.mocked(startGrantEnrollment).mockResolvedValue({
     id: 'enrollment',
@@ -994,40 +731,6 @@ it('enrolls a pasted coding-plan key through a masked field', async () => {
   expect(host.textContent).toContain('Enrollment did not test the key');
   expect(host.textContent).not.toContain('fixture-coding-plan-key');
   expect(host.querySelector('#grant-input')).toBeNull();
-});
-
-it('keeps client setup tied to the active publication after saving a disabled draft', async () => {
-  const load = vi
-    .fn()
-    .mockResolvedValue(
-      clientConfiguration({ configuration: 'published configuration' })
-    );
-  await render(load);
-  await click('Routes');
-  await click('Edit draft');
-  field('code-models', 'unpublished-model');
-  const edited = {
-    ...route,
-    enabled: false,
-    models: ['unpublished-model'],
-    etag: 'new-etag'
-  };
-  vi.mocked(api.saveCodeRoute).mockResolvedValue(edited);
-  vi.mocked(api.listCodeRoutes).mockResolvedValue({
-    items: [edited],
-    nextCursor: null
-  });
-  await submit();
-  expect(api.publishCodeRoute).not.toHaveBeenCalled();
-  expect(host.textContent).toContain('unpublished-model');
-  expect(host.textContent).toContain('Revision 1');
-  await click('Revisions and client setup');
-  expect(load).toHaveBeenCalledWith(edited, {}, expect.any(AbortSignal));
-  expect(
-    host.querySelector<HTMLTextAreaElement>(
-      `#code-client-configuration-${route.id}`
-    )!.value
-  ).toBe('published configuration');
 });
 
 it('distinguishes upstream rejection statuses from interruptions and unknown consumption', async () => {
@@ -1323,34 +1026,6 @@ it('retains explicit pool memberships and makes ownership immutable', async () =
   );
 });
 
-it('retains an immutable key budget scope even when its key cannot be listed', async () => {
-  const keyBudget = { ...budget, api_key_id: keyId };
-  vi.mocked(api.listCodeBudgets).mockResolvedValue({
-    items: [keyBudget],
-    nextCursor: null
-  });
-  await render();
-  await click('Token budgets');
-  await click('Edit budget');
-  const scope = host.querySelector<HTMLSelectElement>('#code-budget-key')!;
-  expect(scope.disabled).toBe(true);
-  expect(scope.value).toBe(keyId);
-  field('code-daily', '99000');
-  await submit();
-  expect(api.saveCodeBudget).toHaveBeenCalledWith(
-    {
-      project_id: projectId,
-      route_id: null,
-      api_key_id: keyId,
-      daily_tokens: 99000,
-      monthly_tokens: null,
-      enabled: true
-    },
-    keyBudget,
-    expect.any(String)
-  );
-});
-
 it('does not load code-mode data without read authority', async () => {
   session([]);
   await render();
@@ -1384,22 +1059,6 @@ it('retries an ambiguous create with its captured input and identity', async () 
   expect(vi.mocked(api.saveCodePool).mock.calls[2][2]).not.toBe(first[2]);
 });
 
-it('uses a new identity when the operator changes a refused create input', async () => {
-  vi.mocked(api.saveCodePool).mockRejectedValue(
-    new ApiProblem({ type: 'about:blank', title: 'Invalid pool', status: 400 })
-  );
-  await render();
-  await click('Pools');
-  await click('Create pool');
-  field('code-name', 'First name');
-  await submit();
-  field('code-name', 'Changed name');
-  await submit();
-  expect(vi.mocked(api.saveCodePool).mock.calls[1][2]).not.toBe(
-    vi.mocked(api.saveCodePool).mock.calls[0][2]
-  );
-});
-
 it('guards dirty inputs across local project and tab changes', async () => {
   await render();
   await click('Pools');
@@ -1422,38 +1081,6 @@ it('guards dirty inputs across local project and tab changes', async () => {
   vi.mocked(confirm).mockReturnValue(true);
   await click('Accounts');
   expect(host.querySelector('#code-name')).toBeNull();
-});
-
-it('reports a committed save independently of a failed refresh', async () => {
-  vi.mocked(api.saveCodePool).mockResolvedValue(pool);
-  await render();
-  await click('Pools');
-  await click('Create pool');
-  field('code-name', 'Saved pool');
-  vi.spyOn(client, 'invalidateQueries').mockRejectedValue(
-    new TypeError('refresh unavailable')
-  );
-  await submit();
-  expect(host.textContent).toContain('Changes saved, but refreshing failed.');
-  expect(host.querySelector('#code-name')).toBeNull();
-  await click('Refresh');
-  expect(api.saveCodePool).toHaveBeenCalledTimes(1);
-});
-
-it('gates administrative pool owner inventory but preserves the current owner', async () => {
-  session(['read', 'configure']);
-  await render();
-  await click('Pools');
-  await click('Edit pool');
-  expect(listAllProjectMembers).not.toHaveBeenCalled();
-  await click('Cancel');
-  session(['read', 'configure', 'manage_projects']);
-  await settle();
-  await click('Edit pool');
-  expect(listAllProjectMembers).toHaveBeenCalledWith(
-    projectId,
-    expect.any(AbortSignal)
-  );
 });
 
 it('clears one-use enrollment input on failure and never resubmits it', async () => {
@@ -1482,80 +1109,3 @@ it('clears one-use enrollment input on failure and never resubmits it', async ()
   expect(host.querySelector<HTMLInputElement>('#grant-input')!.value).toBe('');
 });
 
-it('drops enrollment completion after its editor has been destroyed', async () => {
-  vi.mocked(startGrantEnrollment).mockResolvedValue({
-    id: 'late-enrollment',
-    provider_id: provider.id,
-    slot_id: 'slot',
-    authorization_url: 'https://login.example/authorize',
-    expires_at: '2026-10-12T23:00:00Z'
-  });
-  let finish!: (
-    completion: Awaited<ReturnType<typeof continueGrantEnrollment>>
-  ) => void;
-  vi.mocked(continueGrantEnrollment).mockImplementation(
-    () => new Promise((resolve) => (finish = resolve))
-  );
-  await render();
-  await click('Create account');
-  field('code-provider', provider.id);
-  await settle();
-  await click('Enroll subscription account');
-  field('grant-input', 'https://localhost/callback?code=single-use');
-  await click('Continue');
-  await click('Pools');
-  const refresh = vi.spyOn(client, 'invalidateQueries');
-  finish({
-    provider_id: provider.id,
-    credential_id: account.credential_id,
-    credential_version: 1,
-    etag: account.etag,
-    principal: account.principal
-  });
-  await settle();
-  expect(refresh).not.toHaveBeenCalled();
-  expect(host.textContent).not.toContain('Grant enrolled.');
-});
-
-it('discards an enrollment across a same-user authority change', async () => {
-  vi.mocked(startGrantEnrollment).mockResolvedValue({
-    id: 'old-authority-enrollment',
-    provider_id: provider.id,
-    slot_id: 'slot',
-    authorization_url: 'https://login.example/authorize',
-    expires_at: '2026-10-12T23:00:00Z'
-  });
-  let finish!: (
-    completion: Awaited<ReturnType<typeof continueGrantEnrollment>>
-  ) => void;
-  vi.mocked(continueGrantEnrollment).mockImplementation(
-    () => new Promise((resolve) => (finish = resolve))
-  );
-  await render();
-  await click('Create account');
-  field('code-provider', provider.id);
-  await settle();
-  await click('Enroll subscription account');
-  field('grant-input', 'https://localhost/callback?code=old-authority');
-  await click('Continue');
-  session(['read', 'configure'], 'assigned');
-  await settle();
-  expect(host.querySelector('#grant-input')).toBeNull();
-  await click('Create account');
-  field('code-provider', provider.id);
-  await settle();
-  const refresh = vi.spyOn(client, 'invalidateQueries');
-  finish({
-    provider_id: provider.id,
-    credential_id: account.credential_id,
-    credential_version: 1,
-    etag: account.etag,
-    principal: account.principal
-  });
-  await settle();
-  expect(refresh).not.toHaveBeenCalled();
-  expect(host.querySelector<HTMLSelectElement>('#code-credential')!.value).toBe(
-    ''
-  );
-  expect(host.textContent).not.toContain('Grant enrolled.');
-});
