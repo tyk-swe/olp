@@ -17,6 +17,9 @@ semantic versioning and take their source from root `package.json`;
   focused fixtures and an enumerated LiteLLM v1.105.0 vendor inventory. Service,
   live-vendor and performance qualification remain open; vendor parity is Partial.
 
+- OCR and search result inspection fails closed on unrecognized fields: only
+  nulls, numbers, booleans and empty containers pass uninspected, and upstream
+  search ids never reach the caller — transformed results mint `search_` ids.
 - Decisions refuse token caps, and USD caps outside caller-paid exempt routes,
   with `unbounded_work_budget` before dispatch. Route simulation and key
   inspection report the same refusal, including hierarchy and named-route budgets.
@@ -108,6 +111,18 @@ semantic versioning and take their source from root `package.json`;
 - The M9 endpoint ledger (`tests/clients/m9-endpoints.json`) and the pinned
   OpenAI Go SDK suite (`CLIENTS=m9-go tests/clients/run.sh`). Console/browser
   and live-provider qualification of both slices remain open.
+- OCR (`POST /v1/ocr`, M9.7) on the Mistral `mistral-ocr` profile for
+  `https:`/`data:` `document_url`/`image_url` documents, metering
+  `usage_info.pages_processed` as media units and enforcing the
+  unbounded-work-budget admission rules. File documents, annotations,
+  confidence/block controls and other fields are refused before dispatch.
+- Web search (`POST /v1/search` with `X-OLP-Route`, M9.7) on the Perplexity
+  `perplexity-search` profile plus transformed mappings to Tavily, Exa and
+  Parallel (`X-Api-Key` credential). Transformed results project the Perplexity
+  shape with gateway-minted `search_` ids; token, locale and freshness controls
+  are refused rather than approximated. Search attempts charge `per_request`.
+  Console playground templates and a Chromium gateway journey cover both
+  operations; per-provider live qualification remains open.
 - Opt-in encrypted response caching in a dedicated Valkey, with key isolation,
   native stream replay, request controls, scoped purge, zero-provider-cost
   accounting, metrics and Route Studio controls. Semantic caching uses Valkey

@@ -84,6 +84,7 @@ func New(opts Options) *Fixture {
 	f.registerOpenAI()
 	f.registerAnthropic()
 	f.registerGemini()
+	f.registerOperations()
 	f.mux.HandleFunc("GET "+RecordedPath, f.listRecorded)
 	f.mux.HandleFunc("DELETE "+RecordedPath, f.resetRecorded)
 	return f

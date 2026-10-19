@@ -1,0 +1,20 @@
+{
+  "id": "4a2f9c1e-0000-4d5e-9a11-7f2f0c5b6d71",
+  "results": [
+    {
+      "title": "Example report",
+      "url": "https://example.com/report",
+      "snippet": "Summary of the report.",
+      "date": "2026-10-01",
+      "last_updated": "2026-10-15"
+    },
+    {
+      "title": "Second result",
+      "url": "https://example.org/page",
+      "snippet": "Another snippet.",
+      "date": null,
+      "last_updated": null
+    }
+  ],
+  "server_time": "2026-10-19T07:00:00Z"
+}

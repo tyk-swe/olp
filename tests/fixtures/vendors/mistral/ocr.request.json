@@ -1,0 +1,7 @@
+{
+  "model": "mistral-ocr-latest",
+  "document": {
+    "type": "document_url",
+    "document_url": "https://example.com/report.pdf"
+  }
+}

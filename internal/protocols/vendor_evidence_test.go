@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -193,18 +194,32 @@ func checkEndpoints(t *testing.T, contract vendors.Contract, evidence vendorEvid
 		config.ProfileID, config.ProfileRevision = ref.ID, ref.Revision
 	}
 	for operation, want := range evidence.Endpoints {
-		family, ok := operationFamilies[operation]
-		if !ok {
-			continue
-		}
-		if target, err := config.TargetFamily(family); config.ProfileID != "" && err == nil {
-			family = target
-		}
-		got, err := config.URL(family, "model", false)
-		if profile, profiled := config.Profile(); profiled == nil {
-			if codec, registered := operationregistry.Lookup(profile.OperationDialect(operation)); registered && codec.Operation.ID == operation {
-				got, err = config.OperationURL(codec, "model")
+		cfg := config
+		if cfg.ProfileID == "" {
+			for _, d := range operationregistry.Default.Dialects() {
+				if d.Operation.ID == operation && slices.Contains(contract.Dialects, d.Identity.ID) {
+					cfg.ProfileID, cfg.ProfileRevision = d.Identity.ID, d.Identity.Revision
+				}
 			}
+		}
+		var got string
+		var err error
+		var resolved bool
+		if family, ok := operationFamilies[operation]; ok {
+			resolved = true
+			if target, terr := cfg.TargetFamily(family); cfg.ProfileID != "" && terr == nil {
+				family = target
+			}
+			got, err = cfg.URL(family, "model", false)
+		}
+		if profile, profiled := cfg.Profile(); profiled == nil {
+			if codec, registered := operationregistry.Lookup(profile.OperationDialect(operation)); registered && codec.Operation.ID == operation {
+				resolved = true
+				got, err = cfg.OperationURL(codec, "model")
+			}
+		}
+		if !resolved {
+			continue
 		}
 		if err != nil || got != want {
 			t.Fatalf("%s is addressed at %s (%v); the documentation says %s", operation, got, err, want)
@@ -245,15 +260,81 @@ func checkRefusals(t *testing.T, contract vendors.Contract, evidence vendorEvide
 	}
 }
 
+// operationCodec is the registered unary dialect a vendor's contract binds to
+// the operation: the preset profile's, or one the vendor's dialects name.
+func operationCodec(contract vendors.Contract, operation string) (operations.Dialect, bool) {
+	if ref := contract.Preset.Profile; ref != nil {
+		if profile, err := connectors.LookupProfile(ref.ID, ref.Revision); err == nil {
+			return operationregistry.Lookup(profile.OperationDialect(operation))
+		}
+	}
+	for _, d := range operationregistry.Default.Dialects() {
+		if d.Operation.ID == operation && slices.Contains(contract.Dialects, d.Identity.ID) {
+			return d, true
+		}
+	}
+	return operations.Dialect{}, false
+}
+
 func checkResponses(t *testing.T, contract vendors.Contract, evidence vendorEvidence) {
 	t.Helper()
 	for operation, documented := range evidence.Responses {
 		family, ok := operationFamilies[operation]
-		if !ok || !contract.Serves(operation) {
+		if !contract.Serves(operation) {
 			t.Fatalf("documented %s result for an operation the contract does not serve", operation)
 		}
 		checkBasis(t, operation+" result", documented.Basis)
 		body := vendorFixture(t, contract.ID, documented.File)
+		if codec, registered := operationCodec(contract, operation); registered {
+			descriptor := oif.Descriptor{Operation: codec.Operation, Dialect: codec.Identity}
+			input, err := oif.ParseJSON(vendorFixture(t, contract.ID, documented.Request), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := oif.NewRequest(descriptor, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := codec.Request(request); err != nil {
+				t.Fatal(err)
+			}
+			output, err := oif.ParseJSON(body, oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := oif.NewResult(descriptor, output, oif.Complete)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := codec.Result(request, result)
+			if err != nil {
+				t.Fatalf("%s result does not decode: %v", operation, err)
+			}
+			var usage *operations.Usage
+			if codec.Usage != nil {
+				usage = codec.Usage(view)
+			}
+			var wired *wire.Usage
+			if usage != nil {
+				wired = &wire.Usage{MediaUnits: usage.MediaUnits}
+				if usage.InputTokens != nil {
+					wired.InputTokens = *usage.InputTokens
+				}
+				if usage.OutputTokens != nil {
+					wired.OutputTokens = *usage.OutputTokens
+				}
+				if usage.TotalTokens != nil {
+					wired.TotalTokens = *usage.TotalTokens
+				}
+			}
+			if !sameUsage(wired, documented.Usage) {
+				t.Fatalf("%s usage = %+v, documented %s", operation, wired, documented.Usage)
+			}
+			continue
+		}
+		if !ok {
+			t.Fatalf("documented %s result for an operation the contract does not serve", operation)
+		}
 		if operation == "decision" {
 			codec, registered := operationregistry.Lookup("systemone")
 			if !registered || !slices.Contains(contract.Dialects, codec.Identity.ID) {

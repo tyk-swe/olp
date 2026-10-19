@@ -1,0 +1,7 @@
+{
+  "query": "latest airport delays",
+  "numResults": 2,
+  "contents": {
+    "highlights": true
+  }
+}

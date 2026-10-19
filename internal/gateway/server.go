@@ -608,7 +608,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		// Keep the deadline on failed reads so HTTP/1 body draining stays
 		// bounded; successful uploads must not limit the inference stream.
 		rc.SetReadDeadline(time.Time{})
-		if selected, err := s.selectUnary(x, family, dialect, body, r.PathValue("model")); selected || err != nil {
+		if selected, err := s.selectUnary(x, family, dialect, body, r.PathValue("model"), r.Header.Get(stateRouteHeader)); selected || err != nil {
 			if err != nil {
 				e = requestError(err)
 				x.failure, status = e, e.Status

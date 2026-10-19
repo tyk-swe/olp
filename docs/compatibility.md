@@ -184,6 +184,56 @@ Local evidence is the [M9 endpoint ledger](../tests/clients/m9-endpoints.json)
 and the focused `CLIENTS=m9-go tests/clients/run.sh` suite. Live-provider
 qualification remains required; this evidence does not qualify the rest of M9.
 
+### OCR and Web search
+
+`ocr` and `search` are separate unary operations. `POST /v1/ocr` binds its
+route from the request body's `model`; `POST /v1/search` carries no model
+field and binds its route from the required `X-OLP-Route` header — a missing
+header is refused `400 missing_required_parameter` before dispatch. Both
+operations also serve `/native/{dialect}/models/{route}` on strict routes, and
+serve transformed routes through their reviewed mappings. Neither operation
+uses the response cache.
+
+The `mistral-ocr` profile (vendor Mistral) admits `model`, `document`,
+`id`, `pages`, `include_image_base64`, `image_limit`, `image_min_size`,
+`table_format`, `extract_header` and `extract_footer`. Documents are inline
+`document_url` or `image_url` values over `https:` or `data:` only; file
+documents, annotations, `confidence_scores_granularity`, `include_blocks` and
+any other field are refused `400` before dispatch. Results require `model`,
+`pages[].index`, `pages[].markdown` and `usage_info.pages_processed`, which
+meters as media units. OCR follows the
+[unbounded-work-budget](gateway.md) refusal rules of Decisions: token and
+non-exempt cost caps refuse `422 unbounded_work_budget` before dispatch,
+waived only for caller-paid cost-exempt routes.
+
+The `perplexity-search` profile (vendor Perplexity) admits the frozen
+ApiSearchRequest: a string `query` (arrays refused), `max_results` 1–20,
+`search_type`, `max_tokens`, `max_tokens_per_page`, `country`,
+`search_language_filter`, an all-allow-or-all-deny `search_domain_filter` of
+at most 20 entries, and the date/recency filters. Transformed serving maps it
+to `tavily-search`, `exa-search` and `parallel-search` (vendors Tavily, Exa,
+Parallel; Parallel credentials arrive as `X-Api-Key`). The mappings always
+send `query` and `max_results` (default 10); `search_type` is admitted only
+absent or `web`; token, locale and freshness controls are refused `400`
+rather than approximated. Domain filters reach Exa as root domains expanded
+with `*.d` subdomains and Parallel verbatim (`.tld` and domain/path entries
+allowed, `-` stripped on deny); Tavily carries none. Projections answer with
+the Perplexity shape, a gateway-minted `search_<hex>` id — upstream ids never
+cross — `""` for absent titles, joined highlight/excerpt snippets, and
+per-target dates. A result page beyond `max_results` is a protocol violation.
+Search results carry no usage and settle like moderation: a validated result
+completes its evidence, and the attempt is charged at the target's
+`per_request` price.
+
+Local evidence is the [M9 endpoint ledger](../tests/clients/m9-endpoints.json),
+the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
+`tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
+required; this evidence does not qualify the rest of M9. Brave (GET-query
+transport), Azure Document Intelligence (202/poll transport) and Vertex
+document processing (GCP-authenticated profile) stay pending; Google's Custom
+Search JSON API is excluded — the provider discontinued new enrollment and
+the API sunsets on 2027-01-01.
+
 ### Files, batches, realtime, and provider-retained state
 
 The file, batch, and realtime rows are qualified to official OpenAI and Azure

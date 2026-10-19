@@ -29,6 +29,8 @@ const (
 	VertexEmbeddings      Format = "vertex_embeddings"
 	BedrockEmbeddings     Format = "bedrock_embeddings"
 	Rerank                Format = "rerank"
+	OCR                   Format = "ocr"
+	Search                Format = "search"
 	BedrockRerank         Format = "bedrock_rerank"
 	// Media families name their operation tag directly so the accounting
 	// envelope and selection registry agree on the operation string.
@@ -73,7 +75,7 @@ func (f Format) Operation() string {
 	case ImageGeneration, ImageEdit, ImageVariation, Speech,
 		Transcription, Translation, VideoCreate, VideoList, VideoGet,
 		VideoContent, VideoDelete, File, Batch,
-		Realtime, GeminiLive, BedrockInvoke:
+		Realtime, GeminiLive, BedrockInvoke, OCR, Search:
 		if f == GeminiLive {
 			return "realtime"
 		}

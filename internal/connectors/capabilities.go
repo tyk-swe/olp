@@ -81,6 +81,11 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		// its rerank shape serves it, through the connector it reviews.
 		connector, reviewed := vendors.Kind(vendor)
 		return surface == "openai" && mode == "unary" && (kind == "openai_compatible" || kind == "bedrock") && reviewed && connector == kind
+	case "ocr", "search":
+		// OCR and search are vendor-specific unary operations served
+		// through the connector the vendor's contract reviews.
+		connector, reviewed := vendors.Kind(vendor)
+		return surface == "openai" && mode == "unary" && reviewed && connector == kind
 	case "moderation", "image_variation", "translation":
 		return surface == "openai" && mode == "unary" && openaiFamily
 	case "image_generation":

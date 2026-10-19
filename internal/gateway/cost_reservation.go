@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -223,10 +224,14 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil {
-		u, ok := videoCreateUsage(x.media)
-		if !ok {
-			return costBound
+	if x.media != nil || x.operationName() == "search" {
+		u := usage.AttemptUsage{Complete: true}
+		if x.media != nil {
+			var ok bool
+			u, ok = videoCreateUsage(x.media)
+			if !ok {
+				return costBound
+			}
 		}
 		var priced *usage.Cost
 		if attempt.Price != nil {
@@ -264,7 +269,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 // dispatched attempt: the same worst case under the same pinned price and
 // discount, or false when the request cannot be bounded.
 func (x *call) targetCostBound(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
-	if x.operationName() == "decision" {
+	if operationregistry.UnboundedWork(x.operationName()) {
 		return usage.Cost{}, false
 	}
 	if x.callerCostExempt() || price == nil {
@@ -279,6 +284,9 @@ func (x *call) targetCostBound(provider routing.Provider, target routing.Target,
 			return usage.Cost{}, false
 		}
 		return price.Cost(u, x.request.startedAt, true, discount)
+	}
+	if x.operationName() == "search" {
+		return price.Cost(usage.AttemptUsage{Complete: true}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {
 		input, reply := max(resourceEstimate, x.estimate), int64(0)

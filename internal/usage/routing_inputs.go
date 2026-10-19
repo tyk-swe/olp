@@ -138,6 +138,9 @@ func (p *RoutingPrice) Scalar(operation string) *big.Rat {
 	if operation == "embeddings" {
 		amounts = []*string{p.InputPerMillion}
 	}
+	if operation == "search" {
+		amounts = []*string{p.PerRequest}
+	}
 	total := new(big.Rat)
 	for _, amount := range amounts {
 		if amount == nil {

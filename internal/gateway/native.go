@@ -32,6 +32,8 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 	mux.HandleFunc("OPTIONS /native/", s.preflight)
 	mux.HandleFunc("POST /v1/completions", s.inference(wire.Completions))
 	mux.HandleFunc("POST /v1/decisions", s.inference(wire.Decisions))
+	mux.HandleFunc("POST /v1/ocr", s.inference(wire.OCR))
+	mux.HandleFunc("POST /v1/search", s.inference(wire.Search))
 	mux.HandleFunc("POST /v1/systemone", s.inference(wire.SystemOne))
 	mux.HandleFunc("POST /v1/responses/input_tokens", s.inference(wire.InputTokens))
 	mux.HandleFunc("POST /v1/embeddings", s.inference(wire.Embeddings))

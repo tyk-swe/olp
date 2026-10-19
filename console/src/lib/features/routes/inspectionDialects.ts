@@ -15,6 +15,9 @@ export function inspectionDialects(
   }
   if (operation === 'decision' && surface === 'openai')
     return ['openai-decisions', 'systemone'];
+  if (operation === 'ocr' && surface === 'openai') return ['mistral-ocr'];
+  if (operation === 'search' && surface === 'openai')
+    return ['perplexity-search'];
   if (operation === 'token_count') {
     if (surface === 'openai') return ['openai-input-tokens'];
     if (surface === 'anthropic') return ['anthropic-count-tokens'];

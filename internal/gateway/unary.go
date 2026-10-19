@@ -51,16 +51,23 @@ func (x *call) clientSurface() string {
 	}
 	return x.surfaceName()
 }
-func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body []byte, pathModel string) (bool, error) {
+func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body []byte, pathModel, routeHeader string) (bool, error) {
 	explicit := dialect != ""
 	if !explicit {
-		ids := map[wire.Format]string{wire.Decisions: "openai-decisions", wire.SystemOne: "systemone", wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.Format("bedrock_count"): "bedrock-count-tokens"}
+		ids := map[wire.Format]string{wire.Decisions: "openai-decisions", wire.SystemOne: "systemone", wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.OCR: "mistral-ocr", wire.Search: "perplexity-search", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.Format("bedrock_count"): "bedrock-count-tokens"}
 		dialect = ids[family]
 		if dialect == "" {
 			return false, nil
 		}
 	}
 	model := pathModel
+	if family == wire.Search && !explicit {
+		// Perplexity Search has no model field; the route arrives by header.
+		if routeHeader == "" {
+			return true, invalidRequest("missing_required_parameter", "X-OLP-Route must name a search route.", nil)
+		}
+		model = routeHeader
+	}
 	if model == "" {
 		var header struct {
 			Model string `json:"model"`
@@ -73,15 +80,15 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	// parser that takes any other request cannot read their bodies, so an
 	// unknown or transformed route is refused here with its own error.
 	nativeOnly := family == wire.GeminiEmbeddings || family == wire.GeminiEmbeddingsBatch
-	decision := family == wire.Decisions || family == wire.SystemOne
-	if !explicit && !nativeOnly && !decision && (!exists || !route.Fidelity.Strict()) {
+	serving := operationregistry.TransformedServing(family.Operation())
+	if !explicit && !nativeOnly && !serving && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
 	if !exists {
 		return true, modelNotFound(model)
 	}
 	x.route = &route
-	if !x.strict() && !decision {
+	if !x.strict() && !serving {
 		return true, operations.Error("target_capability", "/route", "strict_native_operation", "Registered native operation endpoints require a strict route.")
 	}
 	codec, ok := operationregistry.Lookup(dialect)
@@ -184,7 +191,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	}
 	budgetRoute := *x.route
 	budgetRoute.CallerCostExempt = x.callerCostExempt()
-	if x.operationName() == "decision" {
+	if operationregistry.UnboundedWork(x.operationName()) {
 		if err := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
 			return err
 		}
@@ -194,7 +201,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	options.Accept = func(p routing.Provider, t routing.Target) error {
 		// Decisions does not expose a provider-enforced output bound. An input
 		// estimate alone cannot enforce a token or spend cap on this request.
-		if x.operationName() == "decision" {
+		if operationregistry.UnboundedWork(x.operationName()) {
 			authority := x.admissionAuthority(x.authority)
 			if err := unboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
 				incompatible = err
@@ -234,7 +241,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	if len(plan.Attempts) == 0 {
 		if incompatible != nil {
 			problem := requestError(incompatible)
-			if x.operationName() == "decision" && problem.Code == "target_capability" {
+			if operationregistry.UnboundedWork(x.operationName()) && problem.Code == "target_capability" {
 				problem.Status = http.StatusUnprocessableEntity
 			}
 			return problem

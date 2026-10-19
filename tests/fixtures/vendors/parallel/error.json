@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "error": {
+    "ref_id": "ref-001",
+    "message": "search_queries is required"
+  }
+}

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -178,5 +180,99 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 	}
 	if resp.StatusCode != 200 || !json.Valid(b) {
 		t.Fatalf("native generation status=%d valid_json=%v", resp.StatusCode, json.Valid(b))
+	}
+}
+
+// TestLiveProviderOperation certifies a reviewed OCR or search dialect against
+// the live provider it binds to. It is opt-in only: it sends a probe request
+// and incurs provider charges.
+func TestLiveProviderOperation(t *testing.T) {
+	dialect := os.Getenv("OLP_LIVE_OPERATION_DIALECT")
+	if dialect == "" {
+		t.Skip("set OLP_LIVE_OPERATION_DIALECT; this test incurs provider charges")
+	}
+	codec, ok := operationregistry.Lookup(dialect)
+	if !ok {
+		t.Fatalf("unknown operation dialect %q", dialect)
+	}
+	require := func(name string) string {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+		t.Fatalf("%s is required", name)
+		return ""
+	}
+	c := Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: dialect, ProfileRevision: ProfileRevision}
+	var secret string
+	switch dialect {
+	case "mistral-ocr":
+		c.VendorID, c.Endpoint = "mistral", "https://api.mistral.ai/v1"
+		secret = require("OLP_LIVE_MISTRAL_API_KEY")
+	case "perplexity-search":
+		c.VendorID, c.Endpoint = "perplexity", "https://api.perplexity.ai"
+		secret = require("OLP_LIVE_PERPLEXITY_API_KEY")
+	case "tavily-search":
+		c.VendorID, c.Endpoint = "tavily", "https://api.tavily.com"
+		secret = require("OLP_LIVE_TAVILY_API_KEY")
+	case "exa-search":
+		c.VendorID, c.Endpoint = "exa", "https://api.exa.ai"
+		secret = require("OLP_LIVE_EXA_API_KEY")
+	case "parallel-search":
+		c.VendorID, c.Endpoint = "parallel", "https://api.parallel.ai/v1"
+		secret = require("OLP_LIVE_PARALLEL_API_KEY")
+	default:
+		t.Fatalf("dialect %q has no live qualification wiring", dialect)
+	}
+	if override := os.Getenv("OLP_LIVE_ENDPOINT"); override != "" {
+		c.Endpoint = override
+	}
+	model := os.Getenv("OLP_LIVE_MODEL")
+	if model == "" {
+		model = "olp-live-probe"
+	}
+	body := codec.Probe(model)
+	endpoint, err := c.OperationURL(codec, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if _, err := NewAuth(&egress.Policy{}).Apply(t.Context(), req, c, []byte(secret), body); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%s returned %d: %s", endpoint, resp.StatusCode, raw)
+	}
+	in, err := oif.ParseJSON(body, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := oif.NewRequest(oif.Descriptor{Operation: codec.Operation, Dialect: codec.Identity}, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := oif.ParseJSON(raw, oif.Limits{})
+	if err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	result, err := oif.NewResult(oif.Descriptor{Operation: codec.Operation, Dialect: codec.Identity}, out, oif.Complete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := codec.Result(request, result); err != nil {
+		t.Fatalf("live result violates the %s contract: %v", dialect, err)
 	}
 }

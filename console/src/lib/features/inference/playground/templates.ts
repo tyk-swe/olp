@@ -292,6 +292,55 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'mistral-ocr',
+    label: 'OCR · Mistral',
+    operation: 'ocr',
+    nativeDialect: 'mistral-ocr',
+    request: {
+      model: '',
+      document: {
+        type: 'image_url',
+        image_url:
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+      }
+    }
+  },
+  {
+    key: 'perplexity-search',
+    label: 'Web search · Perplexity',
+    operation: 'search',
+    nativeDialect: 'perplexity-search',
+    request: { query: 'What is an API gateway?', max_results: 3 }
+  },
+  {
+    key: 'tavily-search',
+    label: 'Web search · Tavily',
+    operation: 'search',
+    nativeDialect: 'tavily-search',
+    request: { query: 'What is an API gateway?', max_results: 3 }
+  },
+  {
+    key: 'exa-search',
+    label: 'Web search · Exa',
+    operation: 'search',
+    nativeDialect: 'exa-search',
+    request: {
+      query: 'What is an API gateway?',
+      numResults: 3,
+      contents: { highlights: true }
+    }
+  },
+  {
+    key: 'parallel-search',
+    label: 'Web search · Parallel',
+    operation: 'search',
+    nativeDialect: 'parallel-search',
+    request: {
+      search_queries: ['What is an API gateway?'],
+      advanced_settings: { max_results: 3 }
+    }
+  },
+  {
     key: 'tei-classification',
     label: 'Classification · TEI predict',
     operation: 'classification',

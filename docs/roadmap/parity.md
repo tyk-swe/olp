@@ -4,7 +4,7 @@ The LiteLLM v1.105.0 gateway baseline reviewed 2026-10-13 is compared with
 the repository's OLP 0.1.0 implementation, reconciled 2026-10-18. This is the
 [roadmap](README.md)'s tracked capability scope, not a live-provider or released
 image qualification claim. OLP-only additions have no comparative row. Current
-counts: 23 Ahead, 103 Parity, 7 Partial, 18 Gap, 2 Excluded (153 capabilities;
+counts: 23 Ahead, 103 Parity, 9 Partial, 16 Gap, 2 Excluded (153 capabilities;
 legend rows excluded). Coverage is 126/151 (83.4%).
 
 Each row describes the supported scope stated in its OLP column, not every
@@ -52,8 +52,8 @@ of [M3](m03-routing-resilience.md).
 | Vector stores and retrieval | [/vector_stores](https://docs.litellm.ai/docs/vector_stores/), [RAG query](https://docs.litellm.ai/docs/rag_query) | Not available | `Gap` | M9.4 |
 | Realtime over WebSocket | [/realtime](https://docs.litellm.ai/docs/realtime) | OpenAI and Azure, plus Gemini Live | `Partial` | M9.6 |
 | Realtime over WebRTC | [WebRTC](https://docs.litellm.ai/docs/proxy/realtime_webrtc) | Not available | `Gap` | M9.6 |
-| OCR | [/ocr](https://docs.litellm.ai/docs/ocr), Mistral request shape | Not available | `Gap` | M9.7 |
-| Web search | [/search](https://docs.litellm.ai/docs/search/), Perplexity request shape | Not available | `Gap` | M9.7 |
+| OCR | [/ocr](https://docs.litellm.ai/docs/ocr), Mistral request shape | `POST /v1/ocr` and `/native/mistral-ocr/models/{route}`: Mistral `mistral-ocr` profile for URL/data-URI documents, page count metering; file documents, annotations and block/confidence controls refused | `Partial` | M9.7 |
+| Web search | [/search](https://docs.litellm.ai/docs/search/), Perplexity request shape | `POST /v1/search` (`X-OLP-Route`) plus native paths: Perplexity native, transformed mappings to Tavily, Exa and Parallel with `search_` projected ids; token/locale/freshness controls refused | `Partial` | M9.7 |
 | Containers, skills and evals | [/containers](https://docs.litellm.ai/docs/containers), [/skills](https://docs.litellm.ai/docs/skills), [/evals](https://docs.litellm.ai/docs/evals_api) | Not available | `Gap` | M9.8 |
 | Vendor pass-through endpoints | [Pass-through](https://docs.litellm.ai/docs/pass_through/intro) | Only registered surfaces | `Gap` | M9.9 |
 | Model listing | `/v1/models`, model info and [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) | Native key-visible route lists and a [scoped catalog](../model-catalog.md) with facts, current prices and SDK samples; public disclosure is separately authorized | `Parity` | M11.4 |

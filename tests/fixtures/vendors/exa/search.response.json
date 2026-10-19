@@ -1,0 +1,16 @@
+{
+  "requestId": "req-001",
+  "results": [
+    {
+      "id": "doc-1",
+      "title": "Example report",
+      "url": "https://example.com/report",
+      "publishedDate": "2026-10-01T00:00:00Z",
+      "author": "Reporter",
+      "highlights": [
+        "Summary of the report."
+      ]
+    }
+  ],
+  "costDollars": 0.0125
+}

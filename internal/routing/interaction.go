@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/realtimecontract"
 )
 
@@ -134,7 +135,7 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
-		if !route.Fidelity.Strict() && op != "decision" {
+		if !route.Fidelity.Strict() && !operationregistry.TransformedServing(op) {
 			continue
 		}
 		if op == "generation" || op == "batch" || op == "realtime" || mediacontract.IsMediaOperation(op) {

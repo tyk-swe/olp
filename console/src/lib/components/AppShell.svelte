@@ -141,11 +141,8 @@
         >
           <!-- Chromium's accessibility tree does not consistently expose the native summary role. -->
           <!-- svelte-ignore a11y_no_redundant_roles -->
-          <summary
-            role="button"
-            aria-label="Open account menu"
-            aria-expanded={accountMenuOpen}
-          >
+          <summary role="button" aria-expanded={accountMenuOpen}>
+            <span class="sr-only">Open account menu:</span>
             <span class="avatar" aria-hidden="true"
               >{user?.display_name?.slice(0, 1).toUpperCase() ?? 'A'}</span
             >

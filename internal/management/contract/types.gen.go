@@ -4237,10 +4237,12 @@ const (
 	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
 	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
 	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
+	SimulationDialectExaSearch                SimulationDialect = "exa-search"
 	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
 	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
 	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
 	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
+	SimulationDialectMistralOcr               SimulationDialect = "mistral-ocr"
 	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
 	SimulationDialectOpenaiCompletions        SimulationDialect = "openai-completions"
 	SimulationDialectOpenaiDecisions          SimulationDialect = "openai-decisions"
@@ -4248,8 +4250,11 @@ const (
 	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
 	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
 	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
+	SimulationDialectParallelSearch           SimulationDialect = "parallel-search"
+	SimulationDialectPerplexitySearch         SimulationDialect = "perplexity-search"
 	SimulationDialectRerank                   SimulationDialect = "rerank"
 	SimulationDialectSystemone                SimulationDialect = "systemone"
+	SimulationDialectTavilySearch             SimulationDialect = "tavily-search"
 	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
 	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
 	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
@@ -4273,6 +4278,8 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectBedrockEmbeddings:
 		return true
+	case SimulationDialectExaSearch:
+		return true
 	case SimulationDialectGeminiBatchEmbeddings:
 		return true
 	case SimulationDialectGeminiCountTokens:
@@ -4280,6 +4287,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectGeminiEmbeddings:
 		return true
 	case SimulationDialectGeminiGenerateContent:
+		return true
+	case SimulationDialectMistralOcr:
 		return true
 	case SimulationDialectOpenaiChat:
 		return true
@@ -4295,9 +4304,15 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectOpenaiResponses:
 		return true
+	case SimulationDialectParallelSearch:
+		return true
+	case SimulationDialectPerplexitySearch:
+		return true
 	case SimulationDialectRerank:
 		return true
 	case SimulationDialectSystemone:
+		return true
+	case SimulationDialectTavilySearch:
 		return true
 	case SimulationDialectTeiClassification:
 		return true

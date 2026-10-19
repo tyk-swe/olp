@@ -32682,7 +32682,12 @@
             "tei-tokenize",
             "openai-completions",
             "openai-decisions",
-            "systemone"
+            "systemone",
+            "mistral-ocr",
+            "perplexity-search",
+            "tavily-search",
+            "exa-search",
+            "parallel-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -33083,7 +33088,12 @@
             "tei-tokenize",
             "openai-completions",
             "openai-decisions",
-            "systemone"
+            "systemone",
+            "mistral-ocr",
+            "perplexity-search",
+            "tavily-search",
+            "exa-search",
+            "parallel-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },

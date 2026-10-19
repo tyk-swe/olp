@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -63,7 +64,7 @@ func (x *call) cacheHeaders(h http.Header) {
 
 func (s *Server) initializeCache(x *call) *Error {
 	// New endpoint contracts require explicit cache qualification.
-	if x.family == wire.Completions || x.operationName() == "decision" {
+	if x.family == wire.Completions || operationregistry.TransformedServing(x.operationName()) {
 		return nil
 	}
 	if x.route.Cache == nil && x.request.cacheDirectives == "" {

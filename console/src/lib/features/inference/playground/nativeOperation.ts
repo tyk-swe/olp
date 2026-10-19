@@ -33,8 +33,23 @@ export const nativeOperationDialects = {
     'gemini-count-tokens',
     'bedrock-count-tokens',
     'tei-tokenize'
+  ],
+  ocr: ['mistral-ocr'],
+  search: [
+    'perplexity-search',
+    'tavily-search',
+    'exa-search',
+    'parallel-search'
   ]
 } as const;
+
+/** Operations that serve publicly on strict and transformed routes: they need
+ * the public native client rather than the negotiated composer. */
+export const publicNativeOperations: ReadonlySet<string> = new Set([
+  'decision',
+  'ocr',
+  'search'
+]);
 
 export type NativeOperation = keyof typeof nativeOperationDialects;
 const bodyModelDialects = new Set([
@@ -49,8 +64,15 @@ const bodyModelDialects = new Set([
   'cohere-rerank-v2',
   'openai-moderation',
   'openai-input-tokens',
-  'anthropic-count-tokens'
+  'anthropic-count-tokens',
+  'mistral-ocr'
 ]);
+
+// Search dialects carry the route in a header or the native path, never a
+// body model field.
+const routeCarriedDialects: ReadonlySet<string> = new Set(
+  nativeOperationDialects.search
+);
 
 export function nativeDialects(operation: string): readonly string[] {
   return Object.hasOwn(nativeOperationDialects, operation)
@@ -76,6 +98,10 @@ export function nativeOperationRequest(
   if (!nativeObject(parsed))
     throw new Error('The native operation request must be a JSON object.');
   const model = parsed.model;
+  if (model !== undefined && routeCarriedDialects.has(dialect))
+    throw new Error(
+      'Search requests carry no model field; the route goes in X-OLP-Route or the native path.'
+    );
   if (model !== undefined && model !== '' && model !== route)
     throw new Error('The native request names another route.');
   if (model === '' && bodyModelDialects.has(dialect))
@@ -119,6 +145,7 @@ export async function runNativeOperation(
   });
   if (operation === 'embeddings')
     headers.set('X-OLP-Client-Contract', 'raw-vector-storage/1');
+  if (dialect === 'perplexity-search') headers.set('X-OLP-Route', route);
   const response = await gatewayFetch(
     operation === 'completions'
       ? '/v1/completions'
@@ -126,7 +153,11 @@ export async function runNativeOperation(
         ? dialect === 'systemone'
           ? '/v1/systemone'
           : '/v1/decisions'
-        : `/native/${dialect}/models/${encodeURIComponent(route)}`,
+        : operation === 'ocr'
+          ? '/v1/ocr'
+          : dialect === 'perplexity-search'
+            ? '/v1/search'
+            : `/native/${dialect}/models/${encodeURIComponent(route)}`,
     {
       method: 'POST',
       headers,

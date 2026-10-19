@@ -216,6 +216,9 @@ func capabilityOptions() []CapabilityInput {
 	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation", "decision"} {
 		out = append(out, tuple(operation, "openai", "unary"))
 	}
+	for _, operation := range []string{"ocr", "search"} {
+		out = append(out, tuple(operation, "openai", "unary"), tuple(operation, "native", "unary"))
+	}
 	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
 		out = append(out, tuple(operation, "openai", "unary"), tuple(operation, "openai", "streaming"))
 	}
@@ -296,6 +299,8 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	}
 	switch c.Operation {
 	case "generation", "token_count", "embeddings", "moderation", "rerank":
+		return true
+	case "ocr", "search":
 		return true
 	case "batch", "realtime":
 		return kind == KindOpenAI || kind == KindAzure

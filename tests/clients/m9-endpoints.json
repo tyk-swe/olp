@@ -60,6 +60,23 @@
       "source": "systemone",
       "target": "openai-decisions",
       "reason": "Accepted user constraint: keep incompatible mappings unavailable; System One 0.2.0 cannot represent refusals."
+    },
+    {
+      "family": "ocr",
+      "fields": [
+        "file documents",
+        "annotations"
+      ],
+      "reason": "Provider-retained files and annotation passes price and contract outside the frozen document contract."
+    },
+    {
+      "family": "search",
+      "fields": [
+        "array queries",
+        "token budgets",
+        "locale and freshness filters"
+      ],
+      "reason": "No qualified target mapping carries them; refused rather than approximated."
     }
   ],
   "endpoints": [
@@ -4408,13 +4425,42 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+       "model",
+       "document (document_url/image_url, https or data:)",
+       "id",
+       "pages",
+       "include_image_base64",
+       "image_limit",
+       "image_min_size",
+       "table_format",
+       "extract_header",
+       "extract_footer"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+       "internal/operations/ocr/ocr.go",
+       "internal/operations/ocr/ocr_test.go",
+       "internal/gateway/ocr_search_test.go",
+       "internal/routes/ocr_search_test.go",
+       "internal/operationplan/search_test.go",
+       "tests/clients/m9sdk/ocr_search_test.go",
+       "tests/fixtures/vendors/mistral/contract.json",
+       "console/tests/gateway/ocr-search.spec.ts"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "refusals": [
+       "file documents and file_id",
+       "annotation fields",
+       "confidence_scores_granularity",
+       "include_blocks",
+       "non-https/non-data document URLs",
+       "input guardrails",
+       "response caching",
+       "token and non-exempt cost caps unless the route is caller-paid cost-exempt"
+      ],
+      "reference_revision": "Mistral OCR OpenAPI, observed 2026-10-19"
     },
     {
       "slice": "M9.7",
@@ -4435,7 +4481,7 @@
       "evidence": [],
       "live_qualification": "required",
       "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "reference_revision": "unqualified: requires a bounded async 202/poll transport"
     },
     {
       "slice": "M9.7",
@@ -4456,7 +4502,7 @@
       "evidence": [],
       "live_qualification": "required",
       "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "reference_revision": "unqualified: requires a GCP-authenticated document-processing profile"
     },
     {
       "slice": "M9.7",
@@ -4471,13 +4517,39 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+       "query",
+       "max_results",
+       "search_type",
+       "max_tokens",
+       "max_tokens_per_page",
+       "country",
+       "search_language_filter",
+       "search_domain_filter",
+       "search_after_date_filter",
+       "search_before_date_filter",
+       "last_updated_after_filter",
+       "last_updated_before_filter",
+       "search_recency_filter"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+       "internal/operations/search/search.go",
+       "internal/operations/search/search_test.go",
+       "internal/gateway/ocr_search_test.go",
+       "internal/routes/ocr_search_test.go",
+       "tests/clients/m9sdk/ocr_search_test.go",
+       "tests/fixtures/vendors/perplexity/contract.json",
+       "console/tests/gateway/ocr-search.spec.ts"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "refusals": [
+       "array query",
+       "response caching",
+       "fields the qualified target mappings cannot represent"
+      ],
+      "reference_revision": "Perplexity Search OpenAPI, observed 2026-10-19"
     },
     {
       "slice": "M9.7",
@@ -4492,13 +4564,35 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+       "query",
+       "max_results"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+       "internal/operations/search/mapping.go",
+       "internal/operations/search/mapping_test.go",
+       "internal/operations/search/search.go",
+       "internal/gateway/ocr_search_test.go",
+       "internal/operationplan/search_test.go",
+       "tests/clients/m9sdk/ocr_search_test.go",
+       "tests/fixtures/vendors/tavily/contract.json",
+       "console/tests/gateway/ocr-search.spec.ts"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "refusals": [
+       "array query",
+       "max_tokens",
+       "max_tokens_per_page",
+       "country",
+       "search_language_filter",
+       "date, recency and last-updated filters",
+       "search_type other than web",
+       "response caching",
+       "search_domain_filter"
+      ],
+      "reference_revision": "Tavily Search API, observed 2026-10-19"
     },
     {
       "slice": "M9.7",
@@ -4513,13 +4607,37 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+       "query",
+       "numResults",
+       "contents.highlights",
+       "includeDomains",
+       "excludeDomains"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+       "internal/operations/search/mapping.go",
+       "internal/operations/search/mapping_test.go",
+       "internal/operations/search/search.go",
+       "internal/gateway/ocr_search_test.go",
+       "internal/operationplan/search_test.go",
+       "tests/clients/m9sdk/ocr_search_test.go",
+       "tests/fixtures/vendors/exa/contract.json"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "refusals": [
+       "array query",
+       "max_tokens",
+       "max_tokens_per_page",
+       "country",
+       "search_language_filter",
+       "date, recency and last-updated filters",
+       "search_type other than web",
+       "response caching",
+       "non-root-domain filters (paths, TLDs, dotless parts)"
+      ],
+      "reference_revision": "Exa Search API, observed 2026-10-19"
     },
     {
       "slice": "M9.7",
@@ -4540,7 +4658,7 @@
       "evidence": [],
       "live_qualification": "required",
       "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "reference_revision": "unqualified: requires a GET query unary transport"
     },
     {
       "slice": "M9.7",
@@ -4556,12 +4674,16 @@
       "mode": "unary",
       "sdk": null,
       "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
+      "status": "excluded",
+      "expected_refusal": {
+       "http_status": null,
+       "code": "provider_discontinued",
+       "reason": "Google closed the Custom Search JSON API to new customers and discontinues it on 2027-01-01."
+     },
       "evidence": [],
       "live_qualification": "required",
       "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "reference_revision": "unqualified: provider discontinued"
     },
     {
       "slice": "M9.7",
@@ -4576,13 +4698,35 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+       "search_queries",
+       "advanced_settings.max_results",
+       "advanced_settings.source_policy.include_domains",
+       "advanced_settings.source_policy.exclude_domains"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+       "internal/operations/search/mapping.go",
+       "internal/operations/search/mapping_test.go",
+       "internal/operations/search/search.go",
+       "internal/gateway/ocr_search_test.go",
+       "tests/clients/m9sdk/ocr_search_test.go",
+       "tests/fixtures/vendors/parallel/contract.json"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: no locked SDK/reference fixture yet"
+      "refusals": [
+       "array query",
+       "max_tokens",
+       "max_tokens_per_page",
+       "country",
+       "search_language_filter",
+       "date, recency and last-updated filters",
+       "search_type other than web",
+       "response caching",
+       "dotless domain filter entries"
+      ],
+      "reference_revision": "Parallel Search API, observed 2026-10-19"
     },
     {
       "slice": "M9.8",

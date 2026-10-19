@@ -213,6 +213,8 @@ export const operationOptions = [
   ['video_get', 'Video status'],
   ['video_content', 'Video content'],
   ['video_delete', 'Delete video'],
+  ['ocr', 'OCR'],
+  ['search', 'Web search'],
   ['moderation', 'Moderation'],
   ['batch', 'Batches'],
   ['realtime', 'Realtime sessions'],

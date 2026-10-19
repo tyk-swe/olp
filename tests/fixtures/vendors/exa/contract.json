@@ -1,0 +1,28 @@
+{
+  "vendor": "exa",
+  "documentation_url": "https://docs.exa.ai/reference/search",
+  "reviewed_at": "2026-10-19",
+  "notes": "Built from the published Exa /search schema. The response and the 400 error are schema-built. These are offline contract fixtures, not live-provider qualification.",
+  "endpoints": {
+    "search": "https://api.exa.ai/search"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "search": {
+      "request": "search.request.json",
+      "file": "search.response.json",
+      "basis": "schema"
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 400,
+    "envelope": {
+      "type": "",
+      "code": "",
+      "message": "query is required"
+    },
+    "class": "upstream_client"
+  }
+}

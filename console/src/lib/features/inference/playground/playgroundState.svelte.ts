@@ -22,7 +22,11 @@ import {
   type PlaygroundRequest,
   type PlaygroundStreamDone
 } from './api';
-import { nativeDialects, nativeOperationRequest } from './nativeOperation';
+import {
+  nativeDialects,
+  nativeOperationRequest,
+  publicNativeOperations
+} from './nativeOperation';
 import { playgroundTemplates, templateFor } from './templates';
 import {
   parseMaxOutputTokens,
@@ -266,7 +270,7 @@ export class PlaygroundState {
     try {
       const version = this.inspectionInputs();
       const registeredNative =
-        (this.strictSelected || this.operation === 'decision') &&
+        (this.strictSelected || publicNativeOperations.has(this.operation)) &&
         this.composer === 'advanced' &&
         nativeDialects(this.operation).length > 0;
       const selectedDialect = registeredNative
@@ -275,12 +279,11 @@ export class PlaygroundState {
       const input: InspectRoutingInput = {
         route: this.model.trim(),
         operation: this.activeOperation,
-        surface:
-          this.activeOperation === 'decision'
-            ? 'openai'
-            : registeredNative
-              ? 'native'
-              : this.surface,
+        surface: publicNativeOperations.has(this.activeOperation)
+          ? 'openai'
+          : registeredNative
+            ? 'native'
+            : this.surface,
         mode:
           this.activeOperation === 'realtime'
             ? 'realtime'
@@ -396,7 +399,7 @@ export class PlaygroundState {
       return;
     }
     if (
-      this.activeOperation === 'decision' ||
+      publicNativeOperations.has(this.activeOperation) ||
       this.activeOperation === 'classification' ||
       this.activeOperation === 'scoring'
     ) {
@@ -411,7 +414,7 @@ export class PlaygroundState {
           routing: JSON.parse(this.routing),
           model: this.model.trim(),
           surface: this.surface,
-          operation: this.activeOperation,
+          operation: this.activeOperation as PlaygroundRequest['operation'],
           request: this.advancedRequest(),
           stream: this.streamEnabled ? true : undefined
         };

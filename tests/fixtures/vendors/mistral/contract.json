@@ -1,11 +1,12 @@
 {
   "vendor": "mistral",
   "documentation_url": "https://docs.mistral.ai/api/endpoint/chat",
-  "reviewed_at": "2026-10-05",
-  "notes": "Only max_tokens is documented, and seed is spelled random_seed, so both are renamed. Mistral documents its own /v1/conversations API rather than Responses. The documented error glossary body carries no OpenAI error envelope. Usage arrives in streams with stream_options.include_usage.",
+  "reviewed_at": "2026-10-19",
+  "notes": "Only max_tokens is documented, and seed is spelled random_seed, so both are renamed. Mistral documents its own /v1/conversations API rather than Responses. The documented error glossary body carries no OpenAI error envelope. Usage arrives in streams with stream_options.include_usage. The OCR endpoint, request and response are schema-built offline fixtures added 2026-10-19.",
   "endpoints": {
     "generation": "https://api.mistral.ai/v1/chat/completions",
-    "embeddings": "https://api.mistral.ai/v1/embeddings"
+    "embeddings": "https://api.mistral.ai/v1/embeddings",
+    "ocr": "https://api.mistral.ai/v1/ocr"
   },
   "unsupported_parameters": [],
   "responses": {
@@ -16,6 +17,14 @@
         "input_tokens": 9,
         "output_tokens": 3,
         "total_tokens": 12
+      }
+    },
+    "ocr": {
+      "request": "ocr.request.json",
+      "file": "ocr.response.json",
+      "basis": "schema",
+      "usage": {
+        "media_units": "1"
       }
     }
   },

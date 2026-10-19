@@ -1,0 +1,28 @@
+{
+  "vendor": "parallel",
+  "documentation_url": "https://docs.parallel.ai/api-reference/search",
+  "reviewed_at": "2026-10-19",
+  "notes": "Built from the published Parallel /v1/search schema. The response and the 422 error are schema-built. These are offline contract fixtures, not live-provider qualification.",
+  "endpoints": {
+    "search": "https://api.parallel.ai/v1/search"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "search": {
+      "request": "search.request.json",
+      "file": "search.response.json",
+      "basis": "schema"
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 422,
+    "envelope": {
+      "type": "",
+      "code": "",
+      "message": "search_queries is required"
+    },
+    "class": "upstream_client"
+  }
+}

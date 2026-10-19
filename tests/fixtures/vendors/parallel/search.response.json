@@ -1,0 +1,22 @@
+{
+  "search_id": "search_abc123",
+  "results": [
+    {
+      "url": "https://example.com/report",
+      "title": "Example report",
+      "publish_date": "2026-10-01",
+      "excerpts": [
+        "Summary of the report."
+      ]
+    },
+    {
+      "url": "https://example.org/page",
+      "title": null,
+      "publish_date": null,
+      "excerpts": [
+        "Another excerpt."
+      ]
+    }
+  ],
+  "session_id": "sess-001"
+}

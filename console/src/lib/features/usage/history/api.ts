@@ -25,6 +25,8 @@ export const operationKinds = [
   'video_get',
   'video_content',
   'video_delete',
+  'ocr',
+  'search',
   'moderation',
   'model_list',
   'model_get',

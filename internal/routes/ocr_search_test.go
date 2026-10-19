@@ -1,0 +1,84 @@
+package routes
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routing"
+)
+
+// operationSnapshot rebases the estimate snapshot onto a registered unary
+// operation served by a bound vendor profile.
+func operationSnapshot(models []string, vendor, profile, operation string, strict bool) (*routing.Snapshot, []string) {
+	snapshot, ids := estimateSnapshot(models...)
+	for id, provider := range snapshot.Providers {
+		provider.Kind = "openai_compatible"
+		provider.VendorID = vendor
+		provider.ProfileID = profile
+		provider.ProfileRevision = "1"
+		provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: operation, Surface: "openai", Mode: "unary"}}
+		snapshot.Providers[id] = provider
+	}
+	route := snapshot.Routes["route"]
+	route.Operations = []string{operation}
+	route.Fidelity.Mode = routing.FidelityTransformed
+	if strict {
+		route.Fidelity.Mode = routing.FidelityStrict
+	}
+	snapshot.Routes["route"] = route
+	return snapshot, ids
+}
+
+func simulateOperation(t *testing.T, snapshot *routing.Snapshot, input simulationInput, operation string) []inspectedDecision {
+	t.Helper()
+	input.Operation, input.Surface, input.Mode = operation, "openai", "unary"
+	s := &Server{Access: &access.Server{}}
+	leg, _, _, err := s.leg(fixedSimulation(snapshot, input, nil), "route", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leg.Decisions
+}
+
+func TestOCRSimulationAdmitsAndReadsBoundaries(t *testing.T) {
+	snapshot, ids := operationSnapshot([]string{"mistral-ocr-latest"}, "mistral", "mistral-ocr", "ocr", true)
+	body := `{"model":"route","document":{"type":"document_url","document_url":"https://example.com/report.pdf"}}`
+	decisions := simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(body)}, "ocr")
+	d := decisionFor(t, decisions, "mistral-ocr-latest")
+	if d.Interaction == nil || d.Interaction.Status != "admitted" || !d.Eligible {
+		t.Fatalf("ocr not admitted: %+v", d)
+	}
+
+	limit := int64(100)
+	for _, id := range ids {
+		for i, target := range snapshot.Routes["route"].Targets {
+			if target.ID == id {
+				provider := snapshot.Providers[target.ProviderID]
+				provider.Limits = &routing.Limits{TokensPerMinute: &limit}
+				snapshot.Providers[target.ProviderID] = provider
+				_ = i
+			}
+		}
+	}
+	decisions = simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(body)}, "ocr")
+	d = decisionFor(t, decisions, "mistral-ocr-latest")
+	if d.Reason == nil || *d.Reason != "unbounded_work_budget" {
+		t.Fatalf("token-capped ocr: %+v", d)
+	}
+}
+
+func TestSearchSimulationMapsAndRefusesControls(t *testing.T) {
+	snapshot, _ := operationSnapshot([]string{"tavily-model"}, "tavily", "tavily-search", "search", false)
+	decisions := simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(`{"query":"q"}`)}, "search")
+	d := decisionFor(t, decisions, "tavily-model")
+	if d.Interaction == nil || d.Interaction.Status != "admitted" || !d.Eligible || d.Interaction.EgressDialect != "tavily-search" {
+		t.Fatalf("search not admitted: %+v", d)
+	}
+
+	decisions = simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(`{"query":"q","country":"US"}`)}, "search")
+	d = decisionFor(t, decisions, "tavily-model")
+	if d.Interaction != nil && d.Interaction.Status == "admitted" {
+		t.Fatalf("unsupported control admitted: %+v", d)
+	}
+}

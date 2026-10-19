@@ -38,12 +38,13 @@ inspection. System-One-to-OpenAI translation
 is deliberately unavailable: the frozen System One response has no refusal
 variant, and incompatible mappings must remain unavailable.
 
-The additional retained-resource families, batch-settlement worker, expanded
-realtime, OCR/search and governed pass-through remain unimplemented. Existing
+The M9.7 OCR and search slice adds the `mistral-ocr`, `perplexity-search`,
+`tavily-search`, `exa-search` and `parallel-search` codecs with native
+`/v1/ocr` and `/v1/search` endpoints, transformed search mappings, and
+gateway, fixture, SDK, console and Chromium evidence. The additional
+retained-resource families, batch-settlement worker, expanded realtime and
+governed pass-through remain unimplemented. Existing
 OpenAI/Azure files and batches are building blocks, not M9 completion evidence.
-Console playground controls and component tests exist for the initial codecs.
-They have not been run locally yet: console dependencies and a browser are not
-installed in the reviewed checkout, and no Chromium journey exists.
 See the local evidence below for the exact boundary.
 
 ## Baseline
@@ -285,6 +286,37 @@ path in M9.2. Search uses priced request units; OCR needs its page/document unit
 in M6, not guessed token usage. Native vendor shapes can also be registered
 under `/native/{dialect}` with the same operation contract.
 
+**M9.7 implementation decisions.** The slice is implemented with these
+binding decisions:
+
+- `/v1/search` carries no model field; its route arrives in the required
+  `X-OLP-Route` header and a missing header is refused
+  `400 missing_required_parameter` before dispatch. `/v1/ocr` binds its
+  route from the request body's `model`. Native paths stay
+  `/native/{dialect}/models/{route}`.
+- Pre-dispatch field and mapping refusals return HTTP 400
+  (`unsupported_parameter`/`policy_conflict`) under the existing unary
+  contract rather than the planning text's 422. OCR follows the Decisions
+  unbounded-work-budget rules: token and non-exempt cost caps refuse
+  `422 unbounded_work_budget`, waived only for caller-paid cost-exempt
+  routes.
+- The Perplexity surface is frozen to the reviewed ApiSearchRequest; the
+  Tavily, Exa and Parallel mappings send only `query` and `max_results`
+  (default 10), admit `search_type` absent or `web`, refuse token, locale
+  and freshness controls, and map domain filters per target (Exa expands
+  root domains with `*.d`; Parallel accepts `.tld` and domain/path entries
+  verbatim; Tavily carries none). Projections mint `search_<hex>` ids,
+  never reuse upstream ids, and inspect results fail closed: unrecognized
+  fields pass only when null, number, boolean or empty containers.
+- OCR documents are `https:`/`data:` `document_url`/`image_url` values only;
+  `usage_info.pages_processed` meters as media units. Search carries no
+  usage and charges the target's `per_request` price.
+- Google Programmable Search is excluded: the provider discontinued new
+  Custom Search JSON API enrollment and the API sunsets on 2027-01-01.
+  Brave (GET-query transport), Azure Document Intelligence (bounded
+  202/poll transport) and Vertex document processing (GCP-authenticated
+  profile) stay pending in the ledger.
+
 ### M9.8 Provider-retained resource families
 
 | Family / operation | Initial native scope | Boundary |
@@ -417,17 +449,22 @@ advertise pending methods. SDK locks were not changed.
 | --- | --- | --- |
 | M9.1 | `internal/protocols/completions_test.go`, `internal/gateway/completions_test.go`, `internal/gateway/completions_probe_test.go`, `internal/connectors/completions_test.go`, `internal/interaction/completions_test.go`, `internal/routes/completions_decisions_test.go`, capture tests in `internal/protocols/capture*_test.go` and `internal/export/capture_redaction_test.go`, token exposure test, `tests/clients/m9sdk/`; TGI profile, stream guardrails, capture, probes, usage totals and cache-write usage | Console/browser qualification; each provider's live qualification; release performance gate |
 | M9.10 | `internal/operations/decision/decision_test.go`, `internal/gateway/decisions_test.go`, `internal/operationplan/decision_test.go`, `internal/routes/completions_decisions_test.go`, `internal/routes/inspect_key_test.go`, `tests/clients/m9sdk/`; native and one-way mapped questions, typed labels, identity, usage, pricing, caller-paid budgets, inspection diagnostics and explicit refusals | Console/browser and configuration-promotion integration; per-provider live qualification |
+| M9.7 | `internal/operations/ocr/` and `internal/operations/search/` codec/mapping tests, `internal/gateway/ocr_search_test.go`, `internal/operationplan/search_test.go`, `internal/routes/ocr_search_test.go`, `tests/clients/m9sdk/ocr_search_test.go`, `tests/fixtures/vendors/{mistral,perplexity,tavily,exa,parallel}/`, `tests/clientfixture/scripted/ocr_search.go`, console `nativeOperation.test.ts` and `tests/gateway/ocr-search.spec.ts`; strict and transformed dispatch, projected ids, fail-closed inspection, refusal paths and credential isolation | Per-provider live qualification, release performance gate and full `make integration`; the provider wizard cannot select a non-default operation profile (e.g. mistral-ocr, openai-decisions), so such providers are created through the management API or configuration apply |
 | M9.2–M9.9 | Ledger records planned scope only | Implementation and all slice-specific acceptance, including durable settlement and provider control |
 
 Focused SDK selection: `CLIENTS=m9-go tests/clients/run.sh`. This runs the locked
 OpenAI Go SDK against the actual gateway and a scripted upstream. It exercises
 unary and streaming completions, native Decisions, OpenAI-to-System-One
-translation, incompatible-mapping refusal, and credential-safe dispatch.
+translation, incompatible-mapping refusal, and credential-safe dispatch. The
+same selection drives raw-HTTP OCR and search coverage: native Mistral OCR,
+native Perplexity search, the three transformed search routes, refusal
+before dispatch, the required `X-OLP-Route` header, and credential isolation.
 
-Deferred console selection:
+Console selection:
 `pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.svelte.test.ts src/lib/features/inference/playground/nativeOperation.test.ts`.
-Dependencies must already be installed. The second file checks that Decisions
-dialects reach their public endpoints on transformed routes. Chromium journeys
-and the dedicated M9 resource/accounting integration selection do not yet exist
-and remain required; no exit criterion above is marked complete on the strength
-of the initial slice.
+Dependencies must already be installed. Chromium journey coverage lives in
+`console/tests/gateway/ocr-search.spec.ts` (providers, routes and playground
+driving against `mock-ocr-search.mjs`) alongside the existing route journey.
+The dedicated M9 resource/accounting integration selection does not yet exist
+and remains required; no exit criterion above is marked complete on the strength
+of the implemented slices.

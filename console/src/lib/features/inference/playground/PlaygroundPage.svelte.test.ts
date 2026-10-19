@@ -16,6 +16,7 @@ import {
   type PlaygroundStreamHandlers
 } from './api';
 import { stringifyNativeJSON } from '$lib/json/nativeJson';
+import { gatewayFetch } from '$lib/api/gateway';
 import PlaygroundProbe from './test/PlaygroundProbe.svelte';
 
 vi.mock('$lib/features/routes/api', async (original) => ({
@@ -26,6 +27,10 @@ vi.mock('$lib/features/routes/api', async (original) => ({
 vi.mock('$lib/features/access/api-keys/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/api-keys/api')>()),
   listApiKeys: vi.fn()
+}));
+vi.mock('$lib/api/gateway', async (original) => ({
+  ...(await original<typeof import('$lib/api/gateway')>()),
+  gatewayFetch: vi.fn()
 }));
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
@@ -447,6 +452,64 @@ describe('advanced composer', () => {
           request: expect.objectContaining({ model: 'chat-route' })
         })
       );
+    }
+  );
+
+  it.each([
+    [
+      'ocr',
+      'mistral-ocr',
+      '/v1/ocr',
+      '{"model":"r","pages":[],"usage_info":{"pages_processed":0}}'
+    ],
+    ['search', 'perplexity-search', '/v1/search', '{"id":"s","results":[]}']
+  ])(
+    'selecting %s shows the native client and runs it against the gateway',
+    async (operation, dialect, path, reply) => {
+      vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+      vi.mocked(gatewayFetch).mockResolvedValue(
+        new Response(reply, {
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+      await establish();
+      radio('advanced').click();
+      flushSync();
+      const operationSelect = host.querySelector<HTMLSelectElement>(
+        '#playground-operation'
+      )!;
+      operationSelect.value = operation;
+      operationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      const template = host.querySelector<HTMLSelectElement>(
+        '#playground-template'
+      )!;
+      template.value = dialect;
+      template.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      expect(host.textContent).toContain(
+        `Run a registered ${operation} operation`
+      );
+      const dialectSelect = host.querySelector<HTMLSelectElement>(
+        '#native-operation-dialect'
+      )!;
+      dialectSelect.value = dialect;
+      dialectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      fill('#playground-model', 'native-route');
+      fill('#native-operation-key', 'olp_fixture_key');
+      [...host.querySelectorAll('button')]
+        .find(
+          (button) => button.textContent?.trim() === 'Run billable operation'
+        )!
+        .click();
+      flushSync();
+      await settle(0);
+      const calls = vi.mocked(gatewayFetch).mock.calls;
+      expect(calls.at(-1)![0]).toBe(path);
+      const headers = calls.at(-1)![1]?.headers as Headers;
+      expect(headers.get('Authorization')).toBe('Bearer olp_fixture_key');
+      if (dialect === 'perplexity-search')
+        expect(headers.get('X-OLP-Route')).toBe('native-route');
     }
   );
 

@@ -38,7 +38,7 @@ fixture as part of the integration suite.
 | `lib/tap.mjs` | A recording proxy between a client and the gateway: what the client sent and what OLP answered |
 | `lib/relay.mjs` | `assertRelayed`, which holds the tap's recording against the upstream's, and the dialect helpers it uses |
 | `suites/<name>/*.test.mjs` | `node:test` suites; `harness` checks the harness itself, including the tap, the relay assertions, the helpers of `lib/cli.mjs`, the reporter and `lib/check-ran.sh`, the others are one client each |
-| `m9sdk/` | Focused pinned OpenAI SDK checks for legacy completions and Decisions, including the actual gateway and scripted System One target |
+| `m9sdk/` | Focused pinned checks for legacy completions and Decisions, including the actual gateway and scripted System One target, plus raw `net/http` coverage of native OCR and search with their transformed targets |
 | `m9-endpoints.json` | M9 scope, explicit refusals, frozen SDK references and per-tuple qualification status; pending is not a support claim |
 | `gosdk/` | Go SDK tests with the `integration` build tag, in the Go module of this directory: `harness_test.go` is the harness contract, one file per SDK, and `errors_test.go` holds the typed-error contracts |
 | `package.json`, `go.mod` | Exact pins of every client, as development dependencies |

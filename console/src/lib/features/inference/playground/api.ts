@@ -20,7 +20,9 @@ export type PlaygroundOperation =
   | 'classification'
   | 'scoring'
   | 'translation'
-  | 'realtime';
+  | 'realtime'
+  | 'ocr'
+  | 'search';
 
 export type PlaygroundStreamDone = {
   id?: string;

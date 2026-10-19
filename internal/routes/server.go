@@ -56,7 +56,7 @@ const (
 )
 
 var supportedOperations = []string{
-	"generation", "decision", "token_count", "embeddings", "moderation", "rerank",
+	"generation", "decision", "token_count", "embeddings", "moderation", "rerank", "ocr", "search",
 	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 	"video_create", "video_list", "video_get", "video_content", "video_delete",
 	"batch", "realtime", "bedrock_invoke",

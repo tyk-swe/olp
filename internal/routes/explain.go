@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -146,7 +147,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
-	if input.Operation == "decision" {
+	if operationregistry.UnboundedWork(input.Operation) {
 		prepare := accept
 		named := m.snapshot.Routes[cmp.Or(m.named, slug)]
 		accept = func(provider routing.Provider, target routing.Target) error {
@@ -189,7 +190,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
 		WorstCost: func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
-			if input.Operation == "decision" {
+			if operationregistry.UnboundedWork(input.Operation) {
 				return usage.Cost{}, false
 			}
 			if provider.Commitment != nil {
@@ -204,6 +205,9 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 					seconds = *mediaRequest.Seconds
 				}
 				return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, now, true, discount)
+			}
+			if input.Operation == "search" {
+				return price.Cost(usage.AttemptUsage{Complete: true}, now, true, discount)
 			}
 			if counted.prompt != nil {
 				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)

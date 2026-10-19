@@ -11,7 +11,11 @@
   import StrictToolPlayground from './StrictToolPlayground.svelte';
   import NativeOperationPlayground from './NativeOperationPlayground.svelte';
   import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
-  import { nativeDialects, type NativeOperation } from './nativeOperation';
+  import {
+    nativeDialects,
+    publicNativeOperations,
+    type NativeOperation
+  } from './nativeOperation';
   import { playgroundTemplates } from './templates';
   import { PlaygroundState } from './playgroundState.svelte';
 
@@ -19,6 +23,8 @@
   const operations = [
     { value: 'generation', label: 'Generation' },
     { value: 'decision', label: 'Decisions' },
+    { value: 'ocr', label: 'OCR' },
+    { value: 'search', label: 'Web search' },
     { value: 'token_count', label: 'Token count' },
     { value: 'embeddings', label: 'Embeddings' },
     { value: 'moderation', label: 'Moderation' },
@@ -317,14 +323,14 @@
           <select
             id="playground-inspect-dialect"
             value={(playground.strictSelected ||
-              playground.operation === 'decision') &&
+              publicNativeOperations.has(playground.operation)) &&
             nativeDialects(playground.operation).length
               ? playground.currentNativeDialect()
               : (playground.currentInspectDialect() ?? '')}
             onchange={(event) => {
               if (
                 (playground.strictSelected ||
-                  playground.operation === 'decision') &&
+                  publicNativeOperations.has(playground.operation)) &&
                 nativeDialects(playground.operation).length
               )
                 playground.nativeDialect = event.currentTarget.value;
@@ -332,7 +338,7 @@
             }}
           >
             <option value="">Default for operation and surface</option>
-            {#each (playground.strictSelected || playground.operation === 'decision') && nativeDialects(playground.operation).length ? nativeDialects(playground.operation) : inspectionDialects(playground.operation, playground.surface) as dialect (dialect)}
+            {#each (playground.strictSelected || publicNativeOperations.has(playground.operation)) && nativeDialects(playground.operation).length ? nativeDialects(playground.operation) : inspectionDialects(playground.operation, playground.surface) as dialect (dialect)}
               <option value={dialect}>{dialect}</option>
             {/each}
           </select>
@@ -584,7 +590,7 @@
   </section>
 </div>
 
-{#if (playground.strictSelected || playground.activeOperation === 'decision') && playground.activeOperation !== 'translation'}
+{#if (playground.strictSelected || publicNativeOperations.has(playground.activeOperation)) && playground.activeOperation !== 'translation'}
   {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai' && playground.templateKey === 'legacy-completions'}
     {#key playground.model.trim()}
       <NativeOperationPlayground

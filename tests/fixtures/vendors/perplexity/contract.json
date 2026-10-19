@@ -1,0 +1,24 @@
+{
+  "vendor": "perplexity",
+  "documentation_url": "https://docs.perplexity.ai/api-reference/search-post",
+  "reviewed_at": "2026-10-19",
+  "notes": "Built from the published ApiSearchRequest/ApiSearchResponse schema. The response and the 422 FastAPI validation error are schema-built. These are offline contract fixtures, not live-provider qualification.",
+  "endpoints": {
+    "search": "https://api.perplexity.ai/search"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "search": {
+      "request": "search.request.json",
+      "file": "search.response.json",
+      "basis": "schema"
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 422,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}

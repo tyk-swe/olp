@@ -342,6 +342,13 @@ func (c Config) ValidateProfile() error {
 	if p.Dialect == "openai-decisions" && c.VendorID != "openai" || p.Dialect == "systemone" && c.VendorID != "typesafe-jev" {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
+	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
+		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
+		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
+		p.Dialect == "exa-search" && c.VendorID != "exa" ||
+		p.Dialect == "parallel-search" && c.VendorID != "parallel" {
+		return errors.New("operation profile requires its reviewed vendor")
+	}
 	if p.Dialect == "openai-completions" {
 		if c.VendorID != strings.TrimSuffix(p.ID, "-completions") {
 			return errors.New("completions profile requires its reviewed vendor")
@@ -433,6 +440,10 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		}
 	case "moderation":
 		return wire.Moderation, nil
+	case "ocr":
+		return wire.OCR, nil
+	case "search":
+		return wire.Search, nil
 	case "rerank":
 		return wire.Rerank, nil
 	case "bedrock_invoke":
