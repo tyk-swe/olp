@@ -2,8 +2,8 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { untrack } from 'svelte';
   import { copyText } from '$lib/clipboard';
-  import { errorMessage } from '$lib/api/http';
   import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
+  import LoadError from './LoadError.svelte';
   import type {
     CodeClient,
     CodeClientConfiguration,
@@ -71,19 +71,19 @@
       (shown?.revisionId === route.revision_id ? shown.config : undefined)
   );
 
-  function select(change: CodeClientSelection) {
+  function choose(selection: CodeClientSelection) {
     copied = '';
-    chosen = {
-      revisionId: route.revision_id,
-      selection: { ...selection, ...change }
-    };
+    chosen = { revisionId: route.revision_id, selection };
+  }
+
+  function select(change: CodeClientSelection) {
+    choose({ ...selection, ...change });
   }
 
   // On a mixed route each client has its own native models, so a new client
   // starts again from its default models.
   function selectClient(client: CodeClient) {
-    copied = '';
-    chosen = { revisionId: route.revision_id, selection: { client } };
+    choose({ client });
   }
 </script>
 
@@ -159,19 +159,16 @@
       {/if}
     </div>
   {/if}
-  {#if configuration.isError}<p role="alert">
-      {errorMessage(configuration.error)}
-      <button
-        type="button"
-        class="text-button"
-        onclick={() => configuration.refetch()}>Retry</button
-      >
+  {#if configuration.isError}<LoadError
+      error={configuration.error}
+      onRetry={() => configuration.refetch()}
+    >
       {#if Object.keys(selection).length}<button
           type="button"
           class="text-button"
           onclick={() => (chosen = undefined)}>Use defaults</button
         >{/if}
-    </p>
+    </LoadError>
   {:else if !config}<p role="status">Loading supported configuration…</p>
   {:else}
     <dl>

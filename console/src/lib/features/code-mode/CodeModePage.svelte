@@ -15,6 +15,11 @@
   } from '$lib/forms/unsavedChanges';
   import CodeManagement from './CodeManagement.svelte';
   import CodeDiagnostics from './CodeDiagnostics.svelte';
+  import {
+    codeSections,
+    isManagementSection,
+    type CodeSection
+  } from './sections';
 
   let {
     gatewayURL,
@@ -48,26 +53,7 @@
       projectId = select.value;
     } else select.value = projectId;
   }
-  let tab = $state<
-    | 'accounts'
-    | 'pools'
-    | 'routes'
-    | 'budgets'
-    | 'bindings'
-    | 'attempts'
-    | 'refusals'
-    | 'token-windows'
-  >('accounts');
-  const tabs = [
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'pools', label: 'Pools' },
-    { id: 'routes', label: 'Routes' },
-    { id: 'budgets', label: 'Token budgets' },
-    { id: 'bindings', label: 'Conversation trees' },
-    { id: 'attempts', label: 'Attempts' },
-    { id: 'refusals', label: 'Refusals' },
-    { id: 'token-windows', label: 'Token windows' }
-  ] as const;
+  let tab = $state<CodeSection>('accounts');
   $effect(() => {
     if (
       projects.data &&
@@ -120,7 +106,7 @@
       >
     </div>
     <nav aria-label="Code-mode sections">
-      {#each tabs as item (item.id)}<button
+      {#each codeSections as item (item.id)}<button
           type="button"
           class:active={tab === item.id}
           aria-pressed={tab === item.id}
@@ -134,7 +120,7 @@
     </nav>
     {#if projectId}
       {#key `${principal}:${projectId}:${tab}`}
-        {#if tab === 'accounts' || tab === 'pools' || tab === 'routes' || tab === 'budgets'}
+        {#if isManagementSection(tab)}
           <CodeManagement
             {projectId}
             kind={tab}

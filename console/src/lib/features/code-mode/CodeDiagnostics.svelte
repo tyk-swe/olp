@@ -17,6 +17,7 @@
     resetCursor
   } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import LoadError from './LoadError.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
   import {
@@ -26,6 +27,7 @@
     tokenCount,
     utcWindowStart
   } from './presentation';
+  import { diagnosticSections, type CodeDiagnosticsKind } from './sections';
 
   const retireIntent = useMutationIntent();
 
@@ -35,14 +37,18 @@
     allowed
   }: {
     projectId: string;
-    kind: 'bindings' | 'attempts' | 'refusals' | 'token-windows';
+    kind: CodeDiagnosticsKind;
     allowed: boolean;
   } = $props();
-  let route = $state(''),
-    key = $state(''),
-    account = $state(''),
-    binding = $state(''),
-    endUser = $state('');
+  const section = $derived(diagnosticSections[kind]);
+  const emptyFilterForm = {
+    route: '',
+    key: '',
+    account: '',
+    binding: '',
+    endUser: ''
+  };
+  let filterForm = $state({ ...emptyFilterForm });
   let applied = $state<CodeFilters>({});
   let paging = $state(emptyCursorHistory());
   let busy = $state('');
@@ -86,18 +92,27 @@
   function apply(event: SubmitEvent) {
     event.preventDefault();
     applied = {
-      ...(kind === 'attempts' || kind === 'refusals'
-        ? { end_user_digest: endUser.trim() || undefined }
+      ...(section.filters.endUser
+        ? { end_user_digest: filterForm.endUser.trim() || undefined }
         : {}),
-      route_id: route.trim() || undefined,
-      api_key_id: key.trim() || undefined,
-      ...(kind !== 'refusals'
-        ? { account_id: account.trim() || undefined }
+      ...(section.filters.route
+        ? { route_id: filterForm.route.trim() || undefined }
         : {}),
-      ...(kind === 'attempts'
-        ? { binding_id: binding.trim() || undefined }
+      ...(section.filters.key
+        ? { api_key_id: filterForm.key.trim() || undefined }
+        : {}),
+      ...(section.filters.account
+        ? { account_id: filterForm.account.trim() || undefined }
+        : {}),
+      ...(section.filters.binding
+        ? { binding_id: filterForm.binding.trim() || undefined }
         : {})
     };
+    resetCursor(paging);
+  }
+  function clearFilters() {
+    filterForm = { ...emptyFilterForm };
+    applied = {};
     resetCursor(paging);
   }
   async function retire(item: CodeBinding) {
@@ -136,15 +151,7 @@
 
 <section class="diagnostics" aria-label="Code-mode diagnostics">
   <div class="actions">
-    <h2>
-      {kind === 'bindings'
-        ? 'Durable conversation trees'
-        : kind === 'attempts'
-          ? 'Generation attempts'
-          : kind === 'refusals'
-            ? 'Admission refusals'
-            : 'Hard-budget token windows'}
-    </h2>
+    <h2>{section.title}</h2>
     <button
       type="button"
       class="button button-secondary"
@@ -157,42 +164,42 @@
     credentials. OLP never automatically switches a pinned tree's account or
     replays inference.
   </p>
-  {#if kind !== 'token-windows'}
+  {#if section.filters.route || section.filters.key}
     <form class="filters form-field" onsubmit={apply}>
-      <div>
-        <label for="code-filter-route">Route ID</label><input
-          id="code-filter-route"
-          bind:value={route}
-          placeholder="All routes"
-        />
-      </div>
-      <div>
-        <label for="code-filter-key">API-key ID</label><input
-          id="code-filter-key"
-          bind:value={key}
-          placeholder="All keys"
-        />
-      </div>
-      {#if kind !== 'refusals'}<div>
+      {#if section.filters.route}<div>
+          <label for="code-filter-route">Route ID</label><input
+            id="code-filter-route"
+            bind:value={filterForm.route}
+            placeholder="All routes"
+          />
+        </div>{/if}
+      {#if section.filters.key}<div>
+          <label for="code-filter-key">API-key ID</label><input
+            id="code-filter-key"
+            bind:value={filterForm.key}
+            placeholder="All keys"
+          />
+        </div>{/if}
+      {#if section.filters.account}<div>
           <label for="code-filter-account">Account ID</label><input
             id="code-filter-account"
-            bind:value={account}
+            bind:value={filterForm.account}
             placeholder="All accounts"
           />
         </div>{/if}
-      {#if kind === 'attempts'}<div>
+      {#if section.filters.binding}<div>
           <label for="code-filter-binding">Binding ID</label><input
             id="code-filter-binding"
-            bind:value={binding}
+            bind:value={filterForm.binding}
             placeholder="All bindings"
           />
         </div>{/if}
-      {#if kind === 'attempts' || kind === 'refusals'}
+      {#if section.filters.endUser}
         <div>
           <label for="code-filter-end-user">End-user digest</label>
           <input
             id="code-filter-end-user"
-            bind:value={endUser}
+            bind:value={filterForm.endUser}
             placeholder="All end users"
             pattern={'([0-9a-f]{64}|unidentified)'}
             aria-describedby="code-end-user-help"
@@ -208,31 +215,19 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={() => {
-          route = '';
-          key = '';
-          account = '';
-          binding = '';
-          endUser = '';
-          applied = {};
-          resetCursor(paging);
-        }}>Clear filters</button
+        onclick={clearFilters}>Clear filters</button
       >
     </form>
   {/if}
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if selected.isPending}<p role="status">Loading diagnostics…</p>
-  {:else if selected.isError}<p role="alert">
-      {errorMessage(selected.error)}
-      <button
-        type="button"
-        class="text-button"
-        onclick={() => selected.refetch()}>Retry</button
-      >
-    </p>
+  {:else if selected.isError}<LoadError
+      error={selected.error}
+      onRetry={() => selected.refetch()}
+    />
   {:else if !selected.data?.items.length}<p>
-      No matching {kind === 'token-windows' ? 'token windows' : kind}.
+      No matching {section.empty}.
     </p>
   {:else if kind === 'bindings'}
     <p>

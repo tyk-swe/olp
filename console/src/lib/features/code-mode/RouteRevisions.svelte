@@ -1,12 +1,12 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { listCodeRevisions } from '$lib/api/code-mode';
-  import { errorMessage } from '$lib/api/http';
   import {
     emptyCursorHistory,
     cursorPaginationProps
   } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import LoadError from './LoadError.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
   let { id }: { id: string } = $props();
@@ -24,14 +24,10 @@
     new publication; account and key permissions remain live.
   </p>
   {#if revisions.isPending}<p role="status">Loading revisions…</p>
-  {:else if revisions.isError}<p role="alert">
-      {errorMessage(revisions.error)}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => revisions.refetch()}>Retry</button
-      >
-    </p>
+  {:else if revisions.isError}<LoadError
+      error={revisions.error}
+      onRetry={() => revisions.refetch()}
+    />
   {:else}
     <ul>
       {#each revisions.data?.items ?? [] as revision (revision.id)}<li>

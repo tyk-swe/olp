@@ -1109,3 +1109,31 @@ it('clears one-use enrollment input on failure and never resubmits it', async ()
   expect(host.querySelector<HTMLInputElement>('#grant-input')!.value).toBe('');
 });
 
+it('reports a failed collection and retries it', async () => {
+  vi.mocked(api.listCodePools).mockRejectedValueOnce(
+    new ApiProblem({ status: 503, title: 'Pools are unavailable' })
+  );
+  await render();
+  await click('Pools');
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    'Pools are unavailable'
+  );
+  await click('Retry');
+  expect(api.listCodePools).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain(pool.name);
+});
+
+it('offers only the filters that apply to the selected diagnostics', async () => {
+  await render();
+  await click('Conversation trees');
+  expect(host.querySelector('#code-filter-route')).not.toBeNull();
+  expect(host.querySelector('#code-filter-account')).not.toBeNull();
+  expect(host.querySelector('#code-filter-binding')).toBeNull();
+  expect(host.querySelector('#code-filter-end-user')).toBeNull();
+  await click('Refusals');
+  expect(host.querySelector('#code-filter-route')).not.toBeNull();
+  expect(host.querySelector('#code-filter-account')).toBeNull();
+  expect(host.querySelector('#code-filter-end-user')).not.toBeNull();
+  await click('Token windows');
+  expect(host.querySelector('form')).toBeNull();
+});

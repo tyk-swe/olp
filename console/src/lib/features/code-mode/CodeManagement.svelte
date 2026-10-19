@@ -19,6 +19,7 @@
   } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import LoadError from './LoadError.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
   import {
@@ -30,6 +31,7 @@
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
+  import { managementSections, type CodeManagementKind } from './sections';
 
   const publishIntent = useMutationIntent();
 
@@ -42,7 +44,7 @@
     onDraftChange
   }: {
     projectId: string;
-    kind: 'accounts' | 'pools' | 'routes' | 'budgets';
+    kind: CodeManagementKind;
     allowed: boolean;
     gatewayURL: string;
     onDraftChange: (dirty: boolean) => void;
@@ -52,13 +54,7 @@
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();
-  const sections = {
-    accounts: { title: 'Subscription accounts', noun: 'account' },
-    pools: { title: 'Account pools', noun: 'pool' },
-    routes: { title: 'Native-model routes', noun: 'route' },
-    budgets: { title: 'Optional hard token budgets', noun: 'budget' }
-  };
-  const section = $derived(sections[kind]);
+  const section = $derived(managementSections[kind]);
   let editing = $state<CodeEditing | null>(null);
   let paging = $state(emptyCursorHistory());
   let busy = $state(false);
@@ -190,19 +186,17 @@
   {#if error}<p role="alert" class="field-error">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if editing}
-    {#if inventory.isError}<p role="alert">
-        {errorMessage(inventory.error)}
-        <button
-          class="text-button"
-          type="button"
-          onclick={() => inventory.refetch()}>Retry choices</button
-        >
+    {#if inventory.isError}<LoadError
+        error={inventory.error}
+        onRetry={() => inventory.refetch()}
+        retryLabel="Retry choices"
+      >
         <button
           class="text-button"
           type="button"
           onclick={() => (editing = null)}>Cancel</button
         >
-      </p>
+      </LoadError>
     {:else if inventory.data}
       {#key editing}<ResourceEditor
           {editing}
@@ -216,16 +210,12 @@
     {:else}<p role="status">Loading editor choices…</p>{/if}
   {/if}
   {#if selected.isPending}<p role="status">Loading {kind}…</p>
-  {:else if selected.isError}<p role="alert">
-      {errorMessage(selected.error)}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => selected.refetch()}>Retry</button
-      >
-    </p>
+  {:else if selected.isError}<LoadError
+      error={selected.error}
+      onRetry={() => selected.refetch()}
+    />
   {:else if !selected.data?.items.length}<p class="empty">
-      No {kind} in this project.
+      No {section.empty} in this project.
     </p>
   {:else}
     {#if kind === 'accounts'}

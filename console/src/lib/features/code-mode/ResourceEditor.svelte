@@ -56,6 +56,12 @@
   } = $props();
   const access = useRole();
   const initial = untrack(() => editing);
+  const editorTitles = {
+    accounts: 'account',
+    pools: 'pool',
+    routes: 'route draft',
+    budgets: 'token budget'
+  } as const;
   let name = $state(
     initial.kind === 'accounts' || initial.kind === 'pools'
       ? (initial.current?.name ?? '')
@@ -187,15 +193,13 @@
   const selectedUnavailableAccounts = $derived(
     accountIds.filter((id) => !accounts.some((account) => account.id === id))
   );
-  const referenceError = $derived(
-    editing.kind === 'accounts'
-      ? providers.error || credentials.error
-      : editing.kind === 'pools'
-        ? keys.error || members.error
-        : editing.kind === 'budgets'
-          ? keys.error
-          : null
-  );
+  const referenceErrors = $derived({
+    accounts: providers.error || credentials.error,
+    pools: keys.error || members.error,
+    routes: null,
+    budgets: keys.error
+  });
+  const referenceError = $derived(referenceErrors[editing.kind]);
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
@@ -330,13 +334,7 @@
 <section class="card editor" aria-label="Code-mode editor">
   <h2>
     {editing.current ? 'Edit' : 'Create'}
-    {editing.kind === 'accounts'
-      ? 'account'
-      : editing.kind === 'pools'
-        ? 'pool'
-        : editing.kind === 'routes'
-          ? 'route draft'
-          : 'token budget'}
+    {editorTitles[editing.kind]}
   </h2>
   {#if error}<p role="alert" class="field-error">{error}</p>{/if}
   {#if referenceError}<p role="alert" class="field-error">
