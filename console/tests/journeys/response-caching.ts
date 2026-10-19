@@ -11,7 +11,7 @@ export async function verifyResponseCaching(page: Page) {
     '/api/v1/providers'
   );
   const provider = providers.body.items.find(
-    (item) => item.name === vertical.providerName
+    (item) => item.name === 'Concurrent provider name'
   );
   expect(provider).toBeTruthy();
   const draft = await manage<{ id: string }>(

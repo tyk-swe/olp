@@ -650,7 +650,9 @@ test.describe('Hosted console integration', () => {
     await page.goto(`/requests?route=${vertical.route}&operation=generation`);
     await refreshUntilRequestCount(page, 4);
     await page.goto('/usage');
-    await page.getByLabel('Route', { exact: true }).fill(vertical.route);
+    await page
+      .getByRole('textbox', { name: 'Route', exact: true })
+      .fill(vertical.route);
     await page.getByRole('button', { name: 'Apply', exact: true }).click();
     const requestMetric = page
       .locator('article')
