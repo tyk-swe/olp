@@ -161,20 +161,21 @@
     }
   }
   async function enroll(slot: Slot) {
-    if (!canManage || busy) return;
+    if (!canManage || busy || slot.id == null) return;
     notice = '';
     enrollmentSlot = slot.name;
     clearDraft();
-    await grantState.start(provider, slot.id!);
+    await grantState.start(provider, slot.id);
   }
   async function validate(slot: Slot) {
-    if (!canManage || busy || !pool.data) return;
+    if (!canManage || busy || !pool.data || slot.id == null) return;
+    const slotId = slot.id;
     const isCurrent = captureOwner();
-    operationBusy = slot.id!;
+    operationBusy = slotId;
     error = '';
     notice = '';
     try {
-      await validateCredentialSlot(provider.id, slot.id!, pool.data.etag);
+      await validateCredentialSlot(provider.id, slotId, pool.data.etag);
       if (!isCurrent()) return;
       notice = `${slot.name}: model access validated.`;
       await pool.refetch({ throwOnError: true });

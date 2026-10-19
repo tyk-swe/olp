@@ -18,24 +18,25 @@
     type Entry,
     type Result
   } from './api';
+  import { guardrailKeys } from './guardrailKeys';
   const access = useRole();
   const client = useQueryClient();
   const definitions = createQuery(() => ({
-    queryKey: ['guardrails', 'definitions'],
+    queryKey: guardrailKeys.definitions(),
     queryFn: listDefinitions
   }));
   const policies = createQuery(() => ({
-    queryKey: ['guardrails', 'policies'],
+    queryKey: guardrailKeys.policies(),
     notifyOnChangeProps: 'all',
     queryFn: listPolicies
   }));
   const attachments = createQuery(() => ({
-    queryKey: ['guardrails', 'attachments'],
+    queryKey: guardrailKeys.attachments(),
     notifyOnChangeProps: 'all',
     queryFn: listAttachments
   }));
   const projects = createQuery(() => ({
-    queryKey: ['guardrails', 'projects'],
+    queryKey: guardrailKeys.projects(),
     notifyOnChangeProps: 'all',
     queryFn: listProjects
   }));
@@ -74,7 +75,7 @@
     error = notice = '';
     try {
       await action();
-      await client.invalidateQueries({ queryKey: ['guardrails'] });
+      await client.invalidateQueries({ queryKey: guardrailKeys.root });
     } catch (cause) {
       error = errorMessage(cause);
     } finally {

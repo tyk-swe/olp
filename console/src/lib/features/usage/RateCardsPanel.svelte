@@ -16,6 +16,7 @@
   import { listProviderVendors } from '$lib/features/providers/api/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { organizationKeys } from '$lib/features/access/organizations/organizationKeys';
   import {
     createRateCard,
     createRateCardRevision,
@@ -69,7 +70,7 @@
   let rows = $state<PriceRow[]>([]);
 
   const organizations = createQuery(() => ({
-    queryKey: ['organizations'],
+    queryKey: organizationKeys.all,
     queryFn: ({ signal }) => listOrganizations(signal)
   }));
   const projects = createQuery(() => ({

@@ -88,7 +88,7 @@
   }));
 
   const redactorOptions = createQuery(() => ({
-    queryKey: ['capture-redactor-options'],
+    queryKey: observabilityKeys.redactorOptions(),
     queryFn: ({ signal }) => listCaptureRedactorOptions(signal),
     enabled: canManageProjects || canManageInstallation
   }));
@@ -664,7 +664,7 @@
 
   let gapSinkId = $state('');
   const gapQuery = createQuery(() => ({
-    queryKey: [...observabilityKeys.sinks(), 'gaps', gapSinkId],
+    queryKey: observabilityKeys.gaps(gapSinkId),
     queryFn: ({ signal }) => listExportSinkGaps(gapSinkId, signal),
     enabled: gapSinkId !== ''
   }));
@@ -996,12 +996,12 @@
                 >{sink.project_id ? 'Project' : 'Installation-wide'}</td
               ><td>{sink.streams.join(', ')}</td><td
                 >{#each streamStatuses(sink) as st (st.stream)}
+                  {@const errorCodes = st.pending_error_codes ?? []}
                   <div class="stream-status">
                     <span class="mono">{st.stream}</span> — {streamState(st)}:
                     {st.pending ?? 0} pending, {st.delivered_total ?? 0} delivered,
-                    {st.failures_total ?? 0} failed, {st.gaps_total ?? 0} gaps{#if (st.pending_error_codes ?? []).length}<br
-                      /><small
-                        >errors: {st.pending_error_codes!.join(', ')}</small
+                    {st.failures_total ?? 0} failed, {st.gaps_total ?? 0} gaps{#if errorCodes.length}<br
+                      /><small>errors: {errorCodes.join(', ')}</small
                       >{/if}{#if (st.pending ?? 0) > 0}<br /><small
                         >{st.oldest_pending_at &&
                         Number.isFinite(Date.parse(st.oldest_pending_at))

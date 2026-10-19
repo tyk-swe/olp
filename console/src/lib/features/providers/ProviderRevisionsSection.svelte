@@ -6,7 +6,7 @@
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as providerDetailError } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
@@ -135,7 +135,7 @@
         await refreshRestoredDraft(isCurrent);
       } catch (cause) {
         throw new Error(
-          `Draft restored, but refreshing failed. ${providerDetailError(cause)}`,
+          `Draft restored, but refreshing failed. ${errorMessage(cause)}`,
           { cause }
         );
       }
@@ -199,7 +199,7 @@
       Loading provider revisions…
     </p>
   {:else if revisions.isError}<div class="inline-problem" role="alert">
-      {providerDetailError(revisions.error)}
+      {errorMessage(revisions.error)}
       <button
         class="button button-secondary"
         type="button"
@@ -299,7 +299,7 @@
           Loading revision…
         </p>
       {:else if revisionDetail.isError}<div class="inline-problem" role="alert">
-          {providerDetailError(revisionDetail.error)}
+          {errorMessage(revisionDetail.error)}
           <button
             class="button button-secondary"
             type="button"
@@ -385,7 +385,7 @@
           Loading revision models…
         </p>
       {:else if revisionModels.isError}<div class="inline-problem" role="alert">
-          {providerDetailError(revisionModels.error)}
+          {errorMessage(revisionModels.error)}
           <button
             class="button button-secondary"
             type="button"

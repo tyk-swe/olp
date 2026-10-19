@@ -16,7 +16,7 @@
   }: { projectId: string; editable?: boolean } = $props();
   const client = useQueryClient();
   const policy = createQuery(() => ({
-    queryKey: [...projectKeys.root, 'route-groups', projectId],
+    queryKey: projectKeys.routeGroups(projectId),
     queryFn: ({ signal }) => getProjectRouteGroups(projectId, signal)
   }));
   let form = $state(groupForm());

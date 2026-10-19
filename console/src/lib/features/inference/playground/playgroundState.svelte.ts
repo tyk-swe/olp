@@ -301,9 +301,10 @@ export class PlaygroundState {
             : undefined,
         ...(this.composer === 'advanced' && this.operation !== 'realtime'
           ? {
-              request:
-                registeredNative || selectedDialect === 'openai-completions'
-                  ? this.inspectionNativeRequest(selectedDialect!)
+              request: registeredNative
+                ? this.inspectionNativeRequest(selectedDialect ?? '')
+                : selectedDialect === 'openai-completions'
+                  ? this.inspectionNativeRequest(selectedDialect)
                   : this.advancedRequest(),
               dialect: selectedDialect as
                 InspectRoutingInput['dialect'] | undefined

@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import { errorMessage } from '$lib/api/http';
   import { authLifecycle } from '../session/lifecycle';
+  import { profileKeys } from '../profile/profileKeys';
   import {
     reauthenticateWithPassword,
     beginIdentityReauthentication
@@ -10,9 +11,8 @@
   import { listSAMLIdentities, beginSAMLLink, unlinkSAML } from './api';
   let { hasLocalPassword = false } = $props<{ hasLocalPassword?: boolean }>();
   const client = useQueryClient();
-  const key = ['profile', 'saml'];
   const identities = createQuery(() => ({
-    queryKey: key,
+    queryKey: profileKeys.saml(),
     queryFn: ({ signal }) => listSAMLIdentities(signal)
   }));
   let password = $state(''),
@@ -42,7 +42,7 @@
       else if (id) {
         await unlinkSAML(id);
         await authLifecycle.validateSession();
-        await client.invalidateQueries({ queryKey: ['profile'] });
+        await client.invalidateQueries({ queryKey: profileKeys.current() });
         notice = 'SAML identity unlinked. Previous sessions were revoked.';
       }
     } catch (e) {

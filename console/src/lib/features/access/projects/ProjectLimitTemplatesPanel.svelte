@@ -20,7 +20,7 @@
   }: { projectId: string; editable?: boolean } = $props();
   const client = useQueryClient();
   const policy = createQuery(() => ({
-    queryKey: [...projectKeys.root, 'limit-templates', projectId],
+    queryKey: projectKeys.limitTemplates(projectId),
     queryFn: ({ signal }) => getProjectLimitTemplates(projectId, signal)
   }));
   let form = $state(templateForm());

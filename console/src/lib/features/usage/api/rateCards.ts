@@ -32,22 +32,6 @@ export async function createRateCard(
   return unwrap({ data, error, response });
 }
 
-export async function listRateCardRevisions(
-  cardId: string,
-  cursor?: string
-): Promise<CursorPage<RateCardRevision>> {
-  const { data, error, response } = await apiClient.GET(
-    '/api/v1/rate-cards/{rate_card_id}/revisions',
-    {
-      params: {
-        path: { rate_card_id: cardId },
-        query: compactQuery({ cursor, limit: 25 })
-      }
-    }
-  );
-  return unwrapPage({ data, error, response });
-}
-
 export async function createRateCardRevision(
   cardId: string,
   draft: { effective_at?: string; markup: string; prices?: CardPriceDraft[] },

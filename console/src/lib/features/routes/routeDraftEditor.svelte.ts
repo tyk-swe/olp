@@ -9,7 +9,7 @@ import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
 import type { components } from '$lib/api/schema';
 import { resolve } from '$app/paths';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
+import { errorMessage, isEtagMismatch } from '$lib/api/http';
 import {
   beginReload,
   conflictNotice,
@@ -229,7 +229,7 @@ export class RouteDraftEditorState {
     } catch (error) {
       if (!isCurrent()) return;
       if (isEtagMismatch(error)) this.sync = markConflict(this.sync);
-      else this.errorMessage = message(error);
+      else this.errorMessage = errorMessage(error);
     } finally {
       // A stale action must not release a newer operation's busy state.
       if (isCurrent()) this.busy = '';
@@ -347,7 +347,7 @@ export class RouteDraftEditorState {
         );
       } catch (cause) {
         if (isCurrent())
-          this.errorMessage = `Draft saved, but refreshing failed. ${message(cause)}`;
+          this.errorMessage = `Draft saved, but refreshing failed. ${errorMessage(cause)}`;
       }
       if (isCurrent()) await goto(resolve(`/routes/${id}`));
     });

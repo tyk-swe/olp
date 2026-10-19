@@ -6,7 +6,7 @@
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -64,7 +64,7 @@
       );
       await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
     } catch (error) {
-      retireError = `${item.slug}: ${message(error)}`;
+      retireError = `${item.slug}: ${errorMessage(error)}`;
     } finally {
       retiring = null;
     }
@@ -123,7 +123,7 @@
       <div class="loading-state" role="status">Loading published routes…</div>
     {:else if activeRoutes.isError}
       <div class="inline-problem" role="alert">
-        {message(activeRoutes.error)}
+        {errorMessage(activeRoutes.error)}
         <button
           class="button button-secondary"
           type="button"
@@ -213,7 +213,7 @@
       <div class="loading-state" role="status">Loading route drafts…</div>
     {:else if drafts.isError}
       <div class="inline-problem" role="alert">
-        {message(drafts.error)}
+        {errorMessage(drafts.error)}
         <button
           class="button button-secondary"
           type="button"

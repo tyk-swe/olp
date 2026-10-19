@@ -6,7 +6,7 @@ import { onDestroy } from 'svelte';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 import {
   ApiProblem,
-  errorMessage as message,
+  errorMessage,
   fieldIssues,
   isEtagMismatch,
   type FieldIssue
@@ -258,7 +258,7 @@ export class ProviderWizardState {
       if (this.wizardProvider && isEtagMismatch(error))
         this.wizardConflict = true;
       else {
-        this.errorMessage = message(error);
+        this.errorMessage = errorMessage(error);
         this.validationIssues = fieldIssues(error);
       }
       return false;
@@ -799,7 +799,7 @@ export class ProviderWizardState {
         })
         .catch((error) => {
           if (!canApplyCopy()) return;
-          this.errorMessage = message(error);
+          this.errorMessage = errorMessage(error);
         });
     });
     onDestroy(() => {

@@ -4,6 +4,7 @@
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '../session/useRole.svelte';
   import { projectKeys } from '../projects/projectKeys';
+  import { organizationKeys } from './organizationKeys';
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import * as api from './api';
 
@@ -25,27 +26,26 @@
   let busy = $state(false);
   let problem = $state('');
   let notice = $state('');
-  const root = [...projectKeys.root, 'organizations'];
   const organizations = createQuery(() => ({
-    queryKey: root,
+    queryKey: organizationKeys.root,
     queryFn: ({ signal }) => api.listOrganizations(signal)
   }));
   const organization = $derived(
     organizations.data?.find((o) => o.id === selected)
   );
   const members = createQuery(() => ({
-    queryKey: [...root, selected, 'members'],
+    queryKey: organizationKeys.members(selected),
     enabled: !!selected,
     queryFn: ({ signal }) => api.organizationMembers(selected, signal)
   }));
   const projects = createQuery(() => ({
-    queryKey: [...root, selected, 'projects'],
+    queryKey: organizationKeys.projects(selected),
     enabled: !!selected,
     queryFn: ({ signal }) => api.organizationProjects(selected, signal)
   }));
   const project = $derived(projects.data?.find((p) => p.id === projectId));
   const directMembers = createQuery(() => ({
-    queryKey: [...root, selected, projectId, 'members'],
+    queryKey: organizationKeys.projectMembers(selected, projectId),
     enabled: !!selected && !!projectId,
     queryFn: ({ signal }) => api.projectMembers(selected, projectId, signal)
   }));
@@ -78,7 +78,10 @@
       notice = 'Saved.';
       try {
         await Promise.all([
-          client.invalidateQueries({ queryKey: root }, { throwOnError: true }),
+          client.invalidateQueries(
+            { queryKey: organizationKeys.root },
+            { throwOnError: true }
+          ),
           client.invalidateQueries(
             { queryKey: projectKeys.root },
             { throwOnError: true }
@@ -117,10 +120,10 @@
         );
         createIntent.reset();
         newName = '';
-        client.setQueryData<api.Organization[]>(root, (current = []) => [
-          ...current.filter((item) => item.id !== o.id),
-          o
-        ]);
+        client.setQueryData<api.Organization[]>(
+          organizationKeys.root,
+          (current = []) => [...current.filter((item) => item.id !== o.id), o]
+        );
         selected = o.id;
         selected = o.id;
         newName = '';
@@ -266,7 +269,7 @@
             client.setQueryData<
               Awaited<ReturnType<typeof api.organizationProjects>>
             >(
-              [...root, submission.input.organization, 'projects'],
+              organizationKeys.projects(submission.input.organization),
               (current = []) => [
                 ...current.filter((item) => item.id !== p.id),
                 p

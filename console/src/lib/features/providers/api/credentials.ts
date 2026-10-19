@@ -31,12 +31,14 @@ export async function putCredentialSlot(
   slot: Schemas['SlotWrite'],
   requestId: string
 ): Promise<void> {
+  const slotId = slot.slot.id;
+  if (slotId == null) throw new Error('A credential slot ID is required.');
   unwrap(
     await apiClient.PUT(
       '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
       {
         params: {
-          path: { provider_id: providerId, slot_id: slot.slot.id! },
+          path: { provider_id: providerId, slot_id: slotId },
           header: { 'If-Match': etag, 'Idempotency-Key': requestId }
         },
         body: slot

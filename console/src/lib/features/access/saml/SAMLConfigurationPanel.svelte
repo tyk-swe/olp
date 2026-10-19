@@ -3,11 +3,11 @@
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '../session/useRole.svelte';
   import { getSAML, saveSAML, importSAML, type SAMLWrite } from './api';
+  import { samlKeys } from './samlKeys';
   const access = useRole();
   const client = useQueryClient();
-  const key = ['access', 'saml'];
   const query = createQuery(() => ({
-    queryKey: key,
+    queryKey: samlKeys.configuration(),
     queryFn: ({ signal }) => getSAML(signal)
   }));
   const editable = $derived(access.allows('PUT /api/v1/saml/configuration'));
@@ -73,7 +73,7 @@
         rotate_signing_key: rotate
       };
       const data = await saveSAML(body, etag || undefined);
-      client.setQueryData(key, data);
+      client.setQueryData(samlKeys.configuration(), data);
       load();
       notice = 'SAML configuration saved. Pending sign-ins were invalidated.';
     });

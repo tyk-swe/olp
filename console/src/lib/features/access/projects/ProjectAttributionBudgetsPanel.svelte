@@ -20,7 +20,7 @@
   }: { projectId: string; editable?: boolean } = $props();
   const client = useQueryClient();
   const policy = createQuery(() => ({
-    queryKey: [...projectKeys.root, 'attribution-budgets', projectId],
+    queryKey: projectKeys.attributionBudgets(projectId),
     queryFn: ({ signal }) => getProjectAttributionBudgets(projectId, signal)
   }));
   let form = $state(budgetForm());
@@ -66,10 +66,7 @@
         etag,
         budgetInput(form)
       );
-      client.setQueryData(
-        [...projectKeys.root, 'attribution-budgets', projectId],
-        saved
-      );
+      client.setQueryData(projectKeys.attributionBudgets(projectId), saved);
       load(saved);
       await client.invalidateQueries({ queryKey: projectKeys.root });
       notice = 'Attribution budgets saved.';

@@ -12,12 +12,12 @@
   } from './api';
   import { limitsError, limitForm } from '../budgets/limitForm';
   import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { budgetIncreaseKeys } from './budgetIncreaseKeys';
   const access = useRole();
   const client = useQueryClient();
-  const key = ['budget-increases'];
   let before = $state<string | undefined>();
   const query = createQuery(() => ({
-    queryKey: [...key, before],
+    queryKey: budgetIncreaseKeys.page(before),
     queryFn: ({ signal }) => listIncreases(before, signal)
   }));
   const canCreate = $derived(access.allows('POST /api/v1/budget-increases'));
@@ -103,7 +103,10 @@
       committed = true;
       notice = `Increase recorded until ${formatDate(result.expires_at)}.`;
       reset();
-      await client.invalidateQueries({ queryKey: key }, { throwOnError: true });
+      await client.invalidateQueries(
+        { queryKey: budgetIncreaseKeys.root },
+        { throwOnError: true }
+      );
     } catch (error) {
       if (isCurrent())
         problem =
@@ -126,7 +129,10 @@
       if (!isCurrent()) return;
       committed = true;
       notice = 'Increase revoked.';
-      await client.invalidateQueries({ queryKey: key }, { throwOnError: true });
+      await client.invalidateQueries(
+        { queryKey: budgetIncreaseKeys.root },
+        { throwOnError: true }
+      );
     } catch (error) {
       if (isCurrent())
         problem =

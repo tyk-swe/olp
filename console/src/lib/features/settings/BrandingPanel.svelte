@@ -1,14 +1,15 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
-  import { getBranding, updateBranding, brandingKey } from './api/branding';
+  import { getBranding, updateBranding } from './api/branding';
+  import { settingsKeys } from './settingsKeys';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
   const access = useRole();
   const queryClient = useQueryClient();
   const identity = createQuery(() => ({
-    queryKey: brandingKey,
+    queryKey: settingsKeys.branding,
     queryFn: getBranding
   }));
   let name = $state('');
@@ -63,7 +64,7 @@
     error = notice = '';
     try {
       const updated = await updateBranding({ name, logo, etag });
-      queryClient.setQueryData(brandingKey, updated);
+      queryClient.setQueryData(settingsKeys.branding, updated);
       name = updated.name;
       logo = updated.logo;
       etag = updated.etag;

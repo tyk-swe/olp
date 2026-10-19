@@ -1,14 +1,13 @@
 <script lang="ts">
   import DisclosureSettings from './DisclosureSettings.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { catalogKeys, listCatalog, getPublicCatalog } from './api';
+  import { listCatalog, getPublicCatalog } from './api';
+  import { catalogKeys } from './catalogKeys';
   import { errorMessage } from '$lib/api/http';
 
   let { publicProjectId = '' }: { publicProjectId?: string } = $props();
   const catalog = createQuery(() => ({
-    queryKey: publicProjectId
-      ? [...catalogKeys.root, 'public', publicProjectId]
-      : catalogKeys.root,
+    queryKey: catalogKeys.publicCatalog(publicProjectId),
     queryFn: ({ signal }) =>
       publicProjectId
         ? getPublicCatalog(publicProjectId, signal)

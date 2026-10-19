@@ -419,7 +419,8 @@ async function frames(response: Response): Promise<Chunk[]> {
       throw new Error('Continuation stream exceeds the client limit.');
     let start = 0;
     for (let i = 0; i < chunk.length; i++) {
-      const byte = chunk[i]!;
+      const byte = chunk[i];
+      if (byte === undefined) continue;
       if (awaitingLF) {
         awaitingLF = false;
         if (byte === 0x0a) {
@@ -515,8 +516,10 @@ export function nextTurn(
   if (!Array.isArray(messages))
     throw new Error('The original messages are unavailable.');
   const tools = results.map((result, index) => {
+    const call = calls[index];
     if (
-      result.tool_call_id !== calls[index]!.id ||
+      !call ||
+      result.tool_call_id !== call.id ||
       typeof result.content !== 'string'
     )
       throw new Error('Tool results must match call order and identity.');

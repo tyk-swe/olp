@@ -69,12 +69,12 @@
         ? undefined
         : (applied.surface as 'openai' | 'anthropic' | 'gemini');
     return {
-      queryKey: [
-        ...providerKeys.modelInventory(cursor),
+      queryKey: providerKeys.filteredModelInventory(
+        cursor,
         applied.search,
         applied.surface,
         applied.eligibility
-      ],
+      ),
       queryFn: ({ signal }) =>
         listProviderModelInventoryPage(
           cursor,

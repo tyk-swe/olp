@@ -1,12 +1,13 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { listExposureRoutes } from './api';
+  import { catalogKeys } from './catalogKeys';
   import { errorMessage } from '$lib/api/http';
   import ExposurePanel from './ExposurePanel.svelte';
   let open = $state(false);
   let selected = $state('');
   const routes = createQuery(() => ({
-    queryKey: ['model-catalog', 'exposure-routes'],
+    queryKey: catalogKeys.exposureRoutes(),
     queryFn: ({ signal }) => listExposureRoutes(signal),
     enabled: open
   }));

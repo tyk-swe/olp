@@ -6,11 +6,6 @@ export type Catalog = components['schemas']['ModelCatalogResponse'];
 export type CatalogModel = components['schemas']['CatalogModel'];
 export type Publication = components['schemas']['CatalogPublicationResponse'];
 export type Exposure = components['schemas']['RouteCatalogExposureResponse'];
-export const catalogKeys = {
-  root: ['model-catalog'] as const,
-  publication: (id: string) => ['model-catalog', 'publication', id] as const,
-  exposure: (id: string) => ['model-catalog', 'exposure', id] as const
-};
 
 export async function listCatalog(signal?: AbortSignal): Promise<Catalog> {
   return unwrap(await apiClient.GET('/api/v1/catalog', { signal }));

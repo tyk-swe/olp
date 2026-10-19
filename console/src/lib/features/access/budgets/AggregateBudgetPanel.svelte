@@ -8,6 +8,7 @@
     type AggregateBudget,
     type BudgetPolicy
   } from './api';
+  import { aggregateBudgetKeys } from './aggregateBudgetKeys';
 
   let {
     projectId,
@@ -29,11 +30,9 @@
   const prefix = $derived(
     `aggregate-${organizationId ?? projectId ?? 'installation'}`
   );
-  const budgetKey = $derived([
-    ...projectKeys.root,
-    'aggregate-budget',
-    organizationId ?? projectId ?? 'installation'
-  ]);
+  const budgetKey = $derived(
+    aggregateBudgetKeys.detail(organizationId ?? projectId ?? 'installation')
+  );
   const query = createQuery(() => ({
     queryKey: budgetKey,
     queryFn: ({ signal }) => getBudget(projectId, signal, organizationId)

@@ -4,6 +4,7 @@ import type {
   ReplaceRouteDraftInput
 } from '$lib/features/routes/api';
 import type { ProviderModelInventory } from '$lib/features/providers/api/models';
+import { isJsonObject } from '$lib/forms/json';
 import {
   lifecycleNotice,
   type LifecycleNotice
@@ -128,10 +129,6 @@ export function parseSelectors(text: string): RouteSelector[] | string {
   return 'Selectors must be a JSON array of selector objects.';
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === 'string')
@@ -140,9 +137,9 @@ function isStringArray(value: unknown): value is string[] {
 
 function isSelector(value: unknown): value is RouteSelector {
   if (
-    !isObject(value) ||
+    !isJsonObject(value) ||
     typeof value.id !== 'string' ||
-    !isObject(value.when) ||
+    !isJsonObject(value.when) ||
     (value.route !== undefined && typeof value.route !== 'string') ||
     (value.tags !== undefined && !isStringArray(value.tags)) ||
     Object.keys(value).some(
@@ -168,7 +165,7 @@ function isSelector(value: unknown): value is RouteSelector {
       case 'classifier':
         return (
           field === null ||
-          (isObject(field) &&
+          (isJsonObject(field) &&
             typeof field.route === 'string' &&
             isStringArray(field.labels) &&
             Number.isSafeInteger(field.timeout_ms) &&
@@ -180,7 +177,7 @@ function isSelector(value: unknown): value is RouteSelector {
       case 'plugin':
         return (
           field === null ||
-          (isObject(field) &&
+          (isJsonObject(field) &&
             typeof field.digest === 'string' &&
             Object.keys(field).every((name) => name === 'digest'))
         );
@@ -599,7 +596,11 @@ export function buildCreateRouteDraftInput(
     fidelity: values.fidelity,
     ...behaviorFields(values.behavior),
     targets: values.targets.map((target) => {
-      const model = providerModel(target, modelOptions)!;
+      const model = providerModel(target, modelOptions);
+      if (!model)
+        throw new Error(
+          `Route target ${target.providerModelId} is not in the provider model inventory.`
+        );
       return {
         provider_id: model.providerId,
         provider_model: model.upstreamModel,

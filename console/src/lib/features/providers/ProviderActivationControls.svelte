@@ -8,7 +8,7 @@
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as providerActionError } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import {
     activateProvider,
     disableProvider,
@@ -174,7 +174,7 @@
         // The server refuses while a route still targets one of this
         // provider's models, or an upstream media job is still live.
         if (!isProviderInUse(error)) throw error;
-        referenceConflict = providerActionError(error);
+        referenceConflict = errorMessage(error);
         return;
       }
       if (!isCurrent()) return;
@@ -224,7 +224,7 @@
     } catch (cause) {
       if (!isCurrent()) return;
       throw new Error(
-        `The provider change succeeded, but refreshing failed. ${providerActionError(cause)}`,
+        `The provider change succeeded, but refreshing failed. ${errorMessage(cause)}`,
         { cause }
       );
     }

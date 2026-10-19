@@ -9,7 +9,7 @@
   import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
   import { resolve } from '$app/paths';
-  import { errorMessage as message } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
@@ -57,12 +57,15 @@
   <div class="page-actions">
     <a class="button button-secondary" href={resolve('/routes')}
       >{editor.canManage ? 'Cancel' : 'Back to routes'}</a
-    >{#if editor.canManage && editor.resourceId && editor.draft.data}<button
+    >{#if editor.canManage && editor.resourceId && editor.draft.data}
+      {@const draft = editor.draft.data}
+      <button
         class="button button-secondary danger-button"
         type="button"
-        onclick={() => editor.remove(editor.draft.data!)}
+        onclick={() => editor.remove(draft)}
         disabled={Boolean(editor.busy)}>Delete draft</button
-      >{/if}
+      >
+    {/if}
   </div>
 </div>
 {#if !editor.canManage}<ReadOnlyNote
@@ -90,7 +93,7 @@
 />
 {#if !editor.isNew && editor.draft.isError && !editor.draft.data}
   <div class="inline-problem" role="alert">
-    {message(editor.draft.error)}
+    {errorMessage(editor.draft.error)}
     <button
       class="button button-secondary"
       type="button"
@@ -101,8 +104,8 @@
 <!-- The draft and the enabled-model inventory are independent queries; a failure in one must not blank the other. -->
 {#if editor.providerModels.isError}
   <div class="inline-problem" role="alert">
-    {message(editor.providerModels.error)} Target selection is unavailable until the
-    model inventory loads.
+    {errorMessage(editor.providerModels.error)} Target selection is unavailable until
+    the model inventory loads.
     <button
       class="button button-secondary"
       type="button"

@@ -1,9 +1,17 @@
+const summaries = ['providers', 'summary'] as const;
+const modelCatalog = ['providers', 'models', 'catalog'] as const;
+const page = (cursor?: string) =>
+  [...summaries, 'page', cursor ?? 'first'] as const;
+const modelInventory = (cursor?: string) =>
+  [...modelCatalog, 'inventory', cursor ?? 'first'] as const;
+
 export const providerKeys = {
   /** Every provider summary: the full list and each cursor page. */
-  summaries: ['providers', 'summary'] as const,
-  all: () => ['providers', 'summary', 'all'] as const,
-  page: (cursor?: string) =>
-    ['providers', 'summary', 'page', cursor ?? 'first'] as const,
+  summaries,
+  all: () => [...summaries, 'all'] as const,
+  page,
+  filteredPage: (cursor: string | undefined, applied: string) =>
+    [...page(cursor), applied] as const,
   detail: (id: string) => ['providers', 'detail', id] as const,
   kinds: () => ['providers', 'kinds'] as const,
   profiles: () => ['provider-profiles'] as const,
@@ -26,10 +34,15 @@ export const providerKeys = {
       cursor ?? 'first'
     ] as const,
   /** Model views that change whenever any provider's models change. */
-  modelCatalog: ['providers', 'models', 'catalog'] as const,
-  modelInventory: (cursor?: string) =>
-    ['providers', 'models', 'catalog', 'inventory', cursor ?? 'first'] as const,
-  enabledModels: () => ['providers', 'models', 'catalog', 'enabled'] as const,
+  modelCatalog,
+  modelInventory,
+  filteredModelInventory: (
+    cursor: string | undefined,
+    search: string,
+    surface: string,
+    eligibility: string
+  ) => [...modelInventory(cursor), search, surface, eligibility] as const,
+  enabledModels: () => [...modelCatalog, 'enabled'] as const,
   modelsOf: (id: string) => ['providers', 'models', 'of', id] as const,
   models: (id: string, cursor?: string) =>
     ['providers', 'models', 'of', id, cursor ?? 'first'] as const,

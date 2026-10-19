@@ -1,7 +1,6 @@
 import { apiClient } from '$lib/api/client';
 import { ensureOk, unwrap } from '$lib/api/http';
 import type { components } from '$lib/api/schema';
-import type { RecentAuthenticationPurpose } from '../profile/api';
 export type SAMLConfiguration = components['schemas']['SAMLConfiguration'];
 export type SAMLWrite = components['schemas']['SAMLConfigurationWrite'];
 export async function getSAML(signal?: AbortSignal) {
@@ -36,16 +35,6 @@ export async function beginSAMLLogin(returnTo: string, signal?: AbortSignal) {
 export async function beginSAMLLink() {
   return unwrap(await apiClient.POST('/api/v1/profile/saml/link'))
     .authorization_url;
-}
-export async function beginSAMLReauthentication(
-  purpose: RecentAuthenticationPurpose,
-  resourceId?: string
-) {
-  return unwrap(
-    await apiClient.POST('/api/v1/profile/saml/reauthenticate', {
-      body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) }
-    })
-  ).authorization_url;
 }
 export async function unlinkSAML(id: string) {
   ensureOk(

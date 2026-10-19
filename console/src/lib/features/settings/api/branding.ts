@@ -3,7 +3,6 @@ import { apiClient } from '$lib/api/client';
 import { unwrap } from '$lib/api/http';
 
 export type Branding = components['schemas']['InstallationBrandingResponse'];
-export const brandingKey = ['settings', 'branding'] as const;
 
 export async function getBranding(): Promise<Branding> {
   return unwrap(await apiClient.GET('/api/v1/branding'));

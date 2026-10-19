@@ -3,16 +3,17 @@
   import { resolve } from '$app/paths';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { listProjects } from '$lib/features/access/projects/api';
+  import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { listGroups, saveMapping, type Group, type Mapping } from './api';
+  import { scimKeys } from './scimKeys';
   const access = useRole();
   const client = useQueryClient();
-  const key = ['scim', 'groups'] as const;
   const groups = createQuery(() => ({
-    queryKey: key,
+    queryKey: scimKeys.groups(),
     queryFn: ({ signal }) => listGroups(signal)
   }));
   const projects = createQuery(() => ({
-    queryKey: ['projects', 'scim-options'],
+    queryKey: scimKeys.projectOptions(),
     queryFn: ({ signal }) => listProjects(signal)
   }));
   const editable = $derived(
@@ -58,8 +59,8 @@
       });
       edit(result);
       notice = 'Group access saved.';
-      await client.invalidateQueries({ queryKey: key });
-      await client.invalidateQueries({ queryKey: ['projects'] });
+      await client.invalidateQueries({ queryKey: scimKeys.groups() });
+      await client.invalidateQueries({ queryKey: projectKeys.root });
     } catch (e) {
       error =
         e instanceof Error ? e.message : 'Could not save the group mapping.';

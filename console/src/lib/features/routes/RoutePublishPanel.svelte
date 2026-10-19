@@ -29,6 +29,7 @@
         : 'Save draft'}</button
   >
   {#if !editor.isNew && editor.draft.data}
+    {@const draft = editor.draft.data}
     <hr />
     <label for="simulation-operation">Dry-run operation</label>
     <select id="simulation-operation" bind:value={editor.simulationOperation}
@@ -66,7 +67,7 @@
         if (event.key !== 'Enter' || event.isComposing) return;
         event.preventDefault();
         if (editor.canManage && !editor.publicationBlocked && !editor.busy)
-          void editor.simulate(editor.draft.data!);
+          void editor.simulate(draft);
       }}
     />
     <label for="simulation-dialect">Native request dialect</label>
@@ -94,21 +95,21 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => editor.simulate(editor.draft.data!)}
+      onclick={() => editor.simulate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
       >{editor.busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button
     >
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => editor.validate(editor.draft.data!)}
+      onclick={() => editor.validate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
       >{editor.busy === 'validate' ? 'Validating…' : 'Validate draft'}</button
     >
     <button
       class="button button-primary"
       type="button"
-      onclick={() => editor.activate(editor.draft.data!)}
+      onclick={() => editor.activate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
       >{editor.busy === 'activate' ? 'Activating…' : 'Activate route'}</button
     >

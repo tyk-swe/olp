@@ -16,7 +16,7 @@
   }: { projectId: string; editable?: boolean } = $props();
   const client = useQueryClient();
   const policy = createQuery(() => ({
-    queryKey: [...projectKeys.root, 'end-user-policy', projectId],
+    queryKey: projectKeys.endUserPolicy(projectId),
     queryFn: ({ signal }) => getProjectEndUserPolicy(projectId, signal)
   }));
   let form = $state(policyForm());

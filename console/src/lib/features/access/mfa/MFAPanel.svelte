@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { errorMessage } from '$lib/api/http';
   import { formatDate } from '$lib/format';
+  import { profileKeys } from '$lib/features/access/profile/profileKeys';
   import {
     beginIdentityReauthentication,
     reauthenticateWithPassword
@@ -14,9 +15,8 @@
     hasLinkedIdentity = false
   }: { hasLocalPassword?: boolean; hasLinkedIdentity?: boolean } = $props();
   const client = useQueryClient();
-  const key = ['profile', 'mfa'];
   const status = createQuery(() => ({
-    queryKey: key,
+    queryKey: profileKeys.mfa(),
     queryFn: ({ signal }) => getMFA(signal)
   }));
   let password = $state('');
@@ -84,7 +84,7 @@
     try {
       if (!(await authorize())) return;
       await work();
-      await client.invalidateQueries({ queryKey: key });
+      await client.invalidateQueries({ queryKey: profileKeys.mfa() });
     } catch (e) {
       error = errorMessage(e, 'The security operation could not be completed.');
     } finally {

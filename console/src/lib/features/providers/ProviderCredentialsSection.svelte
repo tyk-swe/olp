@@ -9,7 +9,7 @@
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as providerDetailError } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import { type Provider } from '$lib/features/providers/api/providers';
   import {
     listProviderCredentials,
@@ -227,7 +227,7 @@
     </form>
     {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}{/if}
   {#if credentials.isError}<div class="inline-problem" role="alert">
-      {providerDetailError(credentials.error)}
+      {errorMessage(credentials.error)}
       <button
         class="button button-secondary"
         type="button"

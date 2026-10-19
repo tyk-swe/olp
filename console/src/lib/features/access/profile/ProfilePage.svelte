@@ -94,7 +94,7 @@
     queryFn: listOidcIdentities
   }));
   const samlIdentities = createQuery(() => ({
-    queryKey: ['profile', 'saml'],
+    queryKey: profileKeys.saml(),
     queryFn: ({ signal }) => listSAMLIdentities(signal)
   }));
   let passwordEnrollmentNeeded = $derived(

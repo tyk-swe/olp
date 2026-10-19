@@ -2,7 +2,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { errorMessage } from '$lib/api/http';
-  import { catalogKeys, getExposure, putExposure } from './api';
+  import { getExposure, putExposure } from './api';
+  import { catalogKeys } from './catalogKeys';
   let { routeId }: { routeId: string } = $props();
   const access = useRole();
   const client = useQueryClient();

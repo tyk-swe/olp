@@ -31,8 +31,10 @@
   );
   function add() {
     if (!operation) return;
+    const dialect = profile.operation_dialects[operation];
+    if (dialect == null) return;
     draft.set([...path, operation], {
-      dialect: profile.operation_dialects[operation]!,
+      dialect,
       values: {},
       native_options: {}
     });
@@ -53,6 +55,7 @@
       Operation defaults must be a JSON object. Correct the advanced JSON.
     </p>{/if}
   {#each entries as [name, settings] (name)}
+    {@const dialect = profile.operation_dialects[name]}
     <details open class="operation">
       <summary>{name} defaults</summary>
       {#if nativeObject(settings)}
@@ -61,20 +64,17 @@
             >{draft.text([...path, name, 'dialect']) || 'not configured'}</code
           >
         </p>
-        {#if draft.text( [...path, name, 'dialect'] ) !== profile.operation_dialects[name]}
+        {#if draft.text([...path, name, 'dialect']) !== dialect}
           <p class="inline-problem" role="alert">
             This default set does not match the selected profile's operation
             dialect.
           </p>
-          {#if profile.operation_dialects[name]}<button
+          {#if dialect}<button
               type="button"
               class="button button-secondary"
               {disabled}
               onclick={() => {
-                draft.set(
-                  [...path, name, 'dialect'],
-                  profile.operation_dialects[name]!
-                );
+                draft.set([...path, name, 'dialect'], dialect);
                 onChange();
               }}>Use selected operation dialect</button
             >{/if}

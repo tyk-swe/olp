@@ -49,12 +49,15 @@
     }));
     const polyline = coordinates.map(({ x, y }) => `${x},${y}`).join(' ');
     const baseline = bounds.top + height;
+    const firstCoordinate = coordinates[0];
+    const lastCoordinate = coordinates.at(-1);
     return {
       coordinates,
       polyline,
-      area: coordinates.length
-        ? `${coordinates[0].x},${baseline} ${polyline} ${coordinates.at(-1)!.x},${baseline}`
-        : '',
+      area:
+        firstCoordinate && lastCoordinate
+          ? `${firstCoordinate.x},${baseline} ${polyline} ${lastCoordinate.x},${baseline}`
+          : '',
       ticks: Array.from({ length: 5 }, (_, index) => ({
         y: bounds.top + (index * height) / 4,
         value: step * (4 - index)

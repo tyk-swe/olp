@@ -20,7 +20,7 @@
   }: { projectId: string; editable?: boolean } = $props();
   const client = useQueryClient();
   const policy = createQuery(() => ({
-    queryKey: [...projectKeys.root, 'attribution-policy', projectId],
+    queryKey: projectKeys.attributionPolicy(projectId),
     queryFn: ({ signal }) => getProjectAttributionPolicy(projectId, signal)
   }));
   let form = $state(attributionForm());

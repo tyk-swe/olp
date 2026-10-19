@@ -9,12 +9,12 @@
     type Issuer,
     type IssuerWrite
   } from './api';
+  import { workloadIssuerKeys } from './workloadIssuerKeys';
 
   const access = useRole();
   const client = useQueryClient();
-  const queryKey = ['workload-issuers'];
   const query = createQuery(() => ({
-    queryKey,
+    queryKey: workloadIssuerKeys.root,
     queryFn: ({ signal }) => listIssuers(signal),
     enabled: access.allows('GET /api/v1/workload-issuers')
   }));
@@ -126,7 +126,10 @@
       committed = true;
       open(saved);
       notice = 'Workload issuer saved.';
-      await client.invalidateQueries({ queryKey }, { throwOnError: true });
+      await client.invalidateQueries(
+        { queryKey: workloadIssuerKeys.root },
+        { throwOnError: true }
+      );
     } catch (cause) {
       if (!isCurrent()) return;
       error =
@@ -155,7 +158,10 @@
       if (editing?.id === value.id) open(saved);
       notice =
         'Issuer disabled. Gateways apply the change at their next authority refresh.';
-      await client.invalidateQueries({ queryKey }, { throwOnError: true });
+      await client.invalidateQueries(
+        { queryKey: workloadIssuerKeys.root },
+        { throwOnError: true }
+      );
     } catch (cause) {
       if (!isCurrent()) return;
       error =

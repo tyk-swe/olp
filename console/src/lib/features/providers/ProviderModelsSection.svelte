@@ -4,10 +4,7 @@
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import {
-    errorMessage as providerDetailError,
-    isEtagMismatch
-  } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
   import {
@@ -318,7 +315,7 @@
       >
     </details>{/if}
   {#if Boolean(error)}<div class="inline-problem" role="alert">
-      {providerDetailError(error)} The last loaded model page remains available below.
+      {errorMessage(error)} The last loaded model page remains available below.
       <button
         class="button button-secondary"
         type="button"

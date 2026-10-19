@@ -11,5 +11,7 @@ const messages: Record<string, string> = {
 };
 
 export function oidcFailureMessage(reason: string | null): string {
-  return reason && Object.hasOwn(messages, reason) ? messages[reason]! : '';
+  return reason && Object.hasOwn(messages, reason)
+    ? (messages[reason] ?? '')
+    : '';
 }

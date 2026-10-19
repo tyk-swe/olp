@@ -6,7 +6,7 @@
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -44,7 +44,7 @@
     const cursor = listState.cursor;
     const applied = listState.applied;
     return {
-      queryKey: [...providerKeys.page(cursor), applied],
+      queryKey: providerKeys.filteredPage(cursor, applied),
       queryFn: ({ signal }) => listProviderPage(cursor, signal, applied),
       placeholderData: (previous) => previous
     };
@@ -111,7 +111,7 @@
   <div class="loading-state" role="status">Loading providers…</div>
 {:else if providers.isError}
   <div class="inline-problem" role="alert">
-    {message(providers.error)}
+    {errorMessage(providers.error)}
     <button
       class="button button-secondary"
       type="button"
