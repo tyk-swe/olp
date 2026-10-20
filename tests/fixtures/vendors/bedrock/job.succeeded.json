@@ -1,1 +1,1 @@
-{"jobArn":"arn:aws:bedrock:us-east-1:123456789012:model-invocation-job/0123456789ab","status":"Completed","totalRecordCount":2,"processedRecordCount":2,"successRecordCount":1,"errorRecordCount":1,"outputDataConfig":{"s3OutputDataConfig":{"s3Uri":"s3://batch/output/"}}}
+{"jobArn":"arn:aws:bedrock:us-east-1:123456789012:model-invocation-job/0123456789ab","status":"Completed","totalRecordCount":2,"processedRecordCount":2,"successRecordCount":1,"errorRecordCount":1,"outputDataConfig":{"s3OutputDataConfig":{"s3Uri":"s3://batch/output/"}},"submitTime":1792497600.75}

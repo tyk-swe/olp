@@ -197,6 +197,24 @@ func TestBatchResultEventIDsAndValidation(t *testing.T) {
 		!gap.Batch || !gap.Attempts[0].Usage.Batch {
 		t.Fatalf("gap event did not preserve uncertain batch usage: %+v", gap)
 	}
+	for _, uncertain := range []bool{false, true} {
+		aggregateTemplate := *template
+		aggregateTemplate.Attempts = append([]usage.Attempt(nil), template.Attempts...)
+		routingInfo := *template.Attempts[0].Routing
+		policy := json.RawMessage(`{"batch_aggregate_pricing_uncertain":false}`)
+		if uncertain {
+			policy = json.RawMessage(`{"batch_aggregate_pricing_uncertain":true}`)
+		}
+		routingInfo.Policy = &policy
+		aggregateTemplate.Attempts[0].Routing = &routingInfo
+		aggregate := result
+		aggregate.Kind = ResultAggregate
+		event, err := ResultEvent(&aggregateTemplate, resourceID, digest, aggregate, now)
+		if err != nil || event.UsageComplete == uncertain || event.Attempts[0].Usage.BillingUncertain != uncertain {
+			t.Fatalf("aggregate tariff uncertainty was not retained: event=%+v err=%v", event, err)
+		}
+	}
+
 	for _, fixture := range []struct {
 		name  string
 		body  []byte
@@ -206,6 +224,7 @@ func TestBatchResultEventIDsAndValidation(t *testing.T) {
 		{"gemini", geminiBatchFixture(t, "batch.results.jsonl"), func(line []byte) (Result, error) { return parseGeminiResult(line, model) }},
 		{"vertex", cloudBatchFixture(t, "vertex", "predictions.jsonl"), func(line []byte) (Result, error) { return parseVertexLine(line, "object", "1", 1, model) }},
 		{"bedrock", cloudBatchFixture(t, "bedrock", "manifest.json.out"), parseBedrockManifest},
+		{"vertex_private_status", []byte(`{"status":"private-prompt-marker","response":{}}`), func(line []byte) (Result, error) { return parseVertexLine(line, "object", "1", 1, model) }},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			for _, raw := range bytes.Split(bytes.TrimSpace(fixture.body), []byte{'\n'}) {
@@ -216,6 +235,10 @@ func TestBatchResultEventIDsAndValidation(t *testing.T) {
 				event, err := ResultEvent(template, resourceID, digest, result, now)
 				if err != nil {
 					t.Fatalf("native result cannot be persisted: %+v err=%v", result, err)
+				}
+				encoded, encodeErr := usage.Encode(event)
+				if encodeErr != nil || bytes.Contains(encoded, []byte("private-prompt-marker")) {
+					t.Fatalf("provider status content leaked into ordinary accounting: err=%v", encodeErr)
 				}
 				if result.Kind == ResultSucceeded || result.Kind == ResultAggregate {
 					if event.StatusCode == nil || *event.StatusCode != 200 || event.ErrorClass != nil || event.Attempts[0].ErrorClass != nil {
@@ -351,5 +374,16 @@ func TestBatchCheckpointRetainsSubmissionAndOutputEvidence(t *testing.T) {
 		func(_ []Result, cursor Cursor) error { committed = cursor; return nil })
 	if err != nil || committed.OutputPrefixSHA256 != "output-digest" {
 		t.Fatalf("error checkpoint lost output evidence: %+v err=%v", committed, err)
+	}
+}
+
+func TestBatchResultPagesBoundBytesBeforeCount(t *testing.T) {
+	line := strings.Repeat("x", MaxPageBytes/20+17) + "\n"
+	commits, total := 0, 0
+	_, _, _, err := ReadJSONLPages(strings.NewReader(strings.Repeat(line, 40)), Cursor{}, "output", "output",
+		func(raw []byte) (Result, error) { return Result{CustomID: "line", Evidence: raw}, nil },
+		func(page []Result, _ Cursor) error { commits++; total += len(page); return nil })
+	if err != nil || commits < 2 || total != 40 {
+		t.Fatalf("large result pages were bounded only by count: commits=%d total=%d err=%v", commits, total, err)
 	}
 }

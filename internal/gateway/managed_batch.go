@@ -214,7 +214,8 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 		var body struct {
 			Model string `json:"model"`
 		}
-		if json.Unmarshal(line.Body, &body) != nil || body.Model != route.Slug && body.Model != p.model {
+		upstreamModel := p.provider.Connector().Model(p.model)
+		if json.Unmarshal(line.Body, &body) != nil || body.Model != route.Slug && body.Model != p.model && body.Model != upstreamModel {
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported model.", lineNumber), &param))
 		}
@@ -238,7 +239,16 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			manifest.LineCount++
 			continue
 		}
-		request, err := protocols.Parse(family, line.Body, route.Slug)
+		bodyDocument, err := oif.ParseJSON(line.Body, oif.Limits{MaxBytes: managedBatchLineLimit})
+		if err != nil {
+			return fail(err)
+		}
+		modelJSON, _ := json.Marshal(route.Slug)
+		ingress, err := oif.Apply(bodyDocument, []oif.Change{{Pointer: "/model", Value: string(modelJSON), Origin: oif.IdentityBinding, Reason: "batch ingress model alias"}})
+		if err != nil {
+			return fail(err)
+		}
+		request, err := protocols.Parse(family, ingress.Bytes(), route.Slug)
 		if err != nil || request.Stream {
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
@@ -250,9 +260,9 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 		}
 		var encoded []byte
 		if adapter == "gemini_managed" {
-			encoded, _, err = protocols.EncodeTarget(request, wire.Gemini, p.provider.Kind, p.provider.VendorID, p.model, defaults)
+			encoded, _, err = protocols.EncodeTarget(request, wire.Gemini, p.provider.Kind, p.provider.VendorID, upstreamModel, defaults)
 		} else {
-			encoded, _, err = protocols.Encode(request, p.provider.Kind, p.provider.VendorID, p.model, defaults)
+			encoded, _, err = protocols.Encode(request, p.provider.Kind, p.provider.VendorID, upstreamModel, defaults)
 		}
 		if err != nil {
 			param := "file"

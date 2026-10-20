@@ -239,3 +239,17 @@ func TestAnthropicBackwardPageDropsFarthestLookahead(t *testing.T) {
 		t.Fatalf("forward page changed: %+v more=%v", page, more)
 	}
 }
+
+func TestAnthropicFileBindingPreservesOpaqueToolInput(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"tool","name":"save","input":{"source":{"type":"file","file_id":"local-data"},"large":9007199254740993,"tiny":-0}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool","content":[{"type":"document","source":{"type":"file","file_id":"anthropic_file_owned"}}]}]}]}`)
+	refs, err := anthropicFileReferences(body)
+	if err != nil || len(refs) != 1 || refs[0] != "anthropic_file_owned" {
+		t.Fatalf("application tool JSON was treated as a provider reference: %v err=%v", refs, err)
+	}
+	rewritten, err := replaceAnthropicFileReferences(body, map[string]string{"anthropic_file_owned": "file_upstream"})
+	if err != nil || !strings.Contains(string(rewritten), `"file_id":"local-data"`) ||
+		!strings.Contains(string(rewritten), `9007199254740993`) || !strings.Contains(string(rewritten), `"tiny":-0`) ||
+		!strings.Contains(string(rewritten), `"file_id":"file_upstream"`) {
+		t.Fatalf("file rebinding changed unrelated native tool data: %s err=%v", rewritten, err)
+	}
+}

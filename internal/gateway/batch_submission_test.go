@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -395,5 +396,69 @@ func TestNativeBatchInputBindsOneModelWithoutLosingNativeFields(t *testing.T) {
 	foreign := strings.Replace(line, `"model":"route-model"`, `"model":"unrelated-model"`, 1)
 	if _, _, err := runManagedTranslation(foreign+"\n", digest, p, route, "openai"); err == nil {
 		t.Fatal("native batch accepted an unpriced model outside its pinned target")
+	}
+}
+
+func TestBedrockAggregatePinsUnsupportedProviderAndConsumerTariffs(t *testing.T) {
+	h := newHarness(t, Config{})
+	now := time.Now().UTC()
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	target := route.Targets[0]
+	provider := h.rt.release.Snapshot.Providers[target.ProviderID]
+	provider.Kind, provider.VendorID, provider.ProfileID = "bedrock", "amazon-bedrock", "bedrock-batch-inference"
+	p := &pin{target: target, provider: provider, slot: provider.Slots[0], model: target.ProviderModel,
+		attempt: routing.Attempt{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel, VendorID: provider.VendorID}}
+	for _, kind := range []string{"linear", "provider fee", "consumer fee"} {
+		price := usage.RoutingPrice{RevisionID: uuid.NewString(), EffectiveAt: now.Add(-time.Hour), Price: usage.Price{
+			ProviderKind: provider.Kind, Model: p.model, Operation: "generation", InputPerMillion: new("1"), OutputPerMillion: new("1"), Currency: "USD"}}
+		if kind == "provider fee" {
+			price.PerRequest = new("0.1")
+		}
+		h.rt.inputs = &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}}
+		x := &call{request: request{id: uuid.NewString(), minted: true, release: h.rt.release}, keyID: h.keyID, family: wire.CloudBatch, mode: "unary"}
+		x.route = &route
+		if kind == "consumer fee" {
+			consumer := price
+			consumer.PerRequest = new("0.2")
+			x.cardPinned = true
+			x.cardRev = &usage.RoutingCardRevision{ID: uuid.NewString(), Markup: "1", Prices: []usage.RoutingPrice{consumer}}
+		}
+		event, err := h.gateway.batchSettlementTemplate(x, p, "native", "generation", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var policy struct {
+			Uncertain  *bool   `json:"batch_aggregate_pricing_uncertain"`
+			CardPinned bool    `json:"rate_card_pinned"`
+			CardID     *string `json:"rate_card_revision_id"`
+		}
+		if event.Attempts[0].Routing.Policy == nil || json.Unmarshal(*event.Attempts[0].Routing.Policy, &policy) != nil || policy.Uncertain == nil || *policy.Uncertain != (kind != "linear") || !policy.CardPinned {
+			t.Fatalf("aggregate tariff proof is missing or wrong for %s: %+v", kind, policy)
+		}
+		if kind == "consumer fee" && (policy.CardID == nil || *policy.CardID != x.cardRev.ID) {
+			t.Fatal("consumer tariff was not pinned with its aggregate limitation")
+		}
+	}
+}
+
+func TestManagedBatchInputNormalizesProviderNamesAndBindings(t *testing.T) {
+	for _, binding := range []bool{false, true} {
+		provider := routing.Provider{Kind: "openai_compatible", VendorID: "together", ProfileID: "together-files-batches", ProfileRevision: "1", Endpoint: "https://api.together.ai/v1", AuthMode: "api_key"}
+		model := "Qwen/Qwen3.5-9B"
+		bodyModel := model
+		if binding {
+			model, bodyModel = "logical", "route"
+			provider.Bindings = map[string]connectors.Binding{"logical": {Model: "Qwen/Qwen3.5-9B"}}
+		}
+		input, _ := json.Marshal(map[string]any{"custom_id": "one", "method": "POST", "url": "/v1/chat/completions", "body": map[string]any{"model": bodyModel, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}})
+		output, _, err := runManagedTranslation(string(input)+"\n", func(id string) ([]byte, bool) { return []byte(id), true }, &pin{provider: provider, model: model}, &routing.Route{Slug: "route"}, "together")
+		var line struct {
+			Body struct {
+				Model string `json:"model"`
+			} `json:"body"`
+		}
+		if err != nil || json.Unmarshal(output, &line) != nil || line.Body.Model != "Qwen/Qwen3.5-9B" {
+			t.Fatalf("managed provider name/binding failed: binding=%v output=%s err=%v", binding, output, err)
+		}
 	}
 }

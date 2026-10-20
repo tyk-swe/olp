@@ -182,7 +182,7 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		fixture.mu.Lock()
 		defer fixture.mu.Unlock()
 		if operation := fixture.batches[id]; operation != nil {
-			writeJSON(w, operation)
+			writeJSON(w, map[string]any{})
 			return
 		}
 		http.NotFound(w, r)

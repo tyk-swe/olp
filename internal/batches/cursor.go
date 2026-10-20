@@ -14,6 +14,7 @@ const (
 	MaxLineBytes  = 1 << 20
 	MaxBatchBytes = 512 << 20
 	PageSize      = 100
+	MaxPageBytes  = 1 << 20
 )
 
 var (
@@ -81,6 +82,7 @@ func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse Result
 	var bytesRead int64
 	var lineNumber int64
 	var page []Result
+	var pageBytes int
 	next := Cursor{Phase: phase, File: file, OutputPrefixSHA256: cursor.OutputPrefixSHA256}
 	fullHash := sha256.New()
 	for {
@@ -117,11 +119,13 @@ func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse Result
 		next.Line = lineNumber
 		next.PrefixSHA256 = hex.EncodeToString(hash.Sum(nil))
 		page = append(page, result)
-		if len(page) == PageSize {
+		pageBytes += len(raw)
+		if len(page) == PageSize || pageBytes >= MaxPageBytes {
 			if err = commit(page, next); err != nil {
 				return cursor, bytesRead, "", err
 			}
 			page = nil
+			pageBytes = 0
 		}
 	}
 	if lineNumber < startLine {

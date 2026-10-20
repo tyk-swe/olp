@@ -1,6 +1,7 @@
 package batches
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -138,6 +139,22 @@ func ResultEvent(template *usage.Event, resourceID uuid.UUID, customIDDigest []b
 	attempt.FirstByteMS = nil
 	usageEvidence := result.Usage
 	usageEvidence.Batch = true
+	if result.Kind == ResultAggregate {
+		// Older templates have no proof that their pinned tariffs can price
+		// aggregate usage. Keep them uncertain instead of guessing one fee.
+		var policy struct {
+			Uncertain *bool `json:"batch_aggregate_pricing_uncertain"`
+		}
+		if attempt.Routing != nil && attempt.Routing.Policy != nil {
+			if err := json.Unmarshal(*attempt.Routing.Policy, &policy); err != nil {
+				return nil, errors.New("batch aggregate pricing provenance is malformed")
+			}
+		}
+		if policy.Uncertain == nil || *policy.Uncertain {
+			usageEvidence.Complete = false
+			usageEvidence.BillingUncertain = true
+		}
+	}
 	attempt.Usage = &usageEvidence
 	if !successful {
 		errorClass := result.ErrorClass

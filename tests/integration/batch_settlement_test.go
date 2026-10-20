@@ -332,6 +332,20 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) || fixture.dials.Load() != beforeRetry {
 		t.Fatalf("ambiguous HTTP 5xx permitted duplicate work: %d %s", status, raw)
 	}
+	var unresolvedID uuid.UUID
+	if err := h.Pool.QueryRow(t.Context(), `SELECT resource_id FROM olp.batch_settlements WHERE api_key_id=$1 AND state='submission_unknown' ORDER BY created_at DESC LIMIT 1`, apiKeyID).Scan(&unresolvedID); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"conflict", "uncertain"} {
+		if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET state=$2,closed_at=CASE WHEN $2='uncertain' THEN now() ELSE NULL END WHERE resource_id=$1`, unresolvedID, state); err != nil {
+			t.Fatal(err)
+		}
+		status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(serverFailureSource), map[string]string{"Content-Type": "application/json"})
+		if status != http.StatusConflict || fixture.dials.Load() != beforeRetry {
+			t.Fatalf("unmapped %s intent lost duplicate-dispatch protection: %d %s", state, status, raw)
+		}
+	}
+
 }
 
 func openAIBatchReader(h *accessHarness) *batches.OpenAIReader {

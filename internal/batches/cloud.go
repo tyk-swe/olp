@@ -325,7 +325,7 @@ func (r *VertexReader) ReadResults(ctx context.Context, target *PinnedTarget, sn
 			continue
 		}
 		file := obj.Name + "#" + obj.Generation
-		body, err := downloadGCSObject(ctx, r.Auth, r.Egress, target, bucket, obj)
+		response, err := downloadGCSObject(ctx, r.Auth, r.Egress, target, bucket, obj)
 		if err != nil {
 			return cursor, false, err
 		}
@@ -335,10 +335,18 @@ func (r *VertexReader) ReadResults(ctx context.Context, target *PinnedTarget, sn
 			lineNo = cursor.Line
 			prefixDigest = cursor.PrefixSHA256
 		}
-		next, _, _, err := ReadJSONLPages(bytes.NewReader(body), Cursor{Phase: "output", File: file, Line: lineNo, PrefixSHA256: prefixDigest}, file, "output", func(line []byte) (Result, error) {
-			lineNo++
-			return parseVertexLine(line, obj.Name, obj.Generation, lineNo, target.Model)
-		}, commit)
+		if response.ContentLength > MaxBatchBytes {
+			response.Body.Close()
+			return cursor, false, ErrBatchTooLarge
+		}
+		next, _, _, err := func() (Cursor, int64, string, error) {
+			defer response.Body.Close()
+			stream := &io.LimitedReader{R: response.Body, N: MaxBatchBytes + 1}
+			return ReadJSONLPages(stream, Cursor{Phase: "output", File: file, Line: lineNo, PrefixSHA256: prefixDigest}, file, "output", func(line []byte) (Result, error) {
+				lineNo++
+				return parseVertexLine(line, obj.Name, obj.Generation, lineNo, target.Model)
+			}, commit)
+		}()
 		if err != nil {
 			return next, false, err
 		}
@@ -408,7 +416,7 @@ func listGCSObjects(ctx context.Context, auth *connectors.Auth, policy *egress.P
 	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	return all, nil
 }
-func cloudStorageRequest(ctx context.Context, auth *connectors.Auth, policy *egress.Policy, target *PinnedTarget, endpoint string, body []byte, limit int64) ([]byte, error) {
+func cloudStorageResponse(ctx context.Context, auth *connectors.Auth, policy *egress.Policy, target *PinnedTarget, endpoint string) (*http.Response, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, err
@@ -418,11 +426,29 @@ func cloudStorageRequest(ctx context.Context, auth *connectors.Auth, policy *egr
 	if _, err = policy.ValidateEndpoint(validationURL.String()); err != nil {
 		return nil, err
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 	if _, err = auth.ApplyGoogleStorage(ctx, req, target.Config.AuthMode, target.Secret); err != nil {
 		return nil, err
 	}
 	resp, err := target.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusOK {
+		return resp, nil
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, resources.ErrNotFound
+	}
+	return nil, fmt.Errorf("GCS HTTP %d", resp.StatusCode)
+}
+
+func cloudStorageRequest(ctx context.Context, auth *connectors.Auth, policy *egress.Policy, target *PinnedTarget, endpoint string, body []byte, limit int64) ([]byte, error) {
+	resp, err := cloudStorageResponse(ctx, auth, policy, target, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -431,21 +457,17 @@ func cloudStorageRequest(ctx context.Context, auth *connectors.Auth, policy *egr
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == 404 {
-		return nil, resources.ErrNotFound
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("GCS HTTP %d", resp.StatusCode)
-	}
 	if int64(len(data)) > limit {
 		return nil, ErrBatchTooLarge
 	}
 	return data, nil
 }
-func downloadGCSObject(ctx context.Context, auth *connectors.Auth, policy *egress.Policy, target *PinnedTarget, bucket string, obj gcsObject) ([]byte, error) {
+
+func downloadGCSObject(ctx context.Context, auth *connectors.Auth, policy *egress.Policy, target *PinnedTarget, bucket string, obj gcsObject) (*http.Response, error) {
 	endpoint := "https://storage.googleapis.com/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(obj.Name) + "?alt=media&generation=" + url.QueryEscape(obj.Generation)
-	return cloudStorageRequest(ctx, auth, policy, target, endpoint, nil, MaxBatchBytes)
+	return cloudStorageResponse(ctx, auth, policy, target, endpoint)
 }
+
 func parseVertexLine(line []byte, object, generation string, lineNo int64, model string) (Result, error) {
 	evidence, err := canonicalJSON(line)
 	if err != nil {
@@ -460,7 +482,7 @@ func parseVertexLine(line []byte, object, generation string, lineNo int64, model
 	}
 	id := fmt.Sprintf("%s#%s:%d", object, generation, lineNo)
 	if item.Status != "" {
-		return Result{CustomID: id, Kind: ResultErrored, ErrorClass: item.Status, Evidence: evidence, Usage: usage.AttemptUsage{Complete: true}}, nil
+		return Result{CustomID: id, Kind: ResultErrored, ErrorClass: "vertex_batch_errored", Evidence: evidence, Usage: usage.AttemptUsage{Complete: true}}, nil
 	}
 	if len(item.Response) == 0 {
 		return Result{}, ErrProviderConflict

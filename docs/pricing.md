@@ -279,6 +279,12 @@ prediction line, while Bedrock's manifest yields one aggregate result. The
 settlement event uses origin `batch_settlement` and links to the parent batch
 creation request; errors without usage create no cost fact.
 
+Bedrock batch manifests contain aggregate token counts. Settlement prices these
+only with linear token tariffs; per-request fees, input tiers, specialized token
+rates, unit fees and tool fees require per-record evidence. If either the pinned
+provider tariff or consumer rate card requires that evidence, the aggregate
+remains unpriced and billing-uncertain. The observed token totals are retained.
+
 Simulation decisions carry `estimated_cost` per target: `minimum` prices the
 input estimate at the cheapest input-side rate of the selected tier plus the
 per-request fee, and `maximum` is the bound the gateway would reserve — the

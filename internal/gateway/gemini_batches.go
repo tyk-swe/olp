@@ -268,55 +268,48 @@ func geminiBatchInputName(body []byte) string {
 }
 
 func geminiBatchResponseFiles(body []byte) ([]string, error) {
-	var root any
-	if json.Unmarshal(body, &root) != nil {
+	var root map[string]json.RawMessage
+	if json.Unmarshal(body, &root) != nil || root == nil {
 		return nil, errGeminiBatchFidelity
 	}
-	var out []string
-	var visit func(any, []string) error
-	allowed := map[string]bool{
-		"name": true, "metadata.name": true,
-		"inputConfig.fileName": true, "inputConfig.file_name": true,
-		"input_config.fileName": true, "input_config.file_name": true,
-		"metadata.inputConfig.fileName": true, "metadata.inputConfig.file_name": true,
-		"metadata.input_config.fileName": true, "metadata.input_config.file_name": true,
-		"output.responsesFile": true, "metadata.output.responsesFile": true,
-		"response.responsesFile": true, "metadata.response.responsesFile": true,
+	var metadata map[string]json.RawMessage
+	if raw, ok := root["metadata"]; ok {
+		if json.Unmarshal(raw, &metadata) != nil || metadata == nil {
+			return nil, errGeminiBatchFidelity
+		}
 	}
-	visit = func(node any, path []string) error {
-		switch value := node.(type) {
-		case map[string]any:
-			for key, child := range value {
-				if err := visit(child, append(append([]string(nil), path...), key)); err != nil {
-					return err
-				}
+	var files []string
+	for _, parent := range []map[string]json.RawMessage{root, metadata} {
+		for _, field := range []string{"output", "response"} {
+			raw, ok := parent[field]
+			if !ok {
+				continue
 			}
-		case []any:
-			for index, child := range value {
-				if err := visit(child, append(append([]string(nil), path...), strconv.Itoa(index))); err != nil {
-					return err
-				}
+			var destination map[string]json.RawMessage
+			if json.Unmarshal(raw, &destination) != nil || destination == nil {
+				return nil, errGeminiBatchFidelity
 			}
-		case string:
-			joined := strings.Join(path, ".")
-			if strings.Contains(value, "batches/") && !allowed[joined] {
-				return errGeminiBatchFidelity
-			}
-			if strings.Contains(value, "files/") {
-				if !allowed[joined] {
-					return errGeminiBatchFidelity
+			if rawName, present := destination["responsesFile"]; present {
+				var name string
+				if json.Unmarshal(rawName, &name) != nil {
+					return nil, errGeminiBatchFidelity
 				}
-				if strings.Contains(joined, "responsesFile") {
-					out = append(out, value)
+				if _, err := geminiFileID(name); err != nil {
+					return nil, errGeminiBatchFidelity
 				}
+				files = append(files, name)
 			}
 		}
-		return nil
 	}
-	if err := visit(root, nil); err != nil {
-		return nil, err
+	return slices.Compact(files), nil
+}
+
+func geminiBatchCancelAcknowledgement(body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return true
 	}
-	return slices.Compact(out), nil
+	var value map[string]json.RawMessage
+	return json.Unmarshal(body, &value) == nil && value != nil && len(value) == 0
 }
 
 func projectGeminiBatchObject(body []byte, localID, routeSlug, localInputFile, upstreamInputFile string, outputFiles map[string]string) ([]byte, error) {
@@ -498,7 +491,7 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 		upstreamFile = "files/" + file.UpstreamID
 		cursor = mustJSON(map[string]any{"submission": map[string]string{"gemini_file": upstreamFile, "local_input_file_id": localInputFile}})
 	}
-	endpoint, endpointErr := resourceURL(p.provider.Connector(), p.model, "models/"+url.PathEscape(p.model)+":batchGenerateContent", nil)
+	endpoint, endpointErr := resourceURL(p.provider.Connector(), p.model, "models/"+url.PathEscape(p.provider.Connector().Model(p.model))+":batchGenerateContent", nil)
 	if endpointErr != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The Gemini batch address could not be resolved."), x.family)
 		return
@@ -808,7 +801,7 @@ func (s *Server) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use 
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The Gemini batch response could not be read.")
 		}
-		if len(bytes.TrimSpace(body)) == 0 && cancel {
+		if cancel && geminiBatchCancelAcknowledgement(body) {
 			x.dispatched = true
 			projected, projectErr := s.geminiBatchResourceObject(ctx, resource)
 			if projectErr != nil {

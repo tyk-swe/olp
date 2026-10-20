@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -982,52 +983,71 @@ func validateAnthropicBatchRequest(body []byte, routeSlug, targetModel string) (
 	return encoded, uniqueStrings(fileIDs), requestsCustomIDs(requests), nil
 }
 
-func anthropicFileReferences(body []byte) ([]string, error) {
+func decodeAnthropicObject(body []byte) (map[string]any, error) {
 	var value map[string]any
-	if json.Unmarshal(body, &value) != nil || value == nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if value == nil || decoder.Decode(new(any)) != io.EOF {
 		return nil, fmt.Errorf("invalid Anthropic request")
 	}
-	refs := []string{}
-	var visit func(any) error
-	visit = func(node any) error {
-		switch item := node.(type) {
-		case map[string]any:
-			source, ok := item["source"].(map[string]any)
-			if ok && source["type"] == "file" {
-				id, ok := source["file_id"].(string)
-				if !ok || id == "" || len(source) != 2 {
-					return fmt.Errorf("invalid Anthropic file source")
+	return value, nil
+}
+
+// Only protocol-defined content blocks own file sources. Tool inputs are
+// application JSON and must never be traversed as Anthropic resource metadata.
+func visitAnthropicFileSources(value map[string]any, visit func(map[string]any) error) error {
+	var content func(any) error
+	content = func(raw any) error {
+		blocks, _ := raw.([]any)
+		for _, rawBlock := range blocks {
+			block, _ := rawBlock.(map[string]any)
+			switch block["type"] {
+			case "image", "document":
+				source, _ := block["source"].(map[string]any)
+				if source["type"] == "file" {
+					id, ok := source["file_id"].(string)
+					if !ok || id == "" || len(source) != 2 {
+						return fmt.Errorf("invalid Anthropic file source")
+					}
+					if err := visit(source); err != nil {
+						return err
+					}
 				}
-			}
-			if ok && source["type"] == "file" {
-				id := source["file_id"].(string)
-				refs = append(refs, id)
-			}
-			for key, child := range item {
-				if key == "source" {
-					continue
-				}
-				if err := visit(child); err != nil {
-					return err
-				}
-			}
-		case []any:
-			for _, child := range item {
-				if err := visit(child); err != nil {
+			case "tool_result":
+				if err := content(block["content"]); err != nil {
 					return err
 				}
 			}
 		}
 		return nil
 	}
-	for _, field := range []string{"system", "messages"} {
-		if node, present := value[field]; present {
-			if err := visit(node); err != nil {
-				return nil, err
-			}
+	if err := content(value["system"]); err != nil {
+		return err
+	}
+	messages, _ := value["messages"].([]any)
+	for _, raw := range messages {
+		message, _ := raw.(map[string]any)
+		if err := content(message["content"]); err != nil {
+			return err
 		}
 	}
-	return refs, nil
+	return nil
+}
+
+func anthropicFileReferences(body []byte) ([]string, error) {
+	value, err := decodeAnthropicObject(body)
+	if err != nil {
+		return nil, err
+	}
+	refs := []string{}
+	err = visitAnthropicFileSources(value, func(source map[string]any) error {
+		refs = append(refs, source["file_id"].(string))
+		return nil
+	})
+	return refs, err
 }
 
 func uniqueStrings(values []string) []string {
@@ -1140,63 +1160,29 @@ func equalCredentialID(a, b *string) bool {
 }
 
 func replaceAnthropicFileReferences(body []byte, upstream map[string]string) ([]byte, error) {
-	var value map[string]any
-	if err := json.Unmarshal(body, &value); err != nil {
+	value, err := decodeAnthropicObject(body)
+	if err != nil {
 		return nil, err
 	}
-	if value == nil {
-		return nil, fmt.Errorf("invalid Anthropic request")
-	}
-	var visit func(any) error
-	visit = func(node any) error {
-		switch item := node.(type) {
-		case map[string]any:
-			source, ok := item["source"].(map[string]any)
-			if ok && source["type"] == "file" {
-				id, _ := source["file_id"].(string)
-				up, found := upstream[id]
-				if !found {
-					return fmt.Errorf("unknown file")
-				}
-				source["file_id"] = up
-			}
-			for key, child := range item {
-				if key == "source" {
-					continue
-				}
-				if err := visit(child); err != nil {
-					return err
-				}
-			}
-		case []any:
-			for _, child := range item {
-				if err := visit(child); err != nil {
-					return err
-				}
-			}
+	replace := func(source map[string]any) error {
+		id := source["file_id"].(string)
+		bound, ok := upstream[id]
+		if !ok {
+			return fmt.Errorf("unknown file")
 		}
+		source["file_id"] = bound
 		return nil
 	}
 	if requests, ok := value["requests"].([]any); ok {
-		for _, item := range requests {
-			request, _ := item.(map[string]any)
+		for _, raw := range requests {
+			request, _ := raw.(map[string]any)
 			params, _ := request["params"].(map[string]any)
-			for _, field := range []string{"system", "messages"} {
-				if node, present := params[field]; present {
-					if err := visit(node); err != nil {
-						return nil, err
-					}
-				}
+			if err := visitAnthropicFileSources(params, replace); err != nil {
+				return nil, err
 			}
 		}
-	} else {
-		for _, field := range []string{"system", "messages"} {
-			if node, present := value[field]; present {
-				if err := visit(node); err != nil {
-					return nil, err
-				}
-			}
-		}
+	} else if err := visitAnthropicFileSources(value, replace); err != nil {
+		return nil, err
 	}
 	return json.Marshal(value)
 }

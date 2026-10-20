@@ -1661,7 +1661,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		upstream = bound.Effective.Document().Bytes()
 		strictServing = bound.Receipt.Serving
 	} else if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
-		upstream, expectedResults, e = managedBatchRequestBody(source, adapter, file.UpstreamID, p.model, inputManifest)
+		upstream, expectedResults, e = managedBatchRequestBody(source, adapter, file.UpstreamID, p.provider.Connector().Model(p.model), inputManifest)
 		if e != nil {
 			s.stateFail(x, w, e, x.family)
 			return
@@ -1694,7 +1694,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	if adapter == "mistral" {
 		batchPath = "batch/jobs"
 	} else if adapter == "gemini_managed" {
-		batchPath = "models/" + url.PathEscape(p.model) + ":batchGenerateContent"
+		batchPath = "models/" + url.PathEscape(p.provider.Connector().Model(p.model)) + ":batchGenerateContent"
 	}
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, batchPath, nil)
 	if err != nil {
@@ -2032,6 +2032,15 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
 	adapter := batchAdapter(res)
+	if method == http.MethodPost && strings.HasSuffix(path, ":cancel") && adapter == "gemini_managed" && geminiBatchCancelAcknowledgement(result) {
+		x.completePinned()
+		body, err := s.batchObject(ctx, res)
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored Gemini batch could not be projected.")
+		}
+		s.writeStateJSON(w, x, body)
+		return nil
+	}
 	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
 		if adapter == "gemini_managed" {
 			upstreamID, identityErr := geminiBatchName(result)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -208,6 +209,11 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 		fact.Discount = nil
 	}
 	fact.PricingPinned = true
+	fact.CardPinned = true
+	fact.CardRevisionID = nil
+	if fact.cardRev != nil {
+		fact.CardRevisionID = &fact.cardRev.ID
+	}
 	accountingID := x.request.accountingID()
 	event := accountingEvent(Envelope{
 		RequestID: accountingID, AccountingID: accountingID, KeyID: x.keyID,
@@ -221,10 +227,42 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 	if event == nil {
 		return nil, errors.New("batch usage event is unavailable")
 	}
+	if p.provider.ProfileID == "bedrock-batch-inference" {
+		uncertain := aggregateTariffNeedsPerRecordUsage(fact.Price) ||
+			aggregateTariffNeedsPerRecordUsage(fact.cardRev.Explicit(p.provider.Kind, p.provider.VendorID, p.model, lineOperation))
+		var policy map[string]json.RawMessage
+		_ = json.Unmarshal(*event.Attempts[0].Routing.Policy, &policy)
+		policy["batch_aggregate_pricing_uncertain"], _ = json.Marshal(uncertain)
+		encoded, _ := json.Marshal(policy)
+		raw := json.RawMessage(encoded)
+		event.Attempts[0].Routing.Policy = &raw
+	}
 	if _, err := usage.Validate(event); err != nil {
 		return nil, err
 	}
 	return event, nil
+}
+
+// A manifest supplies only aggregate text-token totals. Per-invocation fees,
+// tiers and specialized meters cannot be reconstructed from those totals.
+func aggregateTariffNeedsPerRecordUsage(price *usage.RoutingPrice) bool {
+	if price == nil {
+		return false
+	}
+	if len(price.Tiers) > 0 || len(price.ToolCalls) > 0 {
+		return true
+	}
+	for _, rate := range []*string{
+		price.PerRequest, price.UnitPrice, price.CachedInputPerMillion,
+		price.CacheWriteInputPerMillion, price.CacheWrite5MInputPerMillion, price.CacheWrite1HInputPerMillion,
+		price.AudioInputPerMillion, price.CachedAudioInputPerMillion, price.AudioOutputPerMillion,
+		price.ImageInputPerMillion, price.CachedImageInputPerMillion, price.ImageOutputPerMillion,
+	} {
+		if rate != nil && strings.Trim(*rate, "0.") != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func batchExpectedResults(body []byte) *int64 {

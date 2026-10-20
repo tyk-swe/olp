@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -294,5 +295,26 @@ func TestVertexOmittedZeroCountsAndDottedS3Bucket(t *testing.T) {
 	}
 	if got := bedrockManifestURL("batch.results", "output/job/manifest.json.out", "us-east-1"); got != "https://s3.us-east-1.amazonaws.com/batch.results/output/job/manifest.json.out" {
 		t.Fatalf("dotted bucket uses a TLS-incompatible hostname: %s", got)
+	}
+}
+
+func TestVertexCommitsPagesBeforeDownloadCompletes(t *testing.T) {
+	interrupted := errors.New("prediction download interrupted")
+	line := strings.Split(strings.TrimSpace(string(cloudBatchFixture(t, "vertex", "predictions.jsonl"))), "\n")[0] + "\n"
+	reader, target := vertexTarget(t, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("alt") == "media" {
+			response := cloudResponse(req, 200, "application/jsonl", "")
+			response.Body = io.NopCloser(io.MultiReader(strings.NewReader(strings.Repeat(line, PageSize)), iotest.ErrReader(interrupted)))
+			return response, nil
+		}
+		return cloudResponse(req, 200, "application/json", `{"items":[{"name":"output/job123/prediction-1.jsonl","generation":"8"}]}`), nil
+	})
+	committed := 0
+	_, _, err := reader.ReadResults(t.Context(), target, BatchSnapshot{ID: "job123", Terminal: true, Body: cloudBatchFixture(t, "vertex", "job.succeeded.json")}, Cursor{}, func(page []Result, _ Cursor) error {
+		committed += len(page)
+		return nil
+	})
+	if !errors.Is(err, interrupted) || committed != PageSize {
+		t.Fatalf("result download was buffered before checkpointing: committed=%d err=%v", committed, err)
 	}
 }

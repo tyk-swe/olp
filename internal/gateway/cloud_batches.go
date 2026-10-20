@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -114,7 +115,7 @@ func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, output
 	}
 	created := job["createTime"]
 	if dialect == "bedrock-batch-inference" {
-		created = job["creationTime"]
+		created = job["submitTime"]
 	}
 	createdAt, _ := cloudBatchTime(created)
 	var completed *int64
@@ -139,9 +140,15 @@ func cloudBatchTime(raw json.RawMessage) (int64, bool) {
 		at, err := time.Parse(time.RFC3339Nano, text)
 		return at.Unix(), err == nil
 	}
-	var n int64
-	err := json.Unmarshal(raw, &n)
-	return n, err == nil && n >= 0
+	var n json.Number
+	if json.Unmarshal(raw, &n) != nil || n.String() == "" {
+		return 0, false
+	}
+	seconds, err := strconv.ParseFloat(n.String(), 64)
+	if err != nil || seconds < 0 || seconds >= float64(math.MaxInt64) {
+		return 0, false
+	}
+	return int64(seconds), true
 }
 
 func isCloudBatchTerminal(status string) bool {
@@ -149,12 +156,12 @@ func isCloudBatchTerminal(status string) bool {
 }
 
 func cloudBatchCounts(job map[string]json.RawMessage, dialect string) map[string]int64 {
-	field := "completionStats"
-	if dialect == "bedrock-batch-inference" {
-		field = "jobStatistics"
-	}
 	var stats map[string]json.RawMessage
-	_ = json.Unmarshal(job[field], &stats)
+	if dialect == "bedrock-batch-inference" {
+		stats = job
+	} else {
+		_ = json.Unmarshal(job["completionStats"], &stats)
+	}
 	if stats == nil {
 		return nil
 	}
@@ -336,7 +343,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	if dialect == "vertex-batch-prediction" {
 		endpoint, err = p.provider.Connector().VertexBatchJobsURL("", "")
 		requestBody, _ = json.Marshal(map[string]any{
-			"displayName": display, "model": "publishers/google/models/" + p.model,
+			"displayName": display, "model": "publishers/google/models/" + p.provider.Connector().Model(p.model),
 			"inputConfig":  map[string]any{"instancesFormat": "jsonl", "gcsSource": map[string]any{"uris": []string{input.InputURI}}},
 			"outputConfig": map[string]any{"predictionsFormat": "jsonl", "gcsDestination": map[string]string{"outputUriPrefix": input.OutputURIPrefix}},
 			"labels":       map[string]string{"olp_submission": hexID},
@@ -345,7 +352,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	} else {
 		endpoint, err = p.provider.Connector().BedrockBatchJobsURL("", "create")
 		requestBody, _ = json.Marshal(map[string]any{
-			"jobName": display, "roleArn": p.provider.BatchStorage.RoleARN, "modelId": p.model,
+			"jobName": display, "roleArn": p.provider.BatchStorage.RoleARN, "modelId": p.provider.Connector().Model(p.model),
 			"inputDataConfig":        map[string]any{"s3InputDataConfig": map[string]any{"s3Uri": input.InputURI, "s3InputFormat": "JSONL"}},
 			"outputDataConfig":       map[string]any{"s3OutputDataConfig": map[string]string{"s3Uri": input.OutputURIPrefix}},
 			"timeoutDurationInHours": input.TimeoutHours, "clientRequestToken": resourceID.String(),
@@ -415,7 +422,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	if dialect == "bedrock-batch-inference" {
 		// CreateModelInvocationJob acknowledges acceptance with only jobArn.
 		// The worker obtains the authoritative lifecycle status on its next poll.
-		result, _ = json.Marshal(map[string]any{"jobArn": upstreamID, "status": "Submitted", "creationTime": s.now().UTC()})
+		result, _ = json.Marshal(map[string]any{"jobArn": upstreamID, "status": "Submitted", "submitTime": s.now().UTC()})
 	}
 	meta := map[string]any{
 		"adapter": submission.settlement.Adapter, "dialect": dialect, "route_model": slug, "upstream_model": p.model,

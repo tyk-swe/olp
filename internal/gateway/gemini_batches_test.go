@@ -70,7 +70,7 @@ func TestProjectGeminiBatchObjectAndRejectUnmappedIdentifiers(t *testing.T) {
 		output["responsesFile"] != "files/gemini_file_output" || object["other"].(map[string]any)["count"] != float64(9) {
 		t.Fatalf("Gemini batch projection=%s", projected)
 	}
-	unmapped := []byte(`{"name":"batches/upstream","metadata":{"name":"batches/upstream"},"unexpected":"files/secret"}`)
+	unmapped := []byte(`{"name":"batches/upstream","metadata":{"name":"batches/upstream"},"response":{"responsesFile":"files/secret"}}`)
 	if _, err := projectGeminiBatchObject(unmapped, "local", "route", "", "", nil); err == nil {
 		t.Fatal("passed through an unmapped Gemini file identifier")
 	}
@@ -122,5 +122,21 @@ func TestGeminiInlineBatchRefusesUnboundFileReferences(t *testing.T) {
 		if _, err := validateGeminiBatchRequest(body, "route"); err == nil || err.Code != "unsupported_parameter" {
 			t.Fatalf("unowned file reference was not refused: %s err=%v", body, err)
 		}
+	}
+}
+
+func TestGeminiBatchProjectionPreservesOrdinaryReferenceText(t *testing.T) {
+	body := []byte(`{"name":"batches/upstream","metadata":{"name":"batches/upstream","displayName":"files/daily","output":{"inlinedResponses":{"inlinedResponses":[{"metadata":{"key":"files/result-key"},"response":{"candidates":[{"content":{"parts":[{"text":"save to files/output.json or batches/archive"}]}}]}}]}}}}`)
+	projected, err := projectGeminiBatchObject(body, "local", "route", "", "", nil)
+	if err != nil || !bytes.Contains(projected, []byte("save to files/output.json or batches/archive")) {
+		t.Fatalf("ordinary generated content was mistaken for a resource reference: %s err=%v", projected, err)
+	}
+	for _, body := range []string{"", "{}", "{ \n }"} {
+		if !geminiBatchCancelAcknowledgement([]byte(body)) {
+			t.Fatalf("valid empty cancellation acknowledgement refused: %q", body)
+		}
+	}
+	if geminiBatchCancelAcknowledgement([]byte(`{"name":"batches/upstream"}`)) {
+		t.Fatal("a job response was classified as an empty acknowledgement")
 	}
 }

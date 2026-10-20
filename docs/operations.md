@@ -585,6 +585,9 @@ pending count, oldest age and checkpoint freshness.
   submit a second job manually.
 - For `conflict`, preserve the metadata and compare the provider identifier and
   reconciliation evidence. Escalate rather than attaching a guessed job.
+- Unmapped `conflict` and `uncertain` submission intents retain duplicate-submit
+  protection until their normal retention cutoff; they remain visible in the
+  resource inventory.
 - For `uncertain`, inspect `last_error_class`, result gaps and configured
   storage scope. Restore read access or provider output evidence and use the
   reviewed recovery process; never rewrite a missing result as zero usage.
