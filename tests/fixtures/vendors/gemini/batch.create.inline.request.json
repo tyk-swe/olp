@@ -1,0 +1,21 @@
+{
+  "batch": {
+    "displayName": "sample-inline",
+    "inputConfig": {
+      "requests": {
+        "requests": [
+          {
+            "request": {
+              "contents": [
+                {
+                  "parts": [{"text": "hello"}]
+                }
+              ]
+            },
+            "metadata": {"key": "request-1"}
+          }
+        ]
+      }
+    }
+  }
+}

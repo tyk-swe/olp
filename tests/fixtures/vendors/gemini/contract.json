@@ -32,5 +32,49 @@
     "finalize_response": "file.finalize.response.json",
     "list_response": "files.list.response.json",
     "error_body": "error.json"
+  },
+  "gemini_batches": {
+    "basis": "documented",
+    "documentation_links": {
+      "batch_api": "https://ai.google.dev/api/batch-api",
+      "batch_guide": "https://ai.google.dev/gemini-api/docs/batch-api"
+    },
+    "endpoints": {
+      "create": "https://generativelanguage.googleapis.com/v1beta/models/{model}:batchGenerateContent",
+      "list": "https://generativelanguage.googleapis.com/v1beta/batches",
+      "get": "https://generativelanguage.googleapis.com/v1beta/batches/{name}",
+      "cancel": "https://generativelanguage.googleapis.com/v1beta/batches/{name}:cancel",
+      "delete": "https://generativelanguage.googleapis.com/v1beta/batches/{name}",
+      "results_download": "https://generativelanguage.googleapis.com/download/v1beta/{responsesFile}:download?alt=media"
+    },
+    "fields": [
+      "batch.displayName",
+      "batch.inputConfig.requests.requests[].request",
+      "batch.inputConfig.requests.requests[].metadata.key",
+      "batch.inputConfig.fileName",
+      "name",
+      "metadata.state",
+      "metadata.model",
+      "metadata.inputConfig.fileName",
+      "metadata.batchStats.requestCount",
+      "metadata.output.inlinedResponses.inlinedResponses[]",
+      "metadata.output.responsesFile",
+      "response.usageMetadata.promptTokenCount",
+      "response.usageMetadata.candidatesTokenCount",
+      "response.usageMetadata.cachedContentTokenCount",
+      "response.usageMetadata.thoughtsTokenCount",
+      "key",
+      "error"
+    ],
+    "fixtures": [
+      "batch.create.inline.request.json",
+      "batch.create.file.request.json",
+      "batch.operation.response.json",
+      "batch.list.response.json",
+      "batch.running.json",
+      "batch.succeeded.inline.json",
+      "batch.succeeded.file.json",
+      "batch.results.jsonl"
+    ]
   }
 }

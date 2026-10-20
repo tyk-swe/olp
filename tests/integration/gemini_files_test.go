@@ -14,8 +14,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches"
 )
 
 type geminiFileFixture struct {
@@ -25,11 +27,13 @@ type geminiFileFixture struct {
 	offset       int64
 	queries      int
 	sessionCalls int
+	batchCalls   int
+	batches      map[string]map[string]any
 }
 
 func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 	t.Helper()
-	fixture := &geminiFileFixture{}
+	fixture := &geminiFileFixture{batches: map[string]map[string]any{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1beta/models", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"models": []any{map[string]any{"name": "models/gemini-files-test"}}})
@@ -79,17 +83,97 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		}
 		w.Header().Set("X-Goog-Upload-Status", "active")
 	})
-	mux.HandleFunc("GET /v1beta/files/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1beta/files/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if _, action, ok := strings.Cut(r.PathValue("name"), ":"); ok && action == "download" {
+			w.Header().Set("Content-Type", "text/plain")
+			fixture.mu.Lock()
+			defer fixture.mu.Unlock()
+			_, _ = w.Write(fixture.uploadBytes)
+			return
+		}
 		writeJSON(w, geminiFileObject())
 	})
 	mux.HandleFunc("DELETE /v1beta/files/{id}", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("GET /v1beta/files/{id}:download", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
+	mux.HandleFunc("POST /v1beta/models/gemini-files-test:batchGenerateContent", func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			http.Error(w, "invalid batch request", http.StatusBadRequest)
+			return
+		}
+		batch, _ := request["batch"].(map[string]any)
+		input, _ := batch["inputConfig"].(map[string]any)
 		fixture.mu.Lock()
 		defer fixture.mu.Unlock()
-		_, _ = w.Write(fixture.uploadBytes)
+		fixture.batchCalls++
+		id := "batch-" + strconv.Itoa(fixture.batchCalls)
+		metadata := map[string]any{
+			"state": "BATCH_STATE_SUCCEEDED", "model": "models/gemini-files-test",
+			"createTime": time.Now().UTC().Format(time.RFC3339), "inputConfig": input,
+			"batchStats": map[string]any{"requestCount": "2"},
+		}
+		if input["fileName"] != nil {
+			metadata["output"] = map[string]any{"responsesFile": "files/gemini-output-file"}
+		} else {
+			metadata["output"] = map[string]any{"inlinedResponses": map[string]any{"inlinedResponses": []any{
+				map[string]any{
+					"metadata": map[string]string{"key": "inline-success"},
+					"response": map[string]any{
+						"candidates":    []any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": []any{map[string]string{"text": "ok"}}}, "finishReason": "STOP"}},
+						"usageMetadata": map[string]any{"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
+					},
+				},
+				map[string]any{"metadata": map[string]string{"key": "inline-error"}, "error": map[string]any{"code": 400, "message": "bad request"}},
+			}}}
+		}
+		operation := map[string]any{"name": "batches/" + id, "metadata": metadata}
+		fixture.batches[id] = operation
+		writeJSON(w, operation)
+	})
+	mux.HandleFunc("GET /v1beta/batches/{id}", func(w http.ResponseWriter, r *http.Request) {
+		fixture.mu.Lock()
+		defer fixture.mu.Unlock()
+		operation := fixture.batches[r.PathValue("id")]
+		if operation == nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, operation)
+	})
+	mux.HandleFunc("GET /v1beta/batches", func(w http.ResponseWriter, _ *http.Request) {
+		fixture.mu.Lock()
+		defer fixture.mu.Unlock()
+		operations := make([]any, 0, len(fixture.batches))
+		for _, operation := range fixture.batches {
+			operations = append(operations, operation)
+		}
+		writeJSON(w, map[string]any{"operations": operations})
+	})
+	mux.HandleFunc("POST /v1beta/batches/{action}", func(w http.ResponseWriter, r *http.Request) {
+		id, action, ok := strings.Cut(r.PathValue("action"), ":")
+		if !ok || action != "cancel" {
+			http.NotFound(w, r)
+			return
+		}
+		fixture.mu.Lock()
+		defer fixture.mu.Unlock()
+		if operation := fixture.batches[id]; operation != nil {
+			writeJSON(w, operation)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("DELETE /v1beta/batches/{id}", func(w http.ResponseWriter, r *http.Request) {
+		fixture.mu.Lock()
+		delete(fixture.batches, r.PathValue("id"))
+		fixture.mu.Unlock()
+		writeJSON(w, map[string]any{})
+	})
+	mux.HandleFunc("GET /download/v1beta/files/gemini-output-file:download", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/jsonl")
+		_, _ = io.WriteString(w, `{"key":"file-success","response":{"candidates":[],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`+"\n"+
+			`{"key":"file-error","error":{"code":400,"message":"bad request"}}`+"\n")
 	})
 	fixture.server = httptest.NewTLSServer(mux)
 	t.Cleanup(fixture.server.Close)
@@ -234,4 +318,168 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 	if strictStatus != http.StatusUnprocessableEntity {
 		t.Fatalf("strict Gemini file refusal status=%d", strictStatus)
 	}
+}
+
+func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
+	fixture := newGeminiFileFixture(t)
+	h := newAccessHarness(t)
+	owner := h.owner()
+	trustRoot := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fixture.server.TLS.Certificates[0].Certificate[0]})
+	provider := h.want(owner, http.MethodPost, "/api/v1/providers", map[string]any{
+		"name": "Gemini batches", "configuration": map[string]any{
+			"kind": "gemini", "auth_mode": "api_key", "endpoint": fixture.server.URL + "/v1beta",
+			"profile_id": "gemini-generation", "profile_revision": "1",
+			"options": map[string]any{"network": map[string]any{"trust_roots_pem": string(trustRoot)}},
+		}, "model": "gemini-files-test", "credential": "google-batch-fixture-key",
+	}, idem(uuid.NewString()), http.StatusCreated)
+	providerPath := "/api/v1/providers/" + provider["id"].(string)
+	if probe := h.want(owner, http.MethodPost, providerPath+"/probe", nil, etagHeader(provider), http.StatusOK); probe["succeeded"] != true {
+		t.Fatalf("Gemini provider probe: %v", probe)
+	}
+	models := h.want(owner, http.MethodGet, providerPath+"/models", nil, nil, http.StatusOK)
+	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
+	model := h.want(owner, http.MethodGet, providerPath+"/models/"+modelID, nil, nil, http.StatusOK)
+	updated := h.want(owner, http.MethodPatch, providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{
+		map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
+		map[string]any{"operation": "batch", "surface": "gemini", "mode": "unary"},
+	}}, etagHeader(model), http.StatusOK)
+	if certified := h.want(owner, http.MethodPost, providerPath+"/models/"+modelID+"/certify", nil, etagHeader(updated), http.StatusOK); certified["status"] != "certified" {
+		t.Fatalf("Gemini batch capability: %v", certified)
+	}
+	provider = h.want(owner, http.MethodGet, providerPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, providerPath+"/activate", nil, withMatch(provider, idem(uuid.NewString())), http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{
+		"effective_at": time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+		"prices": []any{map[string]any{
+			"provider_kind": "gemini", "provider_id": provider["id"], "model": "gemini-files-test",
+			"operation": "generation", "currency": "USD", "input_per_million": "1000000",
+			"output_per_million": "1000000", "batch_multiplier": "1",
+		}},
+	}, idem(uuid.NewString()), http.StatusCreated)
+	slug := "gemini-batch-" + uuid.NewString()[:8]
+	activate := func(routeSlug, fidelity string) {
+		draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+			"slug": routeSlug, "operations": []string{"generation", "batch"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+			"fidelity": map[string]any{"mode": fidelity},
+			"targets":  []any{map[string]any{"provider_id": provider["id"], "provider_model": "gemini-files-test", "priority": 0, "weight": 1, "timeout_ms": 5000}},
+		}, idem(uuid.NewString()), http.StatusCreated)
+		h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), http.StatusOK)
+	}
+	activate(slug, "transformed")
+	strictSlug := slug + "-strict"
+	activate(strictSlug, "strict")
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Gemini batch", "scopes": []string{"inference"}, "allowed_routes": []string{slug, strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
+	foreignKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Foreign Gemini file", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
+	h.refresh()
+
+	fileStatus, file := uploadGeminiIntegrationFile(t, h, key, slug)
+	if fileStatus != http.StatusOK {
+		t.Fatalf("Gemini input file upload: %d %v", fileStatus, file)
+	}
+	inlineRequest := []byte(`{"batch":{"inputConfig":{"requests":{"requests":[{"request":{"contents":[{"parts":[{"text":"hello"}]}]},"metadata":{"key":"inline-success"}},{"request":{"contents":[{"parts":[{"text":"bad"}]}]},"metadata":{"key":"inline-error"}}]}}}}`)
+	strictStatus, _, _ := h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+strictSlug+":batchGenerateContent", key, bytes.NewReader(inlineRequest), map[string]string{"Content-Type": "application/json"})
+	if strictStatus != http.StatusUnprocessableEntity {
+		t.Fatalf("strict Gemini batch refusal status=%d", strictStatus)
+	}
+	fixture.mu.Lock()
+	beforeForeign := fixture.batchCalls
+	fixture.mu.Unlock()
+	fileName := file["name"].(string)
+	fileRequest := []byte(`{"batch":{"inputConfig":{"fileName":` + `"` + fileName + `"` + `}}}`)
+	foreignStatus, _, _ := h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", foreignKey, bytes.NewReader(fileRequest), map[string]string{"Content-Type": "application/json"})
+	fixture.mu.Lock()
+	afterForeign := fixture.batchCalls
+	fixture.mu.Unlock()
+	if foreignStatus != http.StatusNotFound || afterForeign != beforeForeign {
+		t.Fatalf("foreign Gemini file batch status=%d dispatches=%d/%d", foreignStatus, beforeForeign, afterForeign)
+	}
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", key, bytes.NewReader(inlineRequest), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusOK {
+		t.Fatalf("Gemini inline batch create: %d %s", status, raw)
+	}
+	var operation map[string]any
+	if json.Unmarshal(raw, &operation) != nil {
+		t.Fatalf("invalid Gemini batch operation: %s", raw)
+	}
+	localName := strings.TrimPrefix(operation["name"].(string), "batches/")
+	resourceID := geminiBatchResourceID(t, localName)
+	if pass, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil || pass.Settled != 1 {
+		t.Fatalf("Gemini worker settlement: pass=%+v err=%v", pass, err)
+	}
+	counts, err := batches.NewStore(h.Pool).ResultCounts(t.Context(), resourceID)
+	if err != nil || counts[batches.ResultSucceeded] != 1 || counts[batches.ResultErrored] != 1 {
+		t.Fatalf("Gemini settlement counts=%v err=%v", counts, err)
+	}
+	rows, err := h.Pool.Query(t.Context(), `SELECT r.result_kind,count(f.attempt_id),
+		count(*) FILTER(WHERE f.charge_status='billable')
+		FROM olp.batch_settlement_results r LEFT JOIN olp.attempt_usage_facts f ON f.event_id=r.event_id
+		WHERE r.resource_id=$1 GROUP BY r.result_kind`, resourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type factCounts struct{ facts, billable int64 }
+	charged := map[batches.ResultKind]factCounts{}
+	for rows.Next() {
+		var kind batches.ResultKind
+		var count factCounts
+		if err := rows.Scan(&kind, &count.facts, &count.billable); err != nil {
+			t.Fatal(err)
+		}
+		charged[kind] = count
+	}
+	rows.Close()
+	if charged[batches.ResultSucceeded].facts != 1 || charged[batches.ResultSucceeded].billable != 1 ||
+		charged[batches.ResultErrored].billable != 0 {
+		t.Fatalf("Gemini batch charges=%v", charged)
+	}
+	fileStatus, raw, _ = h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", key, bytes.NewReader(fileRequest), map[string]string{"Content-Type": "application/json"})
+	if fileStatus != http.StatusOK {
+		t.Fatalf("Gemini file batch create: %d %s", fileStatus, raw)
+	}
+	var fileOperation map[string]any
+	_ = json.Unmarshal(raw, &fileOperation)
+	metadata := fileOperation["metadata"].(map[string]any)
+	output := metadata["output"].(map[string]any)
+	localOutputName := output["responsesFile"].(string)
+	localOutputID := strings.TrimPrefix(localOutputName, "files/")
+	downloadStatus, downloaded, _ := h.gatewayRaw(http.MethodGet, "/gemini/download/v1beta/files/"+localOutputID+":download?alt=media", key, nil, nil)
+	if downloadStatus != http.StatusOK || !bytes.Contains(downloaded, []byte(`"key":"file-success"`)) {
+		t.Fatalf("Gemini mapped batch output download status=%d body=%s", downloadStatus, downloaded)
+	}
+}
+
+func uploadGeminiIntegrationFile(t *testing.T, h *accessHarness, key, route string) (int, map[string]any) {
+	t.Helper()
+	status, _, headers := h.gatewayRaw(http.MethodPost, "/gemini/upload/v1beta/files", key, bytes.NewBufferString(`{"file":{"displayName":"input.txt"}}`), map[string]string{
+		"Content-Type": "application/json", "X-OLP-Route": route, "X-Goog-Upload-Protocol": "resumable",
+		"X-Goog-Upload-Command": "start", "X-Goog-Upload-Header-Content-Length": "10", "X-Goog-Upload-Header-Content-Type": "text/plain",
+	})
+	if status != http.StatusOK {
+		return status, nil
+	}
+	session, err := url.Parse(headers.Get("X-Goog-Upload-URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, body, _ := h.gatewayRaw(http.MethodPost, session.Path, key, bytes.NewBufferString("0123456789"), map[string]string{
+		"Content-Length": "10", "X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0",
+	})
+	if status != http.StatusOK {
+		return status, nil
+	}
+	var result struct {
+		File map[string]any `json:"file"`
+	}
+	_ = json.Unmarshal(body, &result)
+	return status, result.File
+}
+
+func geminiBatchResourceID(t *testing.T, localID string) uuid.UUID {
+	t.Helper()
+	hexID := strings.TrimPrefix(localID, "gemini_batch_")
+	id, err := uuid.Parse(hexID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

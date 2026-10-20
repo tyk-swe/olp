@@ -90,6 +90,13 @@ type vendorEvidence struct {
 		ListResponse       string            `json:"list_response"`
 		ErrorBody          string            `json:"error_body"`
 	} `json:"gemini_files,omitempty"`
+	GeminiBatches struct {
+		Basis              string            `json:"basis"`
+		DocumentationLinks map[string]string `json:"documentation_links"`
+		Endpoints          map[string]string `json:"endpoints"`
+		Fields             []string          `json:"fields"`
+		Fixtures           []string          `json:"fixtures"`
+	} `json:"gemini_batches,omitempty"`
 }
 
 var generationDialects = []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini-generate-content", "bedrock-converse"}
@@ -233,6 +240,39 @@ func TestGeminiFilesVendorEvidence(t *testing.T) {
 		}
 		if _, err := fs.ReadFile(fixtures.Files, path.Join("vendors", "gemini", name)); err != nil {
 			t.Fatalf("Gemini Files fixture %s: %v", name, err)
+		}
+	}
+}
+
+func TestGeminiBatchesVendorEvidence(t *testing.T) {
+	evidence := readEvidence(t, "gemini")
+	if evidence.Vendor != "google" || evidence.GeminiBatches.Basis != "documented" {
+		t.Fatalf("Gemini Batch evidence vendor/basis is %s/%s", evidence.Vendor, evidence.GeminiBatches.Basis)
+	}
+	for _, key := range []string{"batch_api", "batch_guide"} {
+		if !strings.HasPrefix(evidence.GeminiBatches.DocumentationLinks[key], "https://") {
+			t.Fatalf("Gemini Batch evidence lacks %s documentation", key)
+		}
+	}
+	for _, key := range []string{"create", "list", "get", "cancel", "delete", "results_download"} {
+		if !strings.HasPrefix(evidence.GeminiBatches.Endpoints[key], "https://") {
+			t.Fatalf("Gemini Batch evidence lacks endpoint %s", key)
+		}
+	}
+	for _, field := range []string{
+		"batch.displayName", "batch.inputConfig.requests.requests[].request",
+		"batch.inputConfig.requests.requests[].metadata.key", "batch.inputConfig.fileName",
+		"metadata.state", "metadata.batchStats.requestCount", "metadata.output.responsesFile",
+		"response.usageMetadata.promptTokenCount", "response.usageMetadata.candidatesTokenCount",
+		"response.usageMetadata.cachedContentTokenCount", "response.usageMetadata.thoughtsTokenCount",
+	} {
+		if !slices.Contains(evidence.GeminiBatches.Fields, field) {
+			t.Fatalf("Gemini Batch evidence lacks field %s", field)
+		}
+	}
+	for _, name := range evidence.GeminiBatches.Fixtures {
+		if _, err := fs.ReadFile(fixtures.Files, path.Join("vendors", "gemini", name)); err != nil {
+			t.Fatalf("Gemini Batch fixture %s: %v", name, err)
 		}
 	}
 }

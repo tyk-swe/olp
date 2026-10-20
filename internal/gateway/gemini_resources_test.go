@@ -143,6 +143,11 @@ func TestGeminiFileListCursorAndRoutePrecedence(t *testing.T) {
 		{http.MethodGet, "/gemini/v1beta/files/gemini_file_id", "GET /gemini/v1beta/files/{name}"},
 		{http.MethodGet, "/gemini/download/v1beta/files/gemini_file_id:download", "GET /gemini/download/v1beta/files/{action}"},
 		{http.MethodPost, "/gemini/v1beta/models/gemini-2.5:generateContent", "POST /gemini/v1beta/models/{action}"},
+		{http.MethodPost, "/gemini/v1beta/models/gemini-2.5:batchGenerateContent", "POST /gemini/v1beta/models/{action}"},
+		{http.MethodGet, "/gemini/v1beta/batches", "GET /gemini/v1beta/batches"},
+		{http.MethodGet, "/gemini/v1beta/batches/gemini_batch_id", "GET /gemini/v1beta/batches/{name}"},
+		{http.MethodPost, "/gemini/v1beta/batches/gemini_batch_id:cancel", "POST /gemini/v1beta/batches/{action}"},
+		{http.MethodDelete, "/gemini/v1beta/batches/gemini_batch_id", "DELETE /gemini/v1beta/batches/{name}"},
 	} {
 		_, pattern := mux.Handler(&http.Request{Method: test.method, URL: &url.URL{Path: test.path}})
 		if pattern != test.want {

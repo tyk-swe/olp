@@ -1,0 +1,16 @@
+{
+  "operations": [
+    {
+      "name": "batches/batch-file-0123456789",
+      "metadata": {
+        "state": "BATCH_STATE_SUCCEEDED",
+        "model": "models/gemini-2.5-flash",
+        "createTime": "2026-10-21T12:00:00Z",
+        "inputConfig": {"fileName": "files/input-gemini-file"},
+        "batchStats": {"requestCount": "2"},
+        "output": {"responsesFile": "files/output-gemini-file"}
+      }
+    }
+  ],
+  "nextPageToken": ""
+}

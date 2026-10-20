@@ -69,6 +69,10 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 					family = wire.GeminiEmbeddings
 				case "batchEmbedContents":
 					family = wire.GeminiEmbeddingsBatch
+				case "batchGenerateContent":
+					r.SetPathValue("model", model)
+					s.geminiCreateBatch(w, r)
+					return
 				default:
 					s.begin(w, r)
 					writeSurfaceError(w, notFoundError("not_found", "Unknown Gemini operation."), "gemini")

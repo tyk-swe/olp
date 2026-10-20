@@ -1,0 +1,2 @@
+{"key":"request-1","response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":16,"cachedContentTokenCount":3,"thoughtsTokenCount":1}}}
+{"key":"request-2","error":{"code":400,"message":"bad request"}}

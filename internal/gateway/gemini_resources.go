@@ -32,6 +32,10 @@ func (s *Server) registerGeminiFilesState(mux *http.ServeMux) {
 	mux.HandleFunc("GET /gemini/v1beta/files/{name}", s.geminiGetFile)
 	mux.HandleFunc("DELETE /gemini/v1beta/files/{name}", s.geminiDeleteFile)
 	mux.HandleFunc("GET /gemini/download/v1beta/files/{action}", s.geminiDownloadFile)
+	mux.HandleFunc("GET /gemini/v1beta/batches", s.geminiListBatches)
+	mux.HandleFunc("GET /gemini/v1beta/batches/{name}", s.geminiGetBatch)
+	mux.HandleFunc("POST /gemini/v1beta/batches/{action}", s.geminiBatchCancel)
+	mux.HandleFunc("DELETE /gemini/v1beta/batches/{name}", s.geminiDeleteBatch)
 }
 
 func (s *Server) geminiBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, access.Authority, bool) {

@@ -103,6 +103,9 @@ func (w *Worker) setup() {
 	if w.Readers["anthropic"] == nil {
 		w.Readers["anthropic"] = &AnthropicReader{Auth: w.Auth, Egress: w.Egress}
 	}
+	if w.Readers["gemini"] == nil {
+		w.Readers["gemini"] = &GeminiReader{Auth: w.Auth, Egress: w.Egress}
+	}
 	if w.Readers["openai"] == nil {
 		w.Readers["openai"] = &OpenAIReader{Auth: w.Auth, Egress: w.Egress}
 	}
@@ -513,10 +516,14 @@ func submissionFiles(cursor []byte) (inputFileID, localInputID, endpoint string,
 			InputFileID  string `json:"input_file_id"`
 			LocalInputID string `json:"local_input_file_id"`
 			Endpoint     string `json:"endpoint"`
+			GeminiFile   string `json:"gemini_file"`
 		} `json:"submission"`
 	}
 	if len(cursor) == 0 || json.Unmarshal(cursor, &value) != nil {
 		return "", "", "", errors.New("batch submission identity is unavailable")
+	}
+	if value.Submission.GeminiFile != "" {
+		return value.Submission.GeminiFile, "", "", nil
 	}
 	return value.Submission.InputFileID, value.Submission.LocalInputID, value.Submission.Endpoint, nil
 }
