@@ -169,3 +169,10 @@ func TestGeminiManagedContentLineTranslation(t *testing.T) {
 		_ = spool.Remove(part.Handle)
 	}
 }
+
+func TestGeminiManagedResponseEnvelopeResultFile(t *testing.T) {
+	body := []byte(`{"name":"batches/upstream","metadata":{"state":"BATCH_STATE_SUCCEEDED"},"response":{"responsesFile":"files/output"}}`)
+	if name := geminiManagedResponsesFile(body); name != "files/output" {
+		t.Fatalf("response-envelope result file missing: %q", name)
+	}
+}

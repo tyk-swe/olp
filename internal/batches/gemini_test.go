@@ -135,3 +135,24 @@ func TestGeminiSubmissionAdoptionRetainsBindings(t *testing.T) {
 		t.Fatalf("managed adoption metadata=%s state=%s err=%v", metadata, state, err)
 	}
 }
+
+func TestGeminiResponseEnvelopeInlineResults(t *testing.T) {
+	var object, metadata map[string]json.RawMessage
+	if err := json.Unmarshal(geminiBatchFixture(t, "batch.succeeded.inline.json"), &object); err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal(object["metadata"], &metadata)
+	object["response"] = metadata["output"]
+	delete(metadata, "output")
+	object["metadata"], _ = json.Marshal(metadata)
+	body, _ := json.Marshal(object)
+	snapshot, err := parseGeminiBatchSnapshot(body)
+	if err != nil || snapshot.OutputFileID != "inline:batch-0123456789" {
+		t.Fatalf("response-envelope results were missed: %+v err=%v", snapshot, err)
+	}
+	var results []Result
+	_, done, err := (&GeminiReader{}).ReadResults(t.Context(), &PinnedTarget{Model: "gemini-2.5-flash"}, snapshot, Cursor{}, func(page []Result, _ Cursor) error { results = append(results, page...); return nil })
+	if err != nil || !done || len(results) != 2 || !results[0].Usage.Observed {
+		t.Fatalf("response-envelope usage was not settled: %+v done=%v err=%v", results, done, err)
+	}
+}

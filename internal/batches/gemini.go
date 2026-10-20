@@ -542,13 +542,18 @@ func batchGeminiInlineResponses(body []byte) json.RawMessage {
 	var metadata map[string]json.RawMessage
 	_ = json.Unmarshal(object["metadata"], &metadata)
 	for _, parent := range []map[string]json.RawMessage{metadata, object} {
-		var output map[string]json.RawMessage
-		if json.Unmarshal(parent["output"], &output) != nil {
-			continue
-		}
-		var inline map[string]json.RawMessage
-		if json.Unmarshal(output["inlinedResponses"], &inline) == nil {
-			if len(inline["inlinedResponses"]) > 0 {
+		for _, field := range []string{"output", "response"} {
+			var output map[string]json.RawMessage
+			if json.Unmarshal(parent[field], &output) != nil {
+				continue
+			}
+			raw := output["inlinedResponses"]
+			var items []json.RawMessage
+			if json.Unmarshal(raw, &items) == nil && items != nil {
+				return raw
+			}
+			var inline map[string]json.RawMessage
+			if json.Unmarshal(raw, &inline) == nil && len(inline["inlinedResponses"]) > 0 {
 				return inline["inlinedResponses"]
 			}
 		}

@@ -580,6 +580,14 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	_ = json.Unmarshal(nativeBody, &nativeOperation)
 	nativeName := nativeOperation["name"].(string)
 	nativeOutput := nativeOperation["metadata"].(map[string]any)["output"].(map[string]any)["responsesFile"].(string)
+	outputUUID, err := uuid.Parse(strings.TrimPrefix(nativeOutput, "files/gemini_file_"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var savedParent *uuid.UUID
+	if err := h.Pool.QueryRow(t.Context(), `SELECT parent_id FROM olp.provider_resources WHERE id=$1`, outputUUID).Scan(&savedParent); err != nil || savedParent == nil || *savedParent != geminiBatchResourceID(t, strings.TrimPrefix(nativeName, "batches/")) {
+		t.Fatalf("result-file lineage was not persisted: parent=%v err=%v", savedParent, err)
+	}
 	deletePending, _, _ = h.gatewayRaw(http.MethodDelete, "/gemini/v1beta/"+nativeOutput, key, nil, nil)
 	if deletePending != http.StatusConflict {
 		t.Fatalf("native result file was deletable before settlement: %d", deletePending)

@@ -132,13 +132,15 @@ func geminiManagedResponsesFile(body []byte) string {
 	var metadata map[string]json.RawMessage
 	_ = json.Unmarshal(root["metadata"], &metadata)
 	for _, parent := range []map[string]json.RawMessage{metadata, root} {
-		var output map[string]json.RawMessage
-		if json.Unmarshal(parent["output"], &output) != nil {
-			continue
-		}
-		var name string
-		if json.Unmarshal(output["responsesFile"], &name) == nil && name != "" {
-			return name
+		for _, field := range []string{"output", "response"} {
+			var output map[string]json.RawMessage
+			if json.Unmarshal(parent[field], &output) != nil {
+				continue
+			}
+			var name string
+			if json.Unmarshal(output["responsesFile"], &name) == nil && name != "" {
+				return name
+			}
 		}
 	}
 	return ""
