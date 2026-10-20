@@ -211,6 +211,21 @@ func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {
 	readers.Wait()
 }
 
+func TestAnthropicBatchRequiresDirectMessageConnector(t *testing.T) {
+	direct := Config{Kind: "anthropic", ProfileID: "anthropic-messages", ProfileRevision: ProfileRevision, AuthMode: "api_key", Endpoint: "https://api.anthropic.com"}
+	if !direct.Supports("batch", "anthropic", "unary") || direct.Supports("batch", "openai", "unary") {
+		t.Fatal("direct Anthropic message connector batch capability is not surface-bound")
+	}
+	for _, config := range []Config{
+		{Kind: "vertex_ai", VendorID: "google-vertex", ProfileID: "vertex-anthropic", ProfileRevision: ProfileRevision},
+		{Kind: "bedrock", VendorID: "amazon-bedrock", ProfileID: "bedrock-anthropic-invoke", ProfileRevision: ProfileRevision},
+	} {
+		if config.Supports("batch", "anthropic", "unary") {
+			t.Fatalf("cloud Anthropic connector gained native message batches: %+v", config)
+		}
+	}
+}
+
 func TestPluginOpenAIChatProfileSkipsBatchProfilesAsTemplates(t *testing.T) {
 	profile, err := LookupProfile("compatible-chat", ProfileRevision)
 	if err != nil {

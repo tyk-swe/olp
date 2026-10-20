@@ -119,6 +119,9 @@ func init() {
 		case "anthropic":
 			p.SemanticHeaders = []string{"Anthropic-Version", "Anthropic-Beta"}
 			p.Documentation = "https://platform.claude.com/docs/en/api/versioning"
+			if p.Hosting == "direct-anthropic" {
+				p.Operations = append(p.Operations, "batch")
+			}
 		case "gemini", "vertex_ai":
 			p.Documentation = "https://ai.google.dev/api/generate-content"
 			p.QuerySettings = []string{"$xgafv"}
@@ -481,7 +484,11 @@ func generationFamily(dialect string) (wire.Format, bool) {
 
 func (c Config) Supports(operation, surface, mode string) bool {
 	if operation == "batch" {
-		return c.SupportsFilesBatches() && surface == "openai" && mode == "unary"
+		if surface == "openai" {
+			return c.SupportsFilesBatches() && mode == "unary"
+		}
+		return c.Kind == "anthropic" && surface == "anthropic" && mode == "unary" &&
+			(c.ProfileID == "" || c.ProfileID == "anthropic-messages" && c.Hosting() == "direct-anthropic")
 	}
 	if c.Kind == KindPlugin {
 		p, err := c.profile()
