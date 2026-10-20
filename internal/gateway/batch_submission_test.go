@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -473,5 +474,14 @@ func TestCanonicalBatchJSONPreservesExactNumbers(t *testing.T) {
 	b, err := canonicalBatchJSON(right)
 	if err != nil || !bytes.Equal(a, b) || !bytes.Contains(a, []byte("9007199254740993")) || !bytes.Contains(a, []byte(`"tiny":-0`)) {
 		t.Fatalf("canonical intent changed native numbers or depended on serialization: %s / %s err=%v", a, b, err)
+	}
+}
+
+func TestCallerCredentialBatchRefusesBeforePreparingSettlement(t *testing.T) {
+	server := &Server{Batches: &batches.Store{}}
+	p := &pin{provider: routing.Provider{CredentialSource: "caller"}}
+	submission, err := server.prepareBatchSubmission(context.Background(), nil, "key", p, oif.Document{}, nil, nil, oif.ServingIdentity{}, "", "", resources.KindBatch, "openai", "openai", "generation", time.Hour, nil, nil)
+	if submission != nil || err == nil || err.Status != 422 || err.Code != "target_capability" {
+		t.Fatalf("caller credentials reached durable settlement: submission=%+v err=%v", submission, err)
 	}
 }

@@ -3,8 +3,10 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -138,5 +140,23 @@ func TestGeminiBatchProjectionPreservesOrdinaryReferenceText(t *testing.T) {
 	}
 	if geminiBatchCancelAcknowledgement([]byte(`{"name":"batches/upstream"}`)) {
 		t.Fatal("a job response was classified as an empty acknowledgement")
+	}
+}
+
+func TestGeminiNativeFileQualificationRejectsUnownedReferences(t *testing.T) {
+	digest := func(key string) ([]byte, bool) { sum := sha256.Sum256([]byte(key)); return sum[:], true }
+	good := `{"key":"one","request":{"contents":[{"parts":[{"text":"hello"}]}],"tools":[{"functionDeclarations":[{"name":"read","parameters":{"type":"object","properties":{"fileUri":{"type":"string"}}}}]}]}}`
+	manifest, err := qualifyGeminiBatchJSONL(strings.NewReader(good+"\n"), "route", digest)
+	if err != nil || manifest.Adapter != "gemini_native" || manifest.LineCount != 1 || manifest.ManifestDigest == "" {
+		t.Fatalf("valid native JSONL or opaque tool schema was refused: %+v %v", manifest, err)
+	}
+	for _, input := range []string{
+		good + "\n" + good + "\n",
+		`{"key":"one","request":{"contents":[{"parts":[{"fileData":{"fileUri":"files/foreign","mimeType":"application/pdf"}}]}]}}` + "\n",
+		`{"key":"one","request":{"contents":[{"parts":[{"text":"hi"}]}],"cachedContent":"cachedContents/foreign"}}` + "\n",
+	} {
+		if _, err := qualifyGeminiBatchJSONL(strings.NewReader(input), "route", digest); err == nil {
+			t.Fatalf("unqualified native JSONL was accepted: %s", input)
+		}
 	}
 }

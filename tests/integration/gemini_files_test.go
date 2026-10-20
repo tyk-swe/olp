@@ -149,6 +149,7 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 			"batchStats": map[string]any{"requestCount": "2"},
 		}
 		if input["fileName"] != nil || input["file_name"] != nil {
+			fixture.deletedFiles["gemini-output-file"] = false // A new job creates fresh fixture evidence.
 			metadata["output"] = map[string]any{"responsesFile": "files/gemini-output-file"}
 		} else {
 			metadata["output"] = map[string]any{"inlinedResponses": map[string]any{"inlinedResponses": []any{
@@ -359,6 +360,12 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 	file := final["file"].(map[string]any)
 	localName := file["name"].(string)
 	localID := strings.TrimPrefix(localName, "files/")
+	unqualified, _ := json.Marshal(map[string]any{"batch": map[string]any{"inputConfig": map[string]any{"fileName": localName}}})
+	blockedStatus, blockedBody, _ := h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", key, bytes.NewReader(unqualified), map[string]string{"Content-Type": "application/json"})
+	if blockedStatus != http.StatusUnprocessableEntity {
+		t.Fatalf("unqualified native upload entered batch execution: %d %s", blockedStatus, blockedBody)
+	}
+
 	getStatus, getBody, _ := h.gatewayRaw(http.MethodGet, "/gemini/v1beta/files/"+localID, key, nil, nil)
 	if getStatus != http.StatusOK || !bytes.Contains(getBody, []byte(`"name":"files/`+localID+`"`)) {
 		t.Fatalf("Gemini file get status=%d body=%s", getStatus, getBody)
@@ -463,6 +470,11 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	}
 	localName := strings.TrimPrefix(operation["name"].(string), "batches/")
 	resourceID := geminiBatchResourceID(t, localName)
+	deletePending, deletePendingBody, _ := h.gatewayRaw(http.MethodDelete, "/gemini/v1beta/batches/"+localName, key, nil, nil)
+	if deletePending != http.StatusConflict || !bytes.Contains(deletePendingBody, []byte("batch_settlement_pending")) {
+		t.Fatalf("inline Gemini evidence was deletable before settlement: %d %s", deletePending, deletePendingBody)
+	}
+
 	if pass, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil || pass.Settled != 1 {
 		t.Fatalf("Gemini worker settlement: pass=%+v err=%v", pass, err)
 	}
@@ -538,6 +550,48 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	if !deleted {
 		t.Fatal("last settled projection did not delete the shared provider object")
 	}
+	// A complete final chunk can be qualified without persisting input bytes.
+	nativeInput := []byte(`{"key":"file-success","request":{"contents":[{"parts":[{"text":"hi"}]}]}}` + "\n" + `{"key":"file-error","request":{"contents":[{"parts":[{"text":"bad"}]}]}}` + "\n")
+	startStatus, startBody, startHeaders := h.gatewayRaw(http.MethodPost, "/gemini/upload/v1beta/files", key, strings.NewReader(`{}`), map[string]string{
+		"Content-Type": "application/json", "X-OLP-Route": slug, "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+		"X-Goog-Upload-Header-Content-Length": strconv.Itoa(len(nativeInput)), "X-Goog-Upload-Header-Content-Type": "application/jsonl",
+	})
+	if startStatus != http.StatusOK {
+		t.Fatalf("native JSONL upload start: %d %s", startStatus, startBody)
+	}
+	uploadURL, err := url.Parse(startHeaders.Get("X-Goog-Upload-URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadStatus, uploadBody, _ := h.gatewayRaw(http.MethodPost, uploadURL.RequestURI(), key, bytes.NewReader(nativeInput), map[string]string{"Content-Length": strconv.Itoa(len(nativeInput)), "X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0"})
+	if uploadStatus != http.StatusOK || bytes.Contains(uploadBody, []byte("batch_manifest")) {
+		t.Fatalf("qualified native JSONL upload: %d %s", uploadStatus, uploadBody)
+	}
+	var uploadedNative map[string]any
+	_ = json.Unmarshal(uploadBody, &uploadedNative)
+	inputName := uploadedNative["file"].(map[string]any)["name"].(string)
+	_, _, _ = h.gatewayRaw(http.MethodGet, "/gemini/v1beta/"+inputName, key, nil, nil) // Refresh must preserve the private qualification.
+	nativeRequest, _ := json.Marshal(map[string]any{"batch": map[string]any{"inputConfig": map[string]any{"fileName": inputName}}})
+	nativeStatus, nativeBody, _ := h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", key, bytes.NewReader(nativeRequest), map[string]string{"Content-Type": "application/json"})
+	if nativeStatus != http.StatusOK {
+		t.Fatalf("qualified file-backed native batch: %d %s", nativeStatus, nativeBody)
+	}
+	var nativeOperation map[string]any
+	_ = json.Unmarshal(nativeBody, &nativeOperation)
+	nativeName := nativeOperation["name"].(string)
+	nativeOutput := nativeOperation["metadata"].(map[string]any)["output"].(map[string]any)["responsesFile"].(string)
+	deletePending, _, _ = h.gatewayRaw(http.MethodDelete, "/gemini/v1beta/"+nativeOutput, key, nil, nil)
+	if deletePending != http.StatusConflict {
+		t.Fatalf("native result file was deletable before settlement: %d", deletePending)
+	}
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	deletePending, deletePendingBody, _ = h.gatewayRaw(http.MethodDelete, "/gemini/v1beta/"+nativeName, key, nil, nil)
+	if deletePending != http.StatusOK {
+		t.Fatalf("settled native batch could not be deleted: %d %s", deletePending, deletePendingBody)
+	}
+
 }
 
 func uploadGeminiManagedOpenAIFile(t *testing.T, h *accessHarness, key, route string) (int, map[string]any) {

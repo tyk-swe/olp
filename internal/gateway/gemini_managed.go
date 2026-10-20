@@ -166,6 +166,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 			Kind: resources.KindFile, APIKeyID: owner.APIKeyID, RouteSlug: owner.RouteSlug,
 			ProviderID: owner.ProviderID, ProviderRevisionID: owner.ProviderRevisionID, RouteRevisionID: owner.RouteRevisionID,
 			TargetID: owner.TargetID, SlotID: owner.SlotID, CredentialID: owner.CredentialID,
+			ParentID:   new(owner.UUID),
 			UpstreamID: fileName + "#" + role, State: "processed", Metadata: mustJSON(metadata),
 		})
 	}

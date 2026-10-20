@@ -386,7 +386,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, err, x.family)
 		return
 	}
-	if _, _, _, validationErr := validateAnthropicBatchRequest(body, route.Slug, ""); validationErr != nil {
+	if _, _, _, validationErr := validateAnthropicBatchRequest(body, route.Slug, "", ""); validationErr != nil {
 		s.stateFail(x, w, validationErr, x.family)
 		return
 	}
@@ -398,7 +398,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if x.route != nil {
 		route = x.route
 	}
-	translated, fileIDs, customIDs, e := validateAnthropicBatchRequest(body, route.Slug, p.model)
+	translated, fileIDs, customIDs, e := validateAnthropicBatchRequest(body, route.Slug, p.model, p.provider.Connector().Model(p.model))
 	if e != nil {
 		s.releaseHold(r.Context(), p.hold)
 		s.stateFail(x, w, e, x.family)
@@ -815,6 +815,9 @@ func (s *Server) anthropicCancelBatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
 	s.anthropicBatchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, _ access.Authority, res *resources.Resource, p *pin) *Error {
+		if err := s.requireBatchEvidenceSettled(ctx, res.UUID); err != nil {
+			return err
+		}
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "messages/batches/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -898,7 +901,7 @@ type anthropicBatchRequest struct {
 	Params   json.RawMessage `json:"params"`
 }
 
-func validateAnthropicBatchRequest(body []byte, routeSlug, targetModel string) ([]byte, []string, []string, *Error) {
+func validateAnthropicBatchRequest(body []byte, routeSlug, targetModel, boundModel string) ([]byte, []string, []string, *Error) {
 	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
 	if err != nil || source.Root().Kind() != oif.Object || len(source.Root().Members()) != 1 || source.Root().Members()[0].Name != "requests" {
 		return nil, nil, nil, invalidRequest("invalid_request", "The request body must contain only requests.", nil)
@@ -966,6 +969,9 @@ func validateAnthropicBatchRequest(body []byte, routeSlug, targetModel string) (
 			return nil, nil, nil, invalidRequest("invalid_request", fmt.Sprintf("requests[%d].params contains an invalid file source.", i), nil)
 		}
 		fileIDs = append(fileIDs, refs...)
+	}
+	if boundModel != "" {
+		targetModel = boundModel
 	}
 	var object map[string]json.RawMessage
 	_ = json.Unmarshal(body, &object)

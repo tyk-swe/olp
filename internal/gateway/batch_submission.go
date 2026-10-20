@@ -96,6 +96,9 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 	if s.Batches == nil {
 		return nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
 	}
+	if p != nil && p.provider.CredentialSource == "caller" {
+		return nil, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
+	}
 	digester, ok := s.Runtime.(interface {
 		Digest(secrets.DigestPurpose, string) []byte
 	})
@@ -182,6 +185,20 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 		}
 	}
 	return &batchSubmission{settlement: settlement, resource: resource}, nil
+}
+
+func (s *Server) requireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *Error {
+	if s.Batches == nil {
+		return serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state is unavailable.")
+	}
+	pending, err := s.Batches.Pending(ctx, resourceID)
+	if err != nil {
+		return serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state could not be read.")
+	}
+	if pending {
+		return serverError(http.StatusConflict, "batch_settlement_pending", "The resource is still needed for batch settlement; retry after settlement closes.")
+	}
+	return nil
 }
 
 func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation string, now time.Time) (*usage.Event, error) {

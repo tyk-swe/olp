@@ -249,6 +249,11 @@ func TestAnthropicNativeBatchResourcesAndSettlement(t *testing.T) {
 	}
 	localBatchID := batch["id"].(string)
 	resourceID := anthropicBatchResourceID(t, localBatchID)
+	deleteStatus, deleteBody, _ := h.gatewayRaw(http.MethodDelete, "/anthropic/v1/messages/batches/"+localBatchID, key, nil, nil)
+	if deleteStatus != http.StatusConflict || !bytes.Contains(deleteBody, []byte("batch_settlement_pending")) {
+		t.Fatalf("Anthropic evidence was deletable before settlement: %d %s", deleteStatus, deleteBody)
+	}
+
 	if pass, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil || pass.Settled != 1 {
 		t.Fatalf("Anthropic worker settlement: pass=%+v err=%v", pass, err)
 	}

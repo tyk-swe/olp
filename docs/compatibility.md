@@ -538,9 +538,18 @@ provider model before upload. Files uploaded before model qualification must be
 uploaded again before creating new batches. Native Gemini inline batches refuse
 file and cached-content references until owner and affinity binding is available.
 
+Native Gemini file-backed execution requires a qualifying JSONL manifest from
+one complete `upload, finalize` chunk. General resumable uploads remain available,
+but segmented or unqualified files cannot start batch inference. File and cached
+content references are refused in native and managed Gemini batch items.
+Batches using caller-supplied credentials are refused before dispatch because
+autonomous settlement cannot retain the caller's credential.
+
 Managed Gemini output and error files are independent views of one provider
 result object. Deleting one view preserves its sibling; the final view returns
-`409 batch_settlement_pending` while settlement still needs the evidence.
+`409 batch_settlement_pending` while settlement still needs the evidence. Batch
+objects and their native result files are likewise protected until settlement
+closes.
 
 Creation requires `X-OLP-Route`; follow-up requests derive route and affinity
 from the owner-scoped gateway ID. Ambiguous creates are retained as

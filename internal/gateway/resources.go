@@ -575,6 +575,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		SlotID:             owner.SlotID,
 		CredentialID:       owner.CredentialID,
 		UpstreamID:         upstreamID,
+		ParentID:           new(owner.UUID),
 		State:              "processed",
 		Metadata:           metadata,
 	}
@@ -1246,6 +1247,11 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 				if pending {
 					return serverError(http.StatusConflict, "batch_settlement_pending", "The result file is still needed for settlement; retry after settlement closes.")
 				}
+			}
+		}
+		if fileAdapter(res) != "gemini_managed" && res.ParentID != nil {
+			if err := s.requireBatchEvidenceSettled(ctx, *res.ParentID); err != nil {
+				return err
 			}
 		}
 		path := "files/" + url.PathEscape(res.UpstreamID)

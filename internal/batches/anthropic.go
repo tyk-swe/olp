@@ -149,11 +149,11 @@ func parseAnthropicResultLine(line []byte, model string) (Result, error) {
 		result.ErrorClass = "anthropic_batch_expired"
 	case "succeeded":
 		completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, object.Result.Message, model, "")
-		if err != nil || completion == nil || completion.Usage == nil {
+		if err != nil || completion == nil {
 			return Result{}, ErrCursorConflict
 		}
 		result.Kind = ResultSucceeded
-		result.Usage = usage.ObservedAttemptUsage(completion.Usage, true, "generation")
+		result.Usage = usage.ObservedAttemptUsage(completion.Usage, completion.Usage != nil, "generation")
 	default:
 		return Result{}, ErrCursorConflict
 	}

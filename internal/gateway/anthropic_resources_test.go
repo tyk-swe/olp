@@ -71,7 +71,7 @@ func TestValidateAnthropicBatchRequest(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			encoded, _, _, err := validateAnthropicBatchRequest([]byte(test.body), test.route, test.target)
+			encoded, _, _, err := validateAnthropicBatchRequest([]byte(test.body), test.route, test.target, test.target)
 			if test.wantErr {
 				if err == nil {
 					t.Fatal("invalid Anthropic batch request was accepted")
@@ -95,11 +95,11 @@ func TestValidateAnthropicBatchRequest(t *testing.T) {
 	if _, err := protocols.Parse(wire.Anthropic, []byte(`{"model":"route","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`), "route"); err != nil {
 		t.Fatalf("direct Anthropic params parse: %v", err)
 	}
-	if _, _, _, err := validateAnthropicBatchRequest([]byte(withoutRoute), "", ""); err != nil {
+	if _, _, _, err := validateAnthropicBatchRequest([]byte(withoutRoute), "", "", ""); err != nil {
 		t.Fatalf("common params.model did not supply the route: %v", err)
 	}
 	mixedWithoutRoute := `{"requests":[{"custom_id":"a","params":{"model":"route","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}},{"custom_id":"b","params":{"model":"other","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}}]}`
-	if _, _, _, err := validateAnthropicBatchRequest([]byte(mixedWithoutRoute), "", ""); err == nil {
+	if _, _, _, err := validateAnthropicBatchRequest([]byte(mixedWithoutRoute), "", "", ""); err == nil {
 		t.Fatal("mixed params.model values were accepted without X-OLP-Route")
 	}
 }
@@ -251,5 +251,13 @@ func TestAnthropicFileBindingPreservesOpaqueToolInput(t *testing.T) {
 		!strings.Contains(string(rewritten), `9007199254740993`) || !strings.Contains(string(rewritten), `"tiny":-0`) ||
 		!strings.Contains(string(rewritten), `"file_id":"file_upstream"`) {
 		t.Fatalf("file rebinding changed unrelated native tool data: %s err=%v", rewritten, err)
+	}
+}
+
+func TestAnthropicBatchBindsServingModelSeparatelyFromLogicalModel(t *testing.T) {
+	body := []byte(`{"requests":[{"custom_id":"one","params":{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}}]}`)
+	bound, _, _, err := validateAnthropicBatchRequest(body, "route", "logical-model", "claude-serving-model")
+	if err != nil || !strings.Contains(string(bound), `"model":"claude-serving-model"`) {
+		t.Fatalf("Anthropic serving binding was ignored: %s %v", bound, err)
 	}
 }

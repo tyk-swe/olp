@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,15 @@ func TestGeminiReaderPollInlineAndFileResults(t *testing.T) {
 	listing := geminiBatchFixture(t, "batch.list.response.json")
 	results := geminiBatchFixture(t, "batch.results.jsonl")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if selector := r.URL.Query().Get("fields"); selector != "" {
+			prefix, _, _ := strings.Cut(selector, "metadata(")
+			for _, field := range strings.Split(prefix, ",") {
+				if field != "" && field != "name" && field != "done" && field != "error" && field != "response" {
+					http.Error(w, "invalid Operation field selection", http.StatusBadRequest)
+					return
+				}
+			}
+		}
 		switch {
 		case r.URL.Path == "/v1beta/batches/batch-0123456789":
 			_, _ = w.Write(inline)

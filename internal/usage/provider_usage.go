@@ -7,6 +7,9 @@ import (
 // ObservedAttemptUsage converts provider counters to the accounting dimensions
 // shared by live requests and deferred results.
 func ObservedAttemptUsage(u *wire.Usage, complete bool, operation string) AttemptUsage {
+	if u == nil {
+		return AttemptUsage{BillingUncertain: true}
+	}
 	evidence := AttemptUsage{
 		Observed:         true,
 		Complete:         complete,

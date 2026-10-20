@@ -1,7 +1,9 @@
 package batches
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -110,3 +112,24 @@ func TestAnthropicReaderRejectsUnknownResultTypesAndRegisters(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func TestAnthropicMissingUsageDoesNotDiscardFollowingResults(t *testing.T) {
+	lines := bytes.Split(bytes.TrimSpace(anthropicFixture(t, "batch.results.jsonl")), []byte{'\n'})
+	var first map[string]json.RawMessage
+	_ = json.Unmarshal(lines[0], &first)
+	var result map[string]json.RawMessage
+	_ = json.Unmarshal(first["result"], &result)
+	var message map[string]json.RawMessage
+	_ = json.Unmarshal(result["message"], &message)
+	delete(message, "usage")
+	result["message"], _ = json.Marshal(message)
+	first["result"], _ = json.Marshal(result)
+	first["custom_id"] = json.RawMessage(`"missing-usage"`)
+	missing, _ := json.Marshal(first)
+	input := append(append(append([]byte{}, missing...), '\n'), append(lines[0], '\n')...)
+	var got []Result
+	_, _, _, err := ReadJSONLPages(bytes.NewReader(input), Cursor{}, "results", "output", func(line []byte) (Result, error) { return parseAnthropicResultLine(line, "claude-test") }, func(results []Result, _ Cursor) error { got = append(got, results...); return nil })
+	if err != nil || len(got) != 2 || got[0].Usage.Observed || !got[0].Usage.BillingUncertain || got[0].Usage.Complete || !got[1].Usage.Observed {
+		t.Fatalf("missing usage stopped valid settlement: %+v err=%v", got, err)
+	}
+}

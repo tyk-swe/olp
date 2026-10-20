@@ -87,7 +87,7 @@ func (r *GeminiReader) Poll(ctx context.Context, settlement Settlement, target *
 	}
 	path := "batches/" + url.PathEscape(*settlement.UpstreamID)
 	reader := &OpenAIReader{Auth: r.Auth, Egress: r.Egress}
-	fields := url.Values{"fields": {"name,state,createTime,inputConfig,batchStats,metadata(state,createTime,inputConfig,batchStats)"}}
+	fields := url.Values{"fields": {"name,done,error,metadata(state,createTime,inputConfig(fileName),batchStats)"}}
 	body, err := reader.getJSON(ctx, target, path, fields, 1<<20)
 	if err != nil {
 		if !strings.Contains(err.Error(), "exceeds the limit") {

@@ -477,7 +477,9 @@ func geminiFileMetadata(body []byte, model string) (json.RawMessage, string, *ti
 	}
 	metadata := map[string]json.RawMessage{"upstream_model": mustJSON(model)}
 	for field, value := range file {
-		metadata[field] = value
+		if field != "upstream_model" && field != "batch_manifest" {
+			metadata[field] = value
+		}
 	}
 	state := "ACTIVE"
 	if raw := file["state"]; len(raw) > 0 {
@@ -504,6 +506,7 @@ func projectGeminiFile(body []byte, localID, origin string) ([]byte, error) {
 		return nil, errors.New("malformed Gemini file projection")
 	}
 	delete(file, "upstream_model")
+	delete(file, "batch_manifest")
 	localName := "files/" + localID
 	file["name"], _ = json.Marshal(localName)
 	if raw, exists := file["uri"]; exists && string(raw) != "null" {
@@ -609,6 +612,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusRequestEntityTooLarge, "request_too_large", "The Gemini upload chunk exceeds the configured media limit."), x.family)
 		return
 	}
+	var batchInput *batchManifest
 	var chunk io.Reader = bytes.NewReader(nil)
 	var chunkLength int64
 	if r.ContentLength > 0 {
@@ -626,6 +630,15 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer opened.File.Close()
+		if offset == 0 && command.finalize && artifact.ContentLength == expected {
+			if manifest, qualifyErr := qualifyGeminiBatchJSONL(opened.File, route.Slug, s.batchLineDigest); qualifyErr == nil {
+				batchInput = &manifest
+			}
+			if _, seekErr := opened.File.Seek(0, io.SeekStart); seekErr != nil {
+				s.stateFail(x, w, serverError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read."), x.family)
+				return
+			}
+		}
 		chunk, chunkLength = opened.File, artifact.ContentLength
 	}
 	uploadURL, err := s.Resources.ReadGeminiUploadURL(ctx, session.UUID)
@@ -696,6 +709,12 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 			s.markGeminiUploadFailed(r.Context(), session)
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file name is invalid."), x.family)
 			return
+		}
+		if batchInput != nil {
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(fileMetadata, &fields)
+			fields["batch_manifest"] = mustJSON(batchInput)
+			fileMetadata = mustJSON(fields)
 		}
 		file := &resources.Resource{
 			Kind: resources.KindGeminiFile, APIKeyID: authority.ID, RouteSlug: route.Slug,
@@ -812,6 +831,13 @@ func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 		if idErr != nil || upstreamID != res.UpstreamID {
 			return serverError(http.StatusBadGateway, "provider_protocol_error", "The provider returned a mismatched Gemini file name.")
 		}
+		var previous, fields map[string]json.RawMessage
+		_ = json.Unmarshal(res.Metadata, &previous)
+		_ = json.Unmarshal(metadata, &fields)
+		if manifest, ok := previous["batch_manifest"]; ok {
+			fields["batch_manifest"] = manifest
+			metadata = mustJSON(fields)
+		}
 		if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file metadata could not be refreshed.")
 		}
@@ -827,6 +853,11 @@ func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
 	s.geminiFileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, _ access.Authority, res *resources.Resource, p *pin, _ *routing.Route) *Error {
+		if res.ParentID != nil {
+			if err := s.requireBatchEvidenceSettled(ctx, *res.ParentID); err != nil {
+				return err
+			}
+		}
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The Gemini file address could not be resolved.")

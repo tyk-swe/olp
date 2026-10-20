@@ -97,6 +97,12 @@ func (s *Store) DeleteSubmission(ctx context.Context, resourceID uuid.UUID) erro
 	return nil
 }
 
+func (s *Store) Pending(ctx context.Context, resourceID uuid.UUID) (bool, error) {
+	var pending bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.batch_settlements WHERE resource_id=$1 AND closed_at IS NULL)`, resourceID).Scan(&pending)
+	return pending, err
+}
+
 func (s *Store) MarkUnknown(ctx context.Context, resourceID uuid.UUID, errorClass string, next time.Time) error {
 	if len(errorClass) > 120 {
 		errorClass = errorClass[:120]

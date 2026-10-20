@@ -268,6 +268,12 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
 		}
+		if adapter == "gemini_managed" {
+			document, parseErr := oif.ParseJSON(encoded, oif.Limits{MaxBytes: managedBatchLineLimit})
+			if parseErr != nil || geminiBatchHasFileReference(document.Root()) {
+				return fail(invalidRequest("unsupported_parameter", "Gemini batch input cannot use unbound file or cached-content references.", strPtr("file")))
+			}
+		}
 		if adapter == "mistral" || adapter == "gemini_managed" {
 			var fields map[string]json.RawMessage
 			if json.Unmarshal(encoded, &fields) != nil {
