@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,6 +209,27 @@ func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {
 		}
 	}
 	readers.Wait()
+}
+
+func TestPluginOpenAIChatProfileSkipsBatchProfilesAsTemplates(t *testing.T) {
+	profile, err := LookupProfile("compatible-chat", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.ID = "fixture-plugin-openai-chat-" + uuid.NewString()
+	profile.Label = "Fixture plugin OpenAI Chat"
+	profile.Plugin = &Plugin{Digest: strings.Repeat("a", 64), Name: "Fixture", Version: "1"}
+	profile.Authentication = []string{"none"}
+	if template := profileTemplateForRegistration(profile); template == nil || slices.Contains(template.Operations, "batch") {
+		t.Fatalf("plugin template should be the last non-batch openai-chat composition: %v", template)
+	}
+	if err := RegisterProfile(profile); err != nil {
+		t.Fatalf("compatible-chat template registration failed: %v", err)
+	}
+	config := Config{ProfileID: profile.ID, ProfileRevision: profile.Revision, Kind: profile.Kind, AuthMode: "none", Endpoint: "https://provider.example/v1"}
+	if err := config.ValidateProfile(); err != nil {
+		t.Fatalf("registered plugin OpenAI Chat profile is invalid: %v", err)
+	}
 }
 
 func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {

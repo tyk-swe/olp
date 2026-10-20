@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -91,7 +92,7 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *routing.Route, file *media.Part, adapter string) (*media.Part, batchManifest, *Error) {
 	opened, err := s.transport().Spool.Open(file.Handle)
 	if err != nil {
-		return nil, batchManifest{}, serverError(500, "media_content_unavailable", "The uploaded batch file could not be read.")
+		return nil, batchManifest{}, serverError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
 	}
 	defer opened.File.Close()
 	reader, writer := io.Pipe()

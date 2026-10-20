@@ -742,26 +742,8 @@ func RegisterProfile(p Profile) error {
 		if existing.ID == p.ID && existing.Revision == p.Revision {
 			return errors.New("profile revision already registered")
 		}
-		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
-			compatible := true
-			for _, auth := range p.Authentication {
-				compatible = compatible && slices.Contains(existing.Authentication, auth)
-			}
-			for _, operation := range p.Operations {
-				compatible = compatible && slices.Contains(existing.Operations, operation)
-			}
-			for _, header := range p.SemanticHeaders {
-				compatible = compatible && slices.Contains(existing.SemanticHeaders, header)
-			}
-			for _, query := range p.QuerySettings {
-				compatible = compatible && slices.Contains(existing.QuerySettings, query)
-			}
-			if compatible {
-				template = existing
-				break
-			}
-		}
 	}
+	template = profileTemplateForRegistration(p)
 	if template == nil || len(profileRegistry) >= 4096 {
 		return errors.New("profile components do not form an existing registered composition")
 	}
@@ -792,6 +774,20 @@ func RegisterProfile(p Profile) error {
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil
+}
+
+func profileTemplateForRegistration(p Profile) *Profile {
+	var template *Profile
+	for i := range profileRegistry {
+		existing := &profileRegistry[i]
+		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
+			if existing.Kind == "openai_compatible" && slices.Contains(existing.Operations, "batch") {
+				continue
+			}
+			template = existing
+		}
+	}
+	return template
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {

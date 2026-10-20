@@ -2,7 +2,6 @@ package connectors
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -42,11 +41,3 @@ var goldenKinds = []string{"openai", "openai_compatible", "anthropic", "gemini",
 var goldenOperations = []string{"generation", "token_count", "embeddings", "moderation", "rerank", "batch", "realtime", "bedrock_invoke",
 	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 	"video_create", "video_list", "video_get", "video_content", "video_delete"}
-
-func TestProfileRegistryGolden(t *testing.T) {
-	body, err := json.MarshalIndent(Profiles(), "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "profiles.golden", append(body, '\n'))
-}

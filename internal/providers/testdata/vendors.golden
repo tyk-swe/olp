@@ -1,26 +1,5 @@
 [
   {
-    "id": "typesafe-jev",
-    "name": "TypeSafe Jev",
-    "connector": "openai_compatible",
-    "discovery": false,
-    "operations": [
-      "decision"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [],
-    "documentation_url": "https://api.typesafe.ai/redoc",
-    "endpoint": "https://api.typesafe.ai/v1",
-    "dialects": [
-      "systemone"
-    ],
-    "unsupported_parameters": []
-  },
-  {
     "id": "openai",
     "name": "OpenAI",
     "connector": "openai",
@@ -452,8 +431,7 @@
     "operations": [
       "generation",
       "transcription",
-      "translation",
-      "batch"
+      "translation"
     ],
     "authentication": [
       "api_key",
@@ -479,7 +457,7 @@
       "reasoning",
       "reasoning_effort"
     ],
-    "documentation_url": "https://console.groq.com/docs/api-reference",
+    "documentation_url": "https://console.groq.com/docs/openai",
     "endpoint": "https://api.groq.com/openai/v1",
     "dialects": [
       "openai-chat",
@@ -498,9 +476,7 @@
     "discovery": true,
     "operations": [
       "generation",
-      "embeddings",
-      "ocr",
-      "batch"
+      "embeddings"
     ],
     "authentication": [
       "api_key",
@@ -526,12 +502,11 @@
       "reasoning",
       "reasoning_effort"
     ],
-    "documentation_url": "https://docs.mistral.ai/api/endpoint/batch",
+    "documentation_url": "https://docs.mistral.ai/api/endpoint/chat",
     "endpoint": "https://api.mistral.ai/v1",
     "dialects": [
       "openai-chat",
-      "mistral-fim",
-      "mistral-ocr"
+      "mistral-fim"
     ],
     "unsupported_parameters": []
   },
@@ -584,8 +559,7 @@
     "operations": [
       "generation",
       "embeddings",
-      "rerank",
-      "batch"
+      "rerank"
     ],
     "authentication": [
       "api_key",
@@ -611,7 +585,7 @@
       "reasoning",
       "reasoning_effort"
     ],
-    "documentation_url": "https://docs.together.ai/reference/batch-create",
+    "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
     "endpoint": "https://api.together.ai/v1",
     "dialects": [
       "openai-chat"
@@ -624,46 +598,6 @@
       "store",
       "truncation"
     ]
-  },
-  {
-    "id": "tgi",
-    "name": "Text Generation Inference",
-    "connector": "openai_compatible",
-    "discovery": false,
-    "operations": [
-      "generation"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://huggingface.co/docs/text-generation-inference/reference/api_reference",
-    "endpoint": "https://tgi.example.internal/v1",
-    "dialects": [
-      "openai-chat",
-      "openai-completions"
-    ],
-    "unsupported_parameters": []
   },
   {
     "id": "vllm",
@@ -1193,90 +1127,6 @@
     "documentation_url": "https://docs.voyageai.com/reference/embeddings-api",
     "endpoint": "https://api.voyageai.com/v1",
     "dialects": [],
-    "unsupported_parameters": []
-  },
-  {
-    "id": "perplexity",
-    "name": "Perplexity",
-    "connector": "openai_compatible",
-    "discovery": false,
-    "operations": [
-      "search"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [],
-    "documentation_url": "https://docs.perplexity.ai/api-reference/search-post",
-    "endpoint": "https://api.perplexity.ai",
-    "dialects": [
-      "perplexity-search"
-    ],
-    "unsupported_parameters": []
-  },
-  {
-    "id": "tavily",
-    "name": "Tavily",
-    "connector": "openai_compatible",
-    "discovery": false,
-    "operations": [
-      "search"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [],
-    "documentation_url": "https://docs.tavily.com/api-reference/endpoint/search",
-    "endpoint": "https://api.tavily.com",
-    "dialects": [
-      "tavily-search"
-    ],
-    "unsupported_parameters": []
-  },
-  {
-    "id": "exa",
-    "name": "Exa",
-    "connector": "openai_compatible",
-    "discovery": false,
-    "operations": [
-      "search"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [],
-    "documentation_url": "https://docs.exa.ai/reference/search",
-    "endpoint": "https://api.exa.ai",
-    "dialects": [
-      "exa-search"
-    ],
-    "unsupported_parameters": []
-  },
-  {
-    "id": "parallel",
-    "name": "Parallel",
-    "connector": "openai_compatible",
-    "discovery": false,
-    "operations": [
-      "search"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [],
-    "documentation_url": "https://docs.parallel.ai/api-reference/search",
-    "endpoint": "https://api.parallel.ai/v1",
-    "dialects": [
-      "parallel-search"
-    ],
     "unsupported_parameters": []
   },
   {
