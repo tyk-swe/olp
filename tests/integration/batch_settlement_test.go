@@ -82,6 +82,36 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatalf("batch intent did not project a pending budget subject: %v %v", pending, err)
 	}
 
+	// Reproduce a worker that claimed the intent just before the gateway's
+	// successful response activates it. Its stale finish must not revert state.
+	store := batches.NewStore(h.Pool)
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET state='submitting',upstream_id=NULL,next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := store.Claim(t.Context(), time.Now().Add(time.Minute), 1)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("submission claim: %+v %v", claims, err)
+	}
+	tx, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	expected := int64(102)
+	if err = store.ActivateTx(t.Context(), tx, resourceID, upstreamID, &expected); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Finish(t.Context(), claims[0], batches.StateSubmitting, time.Now(), ""); !errors.Is(err, batches.ErrClaimLost) {
+		t.Fatalf("stale submission claim overwrote activation: %v", err)
+	}
+	claims[0].State = batches.StateActive
+	if err = store.Finish(t.Context(), claims[0], batches.StateActive, time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+
 	reader := &interruptedBatchReader{inner: openAIBatchReader(h)}
 	first := batchWorker(h, reader)
 	if pass, err := first.ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil || pass.Claimed != 1 || pass.Failed != 1 {
@@ -162,6 +192,18 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 	assertBatchSettlement(t, h, conflictResource, "uncertain", 1, 1)
 
+	lateConflictID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	lateUpstream := batchUpstreamID(t, h, lateConflictID)
+	setBatchFixtureResults(t, fixture, lateUpstream, "completed", 1, "file-result-"+lateUpstream, "", conflictContent, "")
+	lateResource := batchResourceID(t, lateConflictID)
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET close_after=now() WHERE resource_id=$1`, lateResource); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, lateResource, "uncertain", 1, 1)
+
 	failedID := createBatchForSettlement(t, h, key, slug, inputFileID)
 	failedUpstream := batchUpstreamID(t, h, failedID)
 	setBatchFixtureResults(t, fixture, failedUpstream, "failed", 2, "file-result-"+failedUpstream, "file-error-"+failedUpstream,
@@ -241,6 +283,20 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		WHERE api_key_id=$1 AND state='submission_unknown' ORDER BY created_at DESC LIMIT 1`, ambiguousAuthority.ID).Scan(&ambiguousResource); err != nil {
 		t.Fatal(err)
 	}
+	for _, state := range []string{"conflict", "uncertain"} {
+		if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET state=$2,closed_at=CASE WHEN $2='uncertain' THEN now() ELSE NULL END WHERE resource_id=$1`, ambiguousResource, state); err != nil {
+			t.Fatal(err)
+		}
+		listed := h.want(owner, http.MethodGet, "/api/v1/provider-resources?api_key_id="+ambiguousAuthority.ID+"&state="+state, nil, nil, http.StatusOK)
+		items := listed["items"].([]any)
+		if len(items) != 1 || items[0].(map[string]any)["settlement"].(map[string]any)["state"] != state {
+			t.Fatalf("unmapped %s settlement disappeared from management: %v", state, listed)
+		}
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET state='submission_unknown',closed_at=NULL WHERE resource_id=$1`, ambiguousResource); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err = batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
 		t.Fatal(err)
 	}

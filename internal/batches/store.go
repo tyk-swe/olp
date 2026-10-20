@@ -372,8 +372,9 @@ func (s *Store) Finish(ctx context.Context, settlement Settlement, state State, 
 	tag, err := s.Pool.Exec(ctx, `UPDATE olp.batch_settlements
 		SET state=$3,next_attempt_at=$4,last_error_class=NULLIF($5,''),claim_id=NULL,
 		    claimed_until=NULL,updated_at=now()
-		WHERE resource_id=$1 AND claim_id=$2`,
-		settlement.ResourceID, *settlement.ClaimID, state, next, errorClass)
+		WHERE resource_id=$1 AND claim_id=$2
+		  AND ($6::text NOT IN ('submitting','submission_unknown') OR state=$6)`,
+		settlement.ResourceID, *settlement.ClaimID, state, next, errorClass, settlement.State)
 	if err != nil {
 		return fmt.Errorf("finish batch settlement: %w", err)
 	}

@@ -198,9 +198,12 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 	}
 	if inputs := s.Runtime.RoutingInputs(); inputs != nil {
 		fact.Price = inputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
+		fact.Discount = inputs.Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, now)
 	} else {
 		fact.Price = nil
+		fact.Discount = nil
 	}
+	fact.PricingPinned = true
 	accountingID := x.request.accountingID()
 	event := accountingEvent(Envelope{
 		RequestID: accountingID, AccountingID: accountingID, KeyID: x.keyID,

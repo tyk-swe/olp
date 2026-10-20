@@ -306,7 +306,13 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 		t.Fatalf("Gemini upload query status=%d headers=%v", queryStatus, queryHeaders)
 	}
 	status, raw, _ = h.gatewayRaw(http.MethodPost, sessionPath, key, strings.NewReader("world"), map[string]string{
-		"Content-Length": "5", "X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "5",
+		"Content-Length": "5", "X-Goog-Upload-Command": "upload", "X-Goog-Upload-Offset": "5",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("Gemini last chunk status=%d body=%s", status, raw)
+	}
+	status, raw, _ = h.gatewayRaw(http.MethodPost, sessionPath, key, nil, map[string]string{
+		"Content-Length": "0", "X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "10",
 	})
 	if status != http.StatusOK {
 		t.Fatalf("Gemini finalize status=%d body=%s", status, raw)

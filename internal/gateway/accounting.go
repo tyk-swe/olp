@@ -202,14 +202,15 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		attempt.Routing.Retry = &retry
 	}
 	attempt.Routing.Budgets = fact.Budgets
-	if fact.PolicyDigest != "" || fact.CommitmentPinned {
+	pricingPinned := fact.PolicyDigest != "" || fact.PricingPinned
+	if pricingPinned || fact.CommitmentPinned {
 		var discountID *string
 		if fact.Discount != nil {
 			discountID = &fact.Discount.ID
 		}
 		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy,
-			"pricing_pinned": fact.PolicyDigest != "", "vendor_id": fact.VendorID,
-			"discount_pinned": fact.PolicyDigest != "", "discount_id": discountID,
+			"pricing_pinned": pricingPinned, "vendor_id": fact.VendorID,
+			"discount_pinned": pricingPinned, "discount_id": discountID,
 			"commitment_pinned": fact.CommitmentPinned, "commitment": fact.Commitment,
 			"rate_card_pinned": fact.CardPinned, "rate_card_revision_id": fact.CardRevisionID})
 		rawPolicy := json.RawMessage(policy)

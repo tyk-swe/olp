@@ -227,3 +227,15 @@ func TestAnthropicBetaRejectionReleasesAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestAnthropicBackwardPageDropsFarthestLookahead(t *testing.T) {
+	rows := []*resources.Resource{{ID: "8"}, {ID: "7"}, {ID: "6"}}
+	page, more := anthropicListPage(rows, 2, true)
+	if !more || len(page) != 2 || page[0].ID != "7" || page[1].ID != "6" {
+		t.Fatalf("backward page skipped the nearest resource: %+v more=%v", page, more)
+	}
+	page, more = anthropicListPage(rows, 2, false)
+	if !more || page[0].ID != "8" || page[1].ID != "7" {
+		t.Fatalf("forward page changed: %+v more=%v", page, more)
+	}
+}

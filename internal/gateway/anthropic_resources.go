@@ -652,10 +652,7 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The resource list could not be read."), family)
 		return
 	}
-	hasMore := len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
+	rows, hasMore := anthropicListPage(rows, limit, before != "")
 	items, ids := make([]json.RawMessage, 0, len(rows)), make([]string, 0, len(rows))
 	for _, row := range rows {
 		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
@@ -670,6 +667,16 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		items, ids = append(items, object), append(ids, row.ID)
 	}
 	s.writeStateJSON(w, x, anthropicListBody(items, ids, hasMore))
+}
+
+func anthropicListPage(rows []*resources.Resource, limit int, before bool) ([]*resources.Resource, bool) {
+	if len(rows) <= limit {
+		return rows, false
+	}
+	if before {
+		return rows[len(rows)-limit:], true
+	}
+	return rows[:limit], true
 }
 
 func anthropicListBody(items []json.RawMessage, ids []string, hasMore bool) []byte {

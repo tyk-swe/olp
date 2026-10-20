@@ -151,15 +151,6 @@ export class ConfigurationDraft {
       );
     // Generated types describe the wire contract. Native number wrappers only
     // live inside this JSON document and serialize as exact JSON number tokens.
-    const configuration = parseNativeJSON(
-      stringifyNativeJSON(this.root)
-    ) as Configuration;
-    const profile = this.text(['profile_id']);
-    if (
-      profile !== 'vertex-batch-prediction' &&
-      profile !== 'bedrock-batch-inference'
-    )
-      configuration.batch_storage = null;
-    return configuration;
+    return parseNativeJSON(stringifyNativeJSON(this.root)) as Configuration;
   }
 }

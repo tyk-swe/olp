@@ -163,6 +163,9 @@ func (w *Worker) ReconcileOnce(ctx context.Context, limit int) (*Pass, error) {
 	if limit <= 0 || limit > WorkerBatchSize {
 		limit = WorkerBatchSize
 	}
+	// Lease only work that can start immediately; queued claims otherwise
+	// expire before reconciliation starts its heartbeat.
+	limit = min(limit, WorkerConcurrency)
 	claims, err := w.Store.Claim(ctx, w.now(), limit)
 	if err != nil {
 		return pass, err
@@ -679,6 +682,7 @@ func (w *Worker) keepLease(ctx context.Context, settlement Settlement) (context.
 func (w *Worker) finishConflict(ctx context.Context, settlement Settlement) reconcileOutcome {
 	now := w.now()
 	if !now.Before(settlement.CloseAfter) {
+		settlement.State = StateConflict
 		return w.closeUncertain(ctx, settlement, nil)
 	}
 	if err := w.Store.Finish(ctx, settlement, StateConflict, settlement.CloseAfter, "result_conflict"); err != nil {

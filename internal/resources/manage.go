@@ -217,7 +217,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		LEFT JOIN olp.provider_resources r ON r.id = bs.resource_id
 		JOIN olp.providers p ON p.id = bs.provider_id
 		JOIN olp.api_keys k ON k.id = bs.api_key_id
-		WHERE r.id IS NULL AND bs.state IN ('submitting', 'submission_unknown')
+		WHERE r.id IS NULL AND bs.state IN ('submitting', 'submission_unknown', 'conflict', 'uncertain')
 	)
 	SELECT e.id, e.kind, e.api_key_id::text, e.api_key_name, e.route, e.provider_id::text, e.provider_name,
 		e.upstream_id, e.upstream_model, e.state, e.expires_at, e.created_at, e.updated_at,

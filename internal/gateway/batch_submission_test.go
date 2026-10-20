@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestBatchLineOperation(t *testing.T) {
@@ -336,5 +337,40 @@ func TestManagedFileProjectionDoesNotInventFields(t *testing.T) {
 	}
 	if _, fabricated := fields["status"]; fabricated {
 		t.Fatalf("managed file projection fabricated a status: %s", body)
+	}
+}
+
+func TestBatchSubmissionPinsMissingPriceAndCurrentDiscount(t *testing.T) {
+	h := newHarness(t, Config{})
+	now := time.Now().UTC()
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	target := route.Targets[0]
+	provider := h.rt.release.Snapshot.Providers[target.ProviderID]
+	p := &pin{target: target, provider: provider, slot: provider.Slots[0], model: target.ProviderModel,
+		attempt: routing.Attempt{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel, VendorID: provider.VendorID}}
+	for _, withDiscount := range []bool{false, true} {
+		h.rt.inputs = &usage.RoutingInputs{RefreshedAt: now}
+		discountID := uuid.NewString()
+		if withDiscount {
+			h.rt.inputs.Discounts = []usage.RoutingDiscount{{ID: discountID, ProviderKind: provider.Kind, Multiplier: "0.5", EffectiveAt: now.Add(-time.Hour)}}
+		}
+		x := &call{request: request{id: uuid.NewString(), minted: true, release: h.rt.release}, keyID: h.keyID, family: wire.Batch, mode: "unary"}
+		x.route = &route
+		event, err := h.gateway.batchSettlementTemplate(x, p, "openai", "generation", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempt := event.Attempts[0]
+		var policy struct {
+			PricingPinned  bool    `json:"pricing_pinned"`
+			DiscountPinned bool    `json:"discount_pinned"`
+			DiscountID     *string `json:"discount_id"`
+		}
+		if attempt.Routing.Policy == nil || json.Unmarshal(*attempt.Routing.Policy, &policy) != nil || !policy.PricingPinned || !policy.DiscountPinned || attempt.Routing.PricingRevisionID != nil {
+			t.Fatalf("missing price was not durably pinned: %+v", attempt.Routing)
+		}
+		if withDiscount && (policy.DiscountID == nil || *policy.DiscountID != discountID) || !withDiscount && policy.DiscountID != nil {
+			t.Fatalf("submission discount was not pinned: %+v", policy)
+		}
 	}
 }

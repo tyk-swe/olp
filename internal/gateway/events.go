@@ -97,6 +97,9 @@ type AttemptFact struct {
 	PolicyDigest string
 	VendorID     string
 	Price        *usage.RoutingPrice
+	// PricingPinned also records a submission-time decision when retained
+	// resource routing does not produce a policy digest. Nil price is pinned.
+	PricingPinned bool
 	// Discount is the multiplier the plan pinned on the attempt.
 	Discount *usage.RoutingDiscount
 	// CardPinned records that accounting must use CardRevisionID exactly,

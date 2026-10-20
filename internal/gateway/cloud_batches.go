@@ -262,7 +262,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	x.route = &route
 	p, e := s.selectPinSurface(r.Context(), x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
 		cfg := provider.Connector()
-		return cfg.Supports("batch", "native", "unary") && cfg.BatchStorage != nil
+		return provider.ProfileID == dialect && cfg.Supports("batch", "native", "unary") && cfg.BatchStorage != nil
 	})
 	if e != nil {
 		s.cloudBatchFail(x, w, e)

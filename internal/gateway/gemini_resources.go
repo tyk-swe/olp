@@ -605,20 +605,25 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusRequestEntityTooLarge, "request_too_large", "The Gemini upload chunk exceeds the configured media limit."), x.family)
 		return
 	}
-	artifact, err := s.transport().Spool.Put(ctx, media.Upload{
-		Filename: "gemini-upload-chunk", ContentType: contentType, MaximumLength: min(remaining, s.cfg.MaxMediaBodyBytes), Body: r.Body,
-	})
-	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadRequest, "invalid_request", "The Gemini upload chunk could not be staged."), x.family)
-		return
+	var chunk io.Reader = bytes.NewReader(nil)
+	var chunkLength int64
+	if r.ContentLength > 0 {
+		artifact, err := s.transport().Spool.Put(ctx, media.Upload{
+			Filename: "gemini-upload-chunk", ContentType: contentType, MaximumLength: min(remaining, s.cfg.MaxMediaBodyBytes), Body: r.Body,
+		})
+		if err != nil {
+			s.stateFail(x, w, serverError(http.StatusBadRequest, "invalid_request", "The Gemini upload chunk could not be staged."), x.family)
+			return
+		}
+		defer s.transport().Spool.Remove(artifact.Handle)
+		opened, err := s.transport().Spool.Open(artifact.Handle)
+		if err != nil {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini chunk could not be read."), x.family)
+			return
+		}
+		defer opened.File.Close()
+		chunk, chunkLength = opened.File, artifact.ContentLength
 	}
-	defer s.transport().Spool.Remove(artifact.Handle)
-	opened, err := s.transport().Spool.Open(artifact.Handle)
-	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini chunk could not be read."), x.family)
-		return
-	}
-	defer opened.File.Close()
 	uploadURL, err := s.Resources.ReadGeminiUploadURL(ctx, session.UUID)
 	generationURL, generationErr := p.provider.Connector().URL(wire.Gemini, p.model, false)
 	if err != nil || generationErr != nil || validateGeminiUploadURL(uploadURL, generationURL, s.egress) != nil {
@@ -633,7 +638,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		"X-Goog-Upload-Command": {commandHeader},
 		"X-Goog-Upload-Offset":  {strconv.FormatInt(offset, 10)},
 	}
-	resp, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, opened.File, artifact.ContentLength, contentType, "application/json", headers)
+	resp, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, chunk, chunkLength, contentType, "application/json", headers)
 	if failure != nil {
 		x.dispatched = failure.dispatched
 		s.markGeminiUploadFailed(r.Context(), session)
@@ -642,7 +647,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	x.dispatched = true
-	newOffset := offset + artifact.ContentLength
+	newOffset := offset + chunkLength
 	if received := resp.Header.Get("X-Goog-Upload-Size-Received"); received != "" {
 		reported, parseErr := strconv.ParseInt(received, 10, 64)
 		if parseErr != nil || reported != newOffset || reported > expected {
