@@ -1,0 +1,12 @@
+{
+  "vendor": "google-vertex",
+  "batch_jobs": {
+    "basis": "documented",
+    "documentation_links": {
+      "batch_prediction": "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/batch-prediction-api",
+      "rest": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/v1/projects.locations.batchPredictionJobs"
+    },
+    "fields": ["name", "state", "createTime", "endTime", "completionStats.successfulCount", "completionStats.failedCount", "completionStats.incompleteCount", "outputInfo.gcsOutputDirectory", "labels.olp_submission"],
+    "fixtures": ["job.create.request.json", "job.create.response.json", "job.running.json", "job.succeeded.json", "jobs.list.response.json", "predictions.jsonl", "error.json"]
+  }
+}

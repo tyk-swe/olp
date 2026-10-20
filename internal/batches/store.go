@@ -385,6 +385,10 @@ func (s *Store) Finish(ctx context.Context, settlement Settlement, state State, 
 }
 
 func (s *Store) Close(ctx context.Context, settlement Settlement, state State, gapCount int64, gapDigest []byte, now time.Time) ([]limits.CostSnapshot, error) {
+	return s.CloseWithErrorClass(ctx, settlement, state, gapCount, gapDigest, now, "")
+}
+
+func (s *Store) CloseWithErrorClass(ctx context.Context, settlement Settlement, state State, gapCount int64, gapDigest []byte, now time.Time, errorClass string) ([]limits.CostSnapshot, error) {
 	if settlement.ClaimID == nil || state != StateSettled && state != StateUncertain {
 		return nil, ErrClaimLost
 	}
@@ -458,9 +462,9 @@ func (s *Store) Close(ctx context.Context, settlement Settlement, state State, g
 	}
 	tag, err := tx.Exec(ctx, `UPDATE olp.batch_settlements
 		SET state=$3,closed_at=$4,next_attempt_at=$4,uncertain_results=uncertain_results+$5,
-		    claim_id=NULL,claimed_until=NULL,last_error_class=NULL,updated_at=$4
+		    claim_id=NULL,claimed_until=NULL,last_error_class=NULLIF($6,''),updated_at=$4
 		WHERE resource_id=$1 AND claim_id=$2`, settlement.ResourceID, *settlement.ClaimID,
-		state, now, uncertainDelta)
+		state, now, uncertainDelta, errorClass)
 	if err != nil {
 		return nil, fmt.Errorf("close batch settlement: %w", err)
 	}

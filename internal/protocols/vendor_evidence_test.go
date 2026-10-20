@@ -97,6 +97,12 @@ type vendorEvidence struct {
 		Fields             []string          `json:"fields"`
 		Fixtures           []string          `json:"fixtures"`
 	} `json:"gemini_batches,omitempty"`
+	CloudBatches struct {
+		Basis              string            `json:"basis"`
+		DocumentationLinks map[string]string `json:"documentation_links"`
+		Fields             []string          `json:"fields"`
+		Fixtures           []string          `json:"fixtures"`
+	} `json:"batch_jobs,omitempty"`
 }
 
 var generationDialects = []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini-generate-content", "bedrock-converse"}
@@ -273,6 +279,39 @@ func TestGeminiBatchesVendorEvidence(t *testing.T) {
 	for _, name := range evidence.GeminiBatches.Fixtures {
 		if _, err := fs.ReadFile(fixtures.Files, path.Join("vendors", "gemini", name)); err != nil {
 			t.Fatalf("Gemini Batch fixture %s: %v", name, err)
+		}
+	}
+}
+
+func TestVertexAndBedrockBatchVendorEvidence(t *testing.T) {
+	for _, vendor := range []string{"vertex", "bedrock"} {
+		evidence := readEvidence(t, vendor)
+		if evidence.CloudBatches.Basis != "documented" {
+			t.Fatalf("%s batch evidence is not documented", vendor)
+		}
+		if len(evidence.CloudBatches.DocumentationLinks) == 0 || len(evidence.CloudBatches.Fields) == 0 {
+			t.Fatalf("%s batch evidence lacks links or fields", vendor)
+		}
+		for key, link := range evidence.CloudBatches.DocumentationLinks {
+			if !strings.HasPrefix(link, "https://") {
+				t.Fatalf("%s batch documentation %s is not HTTPS", vendor, key)
+			}
+		}
+		for _, name := range evidence.CloudBatches.Fixtures {
+			if _, err := fs.ReadFile(fixtures.Files, path.Join("vendors", vendor, name)); err != nil {
+				t.Fatalf("%s batch fixture %s: %v", vendor, name, err)
+			}
+		}
+		required := []string{"status", "job identifier"}
+		if vendor == "vertex" {
+			required = []string{"name", "state", "completionStats.successfulCount", "outputInfo.gcsOutputDirectory"}
+		} else {
+			required = []string{"jobArn", "status", "totalRecordCount", "processedRecordCount", "inputTokenCount", "outputTokenCount"}
+		}
+		for _, field := range required {
+			if !slices.Contains(evidence.CloudBatches.Fields, field) {
+				t.Fatalf("%s batch evidence lacks field %s", vendor, field)
+			}
 		}
 	}
 }

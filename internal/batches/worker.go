@@ -109,6 +109,12 @@ func (w *Worker) setup() {
 	if w.Readers["openai"] == nil {
 		w.Readers["openai"] = &OpenAIReader{Auth: w.Auth, Egress: w.Egress}
 	}
+	if w.Readers["vertex"] == nil {
+		w.Readers["vertex"] = &VertexReader{Auth: w.Auth, Egress: w.Egress}
+	}
+	if w.Readers["bedrock"] == nil {
+		w.Readers["bedrock"] = &BedrockReader{Auth: w.Auth, Egress: w.Egress}
+	}
 	if w.Readers["anthropic"] == nil {
 		w.Readers["anthropic"] = &AnthropicReader{Auth: w.Auth, Egress: w.Egress}
 	}
@@ -238,6 +244,9 @@ func (w *Worker) reconcileClaimed(ctx context.Context, settlement Settlement) re
 func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement, target *PinnedTarget) reconcileOutcome {
 	reader := w.Readers[settlement.Adapter]
 	inputFileID, _, endpoint, err := submissionFiles(settlement.Cursor)
+	if settlement.Adapter == "vertex" || settlement.Adapter == "bedrock" {
+		inputFileID, err = "cloud-submission", nil
+	}
 	if err != nil || inputFileID == "" {
 		if !w.now().Before(settlement.CloseAfter) {
 			return w.closeUncertain(ctx, settlement, nil)
@@ -336,6 +345,9 @@ func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, tar
 			if errors.Is(err, ErrCursorConflict) || errors.Is(err, errResultConflict) {
 				return w.finishConflict(ctx, settlement)
 			}
+			if errors.Is(err, ErrStorageScope) {
+				return w.closeUncertainWithError(ctx, settlement, "storage_scope")
+			}
 			if errors.Is(err, ErrBatchTooLarge) || errors.Is(err, ErrLineTooLarge) {
 				return w.closeUncertain(ctx, settlement, nil)
 			}
@@ -379,11 +391,22 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 	if w.Resources == nil {
 		return errors.New("provider resource store is unavailable")
 	}
-	inputFileID, localInputID, _, err := submissionFiles(settlement.Cursor)
-	if err != nil {
-		return err
+	inputFileID, localInputID := "", ""
+	if settlement.Adapter != "vertex" && settlement.Adapter != "bedrock" {
+		var err error
+		inputFileID, localInputID, _, err = submissionFiles(settlement.Cursor)
+		if err != nil {
+			return err
+		}
 	}
 	metadata, state := batchMetadata(snapshot.Body, resourceModel(settlement.Template), localInputID)
+	if settlement.Adapter == "vertex" || settlement.Adapter == "bedrock" {
+		var err error
+		metadata, state, err = cloudAdoptMetadata(settlement, snapshot)
+		if err != nil {
+			return err
+		}
+	}
 	if settlement.Adapter == "together" || settlement.Adapter == "mistral" {
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(metadata, &fields)
@@ -709,6 +732,25 @@ func (w *Worker) closeUncertain(ctx context.Context, settlement Settlement, coun
 		return outcomeUncertain
 	}
 	return outcomeProgress
+}
+
+func (w *Worker) closeUncertainWithError(ctx context.Context, settlement Settlement, errorClass string) reconcileOutcome {
+	counts, err := w.Store.ResultCounts(ctx, settlement.ResourceID)
+	if err != nil {
+		w.logFailure(settlement, "batch_close_unavailable", err)
+		return outcomeFailed
+	}
+	gap := int64(1)
+	if settlement.ExpectedResults != nil {
+		gap = max(*settlement.ExpectedResults-counts.Observed(), 1)
+	}
+	snapshots, err := w.Store.CloseWithErrorClass(ctx, settlement, StateUncertain, gap, w.gapDigest(), w.now(), errorClass)
+	if err != nil {
+		w.logFailure(settlement, errorClass, err)
+		return outcomeFailed
+	}
+	w.applySnapshots(ctx, snapshots)
+	return outcomeUncertain
 }
 
 func (w *Worker) gapDigest() []byte {

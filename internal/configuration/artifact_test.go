@@ -437,3 +437,23 @@ func TestChargeCanonicalizationValidationAndInheritedCurrencyEquality(t *testing
 		t.Fatalf("expected rate_cards.0.prices.0.provider error, got %v", err)
 	}
 }
+
+func TestBatchStorageProviderConfigurationRoundTripsArtifactJSON(t *testing.T) {
+	raw := []byte(`{"api_version":"v1","providers":[{"name":"cloud","project":"Edge","configuration":{"kind":"vertex_ai","auth_mode":"adc","profile_id":"vertex-batch-prediction","profile_revision":"1","cloud_project":"p","cloud_region":"us-central1","batch_storage":{"input_uri_prefix":"gs://batch-data/in/","output_uri_prefix":"gs://batch-data/out/"}},"models":[],"slots":[]}]}`)
+	var first Document
+	if err := json.Unmarshal(raw, &first); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var second Document
+	if err := json.Unmarshal(encoded, &second); err != nil {
+		t.Fatal(err)
+	}
+	storage := second.Providers[0].Configuration.BatchStorage
+	if storage == nil || storage.InputURIPrefix != "gs://batch-data/in/" || storage.OutputURIPrefix != "gs://batch-data/out/" {
+		t.Fatalf("batch_storage artifact round trip = %+v", storage)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestCloudBatchValidationAndProjection(t *testing.T) {
@@ -40,5 +41,14 @@ func TestCloudBatchValidationAndProjection(t *testing.T) {
 	if _, err := projectCloudBatchJob([]byte(`{"name":"projects/p/locations/us/batchPredictionJobs/id","state":"JOB_STATE_UNKNOWN"}`),
 		"cloud_batch_0123456789abcdef0123456789abcdef", "vertex-batch-prediction", "route", "", ""); err == nil {
 		t.Fatal("accepted an unknown Vertex batch state")
+	}
+}
+
+func TestCloudBatchStrictTargetRefusal(t *testing.T) {
+	for _, kind := range []string{"vertex_ai", "bedrock"} {
+		refusal := strictBatchTargetRefusal(&pin{provider: routing.Provider{Kind: kind}})
+		if refusal == nil || refusal.Status != 422 || refusal.Type != "invalid_request_error" || refusal.Code != "target_capability" {
+			t.Fatalf("%s strict refusal=%+v", kind, refusal)
+		}
 	}
 }

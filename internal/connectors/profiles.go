@@ -500,8 +500,8 @@ func generationFamily(dialect string) (wire.Format, bool) {
 func (c Config) Supports(operation, surface, mode string) bool {
 	if operation == "batch" {
 		if surface == "native" {
-			return mode == "unary" && (c.Kind == "vertex_ai" && c.ProfileID == "vertex-batch-prediction" ||
-				c.Kind == "bedrock" && c.ProfileID == "bedrock-batch-inference")
+			return mode == "unary" && (c.Kind == "vertex_ai" && c.ProfileID == "vertex-batch-prediction" && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||
+				c.Kind == "bedrock" && c.ProfileID == "bedrock-batch-inference" && c.ProfileRevision == ProfileRevision && c.Hosting() == "bedrock-batch-inference")
 		}
 		if surface == "openai" {
 			return c.SupportsFilesBatches() && mode == "unary"

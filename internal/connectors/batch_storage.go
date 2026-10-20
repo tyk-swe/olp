@@ -151,6 +151,32 @@ func VertexBatchJobsURL(project, location, jobID, action string) (string, error)
 	return base.String(), nil
 }
 
+func (c Config) VertexBatchJobsURL(jobID, action string) (string, error) {
+	if endpoint, err := url.Parse(c.Endpoint); err == nil && cloudTestDestination(endpoint) {
+		root := strings.TrimSuffix(endpoint.Path, "/publishers/google")
+		if root == endpoint.Path {
+			return "", errors.New("Vertex endpoint does not have a publisher suffix")
+		}
+		path := root + "/batchPredictionJobs"
+		if jobID != "" {
+			path += "/" + url.PathEscape(jobID)
+		}
+		if action == "cancel" {
+			if jobID == "" {
+				return "", errors.New("Vertex cancellation requires a job ID")
+			}
+			path += ":cancel"
+		} else if action != "" {
+			return "", errors.New("unknown Vertex batch action")
+		}
+		if err := setEscapedPath(endpoint, path); err != nil {
+			return "", err
+		}
+		return endpoint.String(), nil
+	}
+	return VertexBatchJobsURL(c.CloudProject, c.CloudRegion, jobID, action)
+}
+
 func BedrockBatchJobsURL(region, jobID, action string) (string, error) {
 	base, err := BedrockEndpoint(region, true)
 	if err != nil {
@@ -162,10 +188,14 @@ func BedrockBatchJobsURL(region, jobID, action string) (string, error) {
 	}
 	path := "/model-invocation-job"
 	if jobID == "" {
-		if action != "" {
+		switch action {
+		case "":
+			path = "/model-invocation-jobs"
+		case "create":
+			path = "/model-invocation-job"
+		default:
 			return "", errors.New("Bedrock batch action requires a job ID")
 		}
-		path = "/model-invocation-jobs"
 	} else {
 		path += "/" + url.PathEscape(jobID)
 		switch action {
@@ -180,6 +210,31 @@ func BedrockBatchJobsURL(region, jobID, action string) (string, error) {
 		return "", err
 	}
 	return parsed.String(), nil
+}
+
+func (c Config) BedrockBatchJobsURL(jobID, action string) (string, error) {
+	if endpoint, err := url.Parse(c.Endpoint); err == nil && cloudTestDestination(endpoint) {
+		path := "/model-invocation-job"
+		if jobID == "" {
+			if action == "" {
+				path = "/model-invocation-jobs"
+			} else if action != "create" {
+				return "", errors.New("Bedrock batch action requires a job ID")
+			}
+		} else {
+			path += "/" + url.PathEscape(jobID)
+			if action == "stop" {
+				path += "/stop"
+			} else if action != "" {
+				return "", errors.New("unknown Bedrock batch action")
+			}
+		}
+		if err := setEscapedPath(endpoint, path); err != nil {
+			return "", err
+		}
+		return endpoint.String(), nil
+	}
+	return BedrockBatchJobsURL(c.CloudRegion, jobID, action)
 }
 
 func setEscapedPath(u *url.URL, escaped string) error {

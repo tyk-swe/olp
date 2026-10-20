@@ -164,8 +164,7 @@ func cloudBatchCounts(job map[string]json.RawMessage, dialect string) map[string
 	}
 	out := map[string]int64{}
 	for upstream, target := range names {
-		var n int64
-		if json.Unmarshal(stats[upstream], &n) == nil && n >= 0 {
+		if n, ok := cloudCount(stats[upstream]); ok {
 			out[target] = n
 		}
 	}
@@ -175,29 +174,54 @@ func cloudBatchCounts(job map[string]json.RawMessage, dialect string) map[string
 	return out
 }
 
-func cloudBatchError(job map[string]json.RawMessage, dialect string) any {
-	key := "error"
-	if dialect == "bedrock-batch-inference" {
-		key = "failureMessage"
+func cloudCount(raw json.RawMessage) (int64, bool) {
+	var n int64
+	if json.Unmarshal(raw, &n) == nil && n >= 0 {
+		return n, true
 	}
-	if len(job[key]) == 0 || string(job[key]) == "null" {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		value, err := strconv.ParseInt(text, 10, 64)
+		return value, err == nil && value >= 0
+	}
+	return 0, false
+}
+
+func cloudBatchError(job map[string]json.RawMessage, dialect string) any {
+	if dialect == "bedrock-batch-inference" {
+		var message string
+		_ = json.Unmarshal(job["message"], &message)
+		if message == "" {
+			return nil
+		}
+		return map[string]string{"code": "provider_error", "message": sanitizeCloudBatchMessage(message)}
+	}
+	var jobError map[string]json.RawMessage
+	if json.Unmarshal(job["error"], &jobError) != nil || jobError == nil {
 		return nil
 	}
-	var message string
-	if json.Unmarshal(job[key], &message) == nil && message != "" {
-		return map[string]string{"code": "provider_error", "message": message}
-	}
-	var detail struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(job[key], &detail) == nil && detail.Message != "" {
-		if detail.Code == "" {
-			detail.Code = "provider_error"
+	var message, code string
+	_ = json.Unmarshal(jobError["message"], &message)
+	if json.Unmarshal(jobError["code"], &code) != nil {
+		var number json.Number
+		if json.Unmarshal(jobError["code"], &number) == nil {
+			code = number.String()
 		}
-		return detail
 	}
-	return nil
+	if message == "" {
+		return nil
+	}
+	if code == "" {
+		code = "provider_error"
+	}
+	return map[string]string{"code": code, "message": sanitizeCloudBatchMessage(message)}
+}
+
+func sanitizeCloudBatchMessage(message string) string {
+	arnPattern := regexp.MustCompile(`arn:[A-Za-z0-9-:]+:[^ \t\r\n"]+`)
+	message = arnPattern.ReplaceAllString(message, "[provider resource]")
+	jobPattern := regexp.MustCompile(`projects/[^ \t\r\n"]+/batchPredictionJobs/[^ \t\r\n"]+`)
+	return jobPattern.ReplaceAllString(message, "[provider resource]")
 }
 
 func (s *Server) registerCloudBatchState(mux *http.ServeMux) {
@@ -234,7 +258,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	x.route = &route
 	p, e := s.selectPinSurface(r.Context(), x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
 		cfg := provider.Connector()
-		return cfg.Supports("batch", "native", "unary") && cfg.BatchStorage != nil && (cfg.ProfileID == dialect)
+		return cfg.Supports("batch", "native", "unary") && cfg.BatchStorage != nil
 	})
 	if e != nil {
 		s.cloudBatchFail(x, w, e)
@@ -304,7 +328,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	var endpoint string
 	var cursor json.RawMessage
 	if dialect == "vertex-batch-prediction" {
-		endpoint, err = connectors.VertexBatchJobsURL(p.provider.CloudProject, p.provider.CloudRegion, "", "")
+		endpoint, err = p.provider.Connector().VertexBatchJobsURL("", "")
 		requestBody, _ = json.Marshal(map[string]any{
 			"displayName": display, "model": "publishers/google/models/" + p.model,
 			"inputConfig":  map[string]any{"instancesFormat": "jsonl", "gcsSource": map[string]any{"uris": []string{input.InputURI}}},
@@ -313,7 +337,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		})
 		cursor = mustJSON(map[string]any{"submission": map[string]string{"vertex_label": hexID}})
 	} else {
-		endpoint, err = connectors.BedrockBatchJobsURL(p.provider.CloudRegion, "", "")
+		endpoint, err = p.provider.Connector().BedrockBatchJobsURL("", "create")
 		requestBody, _ = json.Marshal(map[string]any{
 			"jobName": display, "roleArn": p.provider.BatchStorage.RoleARN, "modelId": p.model,
 			"inputDataConfig":        map[string]any{"s3InputDataConfig": map[string]any{"s3Uri": input.InputURI, "s3InputFormat": "JSONL"}},
@@ -383,7 +407,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	meta := map[string]any{
-		"adapter": submission.settlement.Adapter, "dialect": dialect, "route_model": slug,
+		"adapter": submission.settlement.Adapter, "dialect": dialect, "route_model": slug, "upstream_model": p.model,
 		"input_uri": input.InputURI, "output_uri_prefix": input.OutputURIPrefix,
 		"provider_job": json.RawMessage(result),
 	}
@@ -463,6 +487,11 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	if route.Fidelity.Strict() {
 		s.releaseHold(r.Context(), p.hold)
 		s.cloudBatchFail(x, w, policyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
+		return
+	}
+	if err := x.guardrailSurfaceGate(route); err != nil {
+		s.releaseHold(r.Context(), p.hold)
+		s.cloudBatchFail(x, w, err)
 		return
 	}
 	ctx, stop := s.stateDeadline(r.Context(), route)
@@ -552,17 +581,26 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
-	rows, listErr := s.Resources.ListKinds(r.Context(), []string{resources.KindCloudBatch}, authority.ID, limit+1, after)
+	dialect := r.PathValue("dialect")
+	if dialect != "vertex-batch-prediction" && dialect != "bedrock-batch-inference" {
+		s.cloudBatchFail(x, w, notFoundError("not_found", "Unknown cloud batch dialect."))
+		return
+	}
+	filtered, listErr := s.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, limit+1, after)
 	if listErr != nil {
+		if errors.Is(listErr, resources.ErrNotFound) {
+			s.cloudBatchFail(x, w, invalidRequest("invalid_cursor", "after must identify a local cloud batch job.", strPtr("after")))
+			return
+		}
 		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "Cloud batches could not be listed."))
 		return
 	}
-	hasMore := len(rows) > limit
+	hasMore := len(filtered) > limit
 	if hasMore {
-		rows = rows[:limit]
+		filtered = filtered[:limit]
 	}
-	data := make([]json.RawMessage, 0, len(rows))
-	for _, row := range rows {
+	data := make([]json.RawMessage, 0, len(filtered))
+	for _, row := range filtered {
 		var metadata map[string]json.RawMessage
 		_ = json.Unmarshal(row.Metadata, &metadata)
 		var input, output, dialect string
@@ -577,18 +615,18 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		data = append(data, item)
 	}
 	var first, last any
-	if len(rows) > 0 {
-		first, last = rows[0].ID, rows[len(rows)-1].ID
+	if len(filtered) > 0 {
+		first, last = filtered[0].ID, filtered[len(filtered)-1].ID
 	}
 	s.writeStateJSON(w, x, mustJSON(map[string]any{"object": "list", "data": data, "has_more": hasMore, "first_id": first, "last_id": last}))
 }
 
 func cloudBatchControlURL(cfg connectors.Config, dialect, upstreamID, action string) (string, error) {
 	if dialect == "vertex-batch-prediction" {
-		return connectors.VertexBatchJobsURL(cfg.CloudProject, cfg.CloudRegion, upstreamID, action)
+		return cfg.VertexBatchJobsURL(upstreamID, action)
 	}
 	if dialect == "bedrock-batch-inference" {
-		return connectors.BedrockBatchJobsURL(cfg.CloudRegion, upstreamID, action)
+		return cfg.BedrockBatchJobsURL(upstreamID, action)
 	}
 	return "", errors.New("unknown cloud batch dialect")
 }

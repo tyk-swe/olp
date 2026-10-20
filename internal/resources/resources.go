@@ -279,6 +279,38 @@ func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, 
 	return out, rows.Err()
 }
 
+func (s *Store) ListCloudBatches(ctx context.Context, apiKeyID, dialect string, limit int, afterID string) ([]*Resource, error) {
+	var after uuid.UUID
+	if afterID != "" {
+		parsed, err := parseLocal(afterID)
+		if err != nil || LocalID(KindCloudBatch, parsed) != afterID {
+			return nil, ErrNotFound
+		}
+		after = parsed
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
+		WHERE kind=$1 AND api_key_id=$2 AND metadata->>'dialect'=$3 AND state<>$4
+		AND (expires_at IS NULL OR expires_at>now())
+		AND ($5::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp.provider_resources
+			WHERE id=$5 AND api_key_id=$2 AND kind=$1 AND metadata->>'dialect'=$3 AND state<>$4
+			AND (expires_at IS NULL OR expires_at>now())))
+		ORDER BY created_at DESC,id DESC LIMIT $6`,
+		KindCloudBatch, apiKeyID, dialect, StateDeleted, nilUUID(after), limit)
+	if err != nil {
+		return nil, fmt.Errorf("cloud batch list: %w", err)
+	}
+	defer rows.Close()
+	out := []*Resource{}
+	for rows.Next() {
+		resource, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("cloud batch list scan: %w", err)
+		}
+		out = append(out, resource)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListKindsBefore(ctx context.Context, kinds []string, apiKeyID string, limit int, beforeID string) ([]*Resource, error) {
 	id, err := parseLocal(beforeID)
 	valid := false

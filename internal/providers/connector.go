@@ -551,7 +551,44 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 }
 
 func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
-	if cfg.ProfileID == "vertex-batch-prediction" || cfg.ProfileID == "bedrock-batch-inference" {
+	if cfg.ProfileID == "vertex-batch-prediction" {
+		endpoint, err := cfg.transport().VertexBatchJobsURL("", "")
+		if err != nil {
+			return err
+		}
+		status, body, err := s.call(ctx, cfg, credential, http.MethodGet, endpoint+"?pageSize=1", nil)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return statusError(cfg, status, body)
+		}
+		var listing struct {
+			Jobs []json.RawMessage `json:"batchPredictionJobs"`
+		}
+		if json.Unmarshal(body, &listing) != nil || listing.Jobs == nil {
+			return &probeError{Code: "provider_protocol_error", Detail: "Vertex returned a malformed batch job list."}
+		}
+		return nil
+	}
+	if cfg.ProfileID == "bedrock-batch-inference" {
+		endpoint, err := cfg.transport().BedrockBatchJobsURL("", "")
+		if err != nil {
+			return err
+		}
+		status, body, err := s.call(ctx, cfg, credential, http.MethodGet, endpoint+"?maxResults=1", nil)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return statusError(cfg, status, body)
+		}
+		var listing struct {
+			Jobs []json.RawMessage `json:"invocationJobSummaries"`
+		}
+		if json.Unmarshal(body, &listing) != nil || listing.Jobs == nil {
+			return &probeError{Code: "provider_protocol_error", Detail: "Bedrock returned a malformed batch job list."}
+		}
 		return nil
 	}
 	for _, resource := range []string{"files", "batches"} {

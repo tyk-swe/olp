@@ -1,0 +1,1 @@
+{"displayName":"olp-0123456789abcdef0123456789abcdef","model":"publishers/google/models/gemini-2.5-flash","inputConfig":{"instancesFormat":"jsonl","gcsSource":{"uris":["gs://batch-data/input/input.jsonl"]}},"outputConfig":{"predictionsFormat":"jsonl","gcsDestination":{"outputUriPrefix":"gs://batch-data/output/"}},"labels":{"olp_submission":"0123456789abcdef0123456789abcdef"}}

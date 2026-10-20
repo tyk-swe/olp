@@ -131,10 +131,10 @@ var kinds = withPresets([]kindCapability{
 		Fields:    []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}},
 	{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc",
 		AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint}},
+		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
 	{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain",
 		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint}},
+		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
 	// A SageMaker provider's models are its endpoints, or endpoint/component
 	// for inference components, which operators declare.
 	{Kind: KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: "default_chain",

@@ -4026,10 +4026,25 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "input_uri",
+        "output_uri_prefix",
+        "display_name",
+        "timeout_hours"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4049,10 +4064,23 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "limit",
+        "after"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4072,10 +4100,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "job_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4095,10 +4135,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "job_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4118,10 +4170,25 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "input_uri",
+        "output_uri_prefix",
+        "display_name",
+        "timeout_hours"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4141,10 +4208,23 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "limit",
+        "after"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4164,10 +4244,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "job_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -4187,10 +4279,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "job_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/cloud_batches.go",
+        "internal/gateway/cloud_batches_test.go",
+        "internal/connectors/batch_storage.go",
+        "internal/batches/cloud.go",
+        "internal/batches/cloud_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/bedrock/contract.json",
+        "tests/integration/cloud_batch_storage_test.go",
+        "tests/integration/cloud_batch_jobs_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"

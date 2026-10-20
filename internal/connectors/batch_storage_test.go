@@ -36,6 +36,15 @@ func TestBatchStorageValidationAndContainment(t *testing.T) {
 	}
 }
 
+func TestBatchStorageConnectorCloneOwnsConfiguration(t *testing.T) {
+	source := &BatchStorage{InputURIPrefix: "gs://batch/input/", OutputURIPrefix: "gs://batch/output/"}
+	cloned := (Config{Kind: "vertex_ai", BatchStorage: source}).Clone()
+	cloned.BatchStorage.InputURIPrefix = "gs://changed/input/"
+	if source.InputURIPrefix != "gs://batch/input/" {
+		t.Fatal("connector clone shares mutable batch storage")
+	}
+}
+
 func TestCloudBatchControlPlaneURLHelpers(t *testing.T) {
 	vertex, err := VertexBatchJobsURL("project-one", "us", "job-1", "cancel")
 	if err != nil || vertex != "https://aiplatform.us.rep.googleapis.com/v1/projects/project-one/locations/us/batchPredictionJobs/job-1:cancel" {

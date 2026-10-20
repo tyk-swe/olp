@@ -1,0 +1,2 @@
+{"status":"","response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}}
+{"status":"INVALID_ARGUMENT","error":"bad input"}
