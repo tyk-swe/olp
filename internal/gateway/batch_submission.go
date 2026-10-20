@@ -84,6 +84,14 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 	canonical, effective []byte, serving oif.ServingIdentity,
 	localFileID, upstreamFileID, resourceKind, adapter, surface, lineOperation string, window time.Duration, expected *int64, reconciliationCursor json.RawMessage,
 ) (*batchSubmission, *Error) {
+	return s.prepareBatchSubmissionWithID(ctx, x, authorityID, p, source, canonical, effective, serving,
+		localFileID, upstreamFileID, resourceKind, adapter, surface, lineOperation, window, expected, reconciliationCursor, uuid.Nil)
+}
+
+func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, authorityID string, p *pin, source oif.Document,
+	canonical, effective []byte, serving oif.ServingIdentity,
+	localFileID, upstreamFileID, resourceKind, adapter, surface, lineOperation string, window time.Duration, expected *int64, reconciliationCursor json.RawMessage, resourceID uuid.UUID,
+) (*batchSubmission, *Error) {
 	if s.Batches == nil {
 		return nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
 	}
@@ -93,7 +101,9 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 	if !ok {
 		return nil, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Batch submission identity is unavailable.")
 	}
-	resourceID := uuid.Must(uuid.NewV7())
+	if resourceID == uuid.Nil {
+		resourceID = uuid.Must(uuid.NewV7())
+	}
 	now := s.now()
 	template, err := s.batchSettlementTemplate(x, p, surface, lineOperation, now)
 	if err != nil {

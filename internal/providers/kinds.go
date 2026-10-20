@@ -231,7 +231,7 @@ func capabilityOptions() []CapabilityInput {
 		out = append(out, tuple(operation, "bedrock", "unary"), tuple(operation, "bedrock", "streaming"))
 	}
 	// Native generation dialects, which only their profiles serve.
-	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"))
+	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"), tuple("batch", "native", "unary"))
 	out = append(out, tuple("decision", "native", "unary"))
 	return out
 }
@@ -316,6 +316,9 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	case "ocr", "search":
 		return true
 	case "batch":
+		if c.Surface == "native" {
+			return kind == KindVertex && vendor == "google-vertex" || kind == KindBedrock && vendor == "amazon-bedrock"
+		}
 		if c.Surface == "anthropic" {
 			return kind == KindAnthropic && vendor == "anthropic"
 		}

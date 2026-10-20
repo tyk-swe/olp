@@ -551,6 +551,9 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 }
 
 func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
+	if cfg.ProfileID == "vertex-batch-prediction" || cfg.ProfileID == "bedrock-batch-inference" {
+		return nil
+	}
 	for _, resource := range []string{"files", "batches"} {
 		path, err := cfg.transport().ResourceURL("", resource, url.Values{"limit": []string{"1"}})
 		if err != nil {

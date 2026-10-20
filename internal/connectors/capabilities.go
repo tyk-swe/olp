@@ -10,8 +10,16 @@ import "github.com/tyk-swe/olp/internal/vendors"
 // operations exist only on the OpenAI surface of the OpenAI connector
 // families; no other connector may serve them.
 func Supports(kind, vendor, operation, surface, mode string) bool {
-	if surface != "openai" && surface != "anthropic" && surface != "gemini" && surface != "bedrock" {
+	if surface != "openai" && surface != "anthropic" && surface != "gemini" && surface != "bedrock" && surface != "native" {
 		return false
+	}
+	if operation == "batch" && surface == "native" && mode == "unary" {
+		return kind == "vertex_ai" && vendor == "google-vertex" || kind == "bedrock" && vendor == "amazon-bedrock"
+	}
+	if surface == "native" && operation == "generation" {
+		return kind == KindPlugin && (mode == "unary" || mode == "streaming") ||
+			kind == "openai_compatible" && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2")) &&
+				(mode == "unary" || mode == "streaming")
 	}
 	if mode != "unary" && mode != "streaming" && mode != "async" && mode != "realtime" {
 		return false
@@ -67,6 +75,9 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		}
 		return surface != "bedrock" && (mode == "unary" || mode == "streaming")
 	case "batch":
+		if surface == "native" {
+			return false
+		}
 		if surface == "anthropic" {
 			return kind == "anthropic" && mode == "unary"
 		}

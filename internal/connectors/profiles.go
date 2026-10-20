@@ -78,6 +78,8 @@ var profileRegistry = []Profile{
 	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
 	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
 	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
 	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
@@ -158,6 +160,16 @@ func init() {
 				}
 				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"
 			}
+		}
+		switch p.ID {
+		case "vertex-batch-prediction":
+			p.Authentication = []string{"adc", "service_account"}
+			p.Operations = []string{"batch"}
+			p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/batch-prediction"
+		case "bedrock-batch-inference":
+			p.Authentication = []string{"static", "default_chain"}
+			p.Operations = []string{"batch"}
+			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html"
 		}
 		// Interactions and Live have independent request and event grammars.
 		// Their profile tuples cannot fall through GenerateContent's codec.
@@ -487,6 +499,10 @@ func generationFamily(dialect string) (wire.Format, bool) {
 
 func (c Config) Supports(operation, surface, mode string) bool {
 	if operation == "batch" {
+		if surface == "native" {
+			return mode == "unary" && (c.Kind == "vertex_ai" && c.ProfileID == "vertex-batch-prediction" ||
+				c.Kind == "bedrock" && c.ProfileID == "bedrock-batch-inference")
+		}
 		if surface == "openai" {
 			return c.SupportsFilesBatches() && mode == "unary"
 		}

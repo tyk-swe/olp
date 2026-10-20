@@ -7977,6 +7977,32 @@
               "null"
             ]
           },
+          "batch_storage": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "Operator-owned object-storage prefixes used by Vertex batch prediction or Bedrock batch inference. These values are nonsecret.",
+            "properties": {
+              "input_uri_prefix": {
+                "type": "string",
+                "description": "Allowed object-storage prefix for batch input URIs. Vertex uses gs:// and Bedrock uses s3://."
+              },
+              "output_uri_prefix": {
+                "type": "string",
+                "description": "Allowed object-storage prefix for batch output URIs. The normalized prefix ends with a slash."
+              },
+              "role_arn": {
+                "type": "string",
+                "description": "Bedrock batch job IAM role ARN with permission to read input and write output."
+              }
+            },
+            "required": [
+              "input_uri_prefix",
+              "output_uri_prefix"
+            ]
+          },
           "deployment": {
             "type": [
               "string",
@@ -8024,6 +8050,7 @@
           "endpoint",
           "cloud_region",
           "cloud_project",
+          "batch_storage",
           "deployment",
           "api_version",
           "model"

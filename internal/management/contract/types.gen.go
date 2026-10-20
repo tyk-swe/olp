@@ -3325,6 +3325,7 @@ func (e ProviderConfigurationCredentialSource) Valid() bool {
 // Defines values for ProviderConfigurationField.
 const (
 	ProviderConfigurationFieldApiVersion   ProviderConfigurationField = "api_version"
+	ProviderConfigurationFieldBatchStorage ProviderConfigurationField = "batch_storage"
 	ProviderConfigurationFieldCloudProject ProviderConfigurationField = "cloud_project"
 	ProviderConfigurationFieldCloudRegion  ProviderConfigurationField = "cloud_region"
 	ProviderConfigurationFieldDeployment   ProviderConfigurationField = "deployment"
@@ -3336,6 +3337,8 @@ const (
 func (e ProviderConfigurationField) Valid() bool {
 	switch e {
 	case ProviderConfigurationFieldApiVersion:
+		return true
+	case ProviderConfigurationFieldBatchStorage:
 		return true
 	case ProviderConfigurationFieldCloudProject:
 		return true
@@ -9534,7 +9537,19 @@ type ProviderConfiguration struct {
 	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
 
 	// AuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
-	AuthMode     ProviderAuthMode          `json:"auth_mode"`
+	AuthMode ProviderAuthMode `json:"auth_mode"`
+
+	// BatchStorage Operator-owned object-storage prefixes used by Vertex batch prediction or Bedrock batch inference. These values are nonsecret.
+	BatchStorage nullable.Nullable[struct {
+		// InputUriPrefix Allowed object-storage prefix for batch input URIs. Vertex uses gs:// and Bedrock uses s3://.
+		InputUriPrefix string `json:"input_uri_prefix"`
+
+		// OutputUriPrefix Allowed object-storage prefix for batch output URIs. The normalized prefix ends with a slash.
+		OutputUriPrefix string `json:"output_uri_prefix"`
+
+		// RoleArn Bedrock batch job IAM role ARN with permission to read input and write output.
+		RoleArn *string `json:"role_arn,omitempty"`
+	}] `json:"batch_storage,omitempty"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
 

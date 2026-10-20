@@ -33,6 +33,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	if s.Resources == nil {
 		return
 	}
+	s.registerCloudBatchState(mux)
 	if s.Media != nil {
 		s.registerAnthropicState(mux)
 		s.registerGeminiFilesState(mux)

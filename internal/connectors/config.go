@@ -32,6 +32,7 @@ type Config struct {
 	OperationDefaults                                                                     map[string]DefaultSet
 	Bindings                                                                              map[string]Binding
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
+	BatchStorage                                                                          *BatchStorage
 	// SigningService overrides the SigV4 signing name of one call to an AWS
 	// service beside the connector's own, such as Amazon Polly's.
 	SigningService    string `json:"-"`

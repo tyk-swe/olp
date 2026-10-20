@@ -128,6 +128,7 @@ type Provider struct {
 	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults,omitempty"`
 	CloudRegion       string                           `json:"cloud_region,omitempty"`
 	CloudProject      string                           `json:"cloud_project,omitempty"`
+	BatchStorage      *connectors.BatchStorage         `json:"batch_storage,omitempty"`
 	Deployment        string                           `json:"deployment,omitempty"`
 	APIVersion        string                           `json:"api_version,omitempty"`
 	Models            map[string]json.RawMessage       `json:"models,omitempty"`
@@ -391,7 +392,7 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, ObservedPrincipal: p.ObservedPrincipal, CredentialSource: p.CredentialSource, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, ObservedPrincipal: p.ObservedPrincipal, CredentialSource: p.CredentialSource, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, BatchStorage: p.BatchStorage, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }
 
 // HasBodyLimits reports whether ingress needs byte measurements for ordinary routes.

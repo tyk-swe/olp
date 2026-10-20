@@ -381,4 +381,26 @@ func TestFilesBatchProfilesAreVendorBound(t *testing.T) {
 	}
 }
 
+func TestCloudBatchProfilesDoNotEnableGeneration(t *testing.T) {
+	vertex := Config{Kind: "vertex_ai", ProfileID: "vertex-batch-prediction", ProfileRevision: ProfileRevision,
+		Endpoint:    DefaultProfileEndpoint("vertex_ai", "vertex-batch-prediction", "us-central1", "fixture-project"),
+		CloudRegion: "us-central1", CloudProject: "fixture-project", AuthMode: "adc"}
+	bedrock := Config{Kind: "bedrock", ProfileID: "bedrock-batch-inference", ProfileRevision: ProfileRevision,
+		Endpoint: DefaultProfileEndpoint("bedrock", "bedrock-batch-inference", "us-east-1", ""), CloudRegion: "us-east-1", AuthMode: "default_chain"}
+	for _, config := range []Config{vertex, bedrock} {
+		if !config.Supports("batch", "native", "unary") || config.Supports("generation", "openai", "unary") ||
+			config.Supports("generation", "native", "unary") {
+			t.Fatalf("%s cloud batch profile changed serving generation", config.ProfileID)
+		}
+	}
+	for _, config := range []Config{
+		{Kind: "vertex_ai", ProfileID: "vertex-gemini", ProfileRevision: ProfileRevision},
+		{Kind: "bedrock", ProfileID: "bedrock-invoke", ProfileRevision: ProfileRevision},
+	} {
+		if config.Supports("batch", "native", "unary") {
+			t.Fatalf("%s acquired cloud batch capability", config.ProfileID)
+		}
+	}
+}
+
 // What the connector publishes is what hosting sends, and it validates.

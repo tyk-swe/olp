@@ -870,6 +870,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		"name_changed":                   from.Name != to.Name,
 		"endpoint_changed":               deref(a.Endpoint) != deref(b.Endpoint),
 		"cloud_context_changed":          deref(a.CloudRegion) != deref(b.CloudRegion) || deref(a.CloudProject) != deref(b.CloudProject),
+		"batch_storage_changed":          !sameJSON(a.BatchStorage, b.BatchStorage),
 		"deployment_changed":             deref(a.Deployment) != deref(b.Deployment),
 		"api_version_changed":            deref(a.APIVersion) != deref(b.APIVersion),
 		"connector_changed":              a.Kind != b.Kind || a.AuthMode != b.AuthMode || !slices.Equal(a.Options.CredentialHeaders, b.Options.CredentialHeaders),
