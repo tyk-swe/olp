@@ -1590,7 +1590,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		kind = resources.KindStrictBatch
 	}
 	submission, e := s.prepareBatchSubmission(r.Context(), x, authority.ID, p, source, source.Bytes(), upstream,
-		strictServing, localFile, file.UpstreamID, kind, adapter, lineOperation, completionWindow, expectedResults)
+		strictServing, localFile, file.UpstreamID, kind, adapter, "openai", lineOperation, completionWindow, expectedResults, nil)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return

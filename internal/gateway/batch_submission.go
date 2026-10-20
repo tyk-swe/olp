@@ -82,7 +82,7 @@ func batchCompletionWindow(source oif.Document, vendor string) (time.Duration, *
 
 func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityID string, p *pin, source oif.Document,
 	canonical, effective []byte, serving oif.ServingIdentity,
-	localFileID, upstreamFileID, resourceKind, adapter, lineOperation string, window time.Duration, expected *int64,
+	localFileID, upstreamFileID, resourceKind, adapter, surface, lineOperation string, window time.Duration, expected *int64, reconciliationCursor json.RawMessage,
 ) (*batchSubmission, *Error) {
 	if s.Batches == nil {
 		return nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
@@ -100,22 +100,25 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 		return nil, serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
 	}
 	digest := digester.Digest(secrets.BatchSubmissionDigest, authorityID+"\x00"+string(canonical))
-	endpointValue, _ := source.Root().Lookup("endpoint")
-	endpoint, _ := endpointValue.Text()
-	windowLabel := "24h"
-	if value, present := source.Root().Lookup("completion_window"); present {
-		windowLabel, _ = value.Text()
-	}
-	cursor, err := json.Marshal(map[string]any{
-		"submission": map[string]string{
-			"input_file_id":       upstreamFileID,
-			"local_input_file_id": localFileID,
-			"endpoint":            endpoint,
-			"completion_window":   windowLabel,
-		},
-	})
-	if err != nil {
-		return nil, serverError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be stored.")
+	cursor := reconciliationCursor
+	if len(cursor) == 0 {
+		endpointValue, _ := source.Root().Lookup("endpoint")
+		endpoint, _ := endpointValue.Text()
+		windowLabel := "24h"
+		if value, present := source.Root().Lookup("completion_window"); present {
+			windowLabel, _ = value.Text()
+		}
+		cursor, err = json.Marshal(map[string]any{
+			"submission": map[string]string{
+				"input_file_id":       upstreamFileID,
+				"local_input_file_id": localFileID,
+				"endpoint":            endpoint,
+				"completion_window":   windowLabel,
+			},
+		})
+		if err != nil {
+			return nil, serverError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be stored.")
+		}
 	}
 	closeAfter := now.Add(window + 48*time.Hour)
 	resource := &resources.Resource{
@@ -134,7 +137,7 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 		ResourceID: resourceID, Kind: resourceKind, Adapter: adapter, APIKeyID: authorityID,
 		RouteSlug: x.route.Slug, RouteRevisionID: x.route.RevisionID, ProviderID: p.provider.ID,
 		ProviderRevisionID: p.provider.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID,
-		CredentialID: p.slot.CredentialID, Surface: "openai", SubmissionDigest: digest,
+		CredentialID: p.slot.CredentialID, Surface: surface, SubmissionDigest: digest,
 		LineOperation: lineOperation, Template: template, State: batches.StateSubmitting, ExpectedResults: expected,
 		Cursor: cursor, CloseAfter: closeAfter,
 	}
