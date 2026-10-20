@@ -175,6 +175,7 @@ func init() {
 	}
 	registerUnaryProfiles()
 	registerCompletionProfiles()
+	registerFilesBatchesProfiles()
 }
 
 // Profiles returns detached catalogue metadata; registering a new hosting profile
@@ -343,6 +344,9 @@ func (c Config) ValidateProfile() error {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
 	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
+		p.ID == "groq-files-batches" && c.VendorID != "groq" ||
+		p.ID == "together-files-batches" && c.VendorID != "together" ||
+		p.ID == "mistral-files-batches" && c.VendorID != "mistral" ||
 		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
 		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
 		p.Dialect == "exa-search" && c.VendorID != "exa" ||
@@ -476,6 +480,9 @@ func generationFamily(dialect string) (wire.Format, bool) {
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {
+	if operation == "batch" {
+		return c.SupportsFilesBatches() && surface == "openai" && mode == "unary"
+	}
 	if c.Kind == KindPlugin {
 		p, err := c.profile()
 		return err == nil && slices.Contains(p.Operations, operation) && Supports(c.Kind, c.VendorID, operation, surface, mode)
@@ -736,7 +743,23 @@ func RegisterProfile(p Profile) error {
 			return errors.New("profile revision already registered")
 		}
 		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
-			template = existing
+			compatible := true
+			for _, auth := range p.Authentication {
+				compatible = compatible && slices.Contains(existing.Authentication, auth)
+			}
+			for _, operation := range p.Operations {
+				compatible = compatible && slices.Contains(existing.Operations, operation)
+			}
+			for _, header := range p.SemanticHeaders {
+				compatible = compatible && slices.Contains(existing.SemanticHeaders, header)
+			}
+			for _, query := range p.QuerySettings {
+				compatible = compatible && slices.Contains(existing.QuerySettings, query)
+			}
+			if compatible {
+				template = existing
+				break
+			}
 		}
 	}
 	if template == nil || len(profileRegistry) >= 4096 {

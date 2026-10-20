@@ -1,0 +1,12 @@
+{
+  "id": "batch-job",
+  "user_id": "user-example",
+  "input_file_id": "file-input",
+  "file_size_bytes": 128,
+  "status": "COMPLETED",
+  "created_at": "2026-10-20T12:00:00Z",
+  "completed_at": "2026-10-20T13:00:00Z",
+  "endpoint": "/v1/chat/completions",
+  "output_file_id": "file-output",
+  "error_file_id": "file-error"
+}

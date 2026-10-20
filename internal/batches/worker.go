@@ -51,7 +51,7 @@ type Worker struct {
 	Connections  *egress.ConnectionClientCache
 	Limiter      *limits.Limiter
 	Log          *slog.Logger
-	Reader       Reader
+	Readers      map[string]Reader
 	Now          func() time.Time
 }
 
@@ -97,8 +97,11 @@ func (w *Worker) setup() {
 	if w.Connections == nil {
 		w.Connections = egress.NewConnectionClientCache(128)
 	}
-	if w.Reader == nil {
-		w.Reader = &OpenAIReader{Auth: w.Auth, Egress: w.Egress}
+	if w.Readers == nil {
+		w.Readers = map[string]Reader{}
+	}
+	if w.Readers["openai"] == nil {
+		w.Readers["openai"] = &OpenAIReader{Auth: w.Auth, Egress: w.Egress}
 	}
 }
 
@@ -182,6 +185,9 @@ func (w *Worker) reconcileClaimed(ctx context.Context, settlement Settlement) re
 	if settlement.ClaimID == nil {
 		return outcomeFailed
 	}
+	if w.Readers[settlement.Adapter] == nil {
+		return w.finishRetry(ctx, settlement, settlement.State, "batch_adapter_unavailable")
+	}
 	leaseCtx, stopLease := w.keepLease(ctx, settlement)
 	defer stopLease()
 	now := w.now()
@@ -221,6 +227,7 @@ func (w *Worker) reconcileClaimed(ctx context.Context, settlement Settlement) re
 }
 
 func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement, target *PinnedTarget) reconcileOutcome {
+	reader := w.Readers[settlement.Adapter]
 	inputFileID, _, endpoint, err := submissionFiles(settlement.Cursor)
 	if err != nil || inputFileID == "" {
 		if !w.now().Before(settlement.CloseAfter) {
@@ -228,7 +235,7 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 		}
 		return w.finishRetry(ctx, settlement, StateSubmissionUnknown, "")
 	}
-	reconciliation, err := w.Reader.Reconcile(ctx, settlement, target, inputFileID, endpoint)
+	reconciliation, err := reader.Reconcile(ctx, settlement, target, inputFileID, endpoint)
 	if err != nil {
 		if errors.Is(err, ErrProviderConflict) {
 			return w.finishConflict(ctx, settlement)
@@ -260,12 +267,16 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 }
 
 func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, target *PinnedTarget, known *BatchSnapshot) reconcileOutcome {
+	reader := w.Readers[settlement.Adapter]
+	if reader == nil {
+		return w.finishRetry(ctx, settlement, settlement.State, "batch_adapter_unavailable")
+	}
 	var snapshot BatchSnapshot
 	var err error
 	if known != nil {
 		snapshot = *known
 	} else {
-		snapshot, err = w.Reader.Poll(ctx, settlement, target)
+		snapshot, err = reader.Poll(ctx, settlement, target)
 		if err != nil {
 			if errors.Is(err, ErrProviderConflict) || errors.Is(err, ErrCursorConflict) {
 				return w.finishConflict(ctx, settlement)
@@ -288,7 +299,7 @@ func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, tar
 	exhausted := snapshot.OutputFileID == "" && snapshot.ErrorFileID == ""
 	var progress bool
 	if !exhausted {
-		_, exhausted, err = w.Reader.ReadResults(ctx, target, snapshot, cursor, func(results []Result, next Cursor) error {
+		_, exhausted, err = reader.ReadResults(ctx, target, snapshot, cursor, func(results []Result, next Cursor) error {
 			page := make([]PageResult, 0, len(results))
 			for _, result := range results {
 				if w.DigestKey == nil {
@@ -364,6 +375,16 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		return err
 	}
 	metadata, state := batchMetadata(snapshot.Body, resourceModel(settlement.Template), localInputID)
+	if settlement.Adapter == "together" || settlement.Adapter == "mistral" {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(metadata, &fields)
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		fields["adapter"], _ = json.Marshal(settlement.Adapter)
+		fields["completion_window"], _ = json.Marshal(submissionWindow(settlement.Cursor))
+		metadata, _ = json.Marshal(fields)
+	}
 	resource := &resources.Resource{
 		UUID: settlement.ResourceID, Kind: settlement.Kind, APIKeyID: settlement.APIKeyID,
 		RouteSlug: settlement.RouteSlug, ProviderID: settlement.ProviderID,
@@ -402,7 +423,11 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 	if err != nil {
 		return err
 	}
-	if err = w.Store.ActivateTx(ctx, tx, settlement.ResourceID, snapshot.ID, snapshot.Expected); err != nil {
+	expected := snapshot.Expected
+	if settlement.ExpectedResults != nil {
+		expected = settlement.ExpectedResults
+	}
+	if err = w.Store.ActivateTx(ctx, tx, settlement.ResourceID, snapshot.ID, expected); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -488,6 +513,18 @@ func submissionFiles(cursor []byte) (inputFileID, localInputID, endpoint string,
 		return "", "", "", errors.New("batch submission identity is unavailable")
 	}
 	return value.Submission.InputFileID, value.Submission.LocalInputID, value.Submission.Endpoint, nil
+}
+
+func submissionWindow(cursor []byte) string {
+	var value struct {
+		Submission struct {
+			CompletionWindow string `json:"completion_window"`
+		} `json:"submission"`
+	}
+	if json.Unmarshal(cursor, &value) == nil && value.Submission.CompletionWindow != "" {
+		return value.Submission.CompletionWindow
+	}
+	return "24h"
 }
 
 func (w *Worker) pinnedTarget(ctx context.Context, settlement Settlement) (*PinnedTarget, string) {

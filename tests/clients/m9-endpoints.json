@@ -1427,10 +1427,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "purpose",
+        "file"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1453,10 +1470,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "after",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1479,10 +1513,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1505,10 +1555,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1531,10 +1597,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1557,10 +1639,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "purpose",
+        "file"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1583,10 +1682,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "after",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1609,10 +1725,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1635,10 +1767,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1661,10 +1809,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1837,10 +2001,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "purpose",
+        "file"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1863,10 +2044,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "after",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1889,10 +2087,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1915,10 +2129,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -1941,10 +2171,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2189,10 +2435,29 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "input_file_id",
+        "endpoint",
+        "completion_window",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2215,10 +2480,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "after",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2241,10 +2523,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2267,10 +2565,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/groq/contract.json",
+        "tests/fixtures/vendors/groq/file.upload.response.json",
+        "tests/fixtures/vendors/groq/batch.create.request.json",
+        "tests/fixtures/vendors/groq/batch.create.response.json",
+        "tests/fixtures/vendors/groq/batch.job.json",
+        "tests/fixtures/vendors/groq/batch.input.jsonl",
+        "tests/fixtures/vendors/groq/batch.output.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.jsonl",
+        "tests/fixtures/vendors/groq/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2293,10 +2607,29 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "input_file_id",
+        "endpoint",
+        "completion_window",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2319,10 +2652,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "after",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2345,10 +2695,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2371,10 +2737,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/together/contract.json",
+        "tests/fixtures/vendors/together/file.upload.response.json",
+        "tests/fixtures/vendors/together/batch.create.request.json",
+        "tests/fixtures/vendors/together/batch.create.response.json",
+        "tests/fixtures/vendors/together/batch.job.json",
+        "tests/fixtures/vendors/together/batch.input.jsonl",
+        "tests/fixtures/vendors/together/batch.output.jsonl",
+        "tests/fixtures/vendors/together/batch.error.jsonl",
+        "tests/fixtures/vendors/together/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2517,10 +2899,29 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "input_file_id",
+        "endpoint",
+        "completion_window",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2543,10 +2944,27 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "after",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2569,10 +2987,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -2595,10 +3029,26 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/mistral/contract.json",
+        "tests/fixtures/vendors/mistral/file.upload.response.json",
+        "tests/fixtures/vendors/mistral/batch.create.request.json",
+        "tests/fixtures/vendors/mistral/batch.create.response.json",
+        "tests/fixtures/vendors/mistral/batch.job.json",
+        "tests/fixtures/vendors/mistral/batch.input.jsonl",
+        "tests/fixtures/vendors/mistral/batch.output.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.jsonl",
+        "tests/fixtures/vendors/mistral/batch.error.json",
+        "internal/connectors/profiles_test.go",
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/managed_batches_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"

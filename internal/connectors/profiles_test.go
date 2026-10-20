@@ -283,4 +283,41 @@ func assertProfileSignature(t *testing.T, request *http.Request, body []byte, se
 	}
 }
 
+func TestFilesBatchProfilesAreVendorBound(t *testing.T) {
+	for _, test := range []struct {
+		vendor, profile, adapter string
+	}{
+		{"groq", "groq-files-batches", "openai"},
+		{"together", "together-files-batches", "together"},
+		{"mistral", "mistral-files-batches", "mistral"},
+	} {
+		config := Config{Kind: "openai_compatible", VendorID: test.vendor, ProfileID: test.profile, ProfileRevision: "1",
+			Endpoint: "https://api.example/v1", AuthMode: "api_key"}
+		if err := config.ValidateProfile(); err != nil {
+			t.Fatalf("%s profile: %v", test.vendor, err)
+		}
+		if !config.SupportsFilesBatches() || config.FilesBatchesAdapter() != test.adapter ||
+			!config.Supports("batch", "openai", "unary") {
+			t.Fatalf("%s files/batches profile is unavailable", test.vendor)
+		}
+		config.VendorID = "fireworks"
+		if config.ValidateProfile() == nil || config.SupportsFilesBatches() {
+			t.Fatalf("%s profile can be assigned to another vendor", test.vendor)
+		}
+	}
+	generic := Config{Kind: "openai_compatible", VendorID: "groq", Endpoint: "https://api.groq.com/openai/v1", AuthMode: "api_key"}
+	if generic.SupportsFilesBatches() {
+		t.Fatal("a generic compatible profile inherited provider files/batches")
+	}
+	if config := (Config{Kind: "openai", Endpoint: "https://api.openai.com/v1"}); !config.SupportsFilesBatches() || config.FilesBatchesAdapter() != "openai" {
+		t.Fatal("official OpenAI resource endpoint lost files/batches support")
+	}
+	if config := (Config{Kind: "openai", Endpoint: "https://openai.example/v1"}); config.SupportsFilesBatches() {
+		t.Fatal("a custom OpenAI endpoint inherited official files/batches support")
+	}
+	if config := (Config{Kind: "azure_openai", Endpoint: "https://resource.example"}); !config.SupportsFilesBatches() {
+		t.Fatal("Azure resource endpoint lost files/batches support")
+	}
+}
+
 // What the connector publishes is what hosting sends, and it validates.

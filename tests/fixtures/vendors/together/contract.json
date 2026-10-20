@@ -1,12 +1,13 @@
 {
   "vendor": "together",
-  "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
-  "reviewed_at": "2026-10-05",
-  "notes": "The host moved from api.together.xyz to api.together.ai. GET /v1/models answers a bare array, so models are declared. service_tier, store, metadata and prediction are accepted but ignored, and logit_bias is unsupported on most models; all are refused. Only max_tokens is documented. Rerank, documented at https://docs.together.ai/reference/rerank-1, serves dedicated endpoints and refuses truncation, which it has no control for.",
+  "documentation_url": "https://docs.together.ai/reference/batch-create",
+  "reviewed_at": "2026-10-20",
+  "notes": "The host moved from api.together.xyz to api.together.ai. GET /v1/models answers a bare array, so models are declared. service_tier, store, metadata and prediction are accepted but ignored, and logit_bias is unsupported on most models; all are refused. Only max_tokens is documented. Rerank, documented at https://docs.together.ai/reference/rerank-1, serves dedicated endpoints and refuses truncation, which it has no control for. Files and batches evidence records the fields and endpoints used by the M9.2 adapter: Files upload at /v1/files/upload using file, file_name, purpose=batch-api and file_type=jsonl. Batch creation uses endpoint, input_file_id and optional completion_window; responses wrap the job. Job status is VALIDATING, IN_PROGRESS, COMPLETED, FAILED, EXPIRED or CANCELLED and timestamps are RFC3339.",
   "endpoints": {
     "generation": "https://api.together.ai/v1/chat/completions",
     "embeddings": "https://api.together.ai/v1/embeddings",
-    "rerank": "https://api.together.ai/v1/rerank"
+    "rerank": "https://api.together.ai/v1/rerank",
+    "batch": "https://api.together.ai/v1/batches"
   },
   "unsupported_parameters": [
     "logit_bias",
@@ -56,5 +57,29 @@
       "message": "Invalid request"
     },
     "class": "upstream_client"
+  },
+  "documentation_links": {
+    "files": "https://docs.together.ai/reference/upload-file",
+    "batches": "https://docs.together.ai/reference/batch-create"
+  },
+  "files_batches": {
+    "basis": "schema",
+    "input": "batch.input.jsonl",
+    "file_response": "file.upload.response.json",
+    "create_request": "batch.create.request.json",
+    "create_response": "batch.create.response.json",
+    "job": "batch.job.json",
+    "output": "batch.output.jsonl",
+    "error_file": "batch.error.jsonl",
+    "error_body": "batch.error.json",
+    "endpoints": {
+      "files_upload": "https://api.together.ai/v1/files/upload",
+      "files_get": "https://api.together.ai/v1/files/{file_id}",
+      "files_content": "https://api.together.ai/v1/files/{file_id}/content",
+      "batch_create": "https://api.together.ai/v1/batches",
+      "batch_get": "https://api.together.ai/v1/batches/{batch_id}",
+      "batch_list": "https://api.together.ai/v1/batches",
+      "batch_cancel": "https://api.together.ai/v1/batches/{batch_id}/cancel"
+    }
   }
 }

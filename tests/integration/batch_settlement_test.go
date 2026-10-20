@@ -276,7 +276,10 @@ func batchWorker(h *accessHarness, reader batches.Reader) *batches.Worker {
 		Resolver: h.Gateway.Resolver, Credentials: h.Runtime, DigestKey: h.AuthKey,
 		Auth: connectors.NewAuth(&h.Policy), Egress: &h.Policy,
 		Client: h.Policy.Client(5 * time.Minute), Connections: egress.NewConnectionClientCache(16),
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Reader: reader,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Readers: map[string]batches.Reader{
+			"openai": reader, "together": batches.NewTogetherReader(connectors.NewAuth(&h.Policy), &h.Policy),
+			"mistral": batches.NewMistralReader(connectors.NewAuth(&h.Policy), &h.Policy),
+		},
 	}
 }
 

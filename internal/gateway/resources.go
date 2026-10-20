@@ -98,7 +98,29 @@ func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	if !p.Supports(model, operation, "openai", mode) {
 		return false
 	}
-	return p.Connector().SupportsRetainedResponses()
+	return p.Connector().SupportsFilesBatches()
+}
+
+func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
+	if x == nil || route == nil {
+		return nil
+	}
+	for _, target := range route.Targets {
+		provider, ok := x.snapshot().Providers[target.ProviderID]
+		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
+			return serverError(http.StatusUnprocessableEntity, "target_capability",
+				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
+		}
+	}
+	return nil
+}
+
+func strictBatchTargetRefusal(p *pin) *Error {
+	if p != nil && p.provider.Kind != "openai" && p.provider.Kind != "azure_openai" {
+		return serverError(http.StatusUnprocessableEntity, "target_capability",
+			"Strict routes serve files and batches only for OpenAI and Azure.")
+	}
+	return nil
 }
 
 func resourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
@@ -373,6 +395,19 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
 		return nil, err
 	}
+	var adapter string
+	if json.Unmarshal(meta["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral") {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(meta["provider_file"], &fields)
+		obj := map[string]json.RawMessage{"object": json.RawMessage(`"file"`)}
+		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+			if value, ok := fields[name]; ok {
+				obj[name] = value
+			}
+		}
+		obj["id"], _ = json.Marshal(res.ID)
+		return json.Marshal(obj)
+	}
 	obj := map[string]json.RawMessage{}
 	for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
 		if raw, ok := meta[name]; ok {
@@ -420,7 +455,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 			if !valid || upstream == "" {
 				return nil, resources.ErrContract
 			}
-			mapped, err := s.mapUpstreamFile(ctx, res, upstream)
+			mapped, err := s.mapUpstreamFile(ctx, res, upstream, strings.TrimSuffix(name, "_file_id"))
 			if err != nil {
 				return nil, err
 			}
@@ -434,7 +469,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	}
 	obj := map[string]json.RawMessage{}
 	for name, raw := range meta {
-		if name == "upstream_model" || name == batchLocalInputKey {
+		if name == "upstream_model" || name == batchLocalInputKey || name == "adapter" || name == "manifest" || name == "provider_file" || name == "role" {
 			continue
 		}
 		obj[name] = raw
@@ -460,7 +495,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" {
 			continue
 		}
-		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID)
+		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID, strings.TrimSuffix(name, "_file_id"))
 		if err != nil {
 			return nil, err
 		}
@@ -478,7 +513,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	return json.Marshal(obj)
 }
 
-func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamID string) (*resources.Resource, error) {
+func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamID, role string) (*resources.Resource, error) {
 	kind := resources.KindFile
 	if owner.Kind == resources.KindStrictBatch {
 		kind = resources.KindStrictFile
@@ -491,6 +526,12 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		return nil, err
 	}
 	metadata := durableMetadata(resourceModel(owner))
+	var ownerMetadata map[string]json.RawMessage
+	_ = json.Unmarshal(owner.Metadata, &ownerMetadata)
+	var adapter string
+	if json.Unmarshal(ownerMetadata["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral") {
+		metadata = managedFileMetadata([]byte(`{}`), nil, adapter, batchManifest{}, role)
+	}
 	resource := &resources.Resource{
 		Kind:               kind,
 		APIKeyID:           owner.APIKeyID,
@@ -707,8 +748,53 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}()
 	p, e := s.selectPin(r.Context(), x, &route, "batch", "unary")
 	if e != nil {
+		if refusal := fireworksBatchRefusal(x, &route); refusal != nil {
+			e = refusal
+		}
 		s.stateFail(x, w, e, x.family)
 		return
+	}
+	if x.strict() {
+		if refusal := strictBatchTargetRefusal(p); refusal != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, refusal, x.family)
+			return
+		}
+	}
+	adapter := p.provider.Connector().FilesBatchesAdapter()
+	uploadFile := file
+	uploadPurpose, uploadExtra := purpose, extra
+	var manifest batchManifest
+	if p.provider.VendorID == "groq" && purpose != "batch" {
+		param := "purpose"
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, invalidRequest("unsupported_parameter", "Groq files used by batches require purpose=batch.", &param), x.family)
+		return
+	}
+	if adapter == "together" || adapter == "mistral" {
+		if purpose != "batch" || len(extra) > 0 {
+			param := "purpose"
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, invalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", &param), x.family)
+			return
+		}
+		var translated *media.Part
+		translated, manifest, e = s.translateManagedBatchInput(r.Context(), p, &route, file, adapter)
+		if e != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, e, x.family)
+			return
+		}
+		uploadFile = translated
+		defer func() {
+			if err := s.transport().Spool.Remove(translated.Handle); err != nil {
+				s.log.Warn("translated batch spool cleanup failed", "error", err)
+			}
+		}()
+		if adapter == "together" {
+			uploadPurpose = "batch-api"
+			uploadExtra = map[string]string{"file_name": file.Filename, "file_type": "jsonl"}
+		}
 	}
 	var strictServing oif.ServingIdentity
 	var strictEndpoint string
@@ -736,12 +822,16 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, "files", nil)
+	filePath := "files"
+	if adapter == "together" {
+		filePath = "files/upload"
+	}
+	endpoint, err := resourceURL(p.provider.Connector(), p.model, filePath, nil)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
 		return
 	}
-	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, purpose, extra, file, fileFirst)
+	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, uploadPurpose, uploadExtra, uploadFile, fileFirst)
 	if failure != nil {
 		x.dispatched = failure.dispatched
 		s.stateFail(x, w, upstreamError(failure), x.family)
@@ -769,6 +859,9 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	x.completePinned()
 	metadata, state, expires := fileMetadata(body, p.model)
+	if adapter == "together" || adapter == "mistral" {
+		metadata = managedFileMetadata(metadata, body, adapter, manifest, "input")
+	}
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	kind := resources.KindFile
@@ -813,6 +906,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	var out []byte
 	if x.strict() {
 		out, err = durableProjection(body, res.ID, nil)
+	} else if adapter == "together" || adapter == "mistral" {
+		out, err = s.fileObject(r.Context(), res)
 	} else {
 		out, err = rewriteID(body, "id", res.ID)
 	}
@@ -997,6 +1092,16 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		metadata, state, expires := fileMetadata(body, resourceModel(res))
+		if res.Kind != resources.KindStrictFile {
+			var prior map[string]json.RawMessage
+			_ = json.Unmarshal(res.Metadata, &prior)
+			var adapter, role string
+			_ = json.Unmarshal(prior["adapter"], &adapter)
+			_ = json.Unmarshal(prior["role"], &role)
+			if adapter == "together" || adapter == "mistral" {
+				metadata = managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, role)
+			}
+		}
 		var out []byte
 		if res.Kind == resources.KindStrictFile {
 			if _, _, err := strictResult(body, res.UpstreamID); err != nil {
@@ -1289,15 +1394,6 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	completionWindow, e := batchCompletionWindow(source)
-	if e != nil {
-		s.stateFail(x, w, e, x.family)
-		return
-	}
-	if _, supplied := source.Root().Lookup("id"); supplied {
-		s.stateFail(x, w, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id")), x.family)
-		return
-	}
 	fileValue, ok := source.Root().Lookup("input_file_id")
 	localFile, valid := fileValue.Text()
 	if !ok || !valid || !strings.HasPrefix(localFile, "file_") && !strings.HasPrefix(localFile, "strict_file_") {
@@ -1318,33 +1414,99 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	// The batch runs under the file's retained route revision. Resolution
 	// refuses a file whose contract the current route no longer promises, so
 	// that revision's fidelity is also the route's current one.
+	if candidate, exists := x.snapshot().Routes[file.RouteSlug]; exists {
+		x.route = &candidate
+	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, file, "batch", retainedNewWork)
 	if e != nil {
+		if refusal := fireworksBatchRefusal(x, x.route); refusal != nil {
+			e = refusal
+		}
 		s.stateFail(x, w, e, x.family)
 		return
 	}
 	x.route = route
+	completionWindow, e := batchCompletionWindow(source, p.provider.VendorID)
+	if e != nil {
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, e, x.family)
+		return
+	}
+	endpointValue, endpointPresent := source.Root().Lookup("endpoint")
+	requestEndpoint, endpointValid := endpointValue.Text()
+	if p.provider.VendorID == "groq" && (!endpointPresent || !endpointValid || requestEndpoint != "/v1/chat/completions") {
+		param := "endpoint"
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, invalidRequest("unsupported_parameter", "Groq batches currently support only /v1/chat/completions.", &param), x.family)
+		return
+	}
+	if p.provider.VendorID == "together" || p.provider.VendorID == "mistral" {
+		allowed := map[string]bool{"input_file_id": true, "endpoint": true, "completion_window": true, "metadata": true}
+		for _, field := range source.Root().Members() {
+			if !allowed[field.Name] {
+				param := field.Name
+				s.releaseHold(r.Context(), p.hold)
+				s.stateFail(x, w, invalidRequest("unsupported_parameter", "This batch parameter is not supported.", &param), x.family)
+				return
+			}
+		}
+	}
+	if x.strict() {
+		if refusal := strictBatchTargetRefusal(p); refusal != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, refusal, x.family)
+			return
+		}
+	}
+	adapter := p.provider.Connector().FilesBatchesAdapter()
+	var inputManifest batchManifest
+	if adapter == "together" || adapter == "mistral" {
+		var meta map[string]json.RawMessage
+		_ = json.Unmarshal(file.Metadata, &meta)
+		var storedAdapter string
+		_ = json.Unmarshal(meta["adapter"], &storedAdapter)
+		_ = json.Unmarshal(meta["endpoint"], &inputManifest.Endpoint)
+		_ = json.Unmarshal(meta["line_operation"], &inputManifest.LineOperation)
+		_ = json.Unmarshal(meta["line_count"], &inputManifest.LineCount)
+		_ = json.Unmarshal(meta["manifest_digest"], &inputManifest.ManifestDigest)
+		inputManifest.Adapter = storedAdapter
+		if storedAdapter != adapter || inputManifest.Endpoint == "" || inputManifest.LineCount < 1 || inputManifest.ManifestDigest == "" {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, notFoundError("not_found", "The uploaded file has no compatible batch manifest."), x.family)
+			return
+		}
+	}
+	if _, supplied := source.Root().Lookup("id"); supplied && adapter != "together" && adapter != "mistral" {
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id")), x.family)
+		return
+	}
 	if x.strict() {
 		if fileKind != resources.KindStrictFile || fileContract == nil || !authority.Policy.AllowProviderState || !s.Resources.Encrypted() {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id")), x.family)
 			return
 		}
 		if e := s.authorizeDurable(r.Context(), x, authority, file, fileContract, "batch", retainedNewWork); e != nil {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, e, x.family)
 			return
 		}
 		requestEndpoint, present := source.Root().Lookup("endpoint")
 		path, valid := requestEndpoint.Text()
 		if !present || !valid || fileContract.Asset == nil || fileContract.Asset.Endpoint != path || fileContract.Asset.ItemCount < 1 {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", strPtr("endpoint")), x.family)
 			return
 		}
 	}
 	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
+		s.releaseHold(r.Context(), p.hold)
 		s.stateFail(x, w, e, x.family)
 		return
 	}
 	if e := x.guardrailSurfaceGate(route); e != nil {
+		s.releaseHold(r.Context(), p.hold)
 		s.stateFail(x, w, e, x.family)
 		return
 	}
@@ -1364,21 +1526,42 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	upstreamFile, _ := json.Marshal(file.UpstreamID)
 	var upstream []byte
 	var strictServing oif.ServingIdentity
+	var expectedResults *int64
+	requestedWindow := "24h"
+	if value, present := source.Root().Lookup("completion_window"); present {
+		requestedWindow, _ = value.Text()
+	}
 	if x.strict() {
 		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
 		if !ok {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
 			return
 		}
 		bound, bindErr := template.BindBatch(source, route.Slug, localFile, file.UpstreamID)
 		if bindErr != nil {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The batch source cannot satisfy this native target contract.", nil), x.family)
 			return
 		}
 		upstream = bound.Effective.Document().Bytes()
 		strictServing = bound.Receipt.Serving
+	} else if adapter == "together" || adapter == "mistral" {
+		upstream, expectedResults, e = managedBatchRequestBody(source, adapter, file.UpstreamID, p.model, inputManifest)
+		if e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
 	} else {
 		changes := []oif.Change{{Pointer: "/input_file_id", Value: string(upstreamFile), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"}}
+		window := "24h"
+		if p.provider.VendorID == "groq" {
+			if value, present := source.Root().Lookup("completion_window"); present {
+				window, _ = value.Text()
+			}
+		}
+		windowJSON, _ := json.Marshal(window)
+		changes = append(changes, oif.Change{Pointer: "/completion_window", Value: string(windowJSON), Origin: oif.ResourceBinding, Reason: "provider batch completion window"})
 		if p.provider.Kind == "azure_openai" {
 			deployment := p.provider.Connector().Model(p.model)
 			if deployment != "" {
@@ -1393,7 +1576,11 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		upstream = effective.Bytes()
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, "batches", nil)
+	batchPath := "batches"
+	if adapter == "mistral" {
+		batchPath = "batch/jobs"
+	}
+	endpoint, err := resourceURL(p.provider.Connector(), p.model, batchPath, nil)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
 		return
@@ -1403,7 +1590,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		kind = resources.KindStrictBatch
 	}
 	submission, e := s.prepareBatchSubmission(r.Context(), x, authority.ID, p, source, source.Bytes(), upstream,
-		strictServing, localFile, file.UpstreamID, kind, lineOperation, completionWindow)
+		strictServing, localFile, file.UpstreamID, kind, adapter, lineOperation, completionWindow, expectedResults)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1453,6 +1640,19 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result."), x.family)
 			return
 		}
+	} else if adapter == "together" || adapter == "mistral" {
+		var valid bool
+		result, upstreamID, valid = managedBatchResponse(result, adapter, requestedWindow)
+		if !valid {
+			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
+			defer stopUnknown()
+			_ = s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now())
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."), x.family)
+			return
+		}
+		if metadata, present := source.Fields()["metadata"]; present {
+			result = attachBatchClientMetadata(result, metadata)
+		}
 	} else {
 		var valid bool
 		if upstreamID, valid = nativeResourceID(result, s.cfg.MaxResponseBytes); !valid {
@@ -1475,6 +1675,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	var res *resources.Resource
 	if x.strict() {
 		resource.Metadata = durableMetadata(p.model)
+	} else if adapter == "together" || adapter == "mistral" {
+		resource.Metadata, state = managedBatchMetadata(result, p.model, localFile, adapter)
+		resource.State = state
 	}
 	res, err = func() (*resources.Resource, error) {
 		tx, beginErr := s.Resources.Begin(commitCtx)
@@ -1498,7 +1701,11 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if beginErr != nil {
 			return nil, beginErr
 		}
-		if beginErr = s.Batches.ActivateTx(commitCtx, tx, resource.UUID, upstreamID, batchExpectedResults(result)); beginErr != nil {
+		acceptedExpected := expectedResults
+		if acceptedExpected == nil {
+			acceptedExpected = batchExpectedResults(result)
+		}
+		if beginErr = s.Batches.ActivateTx(commitCtx, tx, resource.UUID, upstreamID, acceptedExpected); beginErr != nil {
 			return nil, beginErr
 		}
 		if beginErr = tx.Commit(commitCtx); beginErr != nil {
@@ -1614,7 +1821,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
 	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
-		return s.batchRefresh(ctx, x, res, p, http.MethodGet, "batches/"+url.PathEscape(res.UpstreamID), nil, w)
+		return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
 	})
 }
 
@@ -1633,7 +1840,7 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 		}
-		return s.batchRefresh(ctx, x, res, p, http.MethodPost, "batches/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w)
+		return s.batchRefresh(ctx, x, res, p, http.MethodPost, managedBatchPath(res, true), []byte(`{}`), w)
 	})
 }
 
@@ -1655,7 +1862,24 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
+	adapter := batchAdapter(res)
+	if adapter == "together" || adapter == "mistral" {
+		window := "24h"
+		var stored map[string]json.RawMessage
+		_ = json.Unmarshal(res.Metadata, &stored)
+		_ = json.Unmarshal(stored["completion_window"], &window)
+		projected, _, projectErr := projectManagedBatch(result, adapter, window)
+		if projectErr != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unknown batch status.")
+		}
+		var prior map[string]json.RawMessage
+		_ = json.Unmarshal(res.Metadata, &prior)
+		result = attachBatchClientMetadata(projected, prior["metadata"])
+	}
 	metadata, state := batchMetadata(result, resourceModel(res), batchLocalInput(res))
+	if adapter == "together" || adapter == "mistral" {
+		metadata, state = managedBatchMetadata(result, resourceModel(res), batchLocalInput(res), adapter)
+	}
 	commitCtx := ctx
 	stopCommit := func() {}
 	if method == http.MethodPost {

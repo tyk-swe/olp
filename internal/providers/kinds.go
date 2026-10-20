@@ -263,14 +263,18 @@ func capabilitiesFor(kind, vendor string) []CapabilityInput {
 // when the kind's Automatic connector cannot serve them.
 func capabilityOptionsForKind(kind string) []CapabilityInput {
 	var profiles []Configuration
+	batchProfile := false
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
 			profiles = append(profiles, Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision})
+			if tupleProfileSupportsBatch(profile.ID) {
+				batchProfile = true
+			}
 		}
 	}
 	out := []CapabilityInput{}
 	for _, tuple := range CapabilityOptions {
-		profiled := slices.ContainsFunc(profiles, func(cfg Configuration) bool {
+		profiled := tuple.Operation == "batch" && batchProfile || slices.ContainsFunc(profiles, func(cfg Configuration) bool {
 			return configurationCertifiable(&cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 		})
 		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
@@ -278,6 +282,14 @@ func capabilityOptionsForKind(kind string) []CapabilityInput {
 		}
 	}
 	return out
+}
+
+func tupleProfileSupportsBatch(profile string) bool {
+	switch profile {
+	case "groq-files-batches", "together-files-batches", "mistral-files-batches":
+		return true
+	}
+	return false
 }
 
 // Custom endpoints need a safe live probe; native media instead relies on the
@@ -303,7 +315,8 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	case "ocr", "search":
 		return true
 	case "batch", "realtime":
-		return kind == KindOpenAI || kind == KindAzure
+		return kind == KindOpenAI || kind == KindAzure || kind == KindOpenAICompatible &&
+			(vendor == "groq" || vendor == "together" || vendor == "mistral")
 	case "bedrock_invoke":
 		return kind == KindBedrock
 	default:

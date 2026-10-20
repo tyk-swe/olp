@@ -62,7 +62,7 @@ type Event struct {
 	APIKeyID    string            `json:"api_key_id"`
 	Attribution map[string]string `json:"attribution,omitempty"`
 	// Origin is empty for a caller request. ParentRequestID names the caller
-	// request a shadow, classifier or cache embedding request was made for.
+	// request a shadow, classifier, cache embedding or batch settlement derives from.
 	Origin          string  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 

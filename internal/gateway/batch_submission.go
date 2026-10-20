@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,7 +41,7 @@ func batchLineOperation(source oif.Document) (string, *Error) {
 	}
 }
 
-func batchCompletionWindow(source oif.Document) (time.Duration, *Error) {
+func batchCompletionWindow(source oif.Document, vendor string) (time.Duration, *Error) {
 	value, present := source.Root().Lookup("completion_window")
 	if !present {
 		return defaultBatchCompletionWindow, nil
@@ -50,17 +51,38 @@ func batchCompletionWindow(source oif.Document) (time.Duration, *Error) {
 		param := "completion_window"
 		return 0, invalidRequest("invalid_value", "completion_window must be a valid duration.", &param)
 	}
-	window, err := time.ParseDuration(raw)
-	if err != nil || window <= 0 || window > defaultBatchCompletionWindow {
-		param := "completion_window"
-		return 0, invalidRequest("invalid_value", "completion_window must be a valid duration no longer than 24h.", &param)
+	if len(raw) < 2 {
+		return 0, invalidRequest("invalid_value", "completion_window must use whole hours or days.", strPtr("completion_window"))
 	}
-	return window, nil
+	unit := raw[len(raw)-1]
+	if unit != 'h' && unit != 'd' {
+		return 0, invalidRequest("invalid_value", "completion_window must use whole hours or days.", strPtr("completion_window"))
+	}
+	n, err := strconv.Atoi(raw[:len(raw)-1])
+	if err != nil || n <= 0 || unit == 'h' && n > 168 || unit == 'd' && n > 7 {
+		param := "completion_window"
+		return 0, invalidRequest("invalid_value", "completion_window must use whole hours or days.", &param)
+	}
+	hours := n
+	if unit == 'd' {
+		hours *= 24
+	}
+	minimum, maximum := 24, 24
+	if vendor == "groq" {
+		maximum = 168
+	} else if vendor == "mistral" {
+		minimum, maximum = 1, 168
+	}
+	if hours < minimum || hours > maximum {
+		param := "completion_window"
+		return 0, invalidRequest("invalid_value", "completion_window is outside the provider's supported range.", &param)
+	}
+	return time.Duration(hours) * time.Hour, nil
 }
 
 func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityID string, p *pin, source oif.Document,
 	canonical, effective []byte, serving oif.ServingIdentity,
-	localFileID, upstreamFileID, resourceKind, lineOperation string, window time.Duration,
+	localFileID, upstreamFileID, resourceKind, adapter, lineOperation string, window time.Duration, expected *int64,
 ) (*batchSubmission, *Error) {
 	if s.Batches == nil {
 		return nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
@@ -80,11 +102,16 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 	digest := digester.Digest(secrets.BatchSubmissionDigest, authorityID+"\x00"+string(canonical))
 	endpointValue, _ := source.Root().Lookup("endpoint")
 	endpoint, _ := endpointValue.Text()
+	windowLabel := "24h"
+	if value, present := source.Root().Lookup("completion_window"); present {
+		windowLabel, _ = value.Text()
+	}
 	cursor, err := json.Marshal(map[string]any{
 		"submission": map[string]string{
 			"input_file_id":       upstreamFileID,
 			"local_input_file_id": localFileID,
 			"endpoint":            endpoint,
+			"completion_window":   windowLabel,
 		},
 	})
 	if err != nil {
@@ -104,11 +131,11 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 		resource.Metadata = durableMetadata(p.model)
 	}
 	settlement := &batches.Settlement{
-		ResourceID: resourceID, Kind: resourceKind, Adapter: "openai", APIKeyID: authorityID,
+		ResourceID: resourceID, Kind: resourceKind, Adapter: adapter, APIKeyID: authorityID,
 		RouteSlug: x.route.Slug, RouteRevisionID: x.route.RevisionID, ProviderID: p.provider.ID,
 		ProviderRevisionID: p.provider.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID,
 		CredentialID: p.slot.CredentialID, Surface: "openai", SubmissionDigest: digest,
-		LineOperation: lineOperation, Template: template, State: batches.StateSubmitting,
+		LineOperation: lineOperation, Template: template, State: batches.StateSubmitting, ExpectedResults: expected,
 		Cursor: cursor, CloseAfter: closeAfter,
 	}
 	if err = s.Batches.BeginSubmission(ctx, settlement); err != nil {

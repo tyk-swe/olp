@@ -1,0 +1,14 @@
+{
+  "id": "batch-job",
+  "object": "batch",
+  "status": "validating",
+  "endpoint": "/v1/chat/completions",
+  "input_file_id": "file-input",
+  "completion_window": "24h",
+  "created_at": 1792497600,
+  "request_counts": {
+    "total": 1,
+    "completed": 0,
+    "failed": 0
+  }
+}

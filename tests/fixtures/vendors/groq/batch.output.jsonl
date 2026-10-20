@@ -1,0 +1,1 @@
+{"custom_id":"request-1","response":{"status_code":200,"body":{"id":"result-1","object":"chat.completion","model":"provider-model","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}}}

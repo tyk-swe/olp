@@ -52,6 +52,11 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		Resources: resources.NewEncrypted(pool, installation, keys),
 		Resolver:  resources.NewResolver(pool), Credentials: mediaService.Credentials,
 		Keys: keys, Installation: installation, DigestKey: auth,
+		Readers: map[string]batches.Reader{
+			"openai":   &batches.OpenAIReader{Auth: batchAuth, Egress: policy},
+			"together": batches.NewTogetherReader(batchAuth, policy),
+			"mistral":  batches.NewMistralReader(batchAuth, policy),
+		},
 		Auth: batchAuth, Egress: policy,
 		Client: policy.Client(5 * time.Minute), Connections: egress.NewConnectionClientCache(128),
 		Limiter: limiter, Log: log,

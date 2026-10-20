@@ -67,7 +67,8 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		}
 		return surface != "bedrock" && (mode == "unary" || mode == "streaming")
 	case "batch":
-		return surface == "openai" && mode == "unary" && (kind == "openai" || kind == "azure_openai")
+		return surface == "openai" && mode == "unary" && (kind == "openai" || kind == "azure_openai" ||
+			kind == "openai_compatible" && (vendor == "groq" || vendor == "together" || vendor == "mistral"))
 	case "realtime":
 		return surface == "openai" && mode == "realtime" && (kind == "openai" || kind == "azure_openai")
 	case "bedrock_invoke":

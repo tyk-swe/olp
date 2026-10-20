@@ -1,0 +1,8 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "input_files": [
+    "file-input"
+  ],
+  "model": "mistral-small-latest",
+  "timeout_hours": 24
+}

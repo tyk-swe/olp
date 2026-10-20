@@ -29,10 +29,11 @@ import (
 // one built from the OpenAI dialect the vendor documents compatibility with
 // where its documentation is silent, or one observed from the live API.
 type vendorEvidence struct {
-	Vendor           string `json:"vendor"`
-	DocumentationURL string `json:"documentation_url"`
-	ReviewedAt       string `json:"reviewed_at"`
-	Notes            string `json:"notes"`
+	Vendor             string            `json:"vendor"`
+	DocumentationURL   string            `json:"documentation_url"`
+	DocumentationLinks map[string]string `json:"documentation_links,omitempty"`
+	ReviewedAt         string            `json:"reviewed_at"`
+	Notes              string            `json:"notes"`
 	// Endpoints are the documented absolute URLs of every served operation.
 	Endpoints map[string]string `json:"endpoints"`
 	// MediaModels are the models the media package's endpoint check names.
@@ -65,6 +66,18 @@ type vendorEvidence struct {
 		} `json:"envelope"`
 		Class string `json:"class"`
 	} `json:"error"`
+	FilesBatches struct {
+		Basis          string            `json:"basis"`
+		Endpoints      map[string]string `json:"endpoints"`
+		Input          string            `json:"input"`
+		FileResponse   string            `json:"file_response"`
+		CreateRequest  string            `json:"create_request"`
+		CreateResponse string            `json:"create_response"`
+		Job            string            `json:"job"`
+		Output         string            `json:"output"`
+		ErrorFile      string            `json:"error_file"`
+		ErrorBody      string            `json:"error_body"`
+	} `json:"files_batches,omitempty"`
 }
 
 var generationDialects = []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini-generate-content", "bedrock-converse"}
@@ -173,6 +186,40 @@ func TestEveryPresetHasReviewedEvidence(t *testing.T) {
 			checkStream(t, contract, evidence)
 			checkError(t, contract, evidence)
 			checkProfile(t, contract)
+		})
+	}
+}
+
+func TestFilesBatchesVendorEvidence(t *testing.T) {
+	for _, vendor := range []string{"groq", "together", "mistral"} {
+		t.Run(vendor, func(t *testing.T) {
+			evidence := readEvidence(t, vendor)
+			if evidence.FilesBatches.Basis != "documented" && evidence.FilesBatches.Basis != "schema" {
+				t.Fatalf("files/batches evidence basis is %q", evidence.FilesBatches.Basis)
+			}
+			for _, name := range []string{"files", "batches"} {
+				if link := evidence.DocumentationLinks[name]; !strings.HasPrefix(link, "https://") {
+					t.Fatalf("missing %s documentation link", name)
+				}
+			}
+			for _, name := range []string{"files_upload", "files_get", "files_content", "batch_create", "batch_get", "batch_list", "batch_cancel"} {
+				if endpoint := evidence.FilesBatches.Endpoints[name]; !strings.HasPrefix(endpoint, "https://") {
+					t.Fatalf("missing files/batches endpoint %s", name)
+				}
+			}
+			for _, fixture := range []string{
+				evidence.FilesBatches.Input, evidence.FilesBatches.FileResponse,
+				evidence.FilesBatches.CreateRequest, evidence.FilesBatches.CreateResponse,
+				evidence.FilesBatches.Job, evidence.FilesBatches.Output,
+				evidence.FilesBatches.ErrorFile, evidence.FilesBatches.ErrorBody,
+			} {
+				if fixture == "" {
+					t.Fatal("files/batches fixture is missing")
+				}
+				if _, err := fs.ReadFile(fixtures.Files, path.Join("vendors", vendor, fixture)); err != nil {
+					t.Fatalf("files/batches fixture %s: %v", fixture, err)
+				}
+			}
 		})
 	}
 }
@@ -485,7 +532,7 @@ func checkProfile(t *testing.T, contract vendors.Contract) {
 		t.Fatalf("preset profile %s/%s does not compose with the vendor: %v", ref.ID, ref.Revision, err)
 	}
 	for operation, shape := range contract.Requests {
-		if len(shape.Rewrites) > 0 || len(shape.Drop) > 0 {
+		if profile.Strict && (len(shape.Rewrites) > 0 || len(shape.Drop) > 0) {
 			t.Fatalf("a strict profile would bypass the reviewed %s request shape", operation)
 		}
 	}

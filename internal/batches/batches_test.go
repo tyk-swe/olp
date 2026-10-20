@@ -238,6 +238,39 @@ func TestBatchReconciliationMatchDecision(t *testing.T) {
 	}
 }
 
+func TestManagedBatchSnapshotsAndLists(t *testing.T) {
+	together, err := parseManagedSnapshot([]byte(`{"job":{"id":"t-job","status":"IN_PROGRESS","endpoint":"/v1/chat/completions","input_file_id":"t-file","created_at":"2026-10-20T12:00:00Z","output_file_id":"t-out"}}`), "together")
+	if err != nil || together.Status != "in_progress" || together.InputFileID != "t-file" || together.OutputFileID != "t-out" {
+		t.Fatalf("Together snapshot = %+v, %v", together, err)
+	}
+	mistral, err := parseManagedSnapshot([]byte(`{"id":"m-job","status":"SUCCESS","endpoint":"/v1/embeddings","input_files":["m-file"],"created_at":1792497600,"total_requests":"5"}`), "mistral")
+	if err != nil || mistral.Status != "completed" || mistral.InputFileID != "m-file" || mistral.Expected == nil || *mistral.Expected != 5 {
+		t.Fatalf("Mistral snapshot = %+v, %v", mistral, err)
+	}
+	if _, err = parseManagedSnapshot([]byte(`{"id":"m-job","status":"UNKNOWN","endpoint":"/v1/chat/completions"}`), "mistral"); err == nil {
+		t.Fatalf("unknown Mistral status error = %v", err)
+	}
+	items, more, err := managedBatchList([]byte(`[{"id":"t-job","status":"CANCELLED","endpoint":"/v1/chat/completions","input_file_id":"t-file","created_at":"2026-10-20T12:00:00Z"}]`), "together", 0)
+	if err != nil || more || len(items) != 1 || items[0].Status != "cancelled" {
+		t.Fatalf("Together batch list = %+v, %v, %v", items, more, err)
+	}
+	for adapter, statuses := range managedBatchStatuses {
+		for upstreamStatus, projectedStatus := range statuses {
+			job := map[string]any{"id": "status-job", "status": upstreamStatus, "endpoint": "/v1/chat/completions", "created_at": 1792497600}
+			if adapter == "together" {
+				job["input_file_id"] = "input"
+			} else {
+				job["input_files"] = []string{"input"}
+			}
+			body, _ := json.Marshal(job)
+			snapshot, err := parseManagedSnapshot(body, adapter)
+			if err != nil || snapshot.Status != projectedStatus {
+				t.Fatalf("%s %s => %s, %v", adapter, upstreamStatus, snapshot.Status, err)
+			}
+		}
+	}
+}
+
 func TestBatchLineDigestUsesItsPurpose(t *testing.T) {
 	auth := secrets.NewAuthKey(bytes.Repeat([]byte{0x5a}, 32), uuid.NewString())
 	got := CustomIDDigest(auth, "custom-line")
