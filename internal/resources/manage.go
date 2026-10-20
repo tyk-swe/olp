@@ -195,8 +195,8 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 
 func (m *Management) page(ctx context.Context, filters manageFilters, cursor *manageCursor, limit int) ([]manageRecord, *string, error) {
 	query := `WITH entries AS (
-		SELECT r.id, r.kind, r.api_key_id::text AS api_key_id, k.name AS api_key_name, r.route_slug AS route,
-			r.provider_id::text AS provider_id, p.name AS provider_name, r.upstream_id,
+		SELECT r.id, r.kind, r.api_key_id, k.name AS api_key_name, r.route_slug AS route,
+			r.provider_id, p.name AS provider_name, r.upstream_id,
 			COALESCE(r.metadata->>'upstream_model', '') AS upstream_model, r.state,
 			r.expires_at, r.created_at, r.updated_at,
 			bs.resource_id AS settlement_id, bs.state AS settlement_state, bs.expected_results,
@@ -206,8 +206,8 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		JOIN olp.api_keys k ON k.id = r.api_key_id
 		LEFT JOIN olp.batch_settlements bs ON bs.resource_id = r.id
 		UNION ALL
-		SELECT bs.resource_id AS id, bs.kind, bs.api_key_id::text AS api_key_id, k.name AS api_key_name,
-			bs.route_slug AS route, bs.provider_id::text AS provider_id, p.name AS provider_name,
+		SELECT bs.resource_id AS id, bs.kind, bs.api_key_id, k.name AS api_key_name,
+			bs.route_slug AS route, bs.provider_id, p.name AS provider_name,
 			COALESCE(bs.upstream_id, '') AS upstream_id,
 			COALESCE(bs.template->>'upstream_model', '') AS upstream_model, bs.state,
 			bs.close_after AS expires_at, bs.created_at, bs.updated_at,
@@ -219,7 +219,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		JOIN olp.api_keys k ON k.id = bs.api_key_id
 		WHERE r.id IS NULL AND bs.state IN ('submitting', 'submission_unknown')
 	)
-	SELECT e.id, e.kind, e.api_key_id, e.api_key_name, e.route, e.provider_id, e.provider_name,
+	SELECT e.id, e.kind, e.api_key_id::text, e.api_key_name, e.route, e.provider_id::text, e.provider_name,
 		e.upstream_id, e.upstream_model, e.state, e.expires_at, e.created_at, e.updated_at,
 		e.settlement_id, e.settlement_state, e.expected_results, e.settled_results,
 		e.uncertain_results, e.last_error_class, e.close_after, e.closed_at
@@ -230,7 +230,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		query += fmt.Sprintf(clause, len(args))
 	}
 	if !filters.allProjects {
-		push(" AND e.api_key_id::uuid IN (SELECT id FROM olp.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.projects)
+		push(" AND e.api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.projects)
 	}
 	if filters.kind != nil {
 		push(" AND e.kind = $%d", *filters.kind)

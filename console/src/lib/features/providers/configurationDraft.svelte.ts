@@ -155,9 +155,11 @@ export class ConfigurationDraft {
       stringifyNativeJSON(this.root)
     ) as Configuration;
     const profile = this.text(['profile_id']);
-    if (profile !== 'vertex-batch-prediction' && profile !== 'bedrock-batch-inference') {
+    if (
+      profile !== 'vertex-batch-prediction' &&
+      profile !== 'bedrock-batch-inference'
+    )
       configuration.batch_storage = null;
-    }
     return configuration;
   }
 }
