@@ -93,7 +93,7 @@ never route aliases or guessed model inventory. An empty model selects the first
 published model.
 
 Save the returned TOML as `$CODEX_HOME/config.toml`, set `OLP_API_KEY` to the
-developer's authorized OLP inference key, and run Codex 0.160.0. The client needs
+developer's authorized OLP inference key, and run the latest Codex release. The client needs
 neither an OpenAI login nor upstream credentials. The generated provider uses
 Responses and supports WebSockets, retaining Codex's default client retries.
 Regenerate the configuration when changing models so the native model and
@@ -143,7 +143,9 @@ and permanent lapse on changed identity. A trusted local TLS fixture terminates
 the plugin's fixed auth hostname through configured network options; it never
 contacts a live account or issues inference. Unit tests independently assert
 the exact OAuth encoding and request fields. The official npm-distributed
-`codex-cli 0.160.0` also accepts the generated TOML with `codex features list`.
+`codex-cli 0.160.0` originally accepted the generated TOML with `codex features list`.
+Current CI resolves npm `latest` and records exact client versions separately
+from the historical authentication source audit above.
 
 These auth/configuration checks do not prove live subscription inference.
 The integrated transport/client evidence and remaining file/search, platform

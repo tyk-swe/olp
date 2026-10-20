@@ -32,11 +32,11 @@ const (
 	ClientOpenCode   = "opencode"
 )
 
-// Client releases the controlled qualification runs. Codex's is
-// codexauth.ClientVersion.
+// Client channels the controlled qualification resolves on every run. Exact
+// versions belong to CI evidence. Codex's channel is codexauth.ClientVersion.
 const (
-	ClaudeCodeVersion = "2.1.286"
-	OpenCodeVersion   = "1.18.34"
+	ClaudeCodeVersion = "latest"
+	OpenCodeVersion   = "latest"
 )
 
 // Transport is a forwarding transport supported by an endpoint.

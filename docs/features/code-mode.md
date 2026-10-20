@@ -11,7 +11,7 @@ reaching its own subscription unchanged; see
 [Mixing subscriptions](#mixing-subscriptions).
 
 **Qualification status:** management, durable ledger and raw transports are wired
-into OLP. The pinned official Codex CLI, Claude Code and OpenCode have
+into OLP. The official Codex CLI, Claude Code and OpenCode resolve npm latest in CI and have
 controlled-fixture qualification. This is not yet a release claim for a real
 ChatGPT, OpenCode Go or GLM Coding Plan subscription. See the
 [support matrix and release gates](../qualification/code-mode.md) before rollout.
@@ -106,7 +106,7 @@ and retirement, and `If-Match` on updates and publication.
    route before that connection can serve it.
 5. Give the developer an OLP inference key and the supported route configuration.
    Keep grant access/refresh tokens and account authorization in OLP. The generated
-   configuration surface states the exact client version, model list and gaps.
+   configuration surface states the latest client channel, model list and gaps; CI evidence records exact versions.
    In the console's Code mode page, set the public gateway URL before copying it.
 6. Inspect account eligibility, bindings, attempts, refusals and token windows.
    Retire a binding to stop its entire tree. A retired or unavailable conversation
@@ -150,7 +150,7 @@ configuration ever contains an OLP key: each reads it from `OLP_API_KEY`.
 
 ### Codex
 
-The controlled suite runs the unmodified official Codex CLI **0.160.0**. This
+The controlled suite resolves the unmodified official Codex CLI from npm **latest** on each run. This
 example demonstrates its tested provider configuration, not a real-account
 qualification or a substitute for OLP's generated configuration:
 
@@ -183,13 +183,13 @@ automatic retries then fail without dispatch until the cooldown expires.
 handshake, before the native body arrives. It is removed upstream. It cannot
 change an existing account pin or bypass the model check on each generation.
 Generate configuration again with `model=<chosen-native-model>` when changing
-models. Codex 0.160.0's `-m` changes the body but **does not update** this static
+models. The controlled suite checks that `-m` changes the body but **does not update** this static
 header; an override alone can pin an incompatible account. Arbitrary `-m`
 overrides are not qualified for disjoint-model pools.
 
 ### Claude Code
 
-The controlled suite runs Claude Code **2.1.286**. OLP generates a POSIX shell
+The controlled suite resolves Claude Code from npm **latest** on each run. OLP generates a POSIX shell
 file to source before starting `claude`:
 
 ```sh
@@ -225,7 +225,7 @@ claude.ai login features are outside code mode.
 
 ### OpenCode
 
-The controlled suite runs OpenCode **1.18.34**. OLP generates an `opencode.json`
+The controlled suite resolves OpenCode from npm **latest** on each run. OLP generates an `opencode.json`
 that overrides the base URL of OpenCode's own provider for each subscription:
 `opencode-go`, or `zai-coding-plan` for either GLM profile. Each model is listed
 under the provider of the subscription that serves it, and every provider points
@@ -255,7 +255,7 @@ the planning model and its build agent `model`. For a route mixing both plans:
 ```
 
 OpenCode keeps choosing each model's endpoint and SDK from its bundled model
-catalogue, so a route model the pinned release does not know is unavailable.
+catalogue, so a route model the installed release does not know is unavailable.
 `enabled_providers` stops OpenCode loading other providers; `small_model` keeps
 title generation on the route. Never run `opencode auth login` for the plan on a
 developer machine. OpenCode asks the npm registry for its own dependencies at

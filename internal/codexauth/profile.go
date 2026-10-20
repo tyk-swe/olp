@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ClientVersion  = "0.160.0"
+	ClientVersion  = "latest"
 	SourceRevision = "a956835d020762cb2b570053af06f643a11c0ecc"
 	ProfileID      = "codex-subscription"
 	Upstream       = "https://chatgpt.com/backend-api/codex"

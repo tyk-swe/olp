@@ -1,8 +1,8 @@
 # Client qualification
 
-Pinned real clients run headless against a gateway/scripted upstream. Suites
+Real clients run headless against a gateway/scripted upstream. Suites
 assert client outcomes and recorded requests, catching bypasses and wire damage.
-[Client compatibility](../../docs/clients.md) owns pins/configuration/limitations.
+[Client compatibility](../../docs/clients.md) owns version policy, configuration and limitations.
 
 ```sh
 pnpm install --frozen-lockfile        # the npm clients, once
@@ -13,7 +13,15 @@ CLIENTS=m9-go tests/clients/run.sh
 tests/clients/run.sh --list
 ```
 
-`run.sh` needs Go, Node.js 26, jq/curl and installed pins. It builds/starts fixtures,
+Codex and Claude Code use the same npm `latest` binaries as code-mode
+qualification. `run.sh` resolves all three coding clients before isolation when a
+coding suite is selected, or reuses `OLP_CODECLI_ENV` from CI setup/integration.
+Exact versions, package URLs and SHA-512 values are retained in
+`.local/codecli/evidence/`; registry failures never fall back to cached metadata.
+`OLP_CODEX_BINARY`, `OLP_CLAUDE_CODE_BINARY` and their `_VERSION` variables reach
+the suites through an explicit allowlist; they are not inherited by the clients.
+
+`run.sh` needs Go, Node.js 26, jq/curl, tar and installed SDK/framework pins. It builds/starts fixtures,
 runs ordered suites, reports outcomes and cleans up (also on signals).
 Unknown `CLIENTS`, missing prerequisites, empty suites or skipped/todo tests fail;
 only explicit reasoned skip rows are allowed. `make integration` invokes it.
@@ -32,7 +40,7 @@ fixture as part of the integration suite.
 | --- | --- |
 | `run.sh` | The suite table, harness start and teardown, per-suite isolation |
 | `lib/harness.mjs` | The harness contract for JavaScript suites: environment, recording, directives |
-| `lib/cli.mjs` | The coding-agent suites' helpers: the pinned binary, a clean environment, a bounded run that kills the whole process group, also when the suite itself is stopped, the bait and `assertHeldByTheTrap`, which prove the proxy trap holds, and `assertPassedThrough` |
+| `lib/cli.mjs` | The coding-agent suites' helpers: the shared resolved coding binary (or pinned Gemini CLI), a clean environment, a bounded run that kills the whole process group, also when the suite itself is stopped, the bait and `assertHeldByTheTrap`, which prove the proxy trap holds, and `assertPassedThrough` |
 | `lib/leaf-tests.mjs` | The `node:test` reporter that lists the tests that ran, by file, and the tests and groups skipped or left to do, which `node:test` does not otherwise report for a skipped group |
 | `lib/check-ran.sh` | What `run.sh` asks of that list: a test in every test file, and nothing skipped or left to do |
 | `lib/tap.mjs` | A recording proxy between a client and the gateway: what the client sent and what OLP answered |
@@ -41,7 +49,7 @@ fixture as part of the integration suite.
 | `m9sdk/` | Focused pinned checks for legacy completions and Decisions, including the actual gateway and scripted System One target, plus raw `net/http` coverage of native OCR and search with their transformed targets |
 | `m9-endpoints.json` | M9 scope, explicit refusals, frozen SDK references and per-tuple qualification status; pending is not a support claim |
 | `gosdk/` | Go SDK tests with the `integration` build tag, in the Go module of this directory: `harness_test.go` is the harness contract, one file per SDK, and `errors_test.go` holds the typed-error contracts |
-| `package.json`, `go.mod` | Exact pins of every client, as development dependencies |
+| `package.json`, `go.mod` | Exact SDK/framework and Gemini CLI pins, as development dependencies |
 | `../clientfixture/` | The gateway host and, in `scripted/`, the scripted upstream |
 
 The gateway host and the upstream are Go packages of the repository's root

@@ -1,4 +1,4 @@
-// Running a coding agent as a child process: the pinned binary, a clean
+// Running a coding agent as a child process: the resolved binary, a clean
 // environment, a bounded run, and the means to see what it sent. The agents
 // are real releases of Claude Code, Codex and Gemini CLI; nothing here
 // patches or stubs them. Suites run through tests/clients/run.sh, which
@@ -41,15 +41,34 @@ export function clientEnvironment(extra = {}) {
   return Object.fromEntries(Object.entries({ ...env, ...extra }).filter(([, value]) => value !== undefined));
 }
 
-/** The path of a client binary the package installed. */
+const sharedClients = {
+  codex: { env: 'OLP_CODEX', output: (v) => `codex-cli ${v}` },
+  claude: { env: 'OLP_CLAUDE_CODE', output: (v) => `${v} (Claude Code)` }
+};
+
+/** Coding clients use the shared resolver; other clients use workspace pins. */
 export function binary(name) {
-  const file = fileURLToPath(new URL(`../node_modules/.bin/${name}`, import.meta.url));
+  const shared = sharedClients[name];
+  const file = shared ? process.env[`${shared.env}_BINARY`] : fileURLToPath(new URL(`../node_modules/.bin/${name}`, import.meta.url));
+  assert.ok(file, `${name} has no resolved binary; run tests/clients/run.sh`);
   try {
     accessSync(file, constants.X_OK);
   } catch {
+    if (shared) assert.fail(`${name} resolved binary is not executable: ${file}`);
     assert.fail(`${name} is not installed; run 'pnpm install --frozen-lockfile' in the repository`);
   }
   return file;
+}
+
+/** Fail if a suite was given a different release than the job resolved. */
+export async function verifyVersion(name) {
+  const spec = sharedClients[name];
+  const version = process.env[`${spec.env}_VERSION`];
+  assert.ok(version, `${name} has no resolved version; run tests/clients/run.sh`);
+  const result = await run(binary(name), ['--version'], { env: clientEnvironment(), timeoutMs: 30_000 });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), spec.output(version), `${name} must match the resolved release`);
+  return result.stdout.trim();
 }
 
 /** A directory private to one test, holding the given files: the client's working directory. */

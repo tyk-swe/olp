@@ -61,7 +61,7 @@ func TestOfficialCodexOLPKeyNativeModelsToolAndResume(t *testing.T) {
 			if !toolResult {
 				t.Fatal("official CLI did not send the local tool result back")
 			}
-			t.Logf("official Codex %s: %d captured requests; native model %s; stable thread-id; no login", codecli.Version, len(requests), codecli.Model)
+			t.Logf("official Codex %s: %d captured requests; native model %s; stable thread-id; no login", client.Version, len(requests), codecli.Model)
 		})
 	}
 }

@@ -7,33 +7,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
 
-const Version = "0.160.0"
 const Model = "gpt-5.4"
 
 type Client struct {
-	Binary string
-	Home   string
-	Work   string
-	Key    string
+	Binary  string
+	Version string
+	Home    string
+	Work    string
+	Key     string
 }
 
 func New(t testing.TB, baseURL, key string, websocket bool) *Client {
 	t.Helper()
-	binary := os.Getenv("OLP_CODEX_BINARY")
-	if binary == "" {
-		t.Fatal("OLP_CODEX_BINARY is required; run scripts/code-mode-qualification.sh install")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, binary, "--version").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(output)) != "codex-cli "+Version {
-		t.Fatalf("expected official Codex %s: %s (%v)", Version, output, err)
-	}
+	binary, version := resolvedBinary(t, "OLP_CODEX_BINARY", "codex-cli %s")
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +48,7 @@ func New(t testing.TB, baseURL, key string, websocket bool) *Client {
 		}
 		t.Error(err)
 	})
-	c := &Client{Binary: binary, Home: home, Work: t.TempDir(), Key: key}
+	c := &Client{Binary: binary, Version: version, Home: home, Work: t.TempDir(), Key: key}
 	config := fmt.Sprintf(`model = %q
 model_provider = "olp"
 approval_policy = "never"

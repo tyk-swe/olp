@@ -5,12 +5,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { readFile } from 'node:fs/promises';
+import { chmod, readFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, test } from 'node:test';
-import { assertHeld, assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, parseJSONLines, privateHome, run, sentTo, startBait, workspace } from '../../lib/cli.mjs';
+import { assertHeld, assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, parseJSONLines, privateHome, run, sentTo, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
 
 describe('the environment of a client', () => {
   test('is the private home and the proxy trap, never the harness contract', () => {
@@ -39,6 +39,27 @@ describe('the environment of a client', () => {
 
   test('an unknown binary is a failure that says how to install it', () => {
     assert.throws(() => binary('no-such-client'), /no-such-client is not installed/);
+  });
+
+  test('coding clients use shared binaries and resolved versions without leaking metadata', async (t) => {
+    for (const [name, prefix, output] of [['codex', 'OLP_CODEX', 'codex-cli 7.8.9'], ['claude', 'OLP_CLAUDE_CODE', '7.8.9 (Claude Code)']]) {
+      const dir = await workspace('resolved', { client: `#!/bin/sh\nprintf '%s\\n' '${output}'\n` });
+      const file = path.join(dir, 'client');
+      await chmod(file, 0o755);
+      for (const [key, value] of [[`${prefix}_BINARY`, file], [`${prefix}_VERSION`, '7.8.9']]) {
+        const previous = process.env[key];
+        t.after(() => previous === undefined ? delete process.env[key] : process.env[key] = previous);
+        process.env[key] = value;
+      }
+      assert.equal(binary(name), file);
+      assert.equal(await verifyVersion(name), output);
+      assert.equal(clientEnvironment()[`${prefix}_BINARY`], undefined);
+      assert.equal(clientEnvironment()[`${prefix}_VERSION`], undefined);
+      process.env[`${prefix}_VERSION`] = '7.8.10';
+      await assert.rejects(verifyVersion(name), /must match the resolved release/);
+      delete process.env[`${prefix}_BINARY`];
+      assert.throws(() => binary(name), /has no resolved binary/);
+    }
   });
 
   test('a workspace is private to the suite and holds its files', async () => {

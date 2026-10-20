@@ -32,7 +32,7 @@ func TestMixedRouteConfigurationsDrawEachModelFromItsSubscription(t *testing.T) 
 	} else if problem, ok := errors.AsType[*access.Problem](err); !ok || problem.Field != "plan_model" {
 		t.Fatalf("Claude Code GPT plan: %v", err)
 	}
-	if want := `# Claude Code 2.1.286 for OLP code-mode route team-mix (OpenCode Go and GLM Coding Plan).
+	if want := `# Claude Code latest for OLP code-mode route team-mix (OpenCode Go and GLM Coding Plan).
 # Source this file in a POSIX shell, such as bash or zsh, before starting claude.
 # Set OLP_API_KEY to your OLP inference key first. No Anthropic login or vendor
 # key belongs on this machine. To select other models, regenerate this file.
@@ -96,6 +96,11 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 	codex, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: "codex"})
 	if err != nil || codex.Model != "gpt-5.5" || !reflect.DeepEqual(codex.NativeModels, []string{"gpt-5.5"}) || !reflect.DeepEqual(codex.Adapters, []codemode.Adapter{codemode.AdapterCodex}) || codex.PlanModel != nil {
 		t.Fatalf("Codex configuration: %+v %v", codex, err)
+	}
+	for client, version := range map[string]string{"codex": codex.ClientVersion, "claude-code": claude.ClientVersion, "opencode": opencode.ClientVersion} {
+		if version != "latest" {
+			t.Fatalf("%s client_version=%q, want latest", client, version)
+		}
 	}
 	if _, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: "codex", Model: "glm-5.3"}); err == nil {
 		t.Fatal("Codex configured with a model no Codex account serves")

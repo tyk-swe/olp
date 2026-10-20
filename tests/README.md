@@ -25,10 +25,13 @@ behavior. Component tests use jsdom and browser exports.
 
 ### Code-mode qualification
 
-`./scripts/code-mode-qualification.sh cli` installs the exact-integrity official
-Codex 0.160.0, Claude Code 2.1.286 and OpenCode 1.18.34 packages and runs
+`./scripts/code-mode-qualification.sh cli` resolves official Codex, Claude Code
+and OpenCode from npm `latest`, verifies their published SHA-512 values and runs
 controlled Codex HTTP/SSE and WebSocket journeys without a provider account.
-`install codex|claude-code|opencode` prints one client's verified binary. It passes only an OLP fixture key into an isolated client
+`install codex|claude-code|opencode` freshly resolves and prints one client's verified binary.
+`source "$(./scripts/code-mode-qualification.sh resolve)"` resolves all three once
+and exports shared binary paths and exact versions for both harnesses. Run metadata
+and failures are retained under `.local/codecli/evidence/` and uploaded by CI. It passes only an OLP fixture key into an isolated client
 home; local tool execution, continuation/resume and cancellation are exercised
 by the real CLI. The fixtures are not live subscription qualification.
 

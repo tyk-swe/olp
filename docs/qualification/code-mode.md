@@ -4,13 +4,32 @@ Qualification applies to an exact client/account/model/operation/transport
 combination. This corpus provides **controlled-fixture evidence only**.
 It does not declare a live subscription account eligible.
 
-## Pinned official client
+## Latest official clients
 
-The runner downloads official npm Codex **0.160.0**, verifies the platform
-archive's SHA-512 before extraction, and checks `codex-cli 0.160.0`.
-Exact package URLs and hashes are in
-`tests/fixtures/codex-qualified/evidence.json` and enforced by
-`scripts/code-mode-qualification.sh`.
+Every CI job resolves the publisher's npm `latest` channel for `@openai/codex`,
+`@anthropic-ai/claude-code` and `opencode-ai`, then follows that release's matching
+Linux x64 or arm64 optional package. Release metadata is refreshed on every run;
+a registry or integrity failure fails qualification without using an older release.
+The installer verifies each platform archive's published SHA-512 before extraction
+and checks the binary's actual version against the resolved version. Archives are
+cached by client, version and architecture, and reverified before reuse.
+
+Setup checks, integration tests and the broader client suites share one resolution
+through `OLP_CODECLI_ENV`. Standalone qualification runs resolve afresh unless
+that shared environment was explicitly supplied. To resolve once for several
+commands, run `source "$(./scripts/code-mode-qualification.sh resolve)"`.
+`install codex|claude-code|opencode` always resolves afresh and prints one verified
+binary path. The installer needs Node.js, curl and tar.
+
+Exact versions, release and platform package URLs, SHA-512 values and binary
+version output are written to `.local/codecli/evidence/run-*/resolution.json`.
+CI uploads this directory as `coding-client-releases` even after failure;
+failed resolutions retain the metadata obtained and the error. Compatibility
+failures remain blocking. The public configuration's `client_version` string is
+`"latest"`; exact resolved versions belong to run evidence.
+
+The fixture JSON files retain historical observations separately from this
+qualification target. These source links document the original Codex review:
 
 - Source tag: [rust-v0.160.0](https://github.com/openai/codex/releases/tag/rust-v0.160.0).
 - Exact source: [a956835d020762cb2b570053af06f643a11c0ecc](https://github.com/openai/codex/commit/a956835d020762cb2b570053af06f643a11c0ecc).
@@ -39,8 +58,8 @@ web search disabled, and the selected WebSocket setting.
 
 | Surface | Evidence | Qualification |
 | --- | --- | --- |
-| Linux amd64 official CLI 0.160.0 | Unmodified integrity-pinned binary executed | Controlled only |
-| Linux arm64 | Exact official package hash pinned; not executed | Unqualified platform |
+| Linux amd64 official CLI, npm latest | Unmodified binary with registry SHA-512 verification | Controlled only; see CI run evidence |
+| Linux arm64 | Matching latest platform package can be resolved; not executed in this job | Unqualified platform |
 | OLP-key-only/native model configuration | Public generated-config endpoint; CLI has no upstream login | Controlled only |
 | Local tools/results, continuation and cold resume | Official CLI over HTTP/SSE and WebSocket, both direct peers and integrated processes | Controlled only |
 | Child agents | Official collaboration spawn; distinct child identity, parent lineage and one durable root account | Controlled only |
@@ -93,7 +112,7 @@ OLP_TEST_PULL_POLICY=missing ./scripts/integration.sh shell
 ```
 
 `code` provisions disposable PostgreSQL/Valkey, builds OLP, applies migrations,
-installs the pinned official client, runs every `TestCode*` integration test with
+installs the latest official clients, runs every `TestCode*` integration test with
 race detection and runs direct CLI qualification. `shell` runs the broader public
 process, fleet, recovery and SDK suites without browser tests. The ordinary
 unqualified integration runner also runs Chromium. The pull-policy option uses
@@ -121,25 +140,25 @@ authorization golden records its read/project boundary.
 
 The same evidence class applies to the OpenCode Go and GLM Coding Plan
 adapters: controlled fixtures only, with no live coding-plan key. Exact package
-URLs and hashes are in `tests/fixtures/coding-plans/evidence.json`, enforced by
-`scripts/code-mode-qualification.sh` and `tests/codecli/evidence_test.go`.
+URLs and hashes are recorded per run as described above;
+`tests/fixtures/coding-plans/evidence.json` retains historical references.
 
-### Pinned official clients
+### Latest official clients
 
-- **Claude Code 2.1.286**, the npm platform package
-  `@anthropic-ai/claude-code-linux-{x64,arm64}`, checked as `2.1.286 (Claude
-  Code)`. Its gateway contract is the
+- **Claude Code**, the matching `@anthropic-ai/claude-code-linux-{x64,arm64}`
+  package of npm `latest`, checked as `<resolved-version> (Claude Code)`.
+  Its gateway contract is the
   [gateway compatibility guide](https://code.claude.com/docs/en/llm-gateway-protocol):
   `POST /v1/messages?beta=true`, `x-claude-code-session-id`, and agent headers on
   subagent requests.
-- **OpenCode 1.18.34**, the npm platform package `opencode-linux-{x64,arm64}`.
-  The [session headers](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/session/llm/request.ts)
+- **OpenCode**, the matching `opencode-linux-{x64,arm64}` package of `opencode-ai@latest`.
+  The [historically reviewed session headers](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/session/llm/request.ts)
   name `x-opencode-session-id` and, for a child session,
   `x-opencode-parent-session-id`. The x64 package needs AVX2; the `-baseline`
   build is unqualified.
 
-These pins are independent of `tests/clients`, so a bump of the ordinary-route
-client suite cannot change code-mode evidence.
+These clients share the same resolved binaries with `tests/clients` in each job;
+SDK and framework packages retain their existing pinning policy.
 
 The harness in `tests/codecli/agents.go`, with its proxy trap and environment
 allowlist in `tests/codecli/trap.go`, runs each client with the configuration
@@ -189,9 +208,10 @@ OLP_TEST_PULL_POLICY=missing ./scripts/integration.sh code
 `code` runs every `TestCode*` test, including `TestCodeCodingPlan*` and the
 real-client `TestCodeQualificationClaudeCodeJourneys`,
 `TestCodeQualificationOpenCodeJourneys` and
-`TestCodeQualificationMixedSubscriptionJourneys`. `process` mode runs the journeys with
-the other `TestCodeQualification` tests, given exported
-`OLP_CLAUDE_CODE_BINARY` and `OLP_OPENCODE_BINARY`.
+`TestCodeQualificationMixedSubscriptionJourneys`. `process` mode runs the journeys
+with the other `TestCodeQualification` tests, reusing `OLP_CODECLI_ENV` when supplied
+or freshly resolving all three clients otherwise. The environment exports their
+binary paths and matching `_VERSION` values together.
 
 ## Remaining release gates
 
@@ -293,7 +313,7 @@ architectures.
 The client harness creates each private home under the user cache and removes it
 after the test. Codex refuses helper aliases under the system temporary directory;
 those aliases are required by distribution bubblewrap versions without `--argv0`.
-The 0.160.0 bundled catalog lacks `gpt-5.4`, so this client uses fallback metadata
+The originally reviewed 0.160.0 bundled catalog lacked `gpt-5.4`, so it used fallback metadata
 with no freeform `apply_patch` tool. An attempted freeform call was rejected by
 the official tool router. Freeform patch support for this selected model remains
 unqualified; the test does not inject a fabricated model catalog to enable it.
@@ -340,7 +360,7 @@ bound adapter was added. Budgeted native generation continues to refuse with
 With the disposable services and built OLP binary described above:
 
 ```sh
-export OLP_CODEX_BINARY="$PWD/.local/codecli/0.160.0-linux-x64/package/vendor/x86_64-unknown-linux-musl/bin/codex"
+source "$(./scripts/code-mode-qualification.sh resolve)"
 go test -mod=readonly -race -tags=integration,codecli -run '^TestCodeCLIFollowup' -count=1 -timeout=8m -v ./tests/integration
 go test -mod=readonly -race -tags=codecli -count=1 -timeout=5m -v ./tests/codecli
 go test -mod=readonly -race ./internal/routes

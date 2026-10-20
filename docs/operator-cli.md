@@ -161,7 +161,7 @@ and `codex`. The shell reads the key file when sourced. Claude Code's background
 models use the requested route. Codex setup defines `olp_codex`, a wrapper that
 selects the custom Responses provider and disables hosted tools unsupported
 on strict routes; run `olp_codex exec "Hello"`. It does not change sandbox or
-permission settings. See [qualified clients](clients.md) for pinned releases
+permission settings. See [qualified clients](clients.md) for release policy
 and qualification boundaries.
 
 Qualified framework setup supports `openai-agents`, `vercel`, `langchain` and

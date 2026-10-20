@@ -218,7 +218,7 @@ To extend code mode with a subscription family:
    refactor adds no family, schema change, migration, dependency or client-version
    change.
 5. Add focused capability, credential, configuration and gateway regressions.
-   Establish controlled official-client evidence for the pinned release, raw
+   Establish controlled official-client evidence for the latest resolved release, raw
    forwarding, refusals, usage, continuation, subagents, model selection and
    mixed-subscription pinning. Record separate live-vendor evidence for inference,
    entitlement, allowance and cross-vendor history compatibility before making

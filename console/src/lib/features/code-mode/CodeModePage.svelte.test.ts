@@ -280,7 +280,7 @@ function clientConfiguration(
     adapters: ['codex'],
     client: 'codex',
     supported_clients: ['codex'],
-    client_version: '0.160.0',
+    client_version: 'latest',
     model: 'native-model',
     plan_model: null,
     small_model: null,
@@ -571,7 +571,7 @@ it("offers the route's clients and regenerates for a chosen client and models", 
         adapters: ['opencode_go', 'zai_coding'],
         client,
         supported_clients: ['claude-code', 'opencode'],
-        client_version: client === 'opencode' ? '1.18.34' : '2.1.286',
+        client_version: 'latest',
         model: selection.model ?? models[0],
         plan_model: selection.plan_model ?? selection.model ?? models[0],
         small_model: selection.small_model ?? selection.model ?? models[0],
@@ -585,7 +585,7 @@ it("offers the route's clients and regenerates for a chosen client and models", 
   await click('Routes');
   await click('Revisions and client setup');
   const text = () => host.textContent?.replace(/\s+/g, ' ');
-  expect(text()).toContain('Claude Code 2.1.286');
+  expect(text()).toContain('Claude Code latest');
   expect(text()).toContain('Source this file in your shell');
   expect(text()).toContain('Generated configuration · SHELL');
   expect(text()).toContain('Subscriptions');
@@ -632,7 +632,7 @@ it("offers the route's clients and regenerates for a chosen client and models", 
     )!.value
   ).toBe('opencode minimax-m3');
   expect(text()).toContain('Save as opencode.json.');
-  expect(text()).toContain('OpenCode 1.18.34');
+  expect(text()).toContain('OpenCode latest');
   expect(text()).toContain('The plan agent; the build agent uses');
   // Another client has its own native models, so its models start again
   // from their defaults.

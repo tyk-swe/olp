@@ -100,7 +100,10 @@ under `tests/fixtures/tokens`.
 
 Client qualification packages in `tests/clients` are exact development pins,
 subject to pnpm's release-age gate. Update their manifests and
-[client compatibility](docs/clients.md) together; script tests check equality.
+[client compatibility](docs/clients.md) together. Codex, Claude Code and OpenCode
+instead resolve the publisher's npm `latest` channel on each CI job, without a
+release-age delay. Code-mode and broader client suites share those verified
+binaries; exact versions and integrity values are retained in CI evidence.
 
 TypeScript stays on the newest 6.0 patch until both
 [typescript-eslint](https://typescript-eslint.io/users/dependency-versions/) and

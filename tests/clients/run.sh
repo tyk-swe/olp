@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the client qualification suites: real, pinned client releases against an
+# Runs the client qualification suites: real client releases against an
 # OLP gateway whose upstream is the scripted fixture of tests/clientfixture.
 # See tests/clients/README.md for the harness contract.
 #
@@ -78,6 +78,20 @@ if [[ -n ${CLIENTS:-} ]]; then
     done
   done
 fi
+
+# Resolve before isolation, sharing CI's exact binaries when setup supplied them.
+coding_env=()
+for name in "${selected[@]}"; do
+  if [[ $name == codex || $name == claude-code ]]; then
+    if [[ -z ${OLP_CODECLI_ENV:-} ]]; then
+      OLP_CODECLI_ENV=$("$repo_dir/scripts/code-mode-qualification.sh" resolve)
+    fi
+    source "$OLP_CODECLI_ENV"
+    coding_env=("OLP_CODEX_BINARY=$OLP_CODEX_BINARY" "OLP_CODEX_VERSION=$OLP_CODEX_VERSION"
+      "OLP_CLAUDE_CODE_BINARY=$OLP_CLAUDE_CODE_BINARY" "OLP_CLAUDE_CODE_VERSION=$OLP_CLAUDE_CODE_VERSION")
+    break
+  fi
+done
 
 row_field() { # name index
   local row
@@ -262,7 +276,7 @@ run_suite() { # name runner target
     "HTTP_PROXY=http://127.0.0.1:9" "HTTPS_PROXY=http://127.0.0.1:9" "ALL_PROXY=http://127.0.0.1:9"
     "NO_PROXY=127.0.0.1,localhost,::1" "NODE_USE_ENV_PROXY=1"
     "GOFLAGS=-mod=readonly"
-    "${go_env[@]}" "${harness_env[@]}"
+    "${go_env[@]}" "${harness_env[@]}" "${coding_env[@]}"
   )
   case $runner in
     node)

@@ -1,4 +1,4 @@
-// Codex CLI, the pinned release, in `codex exec` against OLP's OpenAI surface
+// Codex CLI, the resolved latest release, in `codex exec` against OLP's OpenAI surface
 // as a custom model provider speaking the Responses API: the configuration
 // docs/clients.md documents. It runs against a transformed route with the stock
 // tool set, and against a strict route with the provider-hosted tools turned
@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { beforeEach, describe, test } from 'node:test';
+import { before, beforeEach, describe, test } from 'node:test';
 import {
   apiKey,
   assertClean,
@@ -24,10 +24,12 @@ import {
   toolResultsPrefix,
   upstreamModels
 } from '../../lib/harness.mjs';
-import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSONLines, run, sentTo, startBait, workspace } from '../../lib/cli.mjs';
+import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSONLines, run, sentTo, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
 import { startTap } from '../../lib/tap.mjs';
 
 const codex = binary('codex');
+
+before(async (t) => t.diagnostic(await verifyVersion('codex')));
 
 beforeEach(resetRecorded);
 

@@ -1,30 +1,33 @@
 # Client compatibility
 
 OLP keeps compatibility with real clients as a tested property. The
-[client qualification suite](../tests/clients/README.md) runs pinned releases of
-coding agents, agent SDKs and frameworks headless against a gateway whose
-upstream is a deterministic scripted fixture. Each suite asserts the client's
-own outcome and what the upstream actually received, so a client that bypasses
-OLP, or a gateway that mangles a request, fails.
+[client qualification suite](../tests/clients/README.md) runs coding agents,
+agent SDKs and frameworks headless against a gateway with a deterministic
+scripted upstream. Each suite checks the client's outcome and what the upstream
+received, so bypasses and damaged requests fail qualification.
 
-This page names the pinned releases, what the suites assert, the configuration
-each client was tested with, and what is not yet qualified. Pinned versions
-advance through the [dependency policy](../CONTRIBUTING.md#dependency-policy),
-and `make integration` runs the suites, so a client release that breaks
-compatibility fails the pull request that proposes it. The
-`tests/clients/package.json` and `go.mod` files are the source of truth; a
-script test keeps the tables below equal to them. To run the suites yourself, see
+Codex, Claude Code and OpenCode resolve the publisher's npm `latest` channel
+anew for every CI job. Code-mode qualification and ordinary-route client suites
+share the resolved binaries. Metadata failures and compatibility regressions fail
+the job. Package URLs, SHA-512 integrity and exact binary versions are retained
+in the `coding-client-releases` artifact, including failed runs. Historical
+fixture references do not select releases. See
+[code-mode qualification](qualification/code-mode.md#latest-official-clients).
+
+SDKs, frameworks and Gemini CLI retain exact pins under the
+[dependency policy](../CONTRIBUTING.md#dependency-policy). Their source of truth
+is `tests/clients/package.json` and `go.mod`. To run the suites, see
 [Running the suites](#running-the-suites).
 
-## Pinned releases
+## Client releases
 
-Client versions are exact. Each is the newest release that cleared pnpm's
-one-day minimum release age when the suite was written.
+The three coding clients use `latest`; other versions below remain exact pins.
 
 | Client | Package | Pinned version | Qualification |
 | --- | --- | --- | --- |
-| Claude Code | `@anthropic-ai/claude-code` | 2.1.286 | `claude -p` on a strict and on a transformed route: streaming, tool-use loops, parallel tool calls, prompt caching, `count_tokens` through `/context`, the paired `anthropic-beta` headers and request fields including the auto-mode `safeguards` field, session resume, API-key and bearer credentials, typed errors |
-| Codex CLI | `@openai/codex` | 0.159.2 | `codex exec` on a transformed route with the stock tools and on a strict route with the hosted tools off: Responses streaming, reasoning items replayed with their encrypted content, shell tool calls (parallel too), `exec resume` history replay, typed errors |
+| Claude Code | `@anthropic-ai/claude-code` | latest | `claude -p` on a strict and on a transformed route: streaming, tool-use loops, parallel tool calls, prompt caching, `count_tokens` through `/context`, the paired `anthropic-beta` headers and request fields including the auto-mode `safeguards` field, session resume, API-key and bearer credentials, typed errors |
+| Codex CLI | `@openai/codex` | latest | `codex exec` on a transformed route with the stock tools and on a strict route with the hosted tools off: Responses streaming, reasoning items replayed with their encrypted content, shell tool calls (parallel too), `exec resume` history replay, typed errors |
+| OpenCode | `opencode-ai` | latest | Code-mode generated configuration and controlled coding-plan journeys; see [qualification](qualification/code-mode.md) |
 | Gemini CLI | `@google/gemini-cli` | 0.62.0 | Headless `-p` on a transformed and on a strict route: `streamGenerateContent`, function calling with the thought signature returned, `countTokens` for an attachment, typed errors |
 | OpenAI Agents SDK | `@openai/agents` | 0.18.0 | Responses with function tools, a handoff between two agents, structured output, streamed runs and reasoning items, through `OpenAIProvider`; the Chat Completions model; tool loops through Anthropic and Gemini routes |
 | Vercel AI SDK | `ai` | 7.0.124 | `generateText` and `streamText` with sequential and parallel tool loops, structured output and images, and `embed` and `embedMany`, through each provider below, which also run against routes of the other vendors |
@@ -80,7 +83,7 @@ and a subscription account behind the route. Codex, Claude Code and OpenCode
 take the configuration its management API generates for routes over Codex,
 OpenCode Go and GLM Coding Plan accounts, which one route may mix; see
 [code mode](features/code-mode.md#client-configuration).
-The pins and evidence for that are in the
+The shared resolution policy and evidence for that are in the
 [code-mode qualification](qualification/code-mode.md), not in the tables below.
 
 #Generate mounted-key setup with [`olp client-env`](operator-cli.md#configure-qualified-clients).

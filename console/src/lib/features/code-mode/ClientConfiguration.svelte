@@ -178,7 +178,7 @@
           <span class="badge">{adapterLabel(adapter)}</span>
         {/each}
       </dd>
-      <dt>Client release</dt>
+      <dt>Client channel</dt>
       <dd>
         {clientLabel(config.client)}
         {config.client_version || 'Unqualified'}

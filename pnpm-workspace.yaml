@@ -9,10 +9,7 @@ allowBuilds:
   esbuild: true
   '@google/genai': false
   protobufjs: false
-  # Client packages of tests/clients. Claude Code's installer only links the
-  # platform binary its optional package ships, without network access. Gemini
-  # CLI's optional native modules are never built; it falls back without them.
-  '@anthropic-ai/claude-code': true
+  # Gemini CLI's optional native modules are never built; it falls back without them.
   '@github/keytar': false
   node-pty: false
   tree-sitter: false

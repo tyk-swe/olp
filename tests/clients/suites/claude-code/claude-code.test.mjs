@@ -1,4 +1,4 @@
-// Claude Code, the pinned release, in print mode against OLP's Anthropic
+// Claude Code, the resolved latest release, in print mode against OLP's Anthropic
 // surface: the configuration docs/clients.md documents. Claude Code treats an
 // ANTHROPIC_BASE_URL gateway as the Anthropic API and sends it the beta headers
 // and request fields it sends api.anthropic.com. The two travel as pairs, and
@@ -11,7 +11,7 @@
 // and a tap between the client and the gateway proves the upstream received
 // what the client sent.
 import assert from 'node:assert/strict';
-import { beforeEach, describe, test } from 'node:test';
+import { before, beforeEach, describe, test } from 'node:test';
 import {
   apiKey,
   assertClean,
@@ -25,13 +25,15 @@ import {
   toolResultsPrefix,
   upstreamModels
 } from '../../lib/harness.mjs';
-import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, run, sentTo, startBait, workspace } from '../../lib/cli.mjs';
+import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, run, sentTo, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
 import { startTap } from '../../lib/tap.mjs';
 
 const claude = binary('claude');
 const semanticHeaders = ['anthropic-beta', 'anthropic-version'];
 const messagesFilter = { dialect: 'anthropic.messages' };
 const countFilter = { dialect: 'anthropic.count_tokens' };
+
+before(async (t) => t.diagnostic(await verifyVersion('claude')));
 
 beforeEach(resetRecorded);
 

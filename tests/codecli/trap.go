@@ -2,6 +2,7 @@ package codecli
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -18,20 +19,33 @@ import (
 // the generated configuration must keep from reaching OLP or the upstream.
 const Decoy = "SEEDED_WORKSTATION_SECRET"
 
-func agent(t testing.TB, variable, version, key string, versionOf func(string) string) *Agent {
+func resolvedBinary(t testing.TB, variable, format string) (string, string) {
 	t.Helper()
 	binary := os.Getenv(variable)
-	if binary == "" {
-		t.Fatalf("%s is required; run scripts/code-mode-qualification.sh install", variable)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, binary, "--version").CombinedOutput()
-	if err != nil || versionOf(strings.TrimSpace(string(output))) != version {
-		t.Fatalf("expected the pinned release %s: %s (%v)", version, output, err)
+	version := os.Getenv(strings.TrimSuffix(variable, "_BINARY") + "_VERSION")
+	if binary == "" || version == "" {
+		t.Fatalf("%s and its resolved version are required; source the environment from scripts/code-mode-qualification.sh resolve", variable)
 	}
 	home := t.TempDir()
-	return &Agent{Binary: binary, Home: home, Work: t.TempDir(), Key: key, Trap: NewTrap(t), env: []string{
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "--version")
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "CODEX_HOME=" + home,
+		"XDG_CONFIG_HOME=" + home, "XDG_DATA_HOME=" + home, "XDG_CACHE_HOME=" + home, "XDG_STATE_HOME=" + home,
+		"DISABLE_AUTOUPDATER=1", "OPENCODE_DISABLE_AUTOUPDATE=1", "NO_COLOR=1"}
+	output, err := cmd.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != fmt.Sprintf(format, version) {
+		t.Fatalf("expected resolved release %s: %s (%v)", version, output, err)
+	}
+	t.Logf("official client: %s", strings.TrimSpace(string(output)))
+	return binary, version
+}
+
+func agent(t testing.TB, variable, key, format string) *Agent {
+	t.Helper()
+	binary, version := resolvedBinary(t, variable, format)
+	home := t.TempDir()
+	return &Agent{Binary: binary, Version: version, Home: home, Work: t.TempDir(), Key: key, Trap: NewTrap(t), env: []string{
 		"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TERM=dumb", "NO_COLOR=1", "OLP_API_KEY=" + key,
 		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
 		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"), "XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),

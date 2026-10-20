@@ -5,24 +5,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/tyk-swe/olp/internal/codeadapter"
 )
 
-// Agent drives a pinned, unmodified coding agent with the configuration OLP
+// Agent drives a resolved, unmodified coding agent with the configuration OLP
 // generated for it, in a private home and working directory. Its environment
 // is an allowlist, so a workstation login, vendor key or the harness's own
 // configuration cannot make an OLP-key-only test pass, and every request it
 // sends outside the loopback gateway meets Trap.
 type Agent struct {
-	Binary string
-	Home   string
-	Work   string
-	Key    string
-	Trap   *Trap
+	Binary  string
+	Version string
+	Home    string
+	Work    string
+	Key     string
+	Trap    *Trap
 	// Registry names the package registry the agent asks for at startup to
 	// install its own dependencies, which the trap refuses; no model traffic
 	// goes there.
@@ -31,12 +29,10 @@ type Agent struct {
 	args     func(configuration string, args []string) (string, []string)
 }
 
-// NewClaudeCode returns the pinned [CC]. Run sources the generated
+// NewClaudeCode returns the resolved Claude Code. Run sources the generated
 // shell configuration, which must replace the decoy Anthropic key.
 func NewClaudeCode(t testing.TB, key string) *Agent {
-	a := agent(t, "OLP_CLAUDE_CODE_BINARY", codeadapter.ClaudeCodeVersion, key, func(out string) string {
-		return strings.TrimSuffix(out, " ([CC])")
-	})
+	a := agent(t, "OLP_CLAUDE_CODE_BINARY", key, "%s (Claude Code)")
 	a.env = append(a.env, "ANTHROPIC_API_KEY="+Decoy)
 	a.args = func(configuration string, args []string) (string, []string) {
 		write(t, filepath.Join(a.Work, "olp.sh"), configuration)
@@ -45,10 +41,10 @@ func NewClaudeCode(t testing.TB, key string) *Agent {
 	return a
 }
 
-// NewOpenCode returns the pinned OpenCode. Run saves the generated
+// NewOpenCode returns the resolved OpenCode. Run saves the generated
 // configuration as the project's opencode.json, unchanged.
 func NewOpenCode(t testing.TB, key string) *Agent {
-	a := agent(t, "OLP_OPENCODE_BINARY", codeadapter.OpenCodeVersion, key, func(out string) string { return out })
+	a := agent(t, "OLP_OPENCODE_BINARY", key, "%s")
 	a.env = append(a.env, "OPENCODE_DISABLE_AUTOUPDATE=1", "OPENCODE_DISABLE_MODELS_FET", "OPENCODE_DISABLE_LSP_DOWNLOAD=1", "OPENCODE_DISABLE_DEFAULT_PLUGINS=1",
 		"OPENCODE_API_KEY="+Decoy, "ZHIPU_API_KEY="+Decoy)
 	a.Registry = "registry.npmjs.org"

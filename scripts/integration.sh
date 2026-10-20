@@ -62,10 +62,10 @@ export OLP_TEST_DATABASE_READ_URL="postgres://olp:olp-local@$replica/olp?sslmode
 "${compose[@]}" up -d --wait --wait-timeout 90 valkey-region
 regional=$("${compose[@]}" port valkey-region 6380)
 export OLP_TEST_VALKEY_REGIONAL_URL="rediss://:olp-local@$regional/0"
-export OLP_CODEX_BINARY OLP_CLAUDE_CODE_BINARY OLP_OPENCODE_BINARY
-OLP_CODEX_BINARY=$(./scripts/code-mode-qualification.sh install)
-OLP_CLAUDE_CODE_BINARY=$(./scripts/code-mode-qualification.sh install claude-code)
-OLP_OPENCODE_BINARY=$(./scripts/code-mode-qualification.sh install opencode)
+if [[ -z ${OLP_CODECLI_ENV:-} ]]; then
+  OLP_CODECLI_ENV=$(./scripts/code-mode-qualification.sh resolve)
+fi
+source "$OLP_CODECLI_ENV"
 if [[ "$mode" == code ]]; then
   go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
   ./scripts/code-mode-qualification.sh cli
@@ -89,7 +89,7 @@ go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestInt
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
 OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
-# Pinned coding agents, agent SDKs and frameworks against a scripted upstream.
+# Latest coding agents and pinned agent SDKs/frameworks against a scripted upstream.
 # It starts its own gateway and uses none of the services above.
 ./tests/clients/run.sh
 if [[ "$mode" == shell ]]; then exit; fi
