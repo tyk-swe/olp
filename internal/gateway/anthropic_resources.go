@@ -1058,8 +1058,10 @@ func anthropicFileReferences(body []byte) ([]string, error) {
 
 func uniqueStrings(values []string) []string {
 	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		if !slices.Contains(out, value) {
+		if _, exists := seen[value]; !exists {
+			seen[value] = struct{}{}
 			out = append(out, value)
 		}
 	}

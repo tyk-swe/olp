@@ -282,6 +282,14 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.
 		return x, access.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
+	switch family {
+	case wire.AnthropicFile, wire.AnthropicBatch, wire.GeminiFile, wire.GeminiBatch, wire.CloudBatch:
+		if !authority.Policy.AllowProviderState {
+			s.release(r.Context())
+			s.stateFail(x, w, providerStateForbidden(), family)
+			return x, authority, true
+		}
+	}
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.stateFail(x, w, e, family)

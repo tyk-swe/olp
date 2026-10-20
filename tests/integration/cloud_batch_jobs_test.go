@@ -175,8 +175,8 @@ func TestCloudBatchCreateRefreshCancelFixturesCompile(t *testing.T) {
 		activate(slug, "transformed")
 		strictSlug := slug + "-strict"
 		activate(strictSlug, "strict")
-		key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "cloud batch", "scopes": []string{"inference"}, "allowed_routes": []string{slug, strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
-		strictKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "strict cloud batch", "scopes": []string{"inference"}, "allowed_routes": []string{strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
+		key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "cloud batch", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug, strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
+		strictKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "strict cloud batch", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 		h.refresh()
 		path := "/native/" + tc.profile + "/batch-jobs"
 		outOfScope := []byte(`{"input_uri":"` + tc.scheme + `://outside/input.jsonl","output_uri_prefix":"` + tc.scheme + `://fixture-bucket/output/job/"}`)

@@ -521,6 +521,10 @@ Entra authentication, token caching, and identity egress.
 | Vertex AI and Bedrock | Transformed-only `/native/{dialect}/batch-jobs` create/list/get/cancel, with operator-configured `batch_storage`. |
 | Fireworks | Declined: result retrieval uses provider-returned signed URLs, which the egress contract forbids. |
 
+Native Anthropic and Gemini resource APIs and cloud batch jobs require the key's
+`allow_provider_state` permission. Existing OpenAI-shaped file/batch permissions
+remain unchanged.
+
 Managed Anthropic, Vertex and Bedrock OpenAI-shaped batches are refused with
 `422 target_capability`; only the listed managed adapters translate through the
 OpenAI file/batch shape.

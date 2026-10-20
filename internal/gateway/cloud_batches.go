@@ -514,7 +514,11 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		return
 	}
 	x.route = &candidate
-	p, route, failure := s.resolveResource(r.Context(), x, authority, res, "batch", retainedRetrieval)
+	use := retainedRetrieval
+	if cancel {
+		use = retainedHousekeeping
+	}
+	p, route, failure := s.resolveResource(r.Context(), x, authority, res, "batch", use)
 	if failure != nil {
 		s.cloudBatchFail(x, w, failure)
 		return
@@ -530,10 +534,12 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, policyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
 		return
 	}
-	if err := x.guardrailSurfaceGate(route); err != nil {
-		s.releaseHold(r.Context(), p.hold)
-		s.cloudBatchFail(x, w, err)
-		return
+	if !cancel {
+		if err := x.guardrailSurfaceGate(route); err != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.cloudBatchFail(x, w, err)
+			return
+		}
 	}
 	ctx, stop := s.stateDeadline(r.Context(), route)
 	defer stop()

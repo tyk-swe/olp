@@ -201,10 +201,10 @@ func TestAnthropicNativeBatchResourcesAndSettlement(t *testing.T) {
 	strictSlug := slug + "-strict"
 	makeRoute(strictSlug, "strict")
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"name": "Anthropic batch", "scopes": []string{"inference"}, "allowed_routes": []string{slug, strictSlug},
+		"name": "Anthropic batch", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug, strictSlug},
 	}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 	otherKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"name": "Foreign file", "scopes": []string{"inference"}, "allowed_routes": []string{slug},
+		"name": "Foreign file", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug},
 	}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 	h.refresh()
 

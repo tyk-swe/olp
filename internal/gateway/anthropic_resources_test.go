@@ -216,6 +216,9 @@ func TestAnthropicBatchProjectionResultsURL(t *testing.T) {
 
 func TestAnthropicBetaRejectionReleasesAdmission(t *testing.T) {
 	h := newHarness(t, Config{MaxInFlight: 1})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowProviderState = true
+	h.rt.keys[fullKey] = authority
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/anthropic/v1/files", nil)
 		req.Header.Set("Authorization", "Bearer "+fullKey)
@@ -259,5 +262,28 @@ func TestAnthropicBatchBindsServingModelSeparatelyFromLogicalModel(t *testing.T)
 	bound, _, _, err := validateAnthropicBatchRequest(body, "route", "logical-model", "claude-serving-model")
 	if err != nil || !strings.Contains(string(bound), `"model":"claude-serving-model"`) {
 		t.Fatalf("Anthropic serving binding was ignored: %s %v", bound, err)
+	}
+}
+
+func TestNewRetainedFamiliesRequireStatePermissionAndReleaseAdmission(t *testing.T) {
+	h := newHarness(t, Config{MaxInFlight: 1})
+	for _, family := range []wire.Format{wire.AnthropicFile, wire.AnthropicBatch, wire.GeminiFile, wire.GeminiBatch, wire.CloudBatch} {
+		req := httptest.NewRequest(http.MethodGet, "/retained", nil)
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		response := httptest.NewRecorder()
+		_, _, done := h.gateway.stateBegin(response, req, family)
+		if !done || response.Code != http.StatusForbidden || h.gateway.admission.Admitted() != 0 {
+			t.Fatalf("retained family %s bypassed permission or leaked admission: status=%d admitted=%d", family, response.Code, h.gateway.admission.Admitted())
+		}
+	}
+	for _, family := range []wire.Format{wire.File, wire.Batch} {
+		req := httptest.NewRequest(http.MethodGet, "/legacy", nil)
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		response := httptest.NewRecorder()
+		_, _, done := h.gateway.stateBegin(response, req, family)
+		if done {
+			t.Fatalf("legacy %s permission changed: %d %s", family, response.Code, response.Body.String())
+		}
+		h.gateway.release(req.Context())
 	}
 }

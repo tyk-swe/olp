@@ -277,10 +277,10 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 	activateRoute(slug, "transformed")
 	activateRoute(strictSlug, "strict")
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"name": "Gemini files", "scopes": []string{"inference"}, "allowed_routes": []string{slug, strictSlug},
+		"name": "Gemini files", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug, strictSlug},
 	}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 	otherKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"name": "Foreign Gemini session", "scopes": []string{"inference"}, "allowed_routes": []string{slug},
+		"name": "Foreign Gemini session", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug},
 	}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 	h.refresh()
 
@@ -434,8 +434,8 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	activate(slug, "transformed")
 	strictSlug := slug + "-strict"
 	activate(strictSlug, "strict")
-	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Gemini batch", "scopes": []string{"inference"}, "allowed_routes": []string{slug, strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
-	foreignKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Foreign Gemini file", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Gemini batch", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug, strictSlug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
+	foreignKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Foreign Gemini file", "scopes": []string{"inference"}, "allow_provider_state": true, "allowed_routes": []string{slug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 	h.refresh()
 
 	fileStatus, file := uploadGeminiManagedOpenAIFile(t, h, key, slug)
@@ -594,6 +594,18 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	}
 	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
 		t.Fatal(err)
+	}
+	deletePending, deletePendingBody, _ = h.gatewayRaw(http.MethodDelete, "/gemini/v1beta/"+nativeOutput, key, nil, nil)
+	if deletePending != http.StatusOK {
+		t.Fatalf("settled native result cleanup: %d %s", deletePending, deletePendingBody)
+	}
+	projectionStatus, projectionBody, _ := h.gatewayRaw(http.MethodGet, "/gemini/v1beta/"+nativeName, key, nil, nil)
+	if projectionStatus != http.StatusOK || !bytes.Contains(projectionBody, []byte(nativeOutput)) {
+		t.Fatalf("batch projection lost a deleted result mapping: %d %s", projectionStatus, projectionBody)
+	}
+	listStatus, listBody, _ := h.gatewayRaw(http.MethodGet, "/gemini/v1beta/batches", key, nil, nil)
+	if listStatus != http.StatusOK {
+		t.Fatalf("native batch list failed after result cleanup: %d %s", listStatus, listBody)
 	}
 	deletePending, deletePendingBody, _ = h.gatewayRaw(http.MethodDelete, "/gemini/v1beta/"+nativeName, key, nil, nil)
 	if deletePending != http.StatusOK {

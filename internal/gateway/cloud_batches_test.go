@@ -58,6 +58,9 @@ func TestCloudBatchStrictTargetRefusal(t *testing.T) {
 
 func TestCloudBatchCreationChecksRouteAuthority(t *testing.T) {
 	h := newHarness(t, Config{})
+	authority := h.rt.keys[otherKey]
+	authority.Policy.AllowProviderState = true
+	h.rt.keys[otherKey] = authority
 	route := h.rt.release.Snapshot.Routes[routeSlug]
 	route.Operations = []string{"batch"}
 	h.rt.release.Snapshot.Routes[routeSlug] = route

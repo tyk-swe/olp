@@ -221,6 +221,12 @@ func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Re
 	return s.getByUpstream(ctx, s.pool, identity, false)
 }
 
+// GetByUpstreamIncludingDeleted preserves an identifier mapping during
+// projection. User access still goes through Get, which rejects tombstones.
+func (s *Store) GetByUpstreamIncludingDeleted(ctx context.Context, identity NativeIdentity) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, true)
+}
+
 func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, includeDeleted bool) (*Resource, error) {
 	if identity.TargetID == "" {
 		return nil, ErrContract

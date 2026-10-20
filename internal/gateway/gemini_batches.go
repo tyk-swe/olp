@@ -732,7 +732,7 @@ func (s *Server) mapUpstreamGeminiFile(ctx context.Context, owner *resources.Res
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = resources.KindGeminiFile, upstreamID
-	if existing, err := s.Resources.GetByUpstream(ctx, identity); err == nil {
+	if existing, err := s.Resources.GetByUpstreamIncludingDeleted(ctx, identity); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -757,7 +757,7 @@ func (s *Server) mapUpstreamGeminiFile(ctx context.Context, owner *resources.Res
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.Resources.GetByUpstream(commitCtx, identity); readErr == nil {
+	if existing, readErr := s.Resources.GetByUpstreamIncludingDeleted(commitCtx, identity); readErr == nil {
 		return existing, nil
 	}
 	return nil, err

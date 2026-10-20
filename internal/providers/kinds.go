@@ -5,6 +5,7 @@ package providers
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/vendors"
@@ -264,18 +265,19 @@ func capabilitiesFor(kind, vendor string) []CapabilityInput {
 // when the kind's Automatic connector cannot serve them.
 func capabilityOptionsForKind(kind string) []CapabilityInput {
 	var profiles []Configuration
-	batchProfile := false
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
-			profiles = append(profiles, Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision})
-			if tupleProfileSupportsBatch(profile.ID) {
-				batchProfile = true
+			cfg := Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}
+			if kind == KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
+				vendor := strings.TrimSuffix(profile.ID, "-files-batches")
+				cfg.Options.VendorID = &vendor
 			}
+			profiles = append(profiles, cfg)
 		}
 	}
 	out := []CapabilityInput{}
 	for _, tuple := range CapabilityOptions {
-		profiled := tuple.Operation == "batch" && batchProfile || slices.ContainsFunc(profiles, func(cfg Configuration) bool {
+		profiled := slices.ContainsFunc(profiles, func(cfg Configuration) bool {
 			return configurationCertifiable(&cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 		})
 		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
@@ -283,14 +285,6 @@ func capabilityOptionsForKind(kind string) []CapabilityInput {
 		}
 	}
 	return out
-}
-
-func tupleProfileSupportsBatch(profile string) bool {
-	switch profile {
-	case "groq-files-batches", "together-files-batches", "mistral-files-batches":
-		return true
-	}
-	return false
 }
 
 // Custom endpoints need a safe live probe; native media instead relies on the

@@ -90,3 +90,19 @@ func TestCommitmentValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestCompatibleBatchOptionsOnlyAdvertiseOpenAISurface(t *testing.T) {
+	found := false
+	for _, tuple := range capabilityOptionsForKind(KindOpenAICompatible) {
+		if tuple.Operation != "batch" {
+			continue
+		}
+		found = true
+		if tuple.Surface != "openai" || tuple.Mode != ModeUnary {
+			t.Fatalf("impossible compatible batch capability advertised: %+v", tuple)
+		}
+	}
+	if !found {
+		t.Fatal("reviewed compatible batch profiles disappeared")
+	}
+}
