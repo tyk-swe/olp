@@ -18,10 +18,14 @@ func (s *Snapshot) CodeConnection(route codemode.Route, providerID string) (Conf
 // codeRevision is what a published revision's frozen connections serve.
 type codeRevision struct {
 	adapters  []codemode.Adapter
-	providers map[string][]string
-	// endpoints are the adapters of providers that serve each model on one
-	// protocol.
-	endpoints map[string]codeadapter.Vendor
+	providers map[codeCapability][]string
+	// vendors restrict models to the protocols their selected account serves.
+	vendors map[string]codeadapter.Vendor
+}
+
+type codeCapability struct {
+	path      string
+	transport codeadapter.Transport
 }
 
 // CodeAdapters returns the adapters of a published route's frozen
@@ -31,24 +35,22 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 }
 
 // CodeProviders returns the providers of a published route's frozen
-// connections whose adapter serves a client path, ordered by ID. The returned
-// slice is shared and must not be modified.
-func (s *Snapshot) CodeProviders(route codemode.Route, path string) []string {
-	return s.codeRevisions[route.RevisionID].providers[path]
+// connections whose adapter serves a client path over transport, ordered by ID.
+// The returned slice is shared and must not be modified.
+func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
+	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
 }
 
 // CodeModelProviders returns the providers of CodeProviders whose adapter
 // serves a model on the path's protocol: an adapter that serves each model on
 // one endpoint serves a path only for that endpoint's models.
-func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protocol codemode.Protocol, model string) []string {
+func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protocol codemode.Protocol, model string, transport codeadapter.Transport) []string {
 	revision := s.codeRevisions[route.RevisionID]
-	providers := revision.providers[path]
-	if len(revision.endpoints) == 0 {
-		return providers
-	}
+	providers := revision.providers[codeCapability{path, transport}]
 	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
-		vendor, ok := revision.endpoints[provider]
-		return ok && !vendor.ServesModel(protocol, model)
+		vendor := revision.vendors[provider]
+		endpoint, ok := vendor.Endpoint(path)
+		return !ok || endpoint.Protocol != protocol || !vendor.ServesModel(protocol, model)
 	})
 }
 
@@ -84,17 +86,18 @@ func (s *Snapshot) compileCodeMode() error {
 			revision.adapters = append(revision.adapters, vendor.Adapter)
 		}
 		if revision.providers == nil {
-			revision.providers = make(map[string][]string, len(vendor.Paths))
+			revision.providers = make(map[codeCapability][]string)
+			revision.vendors = make(map[string]codeadapter.Vendor)
 		}
-		for path := range vendor.Paths {
-			revision.providers[path] = append(revision.providers[path], provider)
-		}
-		if vendor.Endpoint != nil {
-			if revision.endpoints == nil {
-				revision.endpoints = make(map[string]codeadapter.Vendor)
+		for _, endpoint := range vendor.Endpoints() {
+			for _, transport := range []codeadapter.Transport{codeadapter.HTTP, codeadapter.WebSocket} {
+				if endpoint.Supports(transport) {
+					capability := codeCapability{endpoint.ClientPath, transport}
+					revision.providers[capability] = append(revision.providers[capability], provider)
+				}
 			}
-			revision.endpoints[provider] = vendor
 		}
+		revision.vendors[provider] = vendor
 		s.codeRevisions[id] = revision
 	}
 	for _, revision := range s.codeRevisions {

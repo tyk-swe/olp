@@ -135,13 +135,17 @@ func (l *codeTestLedger) wait(t *testing.T) codemode.Usage {
 type codeTestAuthorizer struct{ principal string }
 
 func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configuration, _ codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
-	if dispatch.Adapter != codemode.AdapterCodex {
-		if header := codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol); header == "X-Api-Key" {
-			return codemode.Authorization{Principal: a.principal, Headers: http.Header{header: {"upstream-only"}}}, nil
-		}
-		return codemode.Authorization{Principal: a.principal, Headers: http.Header{"Authorization": {"Bearer upstream-only"}}}, nil
+	vendor, _ := codeadapter.Lookup(dispatch.Adapter)
+	endpoint, _ := vendor.Endpoint(dispatch.ClientPath)
+	value := "upstream-only"
+	if endpoint.CredentialHeader == "Authorization" {
+		value = "Bearer " + value
 	}
-	return codemode.Authorization{Principal: a.principal, Headers: http.Header{"Authorization": {"Bearer upstream-only"}, "Chatgpt-Account-Id": {"upstream-account"}}}, nil
+	headers := http.Header{endpoint.CredentialHeader: {value}}
+	if endpoint.Observation == codeadapter.ObserveCodex {
+		headers.Set("Chatgpt-Account-Id", "upstream-account")
+	}
+	return codemode.Authorization{Principal: a.principal, Headers: headers}, nil
 }
 
 func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.Server) {

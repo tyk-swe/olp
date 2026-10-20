@@ -7,8 +7,10 @@ package codeadapter
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -37,49 +39,216 @@ const (
 	OpenCodeVersion   = "1.18.34"
 )
 
-// Vendor is one adapter's row of the table.
+// Transport is a forwarding transport supported by an endpoint.
+type Transport uint8
+
+const (
+	HTTP Transport = 1 << iota
+	WebSocket
+)
+
+// IdentityPolicy selects the existing wire parser's conversation identity.
+type IdentityPolicy string
+
+const (
+	IdentityCodex  IdentityPolicy = "codex"
+	IdentityClient IdentityPolicy = "client"
+)
+
+// ObservationPolicy selects subscription observations in addition to usage.
+type ObservationPolicy string
+
+const (
+	ObserveUsage ObservationPolicy = "usage"
+	ObserveCodex ObservationPolicy = "codex_allowance"
+)
+
+// Endpoint describes one native operation. Operation names the wire parser's
+// operation, independently of either the client or upstream URL.
+type Endpoint struct {
+	ClientPath, UpstreamPath string
+	Protocol                 codemode.Protocol
+	Operation                string
+	Identity                 IdentityPolicy
+	CredentialHeader         string
+	Observation              ObservationPolicy
+	transports               Transport
+}
+
+func (e Endpoint) Supports(transport Transport) bool {
+	return transport != 0 && e.transports&transport == transport
+}
+
+// Client contains the adapter's settings for a generated client configuration.
+type Client struct {
+	ID, Provider, URLSuffix string
+}
+
+// Vendor is a static adapter declaration. Collections stay private; accessors
+// return copies so callers cannot change the registry.
 type Vendor struct {
-	Adapter  codemode.Adapter
-	Name     string
-	Profiles []string
-	Manifest func() abi.Manifest
-	// KeyGrant marks a pasted, non-expiring key whose principal is
-	// codeplans.Principal, rather than a refreshed OAuth grant.
-	KeyGrant  bool
-	Protocols []codemode.Protocol
-	// Endpoint, when set, is the one protocol the adapter serves a model on;
-	// otherwise each of Protocols serves every model.
-	Endpoint func(model string) codemode.Protocol
-	// Paths maps each client path under a route to the upstream path that
-	// extends the profile's hosting address.
-	Paths map[string]string
-	// Extra names the upstream authorization headers besides the credential.
-	Extra []string
-	// Clients lists the clients with a generated configuration, default first.
-	Clients []string
+	Adapter codemode.Adapter
+	Name    string
+	// KeyGrant marks a pasted, non-expiring key rather than a refreshed grant.
+	KeyGrant               bool
+	profiles               []string
+	manifest               func() abi.Manifest
+	endpoints              []Endpoint
+	modelProtocol          func(model string) codemode.Protocol
+	credential             func([]byte, string, string, Endpoint, time.Time) (codemode.Authorization, error)
+	extra                  []string
+	clients                []Client
+	enrollmentNotes, notes []string
+	clientNotes            map[string][]string
+}
+
+var keyEnrollmentNotes = []string{
+	"Enrollment stores the pasted coding-plan key and identifies it by fingerprint; it qualifies no inference, entitlement or allowance.",
+	"Hard token budgets require a separately proven operation/model bound; this adapter supplies none.",
 }
 
 // vendors is in display order, which orders every list of adapters.
 var vendors = []Vendor{
 	{
-		Adapter: codemode.AdapterCodex, Name: "Codex", Profiles: []string{codexauth.ProfileID}, Manifest: codexauth.Manifest,
-		Protocols: []codemode.Protocol{codemode.ProtocolResponses},
-		Paths:     map[string]string{"responses": "responses", "responses/compact": "responses/compact"},
-		Extra:     []string{"Chatgpt-Account-Id"}, Clients: []string{ClientCodex},
+		Adapter: codemode.AdapterCodex, Name: "Codex", profiles: []string{codexauth.ProfileID}, manifest: codexauth.Manifest,
+		credential: codexCredential,
+		endpoints: []Endpoint{
+			{ClientPath: "responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveCodex, transports: HTTP | WebSocket},
+			{ClientPath: "responses/compact", UpstreamPath: "responses/compact", Protocol: codemode.ProtocolResponses, Operation: "responses/compact", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveCodex, transports: HTTP},
+		},
+		extra: []string{"Chatgpt-Account-Id"}, clients: []Client{{ID: ClientCodex}},
+		enrollmentNotes: []string{
+			"Enrollment validates authorization only; live subscription inference and client workflow qualification must be established separately.",
+			"Hard token budgets require a separately proven operation/model bound; this authentication adapter supplies none.",
+			"ChatGPT cloud tasks, standalone web search, account management and FedRAMP accounts are outside this local code-mode configuration.",
+		},
 	},
 	{
-		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", Profiles: []string{codeplans.OpenCodeGoProfile}, Manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses}, Endpoint: openCodeGoEndpoint,
-		Paths:   map[string]string{"v1/chat/completions": "chat/completions", "v1/messages": "messages", "v1/responses": "responses"},
-		Clients: []string{ClientOpenCode, ClientClaudeCode},
+		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", profiles: []string{codeplans.OpenCodeGoProfile}, manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
+		credential: keyCredential, modelProtocol: openCodeGoEndpoint,
+		endpoints: []Endpoint{
+			{ClientPath: "v1/chat/completions", UpstreamPath: "chat/completions", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+			{ClientPath: "v1/messages", UpstreamPath: "messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "X-Api-Key", Observation: ObserveUsage, transports: HTTP},
+			{ClientPath: "v1/responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+		},
+		clients:         []Client{{ID: ClientOpenCode, Provider: "opencode-go", URLSuffix: "/v1"}, {ID: ClientClaudeCode}},
+		enrollmentNotes: keyEnrollmentNotes,
+		notes:           []string{"OpenCode Go's terms govern its use; OLP forwards this client's requests unmodified but cannot guarantee that OpenCode accepts pooled use."},
+		clientNotes:     map[string][]string{ClientClaudeCode: {"OpenCode Go serves Anthropic Messages only for some models, such as MiniMax and Qwen, so Claude Code is offered only those."}},
 	},
 	{
-		Adapter: codemode.AdapterZAICoding, Name: "GLM Coding Plan", Profiles: []string{codeplans.ZAIProfile, codeplans.BigModelProfile}, Manifest: codeplans.ZAIManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolMessages, codemode.ProtocolChat},
-		Paths:     map[string]string{"v1/messages": "anthropic/v1/messages", "v1/chat/completions": "coding/paas/v4/chat/completions"},
-		Clients:   []string{ClientClaudeCode, ClientOpenCode},
+		Adapter: codemode.AdapterZAICoding, Name: "GLM Coding Plan", profiles: []string{codeplans.ZAIProfile, codeplans.BigModelProfile}, manifest: codeplans.ZAIManifest, KeyGrant: true,
+		credential: keyCredential,
+		endpoints: []Endpoint{
+			{ClientPath: "v1/messages", UpstreamPath: "anthropic/v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+			{ClientPath: "v1/chat/completions", UpstreamPath: "coding/paas/v4/chat/completions", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+		},
+		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "zai-coding-plan", URLSuffix: "/v1"}},
+		enrollmentNotes: keyEnrollmentNotes,
+		notes:           []string{"Z.ai restricts the GLM Coding Plan to its officially supported coding tools; OLP forwards this client's requests unmodified but cannot guarantee that Z.ai accepts pooled use."},
+		clientNotes:     map[string][]string{ClientOpenCode: {"Z.ai's vision, web search and web reader MCP servers are separate endpoints this route does not serve."}},
 	},
 }
+
+// Validate declarations once, before routing can accept inconsistent semantics.
+func init() {
+	if err := validate(vendors); err != nil {
+		panic(err)
+	}
+}
+
+func validate(registry []Vendor) error {
+	paths := map[string]Endpoint{}
+	profiles := map[string]bool{}
+	adapters := map[codemode.Adapter]bool{}
+	for _, v := range registry {
+		if v.Adapter == "" || adapters[v.Adapter] || v.credential == nil || v.manifest == nil || len(v.endpoints) == 0 {
+			return fmt.Errorf("invalid code adapter %q", v.Adapter)
+		}
+		adapters[v.Adapter] = true
+		for _, profile := range v.profiles {
+			if _, ok := v.Address(profile); !ok || profiles[profile] {
+				return fmt.Errorf("invalid code profile %q", profile)
+			}
+			profiles[profile] = true
+		}
+		seen := map[string]bool{}
+		for _, e := range v.endpoints {
+			if seen[e.ClientPath] || !e.valid() {
+				return fmt.Errorf("invalid code endpoint %s/%s", v.Adapter, e.ClientPath)
+			}
+			if prior, ok := paths[e.ClientPath]; ok && (prior.Protocol != e.Protocol || prior.Identity != e.Identity || prior.Operation != e.Operation) {
+				return fmt.Errorf("inconsistent code request semantics for %s", e.ClientPath)
+			}
+			seen[e.ClientPath], paths[e.ClientPath] = true, e
+		}
+	}
+	return nil
+}
+
+func (e Endpoint) valid() bool {
+	if e.ClientPath == "" || e.UpstreamPath == "" || e.CredentialHeader == "" || e.transports == 0 || e.transports & ^(HTTP|WebSocket) != 0 {
+		return false
+	}
+	if e.Identity != IdentityClient && e.Identity != IdentityCodex || e.Identity == IdentityCodex && e.Protocol != codemode.ProtocolResponses {
+		return false
+	}
+	if e.Observation != ObserveUsage && e.Observation != ObserveCodex || e.Observation == ObserveCodex && e.Protocol != codemode.ProtocolResponses {
+		return false
+	}
+	if e.Supports(WebSocket) && (e.Protocol != codemode.ProtocolResponses || e.Operation != "responses") {
+		return false
+	}
+	switch e.Protocol {
+	case codemode.ProtocolResponses:
+		return e.Operation == "responses" || e.Operation == "responses/compact"
+	case codemode.ProtocolMessages:
+		return e.Operation == "messages"
+	case codemode.ProtocolChat:
+		return e.Operation == "chat/completions"
+	}
+	return false
+}
+
+// ForPath returns the shared request semantics of a client path. Account
+// selection must resolve the selected vendor's endpoint for forwarding.
+func ForPath(path string) (Endpoint, bool) {
+	for _, v := range vendors {
+		if e, ok := v.Endpoint(path); ok {
+			return e, true
+		}
+	}
+	return Endpoint{}, false
+}
+
+func (v Vendor) Manifest() abi.Manifest { return v.manifest() }
+func (v Vendor) Endpoints() []Endpoint  { return slices.Clone(v.endpoints) }
+func (v Vendor) Endpoint(path string) (Endpoint, bool) {
+	for _, e := range v.endpoints {
+		if e.ClientPath == path {
+			return e, true
+		}
+	}
+	return Endpoint{}, false
+}
+func (v Vendor) Clients() []string {
+	clients := make([]string, len(v.clients))
+	for i, c := range v.clients {
+		clients[i] = c.ID
+	}
+	return clients
+}
+func (v Vendor) Client(id string) (Client, bool) {
+	for _, c := range v.clients {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return Client{}, false
+}
+func (v Vendor) EnrollmentNotes() []string          { return slices.Clone(v.enrollmentNotes) }
+func (v Vendor) Notes() []string                    { return slices.Clone(v.notes) }
+func (v Vendor) ClientNotes(client string) []string { return slices.Clone(v.clientNotes[client]) }
 
 // clientProtocols lists the protocols each client speaks, in the order it
 // prefers them: OpenCode sends a model through a provider on the first one the
@@ -120,7 +289,7 @@ func ForConnection(kind, authMode, profileID string) (Vendor, bool) {
 		return Vendor{}, false
 	}
 	for _, v := range vendors {
-		if slices.Contains(v.Profiles, profileID) {
+		if slices.Contains(v.profiles, profileID) {
 			return v, true
 		}
 	}
@@ -141,10 +310,12 @@ func rank(adapter codemode.Adapter) int {
 }
 
 // Serves reports whether the adapter's routes serve a protocol.
-func (v Vendor) Serves(p codemode.Protocol) bool { return slices.Contains(v.Protocols, p) }
+func (v Vendor) Serves(p codemode.Protocol) bool {
+	return slices.ContainsFunc(v.endpoints, func(e Endpoint) bool { return e.Protocol == p })
+}
 
 // Supports reports whether OLP generates configuration for a client.
-func (v Vendor) Supports(client string) bool { return slices.Contains(v.Clients, client) }
+func (v Vendor) Supports(client string) bool { _, ok := v.Client(client); return ok }
 
 // Reaches reports whether a client OLP generates configuration for reaches a
 // model through the adapter: the client speaks a protocol the adapter serves
@@ -170,31 +341,24 @@ func (v Vendor) Protocol(client, model string) (codemode.Protocol, bool) {
 
 // ServesModel reports whether the adapter serves a model on a protocol.
 func (v Vendor) ServesModel(p codemode.Protocol, model string) bool {
-	if v.Endpoint != nil {
-		return v.Endpoint(model) == p
+	if !v.Serves(p) {
+		return false
 	}
-	return v.Serves(p)
+	if v.modelProtocol != nil {
+		return v.modelProtocol(model) == p
+	}
+	return true
 }
 
 // Address returns a profile's hosting address, the upstream base its
 // requests' paths extend.
 func (v Vendor) Address(profileID string) (string, bool) {
 	for _, p := range v.Manifest().Profiles {
-		if p.ID == profileID && slices.Contains(v.Profiles, profileID) {
+		if p.ID == profileID && slices.Contains(v.profiles, profileID) {
 			return p.Hosting.Address, true
 		}
 	}
 	return "", false
-}
-
-// CredentialHeader names the header that carries the upstream credential:
-// X-Api-Key for OpenCode Go's Anthropic Messages endpoint, as OpenCode's own
-// Anthropic SDK sends it, and a bearer Authorization otherwise.
-func CredentialHeader(adapter codemode.Adapter, protocol codemode.Protocol) string {
-	if adapter == codemode.AdapterOpenCodeGo && protocol == codemode.ProtocolMessages {
-		return "X-Api-Key"
-	}
-	return "Authorization"
 }
 
 // SQL is a SQL expression for the adapter of the provider configuration
@@ -203,7 +367,7 @@ func SQL(config string) string {
 	var b strings.Builder
 	b.WriteString("CASE WHEN " + config + "->>'kind'='" + kindPlugin + "' AND " + config + "->>'auth_mode'='" + authGrant + "' THEN CASE " + config + "->>'profile_id'")
 	for _, v := range vendors {
-		for _, profile := range v.Profiles {
+		for _, profile := range v.profiles {
 			b.WriteString(" WHEN '" + profile + "' THEN '" + string(v.Adapter) + "'")
 		}
 	}

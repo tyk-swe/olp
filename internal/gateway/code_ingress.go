@@ -3,48 +3,54 @@ package gateway
 import (
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexwire"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-// codeIngress is one client path a code route serves over HTTP. The path
-// names the client family, whose identity and protocol it carries; the
-// account's adapter decides where upstream it goes.
-type codeIngress struct {
-	protocol codemode.Protocol
-	classify func(body []byte, headers http.Header) (codemode.Request, error)
-	observer func() codewire.Observer
+// codeIngressFor resolves shared request semantics from the static registry.
+// Forwarding and observation use the endpoint of the account selected later.
+func codeIngressFor(method, path string) (codeadapter.Endpoint, bool) {
+	if method != http.MethodPost {
+		return codeadapter.Endpoint{}, false
+	}
+	return codeadapter.ForPath(path)
 }
 
-// codeIngressFor returns the ingress of a POST to path, relative to the route,
-// or false when no adapter serves such a path.
-func codeIngressFor(method, path string) (codeIngress, bool) {
-	if method != http.MethodPost {
-		return codeIngress{}, false
+func classifyCode(endpoint codeadapter.Endpoint, body []byte, headers http.Header, websocket bool) (codemode.Request, error) {
+	switch endpoint.Protocol {
+	case codemode.ProtocolResponses:
+		if endpoint.Identity == codeadapter.IdentityCodex {
+			return codexwire.Classify(body, headers, endpoint.Operation, websocket)
+		}
+		return codexwire.ClassifyWith(body, endpoint.Operation, websocket, func(oif.Value) (codemode.Identity, error) { return codewire.ClientIdentity(headers) })
+	case codemode.ProtocolMessages:
+		return codewire.ClassifyMessages(body, headers)
+	case codemode.ProtocolChat:
+		return codewire.ClassifyChat(body, headers)
 	}
-	switch path {
-	case "responses", "responses/compact":
-		return codeIngress{protocol: codemode.ProtocolResponses,
-			classify: func(body []byte, headers http.Header) (codemode.Request, error) {
-				return codexwire.Classify(body, headers, path, false)
-			},
-			observer: func() codewire.Observer { return codeResponses{allowance: true} },
-		}, true
-	case "v1/messages":
-		return codeIngress{protocol: codemode.ProtocolMessages, classify: codewire.ClassifyMessages, observer: func() codewire.Observer { return codewire.NewMessages() }}, true
-	case "v1/chat/completions":
-		return codeIngress{protocol: codemode.ProtocolChat, classify: codewire.ClassifyChat, observer: func() codewire.Observer { return codewire.NewChat() }}, true
-	case "v1/responses":
-		return codeIngress{protocol: codemode.ProtocolResponses,
-			classify: func(body []byte, headers http.Header) (codemode.Request, error) {
-				return codexwire.ClassifyWith(body, "responses", false, func(oif.Value) (codemode.Identity, error) { return codewire.ClientIdentity(headers) })
-			},
-			observer: func() codewire.Observer { return codeResponses{} },
-		}, true
+	return codemode.Request{}, codemode.Refuse(400, "code_operation_unsupported")
+}
+
+func codeConnectionIdentity(endpoint codeadapter.Endpoint, headers http.Header) (codemode.Identity, error) {
+	if endpoint.Identity == codeadapter.IdentityCodex {
+		return codexwire.ConnectionIdentity(headers)
 	}
-	return codeIngress{}, false
+	return codewire.ClientIdentity(headers)
+}
+
+func codeObserver(endpoint codeadapter.Endpoint) codewire.Observer {
+	switch endpoint.Protocol {
+	case codemode.ProtocolResponses:
+		return codeResponses{allowance: endpoint.Observation == codeadapter.ObserveCodex}
+	case codemode.ProtocolMessages:
+		return codewire.NewMessages()
+	case codemode.ProtocolChat:
+		return codewire.NewChat()
+	}
+	return nil // Declarations reject protocols without a native handler.
 }
 
 // codeProbe reports a request Claude Code makes to discover what a gateway
@@ -54,8 +60,8 @@ func codeProbe(method, path string) bool {
 	return method == http.MethodHead && path == "api/hello" || method == http.MethodPost && path == "v1/messages/count_tokens"
 }
 
-// codeResponses observes a Responses API stream. Only Codex reports
-// subscription allowance in it.
+// codeResponses observes a Responses API stream, including subscription
+// allowance only when the selected endpoint declares it.
 type codeResponses struct{ allowance bool }
 
 func (o codeResponses) Event(data []byte) codemode.Observation {

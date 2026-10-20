@@ -2,9 +2,6 @@ package providers
 
 import (
 	"context"
-	"encoding/json"
-	"maps"
-	"net/http"
 	"reflect"
 	"time"
 
@@ -13,8 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -31,7 +26,8 @@ type CodeAuthorizer struct {
 // adapter's own, unaltered, and the request's protocol one its routes serve.
 func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	vendor, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
-	if a == nil || a.Pool == nil || a.Credentials == nil || a.Plugins == nil || !ok || vendor.Adapter != dispatch.Adapter || !vendor.Serves(dispatch.Protocol) || !codeConfiguration(cfg, vendor) {
+	endpoint, served := vendor.Endpoint(dispatch.ClientPath)
+	if a == nil || a.Pool == nil || a.Credentials == nil || a.Plugins == nil || !ok || vendor.Adapter != dispatch.Adapter || !served || endpoint.Protocol != dispatch.Protocol || !codeConfiguration(cfg, vendor) {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	manifest, err := a.Plugins.Manifest(ctx, cfg.ProfileRevision)
@@ -54,12 +50,7 @@ func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configur
 	if err != nil || generation < 1 {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
 	}
-	var auth codemode.Authorization
-	if vendor.KeyGrant {
-		auth, err = authorizeKey(secret, cfg.ProfileID, account.Principal, codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol))
-	} else {
-		auth, err = authorizeCodex(secret, account.Principal, time.Now())
-	}
+	auth, err := vendor.Authorize(secret, cfg.ProfileID, account.Principal, dispatch, time.Now())
 	if err != nil {
 		return codemode.Authorization{}, err
 	}
@@ -77,36 +68,4 @@ func codeConfiguration(c routing.Configuration, vendor codeadapter.Vendor) bool 
 		(c.Endpoint == "" || c.Endpoint == address) && c.CloudRegion == "" && c.CloudProject == "" && c.Deployment == "" && c.APIVersion == "" &&
 		len(o.SemanticHeaders) == 0 && len(o.QuerySettings) == 0 && len(o.OperationDefaults) == 0 && len(o.Bindings) == 0 &&
 		len(o.Models) == 0 && len(o.ParameterDefaults) == 0 && len(o.CredentialHeaders) == 0 && len(o.PluginOptions) == 0
-}
-
-func authorizeCodex(secret []byte, principal string, now time.Time) (codemode.Authorization, error) {
-	var credential connectors.GrantCredential
-	if len(secret) > 64<<10 || json.Unmarshal(secret, &credential) != nil {
-		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
-	}
-	identity, err := codexauth.TokenIdentity(credential.AccessToken, now)
-	if err != nil || identity.Principal() != principal || !maps.Equal(identity.Facts(), credential.Facts) {
-		return codemode.Authorization{}, codemode.Refuse(503, "code_principal_mismatch")
-	}
-	return codemode.Authorization{Principal: identity.Principal(), Headers: http.Header{
-		"Authorization":      {"Bearer " + credential.AccessToken},
-		"Chatgpt-Account-Id": {identity.Account},
-	}}, nil
-}
-
-// authorizeKey places a pasted coding-plan key in header, after confirming it
-// is still the key whose fingerprint the account's principal is.
-func authorizeKey(secret []byte, profileID, principal, header string) (codemode.Authorization, error) {
-	var credential connectors.GrantCredential
-	if len(secret) > 64<<10 || json.Unmarshal(secret, &credential) != nil || len(credential.Facts) != 0 || !codeplans.ValidKey(credential.AccessToken) {
-		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
-	}
-	if codeplans.Principal(profileID, credential.AccessToken) != principal {
-		return codemode.Authorization{}, codemode.Refuse(503, "code_principal_mismatch")
-	}
-	value := credential.AccessToken
-	if header == "Authorization" {
-		value = "Bearer " + value
-	}
-	return codemode.Authorization{Principal: principal, Headers: http.Header{http.CanonicalHeaderKey(header): {value}}}, nil
 }

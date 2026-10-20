@@ -15,9 +15,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/bodylimit"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
-	"github.com/tyk-swe/olp/internal/codexwire"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -58,14 +58,14 @@ func codeClosePeer(peer *websocket.Conn, err error) {
 	}
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority) {
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeadapter.Endpoint) {
 	keyID, digest := authority.ID, authority.EndUserDigest
 	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
 		reject(codemode.Refuse(400, "code_protocol_unsupported"))
 		return
 	}
-	identity, err := codexwire.ConnectionIdentity(r.Header)
+	identity, err := codeConnectionIdentity(ingress, r.Header)
 	if err != nil {
 		reject(err)
 		return
@@ -75,7 +75,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		reject(codemode.Refuse(400, "code_model_invalid"))
 		return
 	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, "responses"))
+	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.ClientPath, codeadapter.WebSocket))
 	if err != nil {
 		reject(err)
 		return
@@ -98,19 +98,33 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		reject(codemode.Refuse(503, "code_connection_unpublished"))
 		return
 	}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, codemode.Dispatch{Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses})
-	if err != nil || auth.Principal == "" || auth.Principal != permit.Pin.Principal {
+	vendor, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
+	endpoint, served := vendor.Endpoint(ingress.ClientPath)
+	if !known || !served || endpoint.Protocol != ingress.Protocol || !endpoint.Supports(codeadapter.WebSocket) {
+		reject(codemode.Refuse(503, "code_configuration_unsupported"))
+		return
+	}
+	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, codemode.Dispatch{Adapter: vendor.Adapter, Protocol: endpoint.Protocol, ClientPath: ingress.ClientPath})
+	if err != nil {
 		reject(codemode.Refuse(503, "code_account_unavailable"))
 		return
 	}
-	connection := &codeAttempt{server: s, permit: permit, config: config, auth: auth, allowance: true}
+	if err := vendor.ValidateAuthorization(endpoint, auth, permit.Pin.Principal); err != nil {
+		// Keep the handshake's existing principal-refusal envelope.
+		if codeRefusal(err).Code == "code_principal_mismatch" {
+			err = codemode.Refuse(503, "code_account_unavailable")
+		}
+		reject(err)
+		return
+	}
+	connection := &codeAttempt{server: s, permit: permit, config: config, auth: auth, endpoint: endpoint, observer: codeObserver(endpoint)}
 	httpClient, err := s.codeClient(r.Context(), release, config, permit.Account.ProviderID)
 	if err != nil {
 		reject(err)
 		return
 	}
 	defer httpClient.CloseIdleConnections()
-	target, err := s.codeEndpoint(config, "responses", r.URL.RawQuery)
+	target, err := s.codeEndpoint(config, endpoint.UpstreamPath, r.URL.RawQuery)
 	if err != nil {
 		reject(err)
 		return
@@ -218,7 +232,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_generation_pending"))
 				return
 			}
-			observation, err := codexwire.Classify(message.body, r.Header, "responses", true)
+			observation, err := classifyCode(ingress, message.body, r.Header, true)
 			if err != nil {
 				refuse(err)
 				return
@@ -227,7 +241,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, "responses", codemode.ProtocolResponses)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, ingress.ClientPath, ingress.Protocol, codeadapter.WebSocket)
 			if err != nil {
 				refuse(err)
 				return
@@ -270,7 +284,11 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				codeClosePeer(client, message.err)
 				return
 			}
-			observation := codexwire.Observe(message.body, false)
+			observer := connection.observer
+			if active != nil {
+				observer = active.observer
+			}
+			observation := observer.Event(message.body)
 			if active != nil {
 				active.observe(observation)
 			} else if observation.Allowance != nil {

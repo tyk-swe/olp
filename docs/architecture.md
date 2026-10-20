@@ -19,6 +19,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Provider-resource mappings and stored-response accounting | `internal/resources/` and `internal/gateway/` |
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
 | Code-mode contracts, conversation pins, hard-token reservations | `internal/codemode/`, `internal/resources/code_mode.go`, `internal/limits/` |
+| Code-mode subscription capabilities and generated client configuration | `internal/codeadapter/`, `internal/codeclient/` |
 | Code-mode public management and immutable publication | Code-mode files in `internal/providers/`, `internal/access/`, `internal/routes/`, `internal/runtime/`, `internal/usage/` |
 | Official coding-client qualification and controlled wire peers | `tests/codecli/`, `tests/fixtures/codex-qualified/`, `tests/fixtures/coding-plans/`, `tests/integration/code_qualification*_test.go`, `tests/integration/code_coding_plans_test.go`, `tests/integration/code_client_journeys_test.go` |
 | Upstream failure classes and upstream acceptance | `internal/upstream/` |
@@ -138,17 +139,79 @@ multipart writers and both duplex tasks before terminal accounting.
 [Code mode](features/code-mode.md) separately forwards `/code/{slug}` native
 models/bodies without ordinary translation, rewriting or retries.
 `Snapshot.CodeRoutes` and `CodeConnection` pin immutable route/provider pairs;
-missing frozen configuration refuses until republish. Path adapters select only
-matching accounts. Pool/key/grant eligibility remains live authority.
+missing frozen configuration refuses until republish. Pool/key/grant eligibility
+remains live authority.
 
-`CodeTransport` forwards raw HTTP/SSE/WebSockets, `CodeAuthorizer` resolves pinned
-account credentials and principal, and `CodeLedger`/`resources.CodeStore` atomically
-admit every generation, bind its conversation tree and reserve proven hard-token
-bounds. Upgrade is not generation admission. Match observed principal before one
-`MarkDispatched`; prepared aborts can refund, dispatched unknown usage cannot.
+`codeadapter` owns a static registry of subscription families and their enrollment
+profiles. Each endpoint declares its client and upstream paths, native operation,
+protocol, conversation identity, transports, credential header and observation
+policy. The registry validates that families sharing a client path agree on request
+semantics. Model/protocol restrictions and credential construction belong to that
+declaration. Collections are private and lookup accessors return copies.
+
+`routing` compiles the frozen connections into provider lists by client path and
+transport, filtering them by the declared model/protocol restrictions at admission.
+`gateway` selects the native request parser from the path's shared semantics;
+parsing stays in `codexwire` and `codewire`. `CodeLedger`/`resources.CodeStore`
+atomically admit each generation and bind its conversation tree to one account per
+subscription family. After selection, the account's endpoint determines upstream
+addressing, response observation and allowance handling. HTTP/SSE and WebSocket
+forwarding preserve raw bytes and upstream refusal envelopes, with no inference
+replay.
+
+The provider `CodeAuthorizer` verifies the frozen plugin, checks the live grant and
+credential eligibility, resolves its secret and delegates credential construction
+to the adapter. Dispatch includes the client path; authorization verifies that
+endpoint's protocol. A shared validator checks the principal, required credential
+header, permitted extra headers and single valid header values before either an
+HTTP dispatch or a WebSocket handshake. Every socket generation is separately
+admitted and authorized; upstream refusal still identifies the credential
+generation sent at the handshake. Upgrade is not generation admission.
+
+`codeclient` owns model/client selection, conversation reachability and renderers
+organized by client. Adapter metadata supplies provider names, URL suffixes and
+vendor qualification notes. `routes` retains publication reads, project
+authorization, account-offer queries and HTTP responses. Generated configuration
+uses the published revision, never its mutable draft.
+
+`resources.CodeStore` retains durable admission, conversation bindings, settlement
+and hard-token reservation SQL; `limits` retains token-budget accounting. Match
+the observed principal before one `MarkDispatched`; prepared aborts can refund,
+dispatched unknown usage cannot.
 Equal settlement is idempotent; conflicting totals refuse and proven overruns record
 `bound_violation`. Rate estimates and upstream allowances are separate ledgers.
 No bodies/tools/auth headers persist. See [qualification](qualification/code-mode.md).
+
+To extend code mode with a subscription family:
+
+1. Declare its profiles, manifest, endpoints, credential constructor, supported
+   clients, model/protocol restrictions and qualification notes in `codeadapter`.
+   Reuse a family for profiles in the same subscription system, as Z.ai and
+   BigModel do. Existing protocols and identity policies need no vendor branch in
+   routing, forwarding or client renderers.
+2. Supply an enrollment plugin and its installation/composition wiring. Reuse
+   `codeplans` for the existing pasted-key enrollment contract; a different login,
+   refresh or principal contract needs its own implementation. Enrollment alone
+   does not prove inference, entitlement or allowance.
+3. Add a native handler only when the vendor needs a new protocol, operation,
+   conversation identity or observation format. Extend `codemode.Protocol`, the
+   wire parser/observer and gateway protocol selection as needed; do not translate
+   or rewrite code-mode traffic. A new client needs a renderer in `codeclient`.
+4. An actual new family must extend `codemode.Adapter` and the public enums in
+   `openapi/management.json`: `CodeAccount.adapter`, `CodeRoute.adapters` and
+   `CodeClientConfiguration.adapters` (currently `codex`, `opencode_go` and
+   `zai_coding`, with a nullable account adapter). Regenerate the management Go
+   and console schema types and update console presentation where needed. This
+   refactor adds no family, schema change, migration, dependency or client-version
+   change.
+5. Add focused capability, credential, configuration and gateway regressions.
+   Establish controlled official-client evidence for the pinned release, raw
+   forwarding, refusals, usage, continuation, subagents, model selection and
+   mixed-subscription pinning. Record separate live-vendor evidence for inference,
+   entitlement, allowance and cross-vendor history compatibility before making
+   those claims. Hard token budgets require a separately proven operation/model
+   bound. Database integration, official-client qualification, browser suites and
+   benchmarks remain CI/human validation under lean-development.
 
 ## Accounting and process lifetime
 

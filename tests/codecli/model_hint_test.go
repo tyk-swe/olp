@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/tests/codecli"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
@@ -22,7 +22,7 @@ func TestOfficialCodexModelSelectionHintAndOverride(t *testing.T) {
 			server := httptest.NewServer(peer)
 			defer server.Close()
 			client := codecli.New(t, server.URL, "controlled-olp-key", true)
-			config, err := routes.CodexClientConfiguration(codemode.Route{Slug: "model-hint", Enabled: true, RevisionID: "published", Models: []string{"gpt-5.4", "gpt-5.3-codex"}}, server.URL, selected)
+			config, err := codeclient.Generate(codemode.Route{Slug: "model-hint", Enabled: true, RevisionID: "published", Models: []string{"gpt-5.4", "gpt-5.3-codex"}}, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"gpt-5.4", "gpt-5.3-codex"}}}, codeclient.Request{GatewayURL: server.URL, Model: selected})
 			if err != nil {
 				t.Fatal(err)
 			}

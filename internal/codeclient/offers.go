@@ -1,0 +1,108 @@
+package codeclient
+
+import (
+	"slices"
+
+	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode"
+)
+
+// Offers is what the accounts a route's requests can reach serve.
+type Offers []Offer
+
+// Offer is the adapter and models of one or more accounts.
+type Offer struct {
+	Adapter codemode.Adapter
+	Models  []string
+}
+
+// adapters returns the adapters whose accounts serve model, in table order.
+func (o Offers) adapters(model string) []codemode.Adapter {
+	var adapters []codemode.Adapter
+	for _, offer := range o {
+		if slices.Contains(offer.Models, model) && !slices.Contains(adapters, offer.Adapter) {
+			adapters = append(adapters, offer.Adapter)
+		}
+	}
+	slices.SortFunc(adapters, codeadapter.Compare)
+	return adapters
+}
+
+// through returns the adapter a client sends each model through: the first
+// choice, in table order, with which one conversation reaches them all.
+func (o Offers) through(client string, models []string) (map[string]codemode.Adapter, bool) {
+	chosen := make([]codemode.Adapter, len(models))
+	var choose func(i int) bool
+	choose = func(i int) bool {
+		if i == len(models) {
+			return o.reaches(client, models, chosen)
+		}
+		for _, adapter := range o.adapters(models[i]) {
+			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, models[i]) {
+				if chosen[i] = adapter; choose(i + 1) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !choose(0) {
+		return nil, false
+	}
+	through := map[string]codemode.Adapter{}
+	for i, model := range models {
+		through[model] = chosen[i]
+	}
+	return through, true
+}
+
+// reaches reports whether one conversation reaches every model, sent through
+// its adapter, whatever order it first uses them in and whichever account
+// admission pins for each. The client sends a model through an adapter on one
+// protocol, and an account serves it when its adapter serves the model on that
+// protocol; another account joins the conversation only with an adapter it
+// does not use yet.
+func (o Offers) reaches(client string, models []string, through []codemode.Adapter) bool {
+	// Accounts with one adapter serving the same of these models are alike.
+	var alike Offers
+	for _, offer := range o {
+		vendor, _ := codeadapter.Lookup(offer.Adapter)
+		kind := Offer{Adapter: offer.Adapter}
+		for i, model := range models {
+			sender, _ := codeadapter.Lookup(through[i])
+			if p, ok := sender.Protocol(client, model); ok && slices.Contains(offer.Models, model) && vendor.ServesModel(p, model) {
+				kind.Models = append(kind.Models, model)
+			}
+		}
+		if len(kind.Models) != 0 && !slices.ContainsFunc(alike, func(a Offer) bool { return a.Adapter == kind.Adapter && slices.Equal(a.Models, kind.Models) }) {
+			alike = append(alike, kind)
+		}
+	}
+	return alike.joins(nil, models)
+}
+
+// joins reports whether a conversation using tree reaches every model.
+func (o Offers) joins(tree Offers, models []string) bool {
+	for i, model := range models {
+		rest := slices.Concat(models[:i], models[i+1:])
+		if slices.ContainsFunc(tree, func(a Offer) bool { return slices.Contains(a.Models, model) }) {
+			if !o.joins(tree, rest) {
+				return false
+			}
+			continue
+		}
+		joined := false
+		for _, offer := range o {
+			if slices.Contains(offer.Models, model) && !slices.ContainsFunc(tree, func(a Offer) bool { return a.Adapter == offer.Adapter }) {
+				if !o.joins(append(slices.Clone(tree), offer), rest) {
+					return false
+				}
+				joined = true
+			}
+		}
+		if !joined {
+			return false
+		}
+	}
+	return true
+}

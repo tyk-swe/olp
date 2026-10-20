@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"slices"
 	"strings"
 	"time"
 
@@ -78,13 +77,13 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
-	if slices.Contains(adapters, codemode.AdapterCodex) && r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		s.codeWebSocket(w, r, release, route, authority)
+	if endpoint, ok := codeadapter.ForPath(path); ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && len(release.Snapshot.CodeProviders(route, path, codeadapter.WebSocket)) != 0 {
+		s.codeWebSocket(w, r, release, route, authority, endpoint)
 		return
 	}
 	ingress, ok := codeIngressFor(r.Method, path)
-	if !ok || len(release.Snapshot.CodeProviders(route, path)) == 0 {
-		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages")) != 0 {
+	if !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 {
+		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
 		}
@@ -108,19 +107,18 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(err)
 		return
 	}
-	observation, err := ingress.classify(body, r.Header)
+	observation, err := classifyCode(ingress, body, r.Header, false)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, path, ingress.protocol)
+	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, path, ingress.Protocol, codeadapter.HTTP)
 	if err != nil {
 		refuse(err)
 		return
 	}
-	attempt.observer = ingress.observer()
 	defer attempt.finish(ctx)
 	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
 	if err != nil {
@@ -128,7 +126,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, attempt.upstream, r.URL.RawQuery)
+	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.UpstreamPath, r.URL.RawQuery)
 	if err != nil {
 		refuse(err)
 		return
@@ -202,21 +200,18 @@ type codeAttempt struct {
 	lease         *limits.Lease
 	providerLease *limits.Lease
 	observer      codewire.Observer
-	// upstream is the path the account's adapter serves the client path at.
-	upstream string
-	// allowance reads subscription allowance from response headers.
-	allowance   bool
-	dispatched  bool
-	usage       codemode.Usage
-	terminal    bool
-	conflicting bool
-	prewarm     bool
+	endpoint      codeadapter.Endpoint
+	dispatched    bool
+	usage         codemode.Usage
+	terminal      bool
+	conflicting   bool
+	prewarm       bool
 }
 
 // prepareCode admits a request on a client path to an account whose adapter
 // serves the path for the request's model, and authorizes it with that
 // adapter's credential.
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, path string, protocol codemode.Protocol) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, path string, protocol codemode.Protocol, transport codeadapter.Transport) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -224,7 +219,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	providers := release.Snapshot.CodeModelProviders(route, path, protocol, observation.Operation.Model)
+	providers := release.Snapshot.CodeModelProviders(route, path, protocol, observation.Operation.Model, transport)
 	if len(providers) == 0 {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
@@ -286,12 +281,12 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	}
 	// The account's frozen connection names the adapter that serves it.
 	vendor, known := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
-	upstream, served := vendor.Paths[path]
-	if !known || !served {
+	endpoint, served := vendor.Endpoint(path)
+	if !known || !served || endpoint.Protocol != protocol || !endpoint.Supports(transport) || !vendor.ServesModel(protocol, observation.Operation.Model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: protocol}
-	a.config, a.upstream, a.allowance = configuration, upstream, vendor.Adapter == codemode.AdapterCodex
+	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: protocol, ClientPath: path}
+	a.config, a.endpoint, a.observer = configuration, endpoint, codeObserver(endpoint)
 	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, configuration, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
@@ -300,20 +295,8 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if a.auth.Principal == "" || a.auth.Principal != permit.Pin.Principal {
-		return nil, codemode.Refuse(409, "code_principal_mismatch")
-	}
-	// The authorization carries exactly the adapter's credential header for
-	// this protocol, and only the other headers the adapter declares.
-	credential := codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol)
-	for name, values := range a.auth.Headers {
-		declared := strings.EqualFold(name, credential) || slices.ContainsFunc(vendor.Extra, func(extra string) bool { return strings.EqualFold(name, extra) })
-		if !declared || len(values) != 1 || strings.ContainsAny(values[0], "\r\n") {
-			return nil, codemode.Refuse(503, "code_authorization_invalid")
-		}
-	}
-	if a.auth.Headers.Get(credential) == "" {
-		return nil, codemode.Refuse(503, "code_authorization_invalid")
+	if err := vendor.ValidateAuthorization(endpoint, a.auth, permit.Pin.Principal); err != nil {
+		return nil, err
 	}
 	ok = true
 	return a, nil
@@ -322,7 +305,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 func (a *codeAttempt) headers(source http.Header) http.Header {
 	h := codewire.ForwardHeaders(source, true)
 	for name, values := range a.auth.Headers {
-		h[name] = append([]string(nil), values...)
+		h[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
 	}
 	if _, present := h["User-Agent"]; !present {
 		h["User-Agent"] = []string{""}
@@ -460,7 +443,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	case status == 401 || status == 403 || status >= 500:
 		a.health(ctx, "unavailable")
 	}
-	if !a.allowance {
+	if a.endpoint.Observation != codeadapter.ObserveCodex {
 		return
 	}
 	if allowance := codexwire.Allowance(headers, a.server.now()); allowance != nil {

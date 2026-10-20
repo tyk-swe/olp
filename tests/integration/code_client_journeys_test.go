@@ -45,7 +45,15 @@ func scriptedVendor(t *testing.T, f *codingPlanFixture, keys map[codemode.Adapte
 		}
 		adapter := vendorHosts[r.Host]
 		key, known := keys[adapter]
-		header, want := codeadapter.CredentialHeader(adapter, protocol), key
+		vendor, _ := codeadapter.Lookup(adapter)
+		header := ""
+		for _, endpoint := range vendor.Endpoints() {
+			if endpoint.Protocol == protocol {
+				header = endpoint.CredentialHeader
+				break
+			}
+		}
+		want := key
 		if header == "Authorization" {
 			want = "Bearer " + key
 		}

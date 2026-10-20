@@ -34,8 +34,9 @@ const (
 
 // Dispatch is what an authorizer needs to know about the request it signs.
 type Dispatch struct {
-	Adapter  Adapter
-	Protocol Protocol
+	ClientPath string
+	Adapter    Adapter
+	Protocol   Protocol
 }
 
 // Authorization contains the qualified adapter's upstream auth headers and the

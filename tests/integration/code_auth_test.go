@@ -153,7 +153,7 @@ func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler
 	return f
 }
 
-var codexDispatch = codemode.Dispatch{Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses}
+var codexDispatch = codemode.Dispatch{ClientPath: "responses", Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses}
 
 func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) {
 	h := newAccessHarness(t)
