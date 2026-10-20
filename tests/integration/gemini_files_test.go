@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,6 +26,7 @@ type geminiFileFixture struct {
 	mu           sync.Mutex
 	uploadBytes  []byte
 	offset       int64
+	expected     int64
 	queries      int
 	sessionCalls int
 	batchCalls   int
@@ -43,15 +45,17 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 	})
 	mux.HandleFunc("POST /upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Goog-Upload-Protocol") != "resumable" || r.Header.Get("X-Goog-Upload-Command") != "start" ||
-			r.Header.Get("X-Goog-Upload-Header-Content-Length") != "10" || r.Header.Get("X-Goog-Upload-Header-Content-Type") != "text/plain" {
+			r.Header.Get("X-Goog-Upload-Header-Content-Length") == "" || r.Header.Get("X-Goog-Upload-Header-Content-Type") == "" {
 			http.Error(w, "invalid upload start", http.StatusBadRequest)
 			return
 		}
+		expected, _ := strconv.ParseInt(r.Header.Get("X-Goog-Upload-Header-Content-Length"), 10, 64)
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		fixture.mu.Lock()
 		fixture.uploadBytes = nil
 		fixture.offset = 0
+		fixture.expected = expected
 		fixture.mu.Unlock()
 		w.Header().Set("X-Goog-Upload-URL", fixture.server.URL+"/upload/session/token")
 		w.WriteHeader(http.StatusOK)
@@ -75,6 +79,14 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		chunk, _ := io.ReadAll(r.Body)
 		fixture.uploadBytes = append(fixture.uploadBytes, chunk...)
 		fixture.offset += int64(len(chunk))
+		if fixture.offset > fixture.expected {
+			http.Error(w, "too many bytes", http.StatusBadRequest)
+			return
+		}
+		if command == "upload, finalize" && fixture.offset != fixture.expected {
+			http.Error(w, "incomplete upload", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(fixture.offset, 10))
 		if command == "upload, finalize" {
 			w.Header().Set("X-Goog-Upload-Status", "final")
@@ -104,6 +116,9 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		}
 		batch, _ := request["batch"].(map[string]any)
 		input, _ := batch["inputConfig"].(map[string]any)
+		if input == nil {
+			input, _ = batch["input_config"].(map[string]any)
+		}
 		fixture.mu.Lock()
 		defer fixture.mu.Unlock()
 		fixture.batchCalls++
@@ -113,7 +128,7 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 			"createTime": time.Now().UTC().Format(time.RFC3339), "inputConfig": input,
 			"batchStats": map[string]any{"requestCount": "2"},
 		}
-		if input["fileName"] != nil {
+		if input["fileName"] != nil || input["file_name"] != nil {
 			metadata["output"] = map[string]any{"responsesFile": "files/gemini-output-file"}
 		} else {
 			metadata["output"] = map[string]any{"inlinedResponses": map[string]any{"inlinedResponses": []any{
@@ -372,7 +387,7 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	foreignKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Foreign Gemini file", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), http.StatusCreated)["secret"].(string)
 	h.refresh()
 
-	fileStatus, file := uploadGeminiIntegrationFile(t, h, key, slug)
+	fileStatus, file := uploadGeminiManagedOpenAIFile(t, h, key, slug)
 	if fileStatus != http.StatusOK {
 		t.Fatalf("Gemini input file upload: %d %v", fileStatus, file)
 	}
@@ -384,9 +399,10 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	fixture.mu.Lock()
 	beforeForeign := fixture.batchCalls
 	fixture.mu.Unlock()
-	fileName := file["name"].(string)
-	fileRequest := []byte(`{"batch":{"inputConfig":{"fileName":` + `"` + fileName + `"` + `}}}`)
-	foreignStatus, _, _ := h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", foreignKey, bytes.NewReader(fileRequest), map[string]string{"Content-Type": "application/json"})
+	fileRequest, _ := json.Marshal(map[string]any{
+		"input_file_id": file["id"], "endpoint": "/v1/chat/completions", "completion_window": "24h",
+	})
+	foreignStatus, _, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", foreignKey, bytes.NewReader(fileRequest), map[string]string{"Content-Type": "application/json"})
 	fixture.mu.Lock()
 	afterForeign := fixture.batchCalls
 	fixture.mu.Unlock()
@@ -432,46 +448,48 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 		charged[batches.ResultErrored].billable != 0 {
 		t.Fatalf("Gemini batch charges=%v", charged)
 	}
-	fileStatus, raw, _ = h.gatewayRaw(http.MethodPost, "/gemini/v1beta/models/"+slug+":batchGenerateContent", key, bytes.NewReader(fileRequest), map[string]string{"Content-Type": "application/json"})
+	fileStatus, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(fileRequest), map[string]string{"Content-Type": "application/json"})
 	if fileStatus != http.StatusOK {
 		t.Fatalf("Gemini file batch create: %d %s", fileStatus, raw)
 	}
 	var fileOperation map[string]any
 	_ = json.Unmarshal(raw, &fileOperation)
-	metadata := fileOperation["metadata"].(map[string]any)
-	output := metadata["output"].(map[string]any)
-	localOutputName := output["responsesFile"].(string)
-	localOutputID := strings.TrimPrefix(localOutputName, "files/")
-	downloadStatus, downloaded, _ := h.gatewayRaw(http.MethodGet, "/gemini/download/v1beta/files/"+localOutputID+":download?alt=media", key, nil, nil)
-	if downloadStatus != http.StatusOK || !bytes.Contains(downloaded, []byte(`"key":"file-success"`)) {
+	outputID := fileOperation["output_file_id"].(string)
+	errorID := fileOperation["error_file_id"].(string)
+	downloadStatus, downloaded, _ := h.gatewayRaw(http.MethodGet, "/v1/files/"+outputID+"/content", key, nil, nil)
+	if downloadStatus != http.StatusOK || !bytes.Contains(downloaded, []byte(`"custom_id":"file-success"`)) {
 		t.Fatalf("Gemini mapped batch output download status=%d body=%s", downloadStatus, downloaded)
+	}
+	errorStatus, errorOutput, _ := h.gatewayRaw(http.MethodGet, "/v1/files/"+errorID+"/content", key, nil, nil)
+	if errorStatus != http.StatusOK || !bytes.Contains(errorOutput, []byte(`"custom_id":"file-error"`)) {
+		t.Fatalf("Gemini mapped batch error download status=%d body=%s", errorStatus, errorOutput)
 	}
 }
 
-func uploadGeminiIntegrationFile(t *testing.T, h *accessHarness, key, route string) (int, map[string]any) {
+func uploadGeminiManagedOpenAIFile(t *testing.T, h *accessHarness, key, route string) (int, map[string]any) {
 	t.Helper()
-	status, _, headers := h.gatewayRaw(http.MethodPost, "/gemini/upload/v1beta/files", key, bytes.NewBufferString(`{"file":{"displayName":"input.txt"}}`), map[string]string{
-		"Content-Type": "application/json", "X-OLP-Route": route, "X-Goog-Upload-Protocol": "resumable",
-		"X-Goog-Upload-Command": "start", "X-Goog-Upload-Header-Content-Length": "10", "X-Goog-Upload-Header-Content-Type": "text/plain",
-	})
-	if status != http.StatusOK {
-		return status, nil
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	if err := form.WriteField("purpose", "batch"); err != nil {
+		t.Fatal(err)
 	}
-	session, err := url.Parse(headers.Get("X-Goog-Upload-URL"))
+	part, err := form.CreateFormFile("file", "batch.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, body, _ := h.gatewayRaw(http.MethodPost, session.Path, key, bytes.NewBufferString("0123456789"), map[string]string{
-		"Content-Length": "10", "X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0",
+	_, _ = io.WriteString(part, `{"custom_id":"file-success","method":"POST","url":"/v1/chat/completions","body":{"model":"`+route+`","messages":[{"role":"user","content":"hi"}]}}`+"\n")
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/files", key, &body, map[string]string{
+		"Content-Type": form.FormDataContentType(), "X-OLP-Route": route,
 	})
 	if status != http.StatusOK {
 		return status, nil
 	}
-	var result struct {
-		File map[string]any `json:"file"`
-	}
-	_ = json.Unmarshal(body, &result)
-	return status, result.File
+	var result map[string]any
+	_ = json.Unmarshal(raw, &result)
+	return status, result
 }
 
 func geminiBatchResourceID(t *testing.T, localID string) uuid.UUID {

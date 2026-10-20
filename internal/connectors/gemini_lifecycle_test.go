@@ -50,6 +50,11 @@ func TestGeminiLifecycleProfilesHaveDistinctAddressAndCapability(t *testing.T) {
 	if !automatic.Supports("batch", "gemini", "unary") || !generation.Supports("batch", "gemini", "unary") {
 		t.Fatal("direct Gemini connector did not gain native batch support")
 	}
+	if !automatic.SupportsFilesBatches() || !generation.SupportsFilesBatches() ||
+		!automatic.Supports("batch", "openai", "unary") || !generation.Supports("batch", "openai", "unary") ||
+		automatic.FilesBatchesAdapter() != "gemini_managed" || generation.FilesBatchesAdapter() != "gemini_managed" {
+		t.Fatal("direct Gemini connector did not gain managed OpenAI files/batches support")
+	}
 	profile, err := generation.profile()
 	if err != nil || !slices.Contains(profile.Operations, "batch") {
 		t.Fatal("Gemini GenerateContent profile does not list batch")

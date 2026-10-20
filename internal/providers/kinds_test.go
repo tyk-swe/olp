@@ -54,6 +54,11 @@ func TestGeminiBatchCapabilityIsDirectGoogleOnly(t *testing.T) {
 	if !certifiable(KindGemini, "google", tuple) || certifiable(KindGemini, "other", tuple) || certifiable(KindVertex, "google", tuple) {
 		t.Fatal("Gemini batch certifiability escaped the direct Google connector")
 	}
+	managed := CapabilityInput{"batch", "openai", ModeUnary}
+	if !slices.Contains(CapabilityOptions, managed) || !certifiable(KindGemini, "google", managed) ||
+		certifiable(KindGemini, "other", managed) || certifiable(KindVertex, "google", managed) {
+		t.Fatal("managed Gemini batch certification escaped the direct Google connector")
+	}
 }
 
 // A commitment is a positive decimal amount on a UTC calendar period; it is

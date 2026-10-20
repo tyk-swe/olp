@@ -322,6 +322,9 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 		if c.Surface == "gemini" {
 			return kind == KindGemini && vendor == "google"
 		}
+		if c.Surface == "openai" && kind == KindGemini {
+			return vendor == "google"
+		}
 		return kind == KindOpenAI || kind == KindAzure || kind == KindOpenAICompatible &&
 			(vendor == "groq" || vendor == "together" || vendor == "mistral")
 	case "realtime":

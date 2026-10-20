@@ -73,6 +73,9 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		if surface == "gemini" {
 			return kind == "gemini" && mode == "unary"
 		}
+		if surface == "openai" && kind == "gemini" {
+			return vendor == "google" && mode == "unary"
+		}
 		return surface == "openai" && mode == "unary" && (kind == "openai" || kind == "azure_openai" ||
 			kind == "openai_compatible" && (vendor == "groq" || vendor == "together" || vendor == "mistral"))
 	case "realtime":

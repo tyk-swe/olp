@@ -37,6 +37,11 @@ func (c Config) SupportsFilesBatches() bool {
 		case "mistral-files-batches":
 			return c.VendorID == "mistral"
 		}
+	case "gemini":
+		if c.ProfileID == "" {
+			return c.ProfileRevision == "" && c.Hosting() == ""
+		}
+		return c.ProfileID == "gemini-generation" && c.ProfileRevision == ProfileRevision && c.Hosting() == "direct-gemini"
 	}
 	return false
 }
@@ -45,6 +50,9 @@ func (c Config) SupportsFilesBatches() bool {
 func (c Config) FilesBatchesAdapter() string {
 	if !c.SupportsFilesBatches() {
 		return ""
+	}
+	if c.Kind == "gemini" {
+		return "gemini_managed"
 	}
 	switch c.ProfileID {
 	case "together-files-batches":

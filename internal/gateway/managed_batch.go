@@ -32,6 +32,14 @@ const (
 var managedBatchStatusProjection = map[string]map[string]string{
 	"together": {"VALIDATING": "validating", "IN_PROGRESS": "in_progress", "COMPLETED": "completed", "FAILED": "failed", "EXPIRED": "expired", "CANCELLING": "cancelling", "CANCELLED": "cancelled"},
 	"mistral":  {"QUEUED": "validating", "RUNNING": "in_progress", "SUCCESS": "completed", "FAILED": "failed", "TIMEOUT_EXCEEDED": "expired", "CANCELLATION_REQUESTED": "cancelling", "CANCELLED": "cancelled"},
+	"gemini_managed": {
+		"BATCH_STATE_PENDING": "validating", "JOB_STATE_PENDING": "validating", "JOB_STATE_QUEUED": "validating",
+		"BATCH_STATE_RUNNING": "in_progress", "JOB_STATE_RUNNING": "in_progress", "JOB_STATE_CANCELLING": "cancelling",
+		"BATCH_STATE_SUCCEEDED": "completed", "JOB_STATE_SUCCEEDED": "completed",
+		"BATCH_STATE_FAILED": "failed", "JOB_STATE_FAILED": "failed",
+		"BATCH_STATE_CANCELLED": "cancelled", "JOB_STATE_CANCELLED": "cancelled",
+		"BATCH_STATE_EXPIRED": "expired", "JOB_STATE_EXPIRED": "expired",
+	},
 }
 
 type batchManifest struct {
@@ -59,9 +67,42 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 	var provider map[string]json.RawMessage
 	_ = json.Unmarshal(response, &provider)
 	fields := map[string]json.RawMessage{}
-	for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
-		if value, ok := provider[name]; ok {
-			fields[name] = value
+	if adapter == "gemini_managed" {
+		var file map[string]json.RawMessage
+		_ = json.Unmarshal(provider["file"], &file)
+		if file == nil {
+			file = provider
+		}
+		var filename string
+		_ = json.Unmarshal(file["displayName"], &filename)
+		if filename == "" {
+			_ = json.Unmarshal(file["name"], &filename)
+			filename = strings.TrimPrefix(filename, "files/")
+		}
+		fields["filename"], _ = json.Marshal(filename)
+		fields["purpose"], _ = json.Marshal("batch")
+		var sizeText string
+		if json.Unmarshal(file["sizeBytes"], &sizeText) == nil {
+			if size, err := strconv.ParseInt(sizeText, 10, 64); err == nil && size >= 0 {
+				fields["bytes"], _ = json.Marshal(size)
+			}
+		} else {
+			var size int64
+			if json.Unmarshal(file["sizeBytes"], &size) == nil && size >= 0 {
+				fields["bytes"], _ = json.Marshal(size)
+			}
+		}
+		var created string
+		if json.Unmarshal(file["createTime"], &created) == nil {
+			if at, err := time.Parse(time.RFC3339Nano, created); err == nil {
+				fields["created_at"], _ = json.Marshal(at.Unix())
+			}
+		}
+	} else {
+		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+			if value, ok := provider[name]; ok {
+				fields[name] = value
+			}
 		}
 	}
 	if purpose, ok := fields["purpose"]; ok && adapter == "together" {
@@ -79,7 +120,7 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 		meta["line_count"], _ = json.Marshal(manifest.LineCount)
 		meta["manifest_digest"], _ = json.Marshal(manifest.ManifestDigest)
 	} else {
-		for _, name := range []string{"endpoint", "line_operation", "line_count", "manifest_digest"} {
+		for _, name := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "gemini_responses_file"} {
 			if value, ok := prior[name]; ok {
 				meta[name] = value
 			}
@@ -178,7 +219,7 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported model.", lineNumber), &param))
 		}
 		request, err := protocols.Parse(family, line.Body, route.Slug)
-		if err != nil {
+		if err != nil || request.Stream {
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
 		}
@@ -187,12 +228,17 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
 		}
-		encoded, _, err := protocols.Encode(request, p.provider.Kind, p.provider.VendorID, p.model, defaults)
+		var encoded []byte
+		if adapter == "gemini_managed" {
+			encoded, _, err = protocols.EncodeTarget(request, wire.Gemini, p.provider.Kind, p.provider.VendorID, p.model, defaults)
+		} else {
+			encoded, _, err = protocols.Encode(request, p.provider.Kind, p.provider.VendorID, p.model, defaults)
+		}
 		if err != nil {
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
 		}
-		if adapter == "mistral" {
+		if adapter == "mistral" || adapter == "gemini_managed" {
 			var fields map[string]json.RawMessage
 			if json.Unmarshal(encoded, &fields) != nil {
 				return fail(errors.New("translated batch line is malformed"))
@@ -205,7 +251,11 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			return fail(errors.New("batch digest key is unavailable"))
 		}
 		_, _ = manifestHash.Write(customIDDigest)
-		result, _ := json.Marshal(map[string]any{"custom_id": line.CustomID, "body": json.RawMessage(encoded)})
+		resultValue := map[string]any{"custom_id": line.CustomID, "body": json.RawMessage(encoded)}
+		if adapter == "gemini_managed" {
+			resultValue = map[string]any{"key": line.CustomID, "request": json.RawMessage(encoded)}
+		}
+		result, _ := json.Marshal(resultValue)
 		if _, err = writer.Write(append(result, '\n')); err != nil {
 			return fail(err)
 		}
@@ -235,7 +285,7 @@ func managedCustomIDLimit(adapter string) int {
 func managedBatchEndpoint(adapter, endpoint string) (string, wire.Format, bool) {
 	switch endpoint {
 	case "/v1/chat/completions":
-		return "generation", wire.Chat, adapter == "together" || adapter == "mistral"
+		return "generation", wire.Chat, adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
 	case "/v1/embeddings":
 		return "embeddings", wire.Embeddings, adapter == "mistral"
 	default:
@@ -263,6 +313,22 @@ func endpointOperation(endpoint string) string {
 func managedBatchRequestBody(source oif.Document, adapter, upstreamFileID, model string, manifest batchManifest) ([]byte, *int64, *Error) {
 	endpointValue, _ := source.Root().Lookup("endpoint")
 	endpoint, _ := endpointValue.Text()
+	if adapter == "gemini_managed" {
+		windowValue, present := source.Root().Lookup("completion_window")
+		window, valid := windowValue.Text()
+		var metadataValues map[string]string
+		if raw, ok := source.Fields()["metadata"]; ok && (json.Unmarshal(raw, &metadataValues) != nil || metadataValues == nil) {
+			param := "metadata"
+			return nil, nil, invalidRequest("invalid_request", "metadata must be a string map.", &param)
+		}
+		if !present || !valid || window != "24h" || endpoint != manifest.Endpoint ||
+			manifest.LineOperation != "generation" || manifest.LineCount < 1 || upstreamFileID == "" {
+			return nil, nil, invalidRequest("invalid_request", "Gemini managed batches require a matching generation manifest and completion_window=24h.", nil)
+		}
+		body, _ := geminiManagedBatchBody("olp-pending", upstreamFileID)
+		expected := int64(manifest.LineCount)
+		return body, &expected, nil
+	}
 	windowValue, present := source.Root().Lookup("completion_window")
 	window := "24h"
 	if present {
@@ -306,6 +372,13 @@ func managedBatchRequestBody(source oif.Document, adapter, upstreamFileID, model
 	body, _ := json.Marshal(bodyFields)
 	count := int64(manifest.LineCount)
 	return body, &count, nil
+}
+
+func geminiManagedBatchBody(displayName, upstreamFileName string) ([]byte, error) {
+	return json.Marshal(map[string]any{"batch": map[string]any{
+		"display_name": displayName,
+		"input_config": map[string]string{"file_name": upstreamFileName},
+	}})
 }
 
 func projectManagedBatch(body []byte, adapter, requestedWindow string) ([]byte, string, error) {
@@ -442,7 +515,11 @@ func managedBatchPath(resource *resources.Resource, cancel bool) string {
 	}
 	path := base + url.PathEscape(resource.UpstreamID)
 	if cancel {
-		path += "/cancel"
+		if adapter == "gemini_managed" {
+			path += ":cancel"
+		} else {
+			path += "/cancel"
+		}
 	}
 	return path
 }
