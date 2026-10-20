@@ -81,6 +81,15 @@ type vendorEvidence struct {
 		ErrorFile      string            `json:"error_file"`
 		ErrorBody      string            `json:"error_body"`
 	} `json:"files_batches,omitempty"`
+	GeminiFiles struct {
+		Basis              string            `json:"basis"`
+		DocumentationLinks map[string]string `json:"documentation_links"`
+		Endpoints          map[string]string `json:"endpoints"`
+		StartResponse      string            `json:"start_response"`
+		FinalizeResponse   string            `json:"finalize_response"`
+		ListResponse       string            `json:"list_response"`
+		ErrorBody          string            `json:"error_body"`
+	} `json:"gemini_files,omitempty"`
 }
 
 var generationDialects = []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini-generate-content", "bedrock-converse"}
@@ -177,7 +186,7 @@ func TestEveryPresetHasReviewedEvidence(t *testing.T) {
 		}
 	}
 	for _, vendor := range documented {
-		if !slices.Contains(presets, vendor) && vendor != "anthropic" {
+		if !slices.Contains(presets, vendor) && vendor != "anthropic" && vendor != "gemini" {
 			t.Fatalf("vendor evidence %v has unexpected non-preset vendor %s", documented, vendor)
 		}
 	}
@@ -197,6 +206,34 @@ func TestEveryPresetHasReviewedEvidence(t *testing.T) {
 			checkError(t, contract, evidence)
 			checkProfile(t, contract)
 		})
+	}
+}
+
+func TestGeminiFilesVendorEvidence(t *testing.T) {
+	evidence := readEvidence(t, "gemini")
+	if evidence.Vendor != "google" || evidence.GeminiFiles.Basis != "documented" {
+		t.Fatalf("Gemini Files evidence vendor/basis is %s/%s", evidence.Vendor, evidence.GeminiFiles.Basis)
+	}
+	for _, key := range []string{"files", "resumable_upload"} {
+		if !strings.HasPrefix(evidence.GeminiFiles.DocumentationLinks[key], "https://") {
+			t.Fatalf("Gemini Files evidence lacks %s documentation", key)
+		}
+	}
+	for _, key := range []string{"upload_start", "upload_session", "files_list", "files_get", "files_delete", "files_download"} {
+		if !strings.HasPrefix(evidence.GeminiFiles.Endpoints[key], "https://") {
+			t.Fatalf("Gemini Files evidence lacks endpoint %s", key)
+		}
+	}
+	for _, name := range []string{
+		evidence.GeminiFiles.StartResponse, evidence.GeminiFiles.FinalizeResponse,
+		evidence.GeminiFiles.ListResponse, evidence.GeminiFiles.ErrorBody,
+	} {
+		if name == "" {
+			t.Fatal("Gemini Files fixture is missing")
+		}
+		if _, err := fs.ReadFile(fixtures.Files, path.Join("vendors", "gemini", name)); err != nil {
+			t.Fatalf("Gemini Files fixture %s: %v", name, err)
+		}
 	}
 }
 

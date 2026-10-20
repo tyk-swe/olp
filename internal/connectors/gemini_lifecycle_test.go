@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -43,6 +44,22 @@ func TestGeminiLifecycleProfilesHaveDistinctAddressAndCapability(t *testing.T) {
 	}
 	if _, err := interactions.TargetFamily(wire.Gemini); err == nil {
 		t.Fatal("Interactions profile silently fell through GenerateContent")
+	}
+	automatic := Config{Kind: "gemini", AuthMode: "api_key", Endpoint: "https://provider.example/v1beta"}
+	generation := Config{Kind: "gemini", AuthMode: "api_key", Endpoint: "https://provider.example/v1beta", ProfileID: "gemini-generation", ProfileRevision: ProfileRevision}
+	if !automatic.Supports("batch", "gemini", "unary") || !generation.Supports("batch", "gemini", "unary") {
+		t.Fatal("direct Gemini connector did not gain native batch support")
+	}
+	profile, err := generation.profile()
+	if err != nil || !slices.Contains(profile.Operations, "batch") {
+		t.Fatal("Gemini GenerateContent profile does not list batch")
+	}
+	if interactions.Supports("batch", "gemini", "unary") || live.Supports("batch", "gemini", "unary") {
+		t.Fatal("Gemini lifecycle profiles gained file/batch support")
+	}
+	vertex := Config{Kind: "vertex_ai", AuthMode: "adc", Endpoint: "https://us-central1-aiplatform.googleapis.com/v1", ProfileID: "vertex-gemini", ProfileRevision: ProfileRevision}
+	if vertex.Supports("batch", "gemini", "unary") {
+		t.Fatal("Vertex Gemini gained direct Files API support")
 	}
 	withDefaults := interactions
 	withDefaults.OperationDefaults = map[string]DefaultSet{"generation": {Dialect: "gemini-interactions", NativeOptions: map[string]json.RawMessage{"tools": json.RawMessage(`[]`)}}}

@@ -43,6 +43,19 @@ func TestKindCapabilityOptionsIncludeDecisions(t *testing.T) {
 	}
 }
 
+func TestGeminiBatchCapabilityIsDirectGoogleOnly(t *testing.T) {
+	tuple := CapabilityInput{"batch", "gemini", ModeUnary}
+	if !slices.Contains(capabilityOptionsForKind(KindGemini), tuple) {
+		t.Fatal("Gemini batch tuple is not published")
+	}
+	if slices.Contains(capabilityOptionsForKind(KindVertex), tuple) {
+		t.Fatal("Vertex received direct Gemini batch tuple")
+	}
+	if !certifiable(KindGemini, "google", tuple) || certifiable(KindGemini, "other", tuple) || certifiable(KindVertex, "google", tuple) {
+		t.Fatal("Gemini batch certifiability escaped the direct Google connector")
+	}
+}
+
 // A commitment is a positive decimal amount on a UTC calendar period; it is
 // part of the stored provider configuration, so it flows through revisions and
 // configuration export unchanged.

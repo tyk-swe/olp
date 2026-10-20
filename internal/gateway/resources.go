@@ -35,6 +35,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	}
 	if s.Media != nil {
 		s.registerAnthropicState(mux)
+		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
@@ -241,7 +242,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	accept := "application/json"
-	if x.anthropicFileBinary {
+	if x.anthropicFileBinary || x.geminiFileBinary {
 		accept = "application/binary"
 	}
 	req.Header.Set("Accept", accept)

@@ -126,6 +126,9 @@ func init() {
 			p.Documentation = "https://ai.google.dev/api/generate-content"
 			p.QuerySettings = []string{"$xgafv"}
 			p.Operations = []string{"generation", "token_count", "embeddings"}
+			if p.Kind == "gemini" && p.Hosting == "direct-gemini" {
+				p.Operations = append(p.Operations, "batch")
+			}
 			if p.Kind == "vertex_ai" {
 				p.Authentication = []string{"adc", "service_account"}
 				p.Operations = append(p.Operations, "image_generation")
@@ -487,8 +490,15 @@ func (c Config) Supports(operation, surface, mode string) bool {
 		if surface == "openai" {
 			return c.SupportsFilesBatches() && mode == "unary"
 		}
-		return c.Kind == "anthropic" && surface == "anthropic" && mode == "unary" &&
-			(c.ProfileID == "" || c.ProfileID == "anthropic-messages" && c.Hosting() == "direct-anthropic")
+		switch surface {
+		case "anthropic":
+			return c.Kind == "anthropic" && mode == "unary" &&
+				(c.ProfileID == "" || c.ProfileID == "anthropic-messages" && c.Hosting() == "direct-anthropic")
+		case "gemini":
+			return c.Kind == "gemini" && mode == "unary" &&
+				(c.ProfileID == "" || c.ProfileID == "gemini-generation" && c.Hosting() == "direct-gemini")
+		}
+		return false
 	}
 	if c.Kind == KindPlugin {
 		p, err := c.profile()

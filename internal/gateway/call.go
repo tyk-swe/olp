@@ -35,6 +35,7 @@ type call struct {
 	semanticQueryInvalid bool
 	anthropicFilesBeta   bool
 	anthropicFileBinary  bool
+	geminiFileBinary     bool
 	serving              *oif.ServingIdentity
 	servingSlot          string
 	servingBinding       string

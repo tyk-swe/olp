@@ -1,0 +1,36 @@
+{
+  "vendor": "google",
+  "documentation_url": "https://ai.google.dev",
+  "reviewed_at": "2026-10-21",
+  "notes": "Gemini Files uses resumable start headers X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length and X-Goog-Upload-Header-Content-Type; the response returns X-Goog-Upload-URL. Chunk commands use X-Goog-Upload-Offset and X-Goog-Upload-Command. File fields include name, displayName, mimeType, sizeBytes, createTime, updateTime, expirationTime, sha256Hash, uri, downloadUri, state and source.",
+  "endpoints": {},
+  "media_models": {},
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": null,
+    "class": "upstream_client"
+  },
+  "gemini_files": {
+    "basis": "documented",
+    "documentation_links": {
+      "files": "https://ai.google.dev/api/files",
+      "resumable_upload": "https://ai.google.dev/gemini-api/docs/files"
+    },
+    "endpoints": {
+      "upload_start": "https://generativelanguage.googleapis.com/upload/v1beta/files",
+      "upload_session": "https://generativelanguage.googleapis.com/upload/session",
+      "files_list": "https://generativelanguage.googleapis.com/v1beta/files",
+      "files_get": "https://generativelanguage.googleapis.com/v1beta/files/{name}",
+      "files_delete": "https://generativelanguage.googleapis.com/v1beta/files/{name}",
+      "files_download": "https://generativelanguage.googleapis.com/v1beta/files/{name}:download?alt=media"
+    },
+    "start_response": "resumable.start.response.json",
+    "finalize_response": "file.finalize.response.json",
+    "list_response": "files.list.response.json",
+    "error_body": "error.json"
+  }
+}

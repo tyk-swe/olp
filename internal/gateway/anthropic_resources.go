@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
@@ -58,29 +56,6 @@ func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family w
 		return x, authority, true
 	}
 	return x, authority, false
-}
-
-func (s *Server) anthropicOrigin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	} else {
-		remote, _, err := net.SplitHostPort(r.RemoteAddr)
-		addr, parseErr := netip.ParseAddr(remote)
-		trusted := false
-		if err == nil && parseErr == nil {
-			for _, prefix := range s.cfg.TrustedProxies {
-				if prefix.Contains(addr.Unmap()) {
-					trusted = true
-					break
-				}
-			}
-		}
-		if trusted && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-			scheme = "https"
-		}
-	}
-	return scheme + "://" + r.Host
 }
 
 func (s *Server) anthropicRoute(x *call, authority access.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
@@ -523,7 +498,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	localID := resources.LocalID(resources.KindAnthropicBatch, submission.resource.UUID)
-	projected, projectionErr := projectAnthropicBatch(result, localID, s.anthropicOrigin(r))
+	projected, projectionErr := projectAnthropicBatch(result, localID, s.gatewayOrigin(r))
 	if projectionErr != nil {
 		commit, stop := resourceCommitContext(r.Context())
 		defer stop()
@@ -724,7 +699,7 @@ func (s *Server) anthropicResourceObject(res *resources.Resource, kind string, r
 	if kind == resources.KindAnthropicBatch {
 		fields["id"], _ = json.Marshal(res.ID)
 		if raw, ok := fields["results_url"]; ok && string(raw) != "null" {
-			fields["results_url"], _ = json.Marshal(s.anthropicOrigin(r) + "/anthropic/v1/messages/batches/" + url.PathEscape(res.ID) + "/results")
+			fields["results_url"], _ = json.Marshal(s.gatewayOrigin(r) + "/anthropic/v1/messages/batches/" + url.PathEscape(res.ID) + "/results")
 		}
 		return json.Marshal(fields)
 	}
@@ -804,7 +779,7 @@ func (s *Server) anthropicBatchRequest(w http.ResponseWriter, r *http.Request, u
 		if !valid || upstreamID != res.UpstreamID {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a mismatched batch identity.")
 		}
-		projected, err := projectAnthropicBatch(body, res.ID, s.anthropicOrigin(r))
+		projected, err := projectAnthropicBatch(body, res.ID, s.gatewayOrigin(r))
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
 		}
@@ -864,7 +839,7 @@ func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		x.dispatched = true
 		x.completePinned()
-		projected, projectErr := projectAnthropicBatch(body, res.ID, s.anthropicOrigin(r))
+		projected, projectErr := projectAnthropicBatch(body, res.ID, s.gatewayOrigin(r))
 		if projectErr != nil {
 			projected = mustJSON(map[string]string{"id": res.ID, "type": "message_batch_deleted"})
 		}

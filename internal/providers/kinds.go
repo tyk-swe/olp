@@ -213,6 +213,7 @@ func capabilityOptions() []CapabilityInput {
 		}
 		out = append(out, tuple("token_count", surface, "unary"))
 	}
+	out = append(out, tuple("batch", "gemini", "unary"))
 	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation", "decision"} {
 		out = append(out, tuple(operation, "openai", "unary"))
 	}
@@ -317,6 +318,9 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	case "batch":
 		if c.Surface == "anthropic" {
 			return kind == KindAnthropic && vendor == "anthropic"
+		}
+		if c.Surface == "gemini" {
+			return kind == KindGemini && vendor == "google"
 		}
 		return kind == KindOpenAI || kind == KindAzure || kind == KindOpenAICompatible &&
 			(vendor == "groq" || vendor == "together" || vendor == "mistral")

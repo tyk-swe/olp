@@ -334,6 +334,29 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 	return addr.String()
 }
 
+func (s *Server) gatewayOrigin(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	} else {
+		remote, _, err := net.SplitHostPort(r.RemoteAddr)
+		addr, parseErr := netip.ParseAddr(remote)
+		trusted := false
+		if err == nil && parseErr == nil {
+			for _, prefix := range s.cfg.TrustedProxies {
+				if prefix.Contains(addr.Unmap()) {
+					trusted = true
+					break
+				}
+			}
+		}
+		if trusted && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+	}
+	return scheme + "://" + r.Host
+}
+
 // admit takes an inference slot. When the public admission middleware already
 // charged this request the context carries its permit and no second slot is
 // taken; a permit the middleware only queued waits here in the normal class.

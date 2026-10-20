@@ -280,7 +280,7 @@
       "source_dialect": "gemini-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "gemini",
-      "profile": "gemini-files",
+      "profile": "gemini-generation",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -288,10 +288,22 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "alt=media"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/gemini/contract.json",
+        "tests/fixtures/vendors/gemini/resumable.start.response.json",
+        "tests/fixtures/vendors/gemini/file.finalize.response.json",
+        "tests/fixtures/vendors/gemini/files.list.response.json",
+        "tests/fixtures/vendors/gemini/error.json",
+        "internal/gateway/gemini_resources.go",
+        "internal/gateway/gemini_resources_test.go",
+        "tests/integration/gemini_files_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3542,7 +3554,7 @@
       "source_dialect": "gemini-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "gemini",
-      "profile": "gemini-files",
+      "profile": "gemini-generation",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3550,10 +3562,25 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "X-Goog-Upload-Protocol",
+        "X-Goog-Upload-Command",
+        "X-Goog-Upload-Header-Content-Length",
+        "X-Goog-Upload-Header-Content-Type",
+        "file.displayName"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/gemini/contract.json",
+        "tests/fixtures/vendors/gemini/resumable.start.response.json",
+        "tests/fixtures/vendors/gemini/file.finalize.response.json",
+        "tests/fixtures/vendors/gemini/files.list.response.json",
+        "tests/fixtures/vendors/gemini/error.json",
+        "internal/gateway/gemini_resources.go",
+        "internal/gateway/gemini_resources_test.go",
+        "tests/integration/gemini_files_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3568,7 +3595,7 @@
       "source_dialect": "gemini-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "gemini",
-      "profile": "gemini-files",
+      "profile": "gemini-generation",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3576,10 +3603,23 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "X-Goog-Upload-Command",
+        "X-Goog-Upload-Offset",
+        "Content-Length"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/gemini/contract.json",
+        "tests/fixtures/vendors/gemini/resumable.start.response.json",
+        "tests/fixtures/vendors/gemini/file.finalize.response.json",
+        "tests/fixtures/vendors/gemini/files.list.response.json",
+        "tests/fixtures/vendors/gemini/error.json",
+        "internal/gateway/gemini_resources.go",
+        "internal/gateway/gemini_resources_test.go",
+        "tests/integration/gemini_files_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3594,7 +3634,7 @@
       "source_dialect": "gemini-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "gemini",
-      "profile": "gemini-files",
+      "profile": "gemini-generation",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3602,10 +3642,22 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "pageSize",
+        "pageToken"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/gemini/contract.json",
+        "tests/fixtures/vendors/gemini/resumable.start.response.json",
+        "tests/fixtures/vendors/gemini/file.finalize.response.json",
+        "tests/fixtures/vendors/gemini/files.list.response.json",
+        "tests/fixtures/vendors/gemini/error.json",
+        "internal/gateway/gemini_resources.go",
+        "internal/gateway/gemini_resources_test.go",
+        "tests/integration/gemini_files_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3620,7 +3672,7 @@
       "source_dialect": "gemini-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "gemini",
-      "profile": "gemini-files",
+      "profile": "gemini-generation",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3628,10 +3680,21 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/gemini/contract.json",
+        "tests/fixtures/vendors/gemini/resumable.start.response.json",
+        "tests/fixtures/vendors/gemini/file.finalize.response.json",
+        "tests/fixtures/vendors/gemini/files.list.response.json",
+        "tests/fixtures/vendors/gemini/error.json",
+        "internal/gateway/gemini_resources.go",
+        "internal/gateway/gemini_resources_test.go",
+        "tests/integration/gemini_files_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3646,7 +3709,7 @@
       "source_dialect": "gemini-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "gemini",
-      "profile": "gemini-files",
+      "profile": "gemini-generation",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3654,10 +3717,21 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/gemini/contract.json",
+        "tests/fixtures/vendors/gemini/resumable.start.response.json",
+        "tests/fixtures/vendors/gemini/file.finalize.response.json",
+        "tests/fixtures/vendors/gemini/files.list.response.json",
+        "tests/fixtures/vendors/gemini/error.json",
+        "internal/gateway/gemini_resources.go",
+        "internal/gateway/gemini_resources_test.go",
+        "tests/integration/gemini_files_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"

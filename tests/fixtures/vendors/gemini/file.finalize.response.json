@@ -1,0 +1,16 @@
+{
+  "file": {
+    "name": "files/file-0123456789abcdef",
+    "displayName": "sample.pdf",
+    "mimeType": "application/pdf",
+    "sizeBytes": "1024",
+    "createTime": "2026-10-21T10:00:00Z",
+    "updateTime": "2026-10-21T10:00:00Z",
+    "expirationTime": "2026-10-23T10:00:00Z",
+    "sha256Hash": "c2hhMjU2",
+    "uri": "https://generativelanguage.googleapis.com/v1beta/files/file-0123456789abcdef",
+    "downloadUri": "https://generativelanguage.googleapis.com/v1beta/files/file-0123456789abcdef:download?alt=media",
+    "state": "ACTIVE",
+    "source": "UPLOADED"
+  }
+}
