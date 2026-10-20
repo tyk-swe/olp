@@ -462,3 +462,16 @@ func TestManagedBatchInputNormalizesProviderNamesAndBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalBatchJSONPreservesExactNumbers(t *testing.T) {
+	left := []byte(`{"input_file_id":"file","metadata":{"rank":9007199254740993,"tiny":-0},"endpoint":"/v1/chat/completions"}`)
+	right := []byte("{\n \"endpoint\":\"/v1/chat/completions\", \"metadata\":{\"tiny\":-0, \"rank\":9007199254740993}, \"input_file_id\":\"file\"\n}")
+	a, err := canonicalBatchJSON(left)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := canonicalBatchJSON(right)
+	if err != nil || !bytes.Equal(a, b) || !bytes.Contains(a, []byte("9007199254740993")) || !bytes.Contains(a, []byte(`"tiny":-0`)) {
+		t.Fatalf("canonical intent changed native numbers or depended on serialization: %s / %s err=%v", a, b, err)
+	}
+}

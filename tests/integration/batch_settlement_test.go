@@ -322,7 +322,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	assertBatchSettlement(t, h, ambiguousResource, "settled", 1, 0)
 	fixture.batchCreateStatus.Store(http.StatusBadGateway)
 	defer fixture.batchCreateStatus.Store(0)
-	serverFailureSource := []byte(fmt.Sprintf(`{"input_file_id":%q,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"case":"accepted-5xx"}}`, inputFileID))
+	serverFailureSource := []byte(fmt.Sprintf(`{"input_file_id":%q,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"case":"accepted-5xx","rank":9007199254740993}}`, inputFileID))
 	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(serverFailureSource), map[string]string{"Content-Type": "application/json"})
 	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) {
 		t.Fatalf("accepted HTTP 5xx lost its intent: %d %s", status, raw)
@@ -331,6 +331,18 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	status, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(serverFailureSource), map[string]string{"Content-Type": "application/json"})
 	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) || fixture.dials.Load() != beforeRetry {
 		t.Fatalf("ambiguous HTTP 5xx permitted duplicate work: %d %s", status, raw)
+	}
+	var reordered map[string]json.RawMessage
+	if err := json.Unmarshal(serverFailureSource, &reordered); err != nil {
+		t.Fatal(err)
+	}
+	pretty, err := json.MarshalIndent(reordered, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(pretty), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusConflict || fixture.dials.Load() != beforeRetry {
+		t.Fatalf("equivalent JSON bypassed unresolved-submission protection: %d %s", status, raw)
 	}
 	var unresolvedID uuid.UUID
 	if err := h.Pool.QueryRow(t.Context(), `SELECT resource_id FROM olp.batch_settlements WHERE api_key_id=$1 AND state='submission_unknown' ORDER BY created_at DESC LIMIT 1`, apiKeyID).Scan(&unresolvedID); err != nil {

@@ -22,20 +22,22 @@ import (
 )
 
 type geminiFileFixture struct {
-	server       *httptest.Server
-	mu           sync.Mutex
-	uploadBytes  []byte
-	offset       int64
-	expected     int64
-	queries      int
-	sessionCalls int
-	batchCalls   int
-	batches      map[string]map[string]any
+	server          *httptest.Server
+	mu              sync.Mutex
+	uploadBytes     []byte
+	offset          int64
+	expected        int64
+	queries         int
+	sessionCalls    int
+	batchCalls      int
+	batches         map[string]map[string]any
+	rejectChunkOnce bool
+	deletedFiles    map[string]bool
 }
 
 func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 	t.Helper()
-	fixture := &geminiFileFixture{batches: map[string]map[string]any{}}
+	fixture := &geminiFileFixture{batches: map[string]map[string]any{}, deletedFiles: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1beta/files", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{})
@@ -79,6 +81,13 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 			http.Error(w, "invalid offset", http.StatusBadRequest)
 			return
 		}
+		if fixture.rejectChunkOnce {
+			fixture.rejectChunkOnce = false
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeJSON(w, map[string]any{"error": map[string]any{"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "retry chunk"}})
+			return
+		}
 		chunk, _ := io.ReadAll(r.Body)
 		fixture.uploadBytes = append(fixture.uploadBytes, chunk...)
 		fixture.offset += int64(len(chunk))
@@ -113,7 +122,10 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		defer fixture.mu.Unlock()
 		_, _ = w.Write(fixture.uploadBytes)
 	})
-	mux.HandleFunc("DELETE /v1beta/files/{id}", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("DELETE /v1beta/files/{id}", func(w http.ResponseWriter, r *http.Request) {
+		fixture.mu.Lock()
+		fixture.deletedFiles[r.PathValue("id")] = true
+		fixture.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("POST /v1beta/models/gemini-files-test:batchGenerateContent", func(w http.ResponseWriter, r *http.Request) {
@@ -194,6 +206,13 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		writeJSON(w, map[string]any{})
 	})
 	mux.HandleFunc("GET /download/v1beta/files/gemini-output-file:download", func(w http.ResponseWriter, _ *http.Request) {
+		fixture.mu.Lock()
+		deleted := fixture.deletedFiles["gemini-output-file"]
+		fixture.mu.Unlock()
+		if deleted {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "application/jsonl")
 		_, _ = io.WriteString(w, `{"key":"file-success","response":{"candidates":[],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`+"\n"+
 			`{"key":"file-error","error":{"code":400,"message":"bad request"}}`+"\n")
@@ -299,6 +318,17 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 	fixture.mu.Unlock()
 	if status != http.StatusBadRequest || afterOffsetMismatch != beforeOffsetMismatch {
 		t.Fatalf("Gemini offset mismatch status=%d dispatched=%d/%d, want 400 without dispatch", status, beforeOffsetMismatch, afterOffsetMismatch)
+	}
+	fixture.mu.Lock()
+	fixture.rejectChunkOnce = true
+	fixture.mu.Unlock()
+	status, _, _ = h.gatewayRaw(http.MethodPost, sessionPath, key, strings.NewReader("hello"), map[string]string{"Content-Length": "5", "X-Goog-Upload-Command": "upload", "X-Goog-Upload-Offset": "0"})
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("Gemini scripted chunk rejection status=%d", status)
+	}
+	status, _, headers = h.gatewayRaw(http.MethodPost, sessionPath, key, nil, map[string]string{"X-Goog-Upload-Command": "query"})
+	if status != http.StatusOK || headers.Get("X-Goog-Upload-Size-Received") != "0" {
+		t.Fatalf("proven-unaccepted chunk invalidated its upload session: %d %v", status, headers)
 	}
 	status, _, _ = h.gatewayRaw(http.MethodPost, sessionPath, key, strings.NewReader("hello"), map[string]string{
 		"Content-Length": "5", "X-Goog-Upload-Command": "upload", "X-Goog-Upload-Offset": "0",
@@ -477,6 +507,36 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	errorStatus, errorOutput, _ := h.gatewayRaw(http.MethodGet, "/v1/files/"+errorID+"/content", key, nil, nil)
 	if errorStatus != http.StatusOK || !bytes.Contains(errorOutput, []byte(`"custom_id":"file-error"`)) {
 		t.Fatalf("Gemini mapped batch error download status=%d body=%s", errorStatus, errorOutput)
+	}
+	deleteStatus, deleteBody, _ := h.gatewayRaw(http.MethodDelete, "/v1/files/"+errorID, key, nil, nil)
+	if deleteStatus != http.StatusOK {
+		t.Fatalf("delete Gemini error projection: %d %s", deleteStatus, deleteBody)
+	}
+	downloadStatus, downloaded, _ = h.gatewayRaw(http.MethodGet, "/v1/files/"+outputID+"/content", key, nil, nil)
+	if downloadStatus != http.StatusOK || !bytes.Contains(downloaded, []byte(`"custom_id":"file-success"`)) {
+		t.Fatalf("deleting error projection destroyed successful results: %d %s", downloadStatus, downloaded)
+	}
+	batchID := fileOperation["id"].(string)
+	refreshStatus, refreshed, _ := h.gateway(http.MethodGet, "/v1/batches/"+batchID, key, nil)
+	if refreshStatus != http.StatusOK || refreshed["error_file_id"] != errorID {
+		t.Fatalf("deleted Gemini projection was resurrected: %d %v", refreshStatus, refreshed)
+	}
+	deleteStatus, _, _ = h.gatewayRaw(http.MethodDelete, "/v1/files/"+outputID, key, nil, nil)
+	if deleteStatus != http.StatusConflict {
+		t.Fatalf("last result projection was deleted before settlement: %d", deleteStatus)
+	}
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	deleteStatus, deleteBody, _ = h.gatewayRaw(http.MethodDelete, "/v1/files/"+outputID, key, nil, nil)
+	if deleteStatus != http.StatusOK {
+		t.Fatalf("settled Gemini output could not be deleted: %d %s", deleteStatus, deleteBody)
+	}
+	fixture.mu.Lock()
+	deleted := fixture.deletedFiles["gemini-output-file"]
+	fixture.mu.Unlock()
+	if !deleted {
+		t.Fatal("last settled projection did not delete the shared provider object")
 	}
 }
 

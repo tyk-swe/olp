@@ -588,6 +588,9 @@ pending count, oldest age and checkpoint freshness.
 - Unmapped `conflict` and `uncertain` submission intents retain duplicate-submit
   protection until their normal retention cutoff; they remain visible in the
   resource inventory.
+- Vertex checkpoints include completed-shard bytes so the result limit applies
+  across shards and restarts. A legacy checkpoint without this proof enters
+  `conflict`; review it rather than guessing the remaining allowance.
 - For `uncertain`, inspect `last_error_class`, result gaps and configured
   storage scope. Restore read access or provider output evidence and use the
   reviewed recovery process; never rewrite a missing result as zero usage.

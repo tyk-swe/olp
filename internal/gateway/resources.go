@@ -1221,6 +1221,33 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+		writeDeleted := func() {
+			s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "object": "file", "deleted": true}))
+		}
+		if fileAdapter(res) == "gemini_managed" {
+			var fields struct {
+				Role string `json:"role"`
+			}
+			_ = json.Unmarshal(res.Metadata, &fields)
+			if fields.Role == "output" || fields.Role == "error" {
+				commitCtx, stop := resourceCommitContext(ctx)
+				defer stop()
+				detached, pending, err := s.Resources.DetachGeminiResultView(commitCtx, res, geminiManagedFileName(res))
+				if errors.Is(err, resources.ErrNotFound) {
+					return notFoundError("not_found", "No file with this identifier exists for this key.")
+				}
+				if err != nil {
+					return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The result file dependencies could not be read.")
+				}
+				if detached {
+					writeDeleted()
+					return nil
+				}
+				if pending {
+					return serverError(http.StatusConflict, "batch_settlement_pending", "The result file is still needed for settlement; retry after settlement closes.")
+				}
+			}
+		}
 		path := "files/" + url.PathEscape(res.UpstreamID)
 		if fileAdapter(res) == "gemini_managed" {
 			var err error
@@ -1255,11 +1282,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be deleted.")
 		}
-		encoded, _ := json.Marshal(res.ID)
-		out, _ := json.Marshal(map[string]json.RawMessage{
-			"id": encoded, "object": json.RawMessage(`"file"`), "deleted": json.RawMessage(`true`),
-		})
-		s.writeStateJSON(w, x, out)
+		writeDeleted()
 		return nil
 	})
 }

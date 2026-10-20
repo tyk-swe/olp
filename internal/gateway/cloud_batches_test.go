@@ -83,3 +83,15 @@ func TestBedrockProjectionUsesNativeCountsAndSubmitTime(t *testing.T) {
 		t.Fatalf("Bedrock native progress or timestamp was lost: %s err=%v", projected, err)
 	}
 }
+
+func TestCloudBatchProjectionRequiresNativeIdentity(t *testing.T) {
+	for _, test := range []struct{ dialect, body string }{
+		{"vertex-batch-prediction", `{"state":"JOB_STATE_RUNNING"}`},
+		{"vertex-batch-prediction", `{"name":"other/job","state":"JOB_STATE_RUNNING"}`},
+		{"bedrock-batch-inference", `{"status":"InProgress"}`},
+	} {
+		if _, err := projectCloudBatchJob([]byte(test.body), "local", test.dialect, "route", "", ""); err == nil {
+			t.Fatalf("projected a cloud job without its native identity: %s", test.body)
+		}
+	}
+}

@@ -670,6 +670,11 @@ func (w *Worker) keepLease(ctx context.Context, settlement Settlement) (context.
 					cancel()
 					return
 				}
+				// Lease renewal proves this worker is alive during a long result
+				// read, even when a full pass exceeds the health freshness window.
+				if err := usage.CheckpointTask(leaseCtx, w.Pool, usage.TaskBatchSettlement, usage.OutcomeSuccess, false); err != nil {
+					w.logger().Debug("batch settlement heartbeat failed", "error", err)
+				}
 			}
 		}
 	}()

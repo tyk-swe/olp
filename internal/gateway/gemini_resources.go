@@ -645,7 +645,9 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 	resp, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, chunk, chunkLength, contentType, "application/json", headers)
 	if failure != nil {
 		x.dispatched = failure.dispatched
-		s.markGeminiUploadFailed(r.Context(), session)
+		if failure.acceptance.Unresolved() || failure.status == http.StatusNotFound || failure.status == http.StatusGone {
+			s.markGeminiUploadFailed(r.Context(), session)
+		}
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}

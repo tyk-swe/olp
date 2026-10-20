@@ -29,6 +29,9 @@ type Cursor struct {
 	Line               int64  `json:"line,omitempty"`
 	PrefixSHA256       string `json:"prefix_sha256,omitempty"`
 	OutputPrefixSHA256 string `json:"output_prefix_sha256,omitempty"`
+	// VertexBytes counts completed shards; while a shard is in progress it
+	// excludes that shard, whose prefix is reread and verified on resume.
+	VertexBytes *int64 `json:"vertex_bytes,omitempty"`
 }
 
 type ResultLineParser func([]byte) (Result, error)
@@ -57,6 +60,10 @@ func checkpointCursor(previous []byte, next any) ([]byte, error) {
 }
 
 func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse ResultLineParser, commit ResultPageCommit) (Cursor, int64, string, error) {
+	return readJSONLPages(r, cursor, file, phase, parse, commit, MaxBatchBytes)
+}
+
+func readJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse ResultLineParser, commit ResultPageCommit, maxBytes int64) (Cursor, int64, string, error) {
 	if r == nil || file == "" || phase != "output" && phase != "error" || parse == nil || commit == nil {
 		return cursor, 0, "", errors.New("invalid batch result stream")
 	}
@@ -94,7 +101,7 @@ func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse Result
 			break
 		}
 		bytesRead += int64(len(raw))
-		if bytesRead > MaxBatchBytes {
+		if bytesRead > maxBytes {
 			return cursor, bytesRead, "", ErrBatchTooLarge
 		}
 		fullHash.Write(raw)

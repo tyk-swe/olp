@@ -538,6 +538,10 @@ provider model before upload. Files uploaded before model qualification must be
 uploaded again before creating new batches. Native Gemini inline batches refuse
 file and cached-content references until owner and affinity binding is available.
 
+Managed Gemini output and error files are independent views of one provider
+result object. Deleting one view preserves its sibling; the final view returns
+`409 batch_settlement_pending` while settlement still needs the evidence.
+
 Creation requires `X-OLP-Route`; follow-up requests derive route and affinity
 from the owner-scoped gateway ID. Ambiguous creates are retained as
 `submission_unknown`: the create returns `502`, a matching reconciliation can

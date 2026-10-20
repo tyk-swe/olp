@@ -318,3 +318,34 @@ func TestVertexCommitsPagesBeforeDownloadCompletes(t *testing.T) {
 		t.Fatalf("result download was buffered before checkpointing: committed=%d err=%v", committed, err)
 	}
 }
+
+func TestVertexResumeRetainsBatchBudgetAndDirectoryBoundary(t *testing.T) {
+	predictions := cloudBatchFixture(t, "vertex", "predictions.jsonl")
+	var job map[string]json.RawMessage
+	if err := json.Unmarshal(cloudBatchFixture(t, "vertex", "job.succeeded.json"), &job); err != nil {
+		t.Fatal(err)
+	}
+	job["outputInfo"] = json.RawMessage(`{"gcsOutputDirectory":"gs://batch-data/output/job123"}`)
+	body, _ := json.Marshal(job)
+	reader, target := vertexTarget(t, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("alt") == "media" {
+			return cloudResponse(req, 200, "application/jsonl", string(predictions)), nil
+		}
+		if got := req.URL.Query().Get("prefix"); got != "output/job123/" {
+			t.Errorf("directory listing can include neighboring jobs: prefix=%q", got)
+		}
+		return cloudResponse(req, 200, "application/json", `{"items":[{"name":"output/job123/prediction-1.jsonl","generation":"1"},{"name":"output/job123/prediction-2.jsonl","generation":"1"}]}`), nil
+	})
+	priorBytes := int64(MaxBatchBytes - len(predictions)/2)
+	cursor := Cursor{Phase: "vertex_done", File: "output/job123/prediction-1.jsonl#1", VertexBytes: &priorBytes}
+	committed := 0
+	_, _, err := reader.ReadResults(t.Context(), target, BatchSnapshot{ID: "job123", Terminal: true, Body: body}, cursor, func(page []Result, _ Cursor) error { committed += len(page); return nil })
+	if !errors.Is(err, ErrBatchTooLarge) || committed != 0 {
+		t.Fatalf("resumed shards reset the batch byte allowance: committed=%d err=%v", committed, err)
+	}
+	cursor.VertexBytes = nil
+	_, _, err = reader.ReadResults(t.Context(), target, BatchSnapshot{ID: "job123", Terminal: true, Body: body}, cursor, func([]Result, Cursor) error { return nil })
+	if !errors.Is(err, ErrCursorConflict) {
+		t.Fatalf("legacy cursor guessed a missing byte budget: %v", err)
+	}
+}

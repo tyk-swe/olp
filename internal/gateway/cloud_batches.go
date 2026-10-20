@@ -99,6 +99,9 @@ func cloudBatchStatus(dialect, state string) (string, bool) {
 }
 
 func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, outputPrefix string) ([]byte, error) {
+	if _, err := cloudBatchJobIdentity(body, dialect); err != nil {
+		return nil, err
+	}
 	var job map[string]json.RawMessage
 	if json.Unmarshal(body, &job) != nil {
 		return nil, errors.New("malformed cloud batch job")
@@ -132,6 +135,26 @@ func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, output
 		"error": cloudBatchError(job, dialect),
 	}
 	return json.Marshal(result)
+}
+
+func cloudBatchJobIdentity(body []byte, dialect string) (string, error) {
+	var job struct {
+		Name string `json:"name"`
+		ARN  string `json:"jobArn"`
+	}
+	if json.Unmarshal(body, &job) != nil {
+		return "", errors.New("malformed cloud batch job")
+	}
+	if dialect == "bedrock-batch-inference" && job.ARN != "" {
+		return job.ARN, nil
+	}
+	if dialect == "vertex-batch-prediction" {
+		parts := strings.Split(job.Name, "/")
+		if len(parts) == 6 && parts[0] == "projects" && parts[1] != "" && parts[2] == "locations" && parts[3] != "" && parts[4] == "batchPredictionJobs" && parts[5] != "" {
+			return parts[5], nil
+		}
+	}
+	return "", errors.New("cloud batch job identity is missing or malformed")
 }
 
 func cloudBatchTime(raw json.RawMessage) (int64, bool) {
@@ -561,6 +584,11 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	var input, output string
 	_ = json.Unmarshal(metadata["input_uri"], &input)
 	_ = json.Unmarshal(metadata["output_uri_prefix"], &output)
+	upstreamID, identityErr := cloudBatchJobIdentity(body, dialect)
+	if identityErr != nil || upstreamID != res.UpstreamID {
+		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned a mismatched job identity."))
+		return
+	}
 	projected, err := projectCloudBatchJob(body, res.ID, dialect, res.RouteSlug, input, output)
 	if err != nil {
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned an unknown job status."))
@@ -629,6 +657,11 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(metadata["input_uri"], &input)
 		_ = json.Unmarshal(metadata["output_uri_prefix"], &output)
 		_ = json.Unmarshal(metadata["dialect"], &dialect)
+		upstreamID, identityErr := cloudBatchJobIdentity(metadata["provider_job"], dialect)
+		if identityErr != nil || upstreamID != row.UpstreamID {
+			s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A stored cloud batch has a mismatched job identity."))
+			return
+		}
 		item, err := projectCloudBatchJob(metadata["provider_job"], row.ID, dialect, row.RouteSlug, input, output)
 		if err != nil {
 			s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A cloud batch could not be projected."))

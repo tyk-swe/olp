@@ -218,17 +218,26 @@ func (r *Resource) NativeIdentity() NativeIdentity {
 }
 
 func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, false)
+}
+
+func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, includeDeleted bool) (*Resource, error) {
 	if identity.TargetID == "" {
 		return nil, ErrContract
 	}
-	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
+	statement := `SELECT ` + columns + ` FROM olp.provider_resources
 		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
 		AND route_slug=$5 AND route_revision_id=$6 AND target_id=$7 AND slot_id=$8
-		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10
-		AND state<>$11 AND (expires_at IS NULL OR expires_at>now())`,
-		identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
-		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID,
-		identity.CredentialID, identity.UpstreamID, StateDeleted))
+		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10`
+	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
+		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID}
+	if includeDeleted {
+		statement += ` AND (expires_at IS NULL OR expires_at>now()) ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
+	} else {
+		statement += ` AND state<>$11 AND (expires_at IS NULL OR expires_at>now())`
+		args = append(args, StateDeleted)
+	}
+	r, err := scan(query.QueryRow(ctx, statement, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

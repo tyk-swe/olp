@@ -144,50 +144,34 @@ func geminiManagedResponsesFile(body []byte) string {
 	return ""
 }
 
-func (s *Server) mapGeminiManagedResultFile(ctx context.Context, owner *resources.Resource, fileName, role string) (*resources.Resource, error) {
+func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resources.Resource, fileName string) (*resources.Resource, *resources.Resource, error) {
 	fileID, err := geminiFileID(fileName)
 	if err != nil {
-		return nil, errGeminiBatchFidelity
-	}
-	upstreamID := fileName + "#" + role
-	identity := owner.NativeIdentity()
-	identity.Kind, identity.UpstreamID = resources.KindFile, upstreamID
-	if existing, err := s.Resources.GetByUpstream(ctx, identity); err == nil {
-		return existing, nil
-	} else if !errors.Is(err, resources.ErrNotFound) {
-		return nil, err
+		return nil, nil, errGeminiBatchFidelity
 	}
 	var ownerMetadata map[string]json.RawMessage
 	_ = json.Unmarshal(owner.Metadata, &ownerMetadata)
-	providerFile := map[string]any{"filename": fileID + ".jsonl", "purpose": "batch"}
-	metadata := map[string]any{
-		"upstream_model": resourceModel(owner), "adapter": "gemini_managed", "role": role,
-		"gemini_responses_file": fileName, "provider_file": providerFile,
-	}
-	for _, field := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "completion_window"} {
-		if value, ok := ownerMetadata[field]; ok {
-			var decoded any
-			_ = json.Unmarshal(value, &decoded)
-			metadata[field] = decoded
+	views := make([]*resources.Resource, 0, 2)
+	for _, role := range []string{"output", "error"} {
+		metadata := map[string]any{
+			"upstream_model": resourceModel(owner), "adapter": "gemini_managed", "role": role,
+			"gemini_responses_file": fileName, "provider_file": map[string]any{"filename": fileID + ".jsonl", "purpose": "batch"},
 		}
-	}
-	resource := &resources.Resource{
-		Kind: resources.KindFile, APIKeyID: owner.APIKeyID, RouteSlug: owner.RouteSlug,
-		ProviderID: owner.ProviderID, ProviderRevisionID: owner.ProviderRevisionID,
-		RouteRevisionID: owner.RouteRevisionID, TargetID: owner.TargetID, SlotID: owner.SlotID,
-		CredentialID: owner.CredentialID, UpstreamID: upstreamID, State: "processed",
-		Metadata: mustJSON(metadata),
+		for _, field := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "completion_window"} {
+			if raw, ok := ownerMetadata[field]; ok {
+				metadata[field] = raw
+			}
+		}
+		views = append(views, &resources.Resource{
+			Kind: resources.KindFile, APIKeyID: owner.APIKeyID, RouteSlug: owner.RouteSlug,
+			ProviderID: owner.ProviderID, ProviderRevisionID: owner.ProviderRevisionID, RouteRevisionID: owner.RouteRevisionID,
+			TargetID: owner.TargetID, SlotID: owner.SlotID, CredentialID: owner.CredentialID,
+			UpstreamID: fileName + "#" + role, State: "processed", Metadata: mustJSON(metadata),
+		})
 	}
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
-	created, err := s.Resources.Put(commitCtx, resource)
-	if err == nil {
-		return created, nil
-	}
-	if existing, readErr := s.Resources.GetByUpstream(commitCtx, identity); readErr == nil {
-		return existing, nil
-	}
-	return nil, err
+	return s.Resources.EnsureGeminiResultViews(commitCtx, fileName, views[0], views[1])
 }
 
 func geminiManagedFileName(resource *resources.Resource) string {
@@ -240,11 +224,7 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 	}
 	if slices.Contains([]string{"completed", "failed", "cancelled", "expired"}, status) {
 		if responsesFile := geminiManagedResponsesFile(providerBatch); responsesFile != "" {
-			outputFile, err := s.mapGeminiManagedResultFile(ctx, resource, responsesFile, "output")
-			if err != nil {
-				return nil, err
-			}
-			errorFile, err := s.mapGeminiManagedResultFile(ctx, resource, responsesFile, "error")
+			outputFile, errorFile, err := s.mapGeminiManagedResultFiles(ctx, resource, responsesFile)
 			if err != nil {
 				return nil, err
 			}

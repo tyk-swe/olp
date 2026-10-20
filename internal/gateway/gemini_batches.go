@@ -133,7 +133,7 @@ func validateGeminiBatchRequest(body []byte, slug string) (geminiBatchInput, *Er
 		inputResult.Expected = &count
 		inputResult.Keys = keys
 	}
-	canonical, err := canonicalGeminiJSON(body)
+	canonical, err := canonicalBatchJSON(body)
 	if err != nil {
 		return geminiBatchInput{}, invalidRequest("invalid_request", "The batch request is invalid JSON.", nil)
 	}
@@ -197,7 +197,7 @@ func geminiBatchAlias(object oif.Value, snake, camel string) (json.RawMessage, b
 	return nil, false, nil
 }
 
-func canonicalGeminiJSON(body []byte) ([]byte, error) {
+func canonicalBatchJSON(body []byte) ([]byte, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	var value any

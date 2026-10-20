@@ -296,6 +296,16 @@ func (r *VertexReader) ReadResults(ctx context.Context, target *PinnedTarget, sn
 	if !ok || scheme != "gs" {
 		return cursor, false, ErrStorageScope
 	}
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	var completedBytes int64
+	if cursor.VertexBytes != nil {
+		completedBytes = *cursor.VertexBytes
+	}
+	if completedBytes < 0 || completedBytes > MaxBatchBytes || cursor.File != "" && cursor.VertexBytes == nil {
+		return cursor, false, ErrCursorConflict
+	}
 	objects, err := listGCSObjects(ctx, r.Auth, r.Egress, target, bucket, prefix)
 	if err != nil {
 		return cursor, false, err
@@ -335,22 +345,28 @@ func (r *VertexReader) ReadResults(ctx context.Context, target *PinnedTarget, sn
 			lineNo = cursor.Line
 			prefixDigest = cursor.PrefixSHA256
 		}
-		if response.ContentLength > MaxBatchBytes {
+		remaining := MaxBatchBytes - completedBytes
+		if response.ContentLength > remaining {
 			response.Body.Close()
 			return cursor, false, ErrBatchTooLarge
 		}
-		next, _, _, err := func() (Cursor, int64, string, error) {
+		next, consumed, _, err := func() (Cursor, int64, string, error) {
 			defer response.Body.Close()
-			stream := &io.LimitedReader{R: response.Body, N: MaxBatchBytes + 1}
-			return ReadJSONLPages(stream, Cursor{Phase: "output", File: file, Line: lineNo, PrefixSHA256: prefixDigest}, file, "output", func(line []byte) (Result, error) {
+			stream := &io.LimitedReader{R: response.Body, N: remaining + 1}
+			return readJSONLPages(stream, Cursor{Phase: "output", File: file, Line: lineNo, PrefixSHA256: prefixDigest}, file, "output", func(line []byte) (Result, error) {
 				lineNo++
 				return parseVertexLine(line, obj.Name, obj.Generation, lineNo, target.Model)
-			}, commit)
+			}, func(page []Result, next Cursor) error {
+				next.VertexBytes = new(completedBytes)
+				return commit(page, next)
+			}, remaining)
 		}()
 		if err != nil {
 			return next, false, err
 		}
+		completedBytes += consumed
 		next.Phase = "vertex_done"
+		next.VertexBytes = new(completedBytes)
 		if err = commit(nil, next); err != nil {
 			return next, false, err
 		}
