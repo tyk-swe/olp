@@ -748,6 +748,10 @@ func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
 	return access.DigestEndUser(m.auth, projectID, identifier)
 }
 
+func (m *Manager) Digest(purpose secrets.DigestPurpose, value string) []byte {
+	return m.auth.Digest(purpose, value)
+}
+
 // Authenticate resolves an API key against the last authority read. The
 // authority it returns is shared with the installed key records: callers read
 // it and copy it before changing it.

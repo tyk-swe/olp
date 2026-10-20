@@ -191,217 +191,9 @@
     {
       "slice": "M9.2",
       "method": "POST",
-      "path": "/v1/files",
-      "operation": "file",
-      "source_dialect": "openai-file-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "mistral",
-      "profile": "mistral-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "POST",
       "path": "/v1/batches",
       "operation": "batch",
-      "source_dialect": "openai-batch-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "mistral",
-      "profile": "mistral-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "GET",
-      "path": "/v1/batches/{batch_id}",
-      "operation": "batch",
-      "source_dialect": "openai-batch-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "mistral",
-      "profile": "mistral-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "GET",
-      "path": "/v1/files/{file_id}/content",
-      "operation": "file",
-      "source_dialect": "openai-file-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "mistral",
-      "profile": "mistral-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "POST",
-      "path": "/v1/files",
-      "operation": "file",
-      "source_dialect": "openai-file-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "together",
-      "profile": "together-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "POST",
-      "path": "/v1/batches",
-      "operation": "batch",
-      "source_dialect": "openai-batch-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "together",
-      "profile": "together-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "GET",
-      "path": "/v1/batches/{batch_id}",
-      "operation": "batch",
-      "source_dialect": "openai-batch-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "together",
-      "profile": "together-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "GET",
-      "path": "/v1/files/{file_id}/content",
-      "operation": "file",
-      "source_dialect": "openai-file-managed",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "together",
-      "profile": "together-files-batches",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
-      "evidence": [],
-      "live_qualification": "required",
-      "refusals": [
-        "strict route"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
-    },
-    {
-      "slice": "M9.2",
-      "method": "POST",
-      "path": "/v1/batches",
-      "operation": "batch",
-      "source_dialect": "openai-batch-managed",
+      "source_dialect": "openai-batch",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
       "profile": "anthropic-message-batches",
@@ -431,7 +223,7 @@
       "method": "POST",
       "path": "/v1/batches",
       "operation": "batch",
-      "source_dialect": "openai-batch-managed",
+      "source_dialect": "openai-batch",
       "dialect_revision": "m9-baseline-1",
       "provider": "vertex",
       "profile": "vertex-batch-prediction",
@@ -458,7 +250,7 @@
       "method": "POST",
       "path": "/v1/batches",
       "operation": "batch",
-      "source_dialect": "openai-batch-managed",
+      "source_dialect": "openai-batch",
       "dialect_revision": "m9-baseline-1",
       "provider": "bedrock",
       "profile": "bedrock-batch-inference",
@@ -2175,10 +1967,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "baseline_only",
+      "supported_fields": [
+        "input_file_id",
+        "endpoint",
+        "completion_window"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/provider_resources_test.go",
+        "tests/integration/batch_settlement_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
@@ -2223,10 +2024,16 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "baseline_only",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/batches/batches_test.go",
+        "tests/integration/provider_resources_test.go",
+        "tests/integration/batch_settlement_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
@@ -2271,10 +2078,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "baseline_only",
+      "supported_fields": [
+        "input_file_id",
+        "endpoint",
+        "completion_window"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/gateway/batch_submission_test.go",
+        "internal/batches/batches_test.go",
+        "tests/integration/provider_resources_test.go",
+        "tests/integration/batch_settlement_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0"
@@ -2319,10 +2135,16 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "baseline_only",
+      "supported_fields": [
+        "batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/batches/batches_test.go",
+        "tests/integration/provider_resources_test.go",
+        "tests/integration/batch_settlement_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0"

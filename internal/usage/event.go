@@ -29,14 +29,16 @@ var ErrUnsupportedVersion = errors.New("unsupported request metadata version")
 // health probes, and a console member makes Playground calls. Shadow, probe
 // and Playground requests belong to the installation and carry no API key; a
 // classifier or cache embedding call is made for, and charged to, the key whose
-// request it routes or matches.
+// request it routes or matches. Batch settlement records deferred work for its
+// caller's key and links each result to the batch creation request.
 const (
-	OriginCaller         = "caller"
-	OriginShadow         = "shadow"
-	OriginClassifier     = "classifier"
-	OriginCacheEmbedding = "cache_embedding"
-	OriginProbe          = "probe"
-	OriginPlayground     = "playground"
+	OriginCaller          = "caller"
+	OriginShadow          = "shadow"
+	OriginClassifier      = "classifier"
+	OriginCacheEmbedding  = "cache_embedding"
+	OriginProbe           = "probe"
+	OriginPlayground      = "playground"
+	OriginBatchSettlement = "batch_settlement"
 )
 
 // Keyless reports whether requests of an origin carry no API key.
@@ -462,7 +464,7 @@ var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
-var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}, OriginCacheEmbedding: {}}
+var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}, OriginCacheEmbedding: {}, OriginBatchSettlement: {}}
 
 func (w wireEvent) decode() (*Event, error) {
 	if w.CacheResult != "" && w.CacheResult != "hit" && w.CacheResult != "semantic-hit" && w.CacheResult != "miss" && w.CacheResult != "bypass" {
@@ -498,8 +500,8 @@ func (w wireEvent) decode() (*Event, error) {
 	if event.EvaluatorGuardrailID, err = optionalUUID("evaluator_guardrail_id", w.EvaluatorGuardrailID); err != nil {
 		return nil, err
 	}
-	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.Origin == OriginCacheEmbedding || event.EvaluatorGuardrailID != nil) {
-		return nil, errors.New("request metadata field parent_request_id belongs to shadow and classifier requests")
+	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.Origin == OriginCacheEmbedding || event.Origin == OriginBatchSettlement || event.EvaluatorGuardrailID != nil) {
+		return nil, errors.New("request metadata field parent_request_id belongs to child work requests")
 	}
 	if w.EndUserDigest != nil {
 		event.EndUserDigest = *w.EndUserDigest
@@ -1106,7 +1108,7 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 		usage.AudioInputTokens != nil || usage.CachedAudioInputTokens != nil ||
 		usage.AudioOutputTokens != nil || usage.ImageInputTokens != nil ||
 		usage.CachedImageInputTokens != nil || usage.ImageOutputTokens != nil ||
-		usage.MediaUnits != nil || len(usage.ToolCalls) > 0 || usage.Batch
+		usage.MediaUnits != nil || len(usage.ToolCalls) > 0
 	if !usage.Observed && hasValues {
 		return nil, fmt.Errorf("%w: attempt %d reports usage it never observed", ErrInvalidEvent, index)
 	}

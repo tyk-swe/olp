@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -116,6 +117,7 @@ type Server struct {
 	Business *telemetry.BusinessMetrics
 
 	Resources *resources.Store
+	Batches   *batches.Store
 
 	Resolver *resources.Resolver
 

@@ -39,40 +39,85 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
-	if r.TargetID == "" {
-		return nil, ErrContract
-	}
-	if r.Kind == KindStrictBatch && batchStateRank(r.State) == 0 {
-		return nil, ErrContract
-	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
-		return nil, err
-	}
 	copy := *r
-	copy.UUID = uuid.Must(uuid.NewV7())
-	if len(copy.Metadata) == 0 {
-		copy.Metadata = []byte(`{}`)
-	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,target_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+columns,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID,
-		copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.TargetID))
+	out, err := s.PutDurableContractTx(ctx, tx, &copy, payload)
 	if err != nil {
-		return nil, err
-	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Store) PutDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
+	if err := s.validateDurable(r, payload); err != nil {
+		return nil, err
+	}
+	if r.TargetID == "" || r.Kind == KindStrictBatch && batchStateRank(r.State) == 0 {
+		return nil, ErrContract
+	}
+	if r.UUID == uuid.Nil {
+		r.UUID = uuid.Must(uuid.NewV7())
+	}
+	if err := s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
+		return nil, err
+	}
+	if len(r.Metadata) == 0 {
+		r.Metadata = []byte(`{}`)
+	}
+	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
+ (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,target_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+columns,
+		r.UUID, r.Kind, r.APIKeyID, r.RouteSlug, r.ProviderID, r.ProviderRevisionID, r.RouteRevisionID, r.SlotID,
+		r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.ContractVersion, r.ParentID, r.TargetID))
+	if err != nil {
+		return nil, err
+	}
+	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) StageDurableContract(ctx context.Context, id uuid.UUID, payload []byte, expiresAt *time.Time) error {
+	if !s.Encrypted() || id == uuid.Nil || expiresAt == nil || !expiresAt.After(time.Now()) ||
+		expiresAt.After(time.Now().Add(DurableLifetime)) || len(payload) == 0 || len(payload) > MaxContinuationBytes {
+		return ErrContract
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = s.keys.Store(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation, payload, expiresAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) ReadStagedDurableContract(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	if !s.Encrypted() || id == uuid.Nil {
+		return nil, ErrContract
+	}
+	payload, err := s.keys.Read(ctx, s.pool, s.installation, id.String(), secrets.ProviderContinuation)
+	if err != nil || len(payload) == 0 || len(payload) > MaxContinuationBytes {
+		return nil, ErrContract
+	}
+	return payload, nil
+}
+
+func (s *Store) DeleteStagedDurableContract(ctx context.Context, id uuid.UUID) error {
+	if !s.Encrypted() || id == uuid.Nil {
+		return ErrContract
+	}
+	_, err := s.pool.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.ProviderContinuation)
+	return err
 }
 
 // ReadDurableContract checks the current owner before decrypting. The gateway

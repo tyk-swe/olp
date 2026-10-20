@@ -62,6 +62,7 @@ type openaiFixture struct {
 	lastReq         atomic.Value
 	lastBatchRaw    atomic.Value
 	batchCreates    atomic.Int64
+	fileCreates     atomic.Int64
 	earlyFileReply  atomic.Bool
 	fileEcho        atomic.Bool // reject uploads, echoing the applied credential
 	batchCreateRaw  atomic.Value
@@ -81,6 +82,8 @@ type openaiFixture struct {
 	lastRespQuery   atomic.Value
 	holdCreated     atomic.Bool
 	holdGet         atomic.Bool
+	batchCreateHold chan struct{}
+	batchCreateRead chan struct{}
 	dials           atomic.Int64
 }
 
@@ -135,7 +138,13 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
-		writeJSON(w, f.files["file-up-1"])
+		fileNumber := f.fileCreates.Add(1)
+		fileID := fmt.Sprintf("file-up-%d", fileNumber)
+		file := map[string]any{"id": fileID, "object": "file", "bytes": 128, "created_at": time.Now().Unix(), "filename": "input.jsonl", "purpose": "batch", "status": "processed"}
+		f.mu.Lock()
+		f.files[fileID] = file
+		f.mu.Unlock()
+		writeJSON(w, file)
 	})
 	mux.HandleFunc("GET /openai/files/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
@@ -172,11 +181,21 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		writeJSON(w, map[string]any{"id": r.PathValue("id"), "object": "file", "deleted": true})
 	})
 	mux.HandleFunc("GET /openai/batches", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"object": "list", "data": []any{}})
+		f.mu.Lock()
+		items := make([]any, 0, len(f.batches))
+		for _, batch := range f.batches {
+			copy := make(map[string]any, len(batch))
+			for key, value := range batch {
+				copy[key] = value
+			}
+			items = append(items, copy)
+		}
+		f.mu.Unlock()
+		writeJSON(w, map[string]any{"object": "list", "data": items, "has_more": false})
 	})
 	mux.HandleFunc("POST /openai/batches", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
-		f.batchCreates.Add(1)
+		batchNumber := f.batchCreates.Add(1)
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "invalid batch fixture body", http.StatusBadRequest)
@@ -195,16 +214,34 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			_, _ = io.WriteString(w, result.(string))
 			return
 		}
-		batch := map[string]any{}
-		for k, v := range f.batches["batch-up-1"] {
-			batch[k] = v
+		batchID := fmt.Sprintf("batch-up-%d", batchNumber)
+		batch := map[string]any{
+			"id": batchID, "object": "batch", "status": "validating",
+			"endpoint": body["endpoint"], "completion_window": body["completion_window"],
+			"input_file_id": body["input_file_id"], "created_at": time.Now().Unix(),
 		}
-		batch["input_file_id"] = body["input_file_id"]
+		f.mu.Lock()
+		f.batches[batchID] = batch
+		hold, read := f.batchCreateHold, f.batchCreateRead
+		f.mu.Unlock()
+		if hold != nil {
+			if read != nil {
+				close(read)
+			}
+			<-hold
+			return
+		}
 		writeJSON(w, batch)
 	})
 	mux.HandleFunc("GET /openai/batches/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		f.mu.Lock()
 		batch, ok := f.batches[r.PathValue("id")]
+		copy := make(map[string]any, len(batch))
+		for key, value := range batch {
+			copy[key] = value
+		}
+		f.mu.Unlock()
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such batch"}}`, http.StatusNotFound)
 			return
@@ -213,7 +250,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
-		writeJSON(w, batch)
+		writeJSON(w, copy)
 	})
 	mux.HandleFunc("POST /openai/batches/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)

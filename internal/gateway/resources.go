@@ -1284,6 +1284,16 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, invalidRequest("invalid_json", "The request body must be one JSON object.", nil), x.family)
 		return
 	}
+	lineOperation, e := batchLineOperation(source)
+	if e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
+	}
+	completionWindow, e := batchCompletionWindow(source)
+	if e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
+	}
 	if _, supplied := source.Root().Lookup("id"); supplied {
 		s.stateFail(x, w, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id")), x.family)
 		return
@@ -1388,9 +1398,33 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
 		return
 	}
+	kind := resources.KindBatch
+	if x.strict() {
+		kind = resources.KindStrictBatch
+	}
+	submission, e := s.prepareBatchSubmission(r.Context(), x, authority.ID, p, source, source.Bytes(), upstream,
+		strictServing, localFile, file.UpstreamID, kind, lineOperation, completionWindow)
+	if e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
+	}
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, upstream, "application/json")
 	if failure != nil {
 		x.dispatched = failure.dispatched
+		if failure.status == 0 && failure.dispatched {
+			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
+			defer stopUnknown()
+			if err := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); err != nil {
+				s.log.Warn("batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", err)
+			}
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider may have accepted this batch, but its outcome is unknown."), x.family)
+			return
+		}
+		cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
+		defer stopCleanup()
+		if err := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); err != nil {
+			s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", err)
+		}
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -1398,6 +1432,11 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = true
 	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
+		cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
+		defer stopCleanup()
+		if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
+			s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
+		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
 		return
 	}
@@ -1406,12 +1445,22 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		var validated oif.Document
 		validated, upstreamID, err = strictBatchResult(result, "")
 		if err != nil || !strictBatchInputMatches(validated, upstream) {
+			cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
+			defer stopCleanup()
+			if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
+				s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
+			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result."), x.family)
 			return
 		}
 	} else {
 		var valid bool
 		if upstreamID, valid = nativeResourceID(result, s.cfg.MaxResponseBytes); !valid {
+			cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
+			defer stopCleanup()
+			if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
+				s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
+			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
 			return
 		}
@@ -1420,41 +1469,48 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	metadata, state := batchMetadata(result, p.model, localFile)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
-	kind := resources.KindBatch
-	if x.strict() {
-		kind = resources.KindStrictBatch
-		metadata = durableMetadata(p.model)
-	}
-	resource := &resources.Resource{
-		Kind:               kind,
-		APIKeyID:           authority.ID,
-		RouteSlug:          route.Slug,
-		ProviderID:         p.provider.ID,
-		ProviderRevisionID: p.provider.RevisionID,
-		RouteRevisionID:    route.RevisionID,
-		TargetID:           p.target.ID,
-		SlotID:             p.slot.ID,
-		CredentialID:       p.slot.CredentialID,
-		UpstreamID:         upstreamID,
-		State:              state,
-		Metadata:           metadata,
-	}
+	resource := submission.resource
+	resource.UpstreamID, resource.State = upstreamID, state
+	resource.Metadata = metadata
 	var res *resources.Resource
 	if x.strict() {
-		version := resources.DurableContractVersion
-		resource.ContractVersion = &version
-		resource.ExpiresAt = s.durableExpiry(nil)
-		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: source.Bytes(), Effective: upstream, Result: result, Binding: p.model, Serving: strictServing})
-		if marshalErr != nil {
-			s.stateFail(x, w, durableError(marshalErr), x.family)
-			return
-		}
-		res, err = s.Resources.PutDurableContract(commitCtx, resource, payload)
-	} else {
-		res, err = s.Resources.Put(commitCtx, resource)
+		resource.Metadata = durableMetadata(p.model)
 	}
+	res, err = func() (*resources.Resource, error) {
+		tx, beginErr := s.Resources.Begin(commitCtx)
+		if beginErr != nil {
+			return nil, beginErr
+		}
+		defer tx.Rollback(commitCtx)
+		var created *resources.Resource
+		if x.strict() {
+			payload, marshalErr := json.Marshal(durableDocument{
+				Version: *resource.ContractVersion, Source: source.Bytes(), Effective: upstream,
+				Result: result, Binding: p.model, Serving: strictServing,
+			})
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			created, beginErr = s.Resources.PutDurableContractTx(commitCtx, tx, resource, payload)
+		} else {
+			created, beginErr = s.Resources.PutTx(commitCtx, tx, resource)
+		}
+		if beginErr != nil {
+			return nil, beginErr
+		}
+		if beginErr = s.Batches.ActivateTx(commitCtx, tx, resource.UUID, upstreamID, batchExpectedResults(result)); beginErr != nil {
+			return nil, beginErr
+		}
+		if beginErr = tx.Commit(commitCtx); beginErr != nil {
+			return nil, beginErr
+		}
+		return created, nil
+	}()
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be stored."), x.family)
+		if markErr := s.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+			s.log.Warn("accepted batch submission intent could not be activated", "resource_id", resource.UUID, "error", markErr)
+		}
+		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed."), x.family)
 		return
 	}
 	out, err := s.batchObject(r.Context(), res)

@@ -34,6 +34,7 @@ const (
 // lock reports LockAcquired false and nothing else; it is a skip, not a failure.
 type MaintenanceReport struct {
 	LockAcquired   bool
+	HistoryCutoff  time.Time
 	RollupRows     int64
 	GapRollupRows  int64
 	RequestRows    int64
@@ -76,7 +77,11 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 	if err != nil {
 		return MaintenanceReport{}, err
 	}
-	report := MaintenanceReport{LockAcquired: true}
+	historyCutoff := windows.request
+	if windows.usage.Before(historyCutoff) {
+		historyCutoff = windows.usage
+	}
+	report := MaintenanceReport{LockAcquired: true, HistoryCutoff: historyCutoff}
 	if report.RequestRows, err = purgeExpiredRequests(ctx, conn, windows.request); err != nil {
 		return MaintenanceReport{}, err
 	}

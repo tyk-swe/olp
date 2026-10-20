@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
@@ -207,6 +208,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var mediaSpool *media.Spool
 	var pluginHost *plugins.Host
 	var policy egress.Policy
+	var auth *secrets.AuthKey
 	var business *telemetry.BusinessMetrics
 	var exporter *export.Worker
 	var capturer *export.Manager
@@ -227,7 +229,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var keys *secrets.KeyRing
 	var prober *gateway.Server
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
-		var auth *secrets.AuthKey
 		var bootstrap string
 		var err error
 		auth, keys, bootstrap, err = loadSecrets(startup, pool, c, installation)
@@ -308,6 +309,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
+			gw.Batches = batches.NewStore(pool)
 			gw.Cache = responseCache
 			gw.Business = business
 			rt.GrantRefreshed = gw.GrantRefreshed
@@ -562,7 +564,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, installation, c.Region, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.

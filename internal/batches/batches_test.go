@@ -1,0 +1,253 @@
+package batches
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+func readFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	body, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestBatchLineUsageParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+	}{
+		{name: "chat.jsonl", endpoint: "/v1/chat/completions"},
+		{name: "responses.jsonl", endpoint: "/v1/responses"},
+		{name: "completions.jsonl", endpoint: "/v1/completions"},
+		{name: "embeddings.jsonl", endpoint: "/v1/embeddings"},
+	}
+	for _, test := range tests {
+		line := bytes.TrimSpace(readFixture(t, test.name))
+		result, err := ParseLine(line, test.endpoint, false)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if result.Kind != ResultSucceeded || !result.Usage.Observed || !result.Usage.Complete {
+			t.Fatalf("%s result: %+v", test.name, result)
+		}
+		if len(result.Evidence) == 0 || !jsonValid(result.Evidence) {
+			t.Fatalf("%s evidence is not canonical JSON", test.name)
+		}
+		switch test.name {
+		case "chat.jsonl":
+			if got := result.Usage.InputTokens; got == nil || *got != 4 {
+				t.Fatalf("chat input tokens = %v", got)
+			}
+			if got := result.Usage.OutputTokens; got == nil || *got != 6 {
+				t.Fatalf("chat output tokens = %v", got)
+			}
+			if got := result.Usage.CachedInputTokens; got == nil || *got != 2 {
+				t.Fatalf("chat cached input tokens = %v", got)
+			}
+		case "responses.jsonl":
+			if got := result.Usage.InputTokens; got == nil || *got != 8 {
+				t.Fatalf("responses input tokens = %v", got)
+			}
+			if got := result.Usage.OutputTokens; got == nil || *got != 3 {
+				t.Fatalf("responses output tokens = %v", got)
+			}
+			if got := result.Usage.CachedInputTokens; got == nil || *got != 2 {
+				t.Fatalf("responses cached input tokens = %v", got)
+			}
+		case "completions.jsonl":
+			if got := result.Usage.InputTokens; got == nil || *got != 5 {
+				t.Fatalf("completion input tokens = %v", got)
+			}
+			if got := result.Usage.OutputTokens; got == nil || *got != 2 {
+				t.Fatalf("completion output tokens = %v", got)
+			}
+		case "embeddings.jsonl":
+			if got := result.Usage.InputTokens; got == nil || *got != 2 {
+				t.Fatalf("embedding input tokens = %v", got)
+			}
+			if result.Usage.OutputTokens != nil {
+				t.Fatalf("embedding output tokens = %v, want absent", *result.Usage.OutputTokens)
+			}
+		}
+	}
+}
+
+func TestBatchLineErrorsAndMissingUsage(t *testing.T) {
+	lines := bytes.Split(bytes.TrimSpace(readFixture(t, "errors.jsonl")), []byte{'\n'})
+	want := []ResultKind{ResultExpired, ResultCancelled, ResultErrored}
+	for index, line := range lines {
+		result, err := ParseLine(line, "/v1/chat/completions", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Kind != want[index] || result.ErrorClass == "" {
+			t.Fatalf("error line %d: %+v", index, result)
+		}
+	}
+	result, err := ParseLine(bytes.TrimSpace(readFixture(t, "missing_usage.jsonl")), "/v1/chat/completions", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Kind != ResultSucceeded || result.Usage.Observed || !result.Usage.BillingUncertain {
+		t.Fatalf("missing usage was treated as zero usage: %+v", result)
+	}
+}
+
+func TestBatchCloseDecision(t *testing.T) {
+	expected := int64(4)
+	tests := []struct {
+		name     string
+		counts   ResultCounts
+		conflict bool
+		terminal bool
+		unknown  bool
+		now      time.Time
+		want     Decision
+	}{
+		{name: "open", counts: ResultCounts{ResultSucceeded: 2}, want: Decision{State: StateActive}},
+		{name: "all observed", counts: ResultCounts{ResultSucceeded: 2, ResultErrored: 2}, want: Decision{State: StateSettled}},
+		{name: "terminal gap", counts: ResultCounts{ResultSucceeded: 1}, terminal: true, want: Decision{State: StateUncertain, Gap: 3}},
+		{name: "unknown expected", counts: ResultCounts{ResultSucceeded: 2}, terminal: true, unknown: true, want: Decision{State: StateUncertain, Gap: 1}},
+		{name: "conflict remains open", counts: ResultCounts{ResultSucceeded: 1}, conflict: true, want: Decision{State: StateConflict}},
+		{name: "conflict closes uncertain", counts: ResultCounts{ResultSucceeded: 1}, conflict: true, now: time.Unix(200, 0), want: Decision{State: StateUncertain, Gap: 3}},
+		{name: "close after gap", counts: ResultCounts{ResultSucceeded: 1}, now: time.Unix(200, 0), want: Decision{State: StateUncertain, Gap: 3}},
+	}
+	now := time.Unix(100, 0)
+	closeAfter := time.Unix(150, 0)
+	for _, test := range tests {
+		at := test.now
+		if at.IsZero() {
+			at = now
+		}
+		expectedCount := &expected
+		if test.unknown {
+			expectedCount = nil
+		}
+		got := CloseDecision(expectedCount, test.counts, test.conflict, test.terminal, at, closeAfter)
+		if got != test.want {
+			t.Errorf("%s decision = %+v, want %+v", test.name, got, test.want)
+		}
+	}
+}
+
+func TestBatchResultEventIDsAndValidation(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	keyID, providerID, runtimeID, createID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	model, route, revision := "provider-model", "batch-route", "provider-revision"
+	template := &usage.Event{
+		Version: usage.WireVersion, EventID: createID, RequestID: createID,
+		RuntimeGenerationID: runtimeID, APIKeyID: keyID, Origin: usage.OriginBatchSettlement,
+		ParentRequestID: &createID, RouteSlug: route, Operation: "generation", Surface: "openai",
+		RequestStartedAt: now, RequestCompletedAt: now, ObservedAt: now,
+		ProviderID: &providerID, UpstreamModel: &model, Committed: true,
+		Attempts: []usage.Attempt{{
+			ID: uuid.NewString(), Ordinal: 1, ProviderID: providerID, UpstreamModel: model,
+			StartedAt: now, CompletedAt: now, Committed: true,
+			Usage:   &usage.AttemptUsage{Observed: false, BillingUncertain: true},
+			Routing: &usage.Routing{ProviderRevisionID: revision},
+		}},
+	}
+	resourceID := uuid.New()
+	digest := bytes.Repeat([]byte{0x7a}, 32)
+	status := 200
+	input, output := int64(8), int64(5)
+	result := Result{CustomID: "line-1", Kind: ResultSucceeded, StatusCode: &status,
+		Usage: usage.AttemptUsage{Observed: true, Complete: true, InputTokens: &input, OutputTokens: &output}}
+	first, err := ResultEvent(template, resourceID, digest, result, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ResultEvent(template, resourceID, digest, result, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.EventID != first.RequestID || first.EventID != second.EventID ||
+		first.Attempts[0].ID != second.Attempts[0].ID || first.ParentRequestID == nil ||
+		*first.ParentRequestID != createID || !first.Batch || !first.Attempts[0].Usage.Batch {
+		t.Fatalf("batch event identity or provenance is invalid: %+v", first)
+	}
+	if _, err = usage.Validate(first); err != nil {
+		t.Fatalf("batch result event failed usage validation: %v", err)
+	}
+	gap, err := ResultEvent(template, resourceID, digest, Result{
+		CustomID: "*", Kind: ResultGap,
+		Usage: usage.AttemptUsage{Observed: false, BillingUncertain: true},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gap.Attempts[0].Usage.Observed || !gap.Attempts[0].Usage.BillingUncertain ||
+		!gap.Batch || !gap.Attempts[0].Usage.Batch {
+		t.Fatalf("gap event did not preserve uncertain batch usage: %+v", gap)
+	}
+}
+
+func TestBatchCursorPrefixDigestSkipAndMismatch(t *testing.T) {
+	body := readFixture(t, "cursor.jsonl")
+	firstEnd := bytes.IndexByte(body, '\n') + 1
+	prefix := sha256.Sum256(body[:firstEnd])
+	cursor := Cursor{Phase: "output", File: "file-1", Line: 1, PrefixSHA256: hex.EncodeToString(prefix[:])}
+	var got []Result
+	next, read, _, err := ReadJSONLPages(bytes.NewReader(body), cursor, "file-1", "output",
+		func(line []byte) (Result, error) {
+			return Result{CustomID: string(line), Kind: ResultSucceeded, Evidence: append([]byte(nil), line...)}, nil
+		},
+		func(results []Result, _ Cursor) error { got = append(got, results...); return nil })
+	if err != nil || read != int64(len(body)) || next.Line != 2 || len(got) != 1 || !bytes.Contains([]byte(got[0].CustomID), []byte("cursor-2")) {
+		t.Fatalf("cursor resume: next=%+v read=%d got=%+v err=%v", next, read, got, err)
+	}
+	cursor.PrefixSHA256 = strings.Repeat("0", 64)
+	_, _, _, err = ReadJSONLPages(bytes.NewReader(body), cursor, "file-1", "output",
+		func(line []byte) (Result, error) { return Result{}, nil },
+		func([]Result, Cursor) error { return nil })
+	if !errors.Is(err, ErrCursorConflict) {
+		t.Fatalf("changed prefix error = %v, want %v", err, ErrCursorConflict)
+	}
+}
+
+func TestBatchReconciliationMatchDecision(t *testing.T) {
+	after := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	candidates := []BatchSnapshot{
+		{ID: "old", InputFileID: "owned-file", CreatedAt: after.Add(-6 * time.Minute)},
+		{ID: "other-input", InputFileID: "other-file", CreatedAt: after},
+		{ID: "one", InputFileID: "owned-file", CreatedAt: after},
+		{ID: "two", InputFileID: "owned-file", CreatedAt: after.Add(time.Second)},
+	}
+	if matches := MatchSubmission(candidates[:2], "owned-file", after); len(matches) != 0 {
+		t.Fatalf("unmatched submission: %+v", matches)
+	}
+	if matches := MatchSubmission(candidates[:3], "owned-file", after); len(matches) != 1 || matches[0].ID != "one" {
+		t.Fatalf("single submission match: %+v", matches)
+	}
+	if matches := MatchSubmission(candidates, "owned-file", after); len(matches) != 2 {
+		t.Fatalf("ambiguous submission matches: %+v", matches)
+	}
+}
+
+func TestBatchLineDigestUsesItsPurpose(t *testing.T) {
+	auth := secrets.NewAuthKey(bytes.Repeat([]byte{0x5a}, 32), uuid.NewString())
+	got := CustomIDDigest(auth, "custom-line")
+	want := auth.Digest(secrets.BatchLineDigest, "custom-line")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("custom ID digest = %x, want %x", got, want)
+	}
+}
+
+func jsonValid(body []byte) bool {
+	var value any
+	return json.Unmarshal(body, &value) == nil
+}

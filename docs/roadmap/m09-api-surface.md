@@ -169,21 +169,21 @@ does not change line identity. Unsupported line mappings fail the whole batch
 before provider work, not after a paid partial submission.
 
 **Settlement.** `batch_settlement` is a supervised, checkpointed worker using
-PostgreSQL leases, bounded polling/backoff and restart-safe cursors. Batch
-creation refuses token and non-exempt cost budgets with
-`422 unbounded_work_budget`; this slice makes no durable reservation. Each
-unsettled settlement projects pending budget subjects, so a budget enabled
-after acceptance fails closed with `cost_accounting_incomplete` until closure.
+PostgreSQL leases, bounded polling/backoff and restart-safe cursors. Reserve the
+bounded estimated cost before submission using pinned output limits; refuse a
+budget-constrained job when its maximum exposure cannot be bounded. Keep the
+reservation until terminal settlement or explicit uncertain reconciliation,
+not an ordinary HTTP lease timeout.
 
-For each terminal result, use a unique ledger identity
-`(resource_id, HMAC(custom_id), result_kind)` and commit observed usage, pinned
-batch price/rate-card calculation and settlement atomically. Duplicate pages,
-workers and restarts are idempotent. Conflicting duplicate results stop
-settlement with visible uncertainty. Failed/cancelled batches still settle
-reported paid partial results. Missing lines/usage stay billing-uncertain; never
-invent a zero-cost result. Cost deduplication survives resource deletion and
-normal resource expiry for the accounting retention period. Re-reading a result
-file does not charge inference again.
+For each terminal result, use a unique ledger identity `(resource_id, custom_id,
+result_kind)` and commit observed usage, pinned batch price/rate-card calculation
+and reservation release atomically. Duplicate pages, workers and restarts are
+idempotent. Conflicting duplicate results stop settlement with visible
+uncertainty. Failed/cancelled batches still settle reported paid partial
+results. Missing lines/usage stay billing-uncertain; never invent a zero-cost
+result. Cost deduplication survives resource deletion and normal resource
+expiry for the accounting retention period. Re-reading a result file does not
+charge inference again.
 
 **M9.2 implementation decisions.** These replace the planned bounded-cost
 reservation and fix the settlement boundary:
@@ -192,6 +192,9 @@ reservation and fix the settlement boundary:
   `422 unbounded_work_budget`; this slice makes no durable reservation.
   Unsettled settlements project pending budget subjects, so budgets enabled
   after acceptance fail closed with `cost_accounting_incomplete` until closure.
+  Durable reservations need PostgreSQL-backed provisional debits across every
+  budget-owner kind, deferred to the shared provisional ledger M10 also requires;
+  this replaces the planning text's reservation requirement.
 - Fireworks is excluded: it has no OpenAI-compatible files/batches API, and
   its dataset batch results use provider-returned signed URLs forbidden by the
   egress contract.
