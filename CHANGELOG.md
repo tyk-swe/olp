@@ -7,6 +7,12 @@ semantic versioning and take their source from root `package.json`;
 
 ## [Unreleased]
 
+### Added
+
+- Expose metadata-only batch settlement progress and in-flight submission
+  intents in provider-resource listings; document M9.2 provider scope,
+  configuration and operator recovery.
+
 ### Security
 
 - Capture policies pin ordered local detector revisions and independently redact

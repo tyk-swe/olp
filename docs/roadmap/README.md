@@ -56,13 +56,15 @@ intent. Everything ships in the single AGPL product, without a feature paywall.
 
 M1–M6, M8 and M11 are implemented; M7 and M9 are in progress, and M10 remains planned.
 M6 has local verification; its full integration and benchmark qualification remain
-open as recorded in [the commitment evidence](m06-commitment-evidence.md). M9's
-legacy completions (M9.1) and text Decisions (M9.10) slices have local protocol,
-gateway, route-inspection and pinned SDK evidence; OCR/search (M9.7) has the
-same gateway evidence plus raw-HTTP process fixtures — no locked SDK exists for
-these APIs — and a Chromium journey. Console/browser qualification remains open
-for M9.1 and M9.10, live-provider qualification remains open for all three, and
-the other M9 slices are unbuilt. The
+open as recorded in [the commitment evidence](m06-commitment-evidence.md). M9.2
+files/batches, M9.1 legacy completions and M9.10 text Decisions have local
+protocol, gateway, route-inspection and pinned SDK evidence; OCR/search (M9.7)
+has the same gateway evidence plus raw-HTTP process fixtures — no locked SDK
+exists for these APIs — and a Chromium journey. M9.2 still needs database-backed
+SDK qualification, Chromium/console qualification, per-provider live
+qualification and the release performance gate. Console/browser qualification
+remains open for M9.1 and M9.10, live-provider qualification remains open for
+these slices, and the other M9 slices are unbuilt. The
 [implementation review](m01-m04-implementation-review.md) records historical
 focused evidence and the [architecture review](../architecture-review.md) records
 later integrated qualification. Neither establishes uncollected full-rate,
@@ -98,7 +100,7 @@ taking a slice owns it through qualification.
 | 1 · guardrails | Close M7 vendor coverage decisions and capture-redaction integration | Existing immutable engine, streaming holdback and M5 capture boundary | Guardrails/export owners; named adapter contracts, capture leakage/failure tests and M7 exit evidence |
 | 1 · accounting | M2.4 calibration and M6 live billing/sink qualification; additional invoice adapters follow | Signed calibration provenance and the existing commitment/invoice ledgers | Catalog/billing owners; measured family corpus, total commitment-cost reconciliation and provider-specific import fixtures |
 | 2 · stateless APIs | M9.7 OCR/search implemented on the shared ledger and codec contracts; qualify the implemented M9.1, M9.7 and M9.10 slices in the console and against live providers | M2 certification; M7 inspection contract and M6 units for each supported surface | Protocol/connector owners; explicit operation/provider ledger, native fixtures, SDK qualification, and Chromium journeys and per-provider live results for M9.1, M9.7 and M9.10 |
-| 2 · retained APIs | M9 resource lifecycle and files/batches, then fine-tuning, vector stores, Responses and other retained families | Historical target/credential authority, cancellation and usage-settlement contract | Resource/worker owners; cross-project denial, replay, ambiguous-create, cleanup and late-usage tests |
+| 2 · retained APIs | M9.3–M9.5 and M9.8 on the M9.2 settlement foundation; qualify M9.2 files/batches | Historical target/credential authority, cancellation and usage-settlement contract | Resource/worker owners; cross-project denial, replay, ambiguous-create, cleanup, provider settlement and late-usage tests |
 | 2 · realtime | M9 realtime expansion | Transport-specific inspection, accounting and revocation controls are demonstrable | Realtime owner; connection teardown, reconnect and usage-completeness qualification before enabling each transport |
 | 2 · tools | M10 direct MCP, then gateway tool loops and A2A | Existing MCP registration plus M4 authority, M7 tool governance, M5 facts and M6 prices | MCP/agent owners; pinned-tool drift, grant isolation, cancellation and one-accounting-event-per-attempt evidence |
 | 2 · agent support | M10 prompt registry, traces and delegated identities | The corresponding M10 resource/identity contracts; traces use M5 content-free facts | Agent/access owners; immutable rendering, scoped metadata queries and delegation/revocation tests |
@@ -150,9 +152,10 @@ At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
 This historical scorecard is preserved for comparison.
 The current 153 capability rows reflect implemented capabilities, including M8,
 project limit templates, the scoped model catalog, FOCUS export with complete
-commitment cost, legacy text completions (`Parity`) and the text-only Decisions
-API (`Partial`): 23 `Ahead`, 103 `Parity`, 7 `Partial`, 18 `Gap`, 2 `Excluded`;
-coverage is 126/151 (83.4%).
+commitment cost, legacy text completions (`Parity`), text-only Decisions
+(`Partial`) and M9.2 files/batches plus result settlement (`Parity`), with
+managed batches (`Partial`): 23 `Ahead`, 105 `Parity`, 9 `Partial`, 14 `Gap`, 2 `Excluded`;
+coverage is 128/151 (84.8%).
 Status rows in the legend are not capabilities. Definitions/registrations alone
 do not close broader guardrail-execution or agent-gateway workstreams.
 

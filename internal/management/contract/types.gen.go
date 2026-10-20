@@ -9900,15 +9900,26 @@ type ProviderResourceItem struct {
 	ExpiresAt  nullable.Nullable[time.Time] `json:"expires_at"`
 
 	// Id Gateway-issued local identifier (kind_ plus a dash-free UUID).
-	Id            string                   `json:"id"`
-	Kind          ProviderResourceItemKind `json:"kind"`
-	ProviderId    openapi_types.UUID       `json:"provider_id"`
-	ProviderName  string                   `json:"provider_name"`
-	Route         string                   `json:"route"`
-	State         string                   `json:"state"`
-	UpdatedAt     time.Time                `json:"updated_at"`
-	UpstreamId    string                   `json:"upstream_id"`
-	UpstreamModel string                   `json:"upstream_model"`
+	Id           string                   `json:"id"`
+	Kind         ProviderResourceItemKind `json:"kind"`
+	ProviderId   openapi_types.UUID       `json:"provider_id"`
+	ProviderName string                   `json:"provider_name"`
+	Route        string                   `json:"route"`
+
+	// Settlement Metadata-only batch settlement progress, when the resource has a settlement record.
+	Settlement nullable.Nullable[struct {
+		CloseAfter       time.Time                    `json:"close_after"`
+		ClosedAt         nullable.Nullable[time.Time] `json:"closed_at"`
+		ExpectedResults  nullable.Nullable[int64]     `json:"expected_results"`
+		LastErrorClass   nullable.Nullable[string]    `json:"last_error_class"`
+		SettledResults   int64                        `json:"settled_results"`
+		State            string                       `json:"state"`
+		UncertainResults int64                        `json:"uncertain_results"`
+	}] `json:"settlement,omitempty"`
+	State         string    `json:"state"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	UpstreamId    string    `json:"upstream_id"`
+	UpstreamModel string    `json:"upstream_model"`
 }
 
 // ProviderResourceItemKind defines model for ProviderResourceItem.Kind.

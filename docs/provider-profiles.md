@@ -55,6 +55,14 @@ listing; otherwise operators declare its providers' models.
 | `bedrock-invoke` | Qualified model-specific native Invoke surface; no generation/Chat fallback. |
 | `sagemaker-openai-chat` | `/endpoints/{endpoint}[/inference-components/{component}]/openai/v1/chat/completions`; see [SageMaker AI](providers/sagemaker.md). |
 
+## Cloud batch profiles
+
+`vertex-batch-prediction` and `bedrock-batch-inference` are batch-only
+control-plane profiles; they do not enable live generation. Both require the
+nonsecret operator `batch_storage` object with input and output URI prefixes:
+Vertex uses `gs://`, while Bedrock uses `s3://` and requires `role_arn`.
+Validation constrains candidate and job output URIs to those configured scopes.
+
 Each built-in composition currently has OLP profile revision `1`. This identifies
 OLP's component composition, not an immutable provider/model release. Undated
 provider APIs and moving model aliases remain mutable. Gemini Interactions and

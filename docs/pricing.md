@@ -271,6 +271,14 @@ budget is configured.
 
 ## Estimates and quotes
 
+Batch results use the price pinned at submission for the line operation
+(normally `generation`): each result's observed usage is priced and multiplied
+by the pinned `batch_multiplier`. A missing multiplier leaves the result
+unpriced; it is never treated as one or zero. Vertex emits one result per
+prediction line, while Bedrock's manifest yields one aggregate result. The
+settlement event uses origin `batch_settlement` and links to the parent batch
+creation request; errors without usage create no cost fact.
+
 Simulation decisions carry `estimated_cost` per target: `minimum` prices the
 input estimate at the cheapest input-side rate of the selected tier plus the
 per-request fee, and `maximum` is the bound the gateway would reserve — the
@@ -288,4 +296,3 @@ It takes `provider_id`, `model`, `operation`, the usage dimensions, and
 optionally `started_at` (default now), `successful` (default true) and
 `project_id` naming the consumer whose card prices the charge; absent, the
 installation's card applies.
-

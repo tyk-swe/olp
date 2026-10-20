@@ -9099,6 +9099,60 @@
           "state": {
             "type": "string"
           },
+          "settlement": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Metadata-only batch settlement progress, when the resource has a settlement record.",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "expected_results": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "settled_results": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "uncertain_results": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "last_error_class": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "close_after": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "closed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "expected_results",
+              "settled_results",
+              "uncertain_results",
+              "last_error_class",
+              "close_after",
+              "closed_at"
+            ]
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"

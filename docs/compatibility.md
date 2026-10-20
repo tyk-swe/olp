@@ -509,6 +509,36 @@ audio translation, and video operations remain uncertifiable. See
 See the [Azure connector guide](providers/azure.md) for API-key and Microsoft
 Entra authentication, token caching, and identity egress.
 
+## Files and batches
+
+| Provider/surface | Supported scope |
+| --- | --- |
+| OpenAI and Azure OpenAI | Native and strict OpenAI-shaped `/v1/files` and `/v1/batches`. |
+| Groq | Native file/batch endpoints under the reviewed Groq contract. |
+| Together, Mistral and Gemini | Managed OpenAI-shaped file uploads and batches on transformed routes. |
+| Anthropic | Native `/anthropic/v1/files` and Messages batch jobs on transformed routes. |
+| Gemini | Native resumable upload, Files list/get/delete/download and `batchGenerateContent`. |
+| Vertex AI and Bedrock | Transformed-only `/native/{dialect}/batch-jobs` create/list/get/cancel, with operator-configured `batch_storage`. |
+| Fireworks | Declined: result retrieval uses provider-returned signed URLs, which the egress contract forbids. |
+
+Managed Anthropic, Vertex and Bedrock OpenAI-shaped batches are refused with
+`422 target_capability`; only the listed managed adapters translate through the
+OpenAI file/batch shape.
+Strict resource and batch routes are available only to OpenAI and Azure OpenAI;
+other families return `422 target_capability`. Batch creation that cannot be
+bounded by the applicable enforced budget returns `422 unbounded_work_budget`.
+Unknown fields, unsupported output configuration, unsafe file references,
+out-of-prefix cloud URIs and unsupported timeout settings are refused rather
+than silently ignored.
+
+Creation requires `X-OLP-Route`; follow-up requests derive route and affinity
+from the owner-scoped gateway ID. Ambiguous creates are retained as
+`submission_unknown`: the create returns `502`, a matching reconciliation can
+adopt the job, while conflicting evidence returns `409` and is never blindly
+redispatched. Result
+settlement records observed per-result usage against the pinned line-operation
+price; incomplete evidence remains uncertain and is never zero-cost.
+
 ## SDK and live-provider checks
 
 The deterministic JavaScript smoke suite pins OpenAI `7.4.0`, Anthropic

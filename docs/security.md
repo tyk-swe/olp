@@ -129,6 +129,12 @@ only the encrypted dependencies their documented continuation protocol requires.
 
 ## Secrets
 
+Batch tables (`batch_settlements`, `batch_settlement_results` and
+`attempt_usage_facts`) contain lifecycle/accounting metadata only;
+`custom_id_digest` is an HMAC, not the custom ID or request/result lines. Gemini
+resumable upload URLs are sealed under the upload-session resource and are never
+returned from management metadata.
+
 OLP holds two keys, both mounted from files that others cannot read:
 
 - The **authentication key** computes HMAC-SHA256 digests, each bound to the

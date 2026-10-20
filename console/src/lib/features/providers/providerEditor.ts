@@ -104,7 +104,9 @@ function configurationViews<Values extends ProviderEditValues>(
       enumerable: true,
       configurable: true,
       get: () => document.text([member]),
-      set: (input: string) =>
+      set: (input: string) => {
+        const previousProfile =
+          member === 'profile_id' ? document.text(['profile_id']) : '';
         document.set(
           [member],
           member === 'profile_id' || member === 'profile_revision'
@@ -112,7 +114,10 @@ function configurationViews<Values extends ProviderEditValues>(
             : member === 'kind' || member === 'auth_mode'
               ? input
               : input.trim() || null
-        )
+        );
+        if (member === 'profile_id' && previousProfile !== input)
+          document.set(['batch_storage'], null);
+      }
     });
   }
   Object.defineProperty(values, 'options', {
@@ -487,6 +492,7 @@ function buildConnectionFields(
     cloud_project: hasCloudProject(spec)
       ? values.cloudProject.trim() || null
       : null,
+    batch_storage: null,
     deployment: hasDeployment(spec) ? values.deployment.trim() || null : null
   };
 }

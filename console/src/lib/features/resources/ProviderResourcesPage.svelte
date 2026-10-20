@@ -16,7 +16,18 @@
   const kinds: ProviderResourceFilters['kind'][] = [
     'file',
     'batch',
-    'response'
+    'response',
+    'continuation',
+    'strict_response',
+    'interaction',
+    'strict_file',
+    'strict_batch',
+    'anthropic_file',
+    'anthropic_batch',
+    'gemini_upload',
+    'gemini_file',
+    'gemini_batch',
+    'cloud_batch'
   ];
 
   let kind = $state('');
@@ -67,7 +78,7 @@
     <p class="eyebrow">Operations</p>
     <h1 class="page-title">Provider Resources</h1>
     <p class="page-description">
-      Metadata-only mappings for files, batches, and stored responses. Provider
+      Metadata-only mappings for provider resources and batch settlement. Provider
       content never appears in the console.
     </p>
   </div>
@@ -155,7 +166,15 @@
             ><td data-label="API key"
               >{item.api_key_name}<small class="mono">{item.api_key_id}</small
               ></td
-            ><td data-label="State">{item.state}</td><td data-label="Expires"
+            ><td data-label="State">{item.state}
+              {#if item.settlement}
+                <small>
+                  Settlement {item.settlement.state} ·
+                  {item.settlement.settled_results}/{item.settlement.expected_results ??
+                    '—'} settled · {item.settlement.uncertain_results} uncertain
+                </small>
+              {/if}</td
+            ><td data-label="Expires"
               >{item.expires_at ? formatDate(item.expires_at) : '—'}</td
             ><td data-label="Updated">{formatDate(item.updated_at)}</td></tr
           >{/each}</tbody
