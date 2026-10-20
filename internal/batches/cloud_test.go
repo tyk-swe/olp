@@ -267,3 +267,19 @@ func TestVertexReconcileTerminalOutput(t *testing.T) {
 		t.Fatalf("terminal adoption lost its GCS output identity: %+v err=%v", matches, err)
 	}
 }
+
+func TestBedrockManifestRequiresUsageCounters(t *testing.T) {
+	for _, body := range []string{
+		`{"totalRecordCount":2,"processedRecordCount":2}`,
+		`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":0}`,
+		`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":0,"outputTokenCount":null}`,
+	} {
+		if _, err := parseBedrockManifest([]byte(body)); err == nil {
+			t.Fatalf("absent usage was treated as zero: %s", body)
+		}
+	}
+	zero, err := parseBedrockManifest([]byte(`{"totalRecordCount":0,"processedRecordCount":0,"inputTokenCount":0,"outputTokenCount":0}`))
+	if err != nil || !zero.Usage.Complete || zero.Usage.InputTokens == nil || *zero.Usage.InputTokens != 0 {
+		t.Fatalf("explicit zero usage is invalid: %+v err=%v", zero, err)
+	}
+}

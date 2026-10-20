@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -50,5 +53,21 @@ func TestCloudBatchStrictTargetRefusal(t *testing.T) {
 		if refusal == nil || refusal.Status != 422 || refusal.Type != "invalid_request_error" || refusal.Code != "target_capability" {
 			t.Fatalf("%s strict refusal=%+v", kind, refusal)
 		}
+	}
+}
+
+func TestCloudBatchCreationChecksRouteAuthority(t *testing.T) {
+	h := newHarness(t, Config{})
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	route.Operations = []string{"batch"}
+	h.rt.release.Snapshot.Routes[routeSlug] = route
+	req := httptest.NewRequest(http.MethodPost, "/native/vertex-batch-prediction/batch-jobs", strings.NewReader(`{}`))
+	req.SetPathValue("dialect", "vertex-batch-prediction")
+	req.Header.Set("Authorization", "Bearer "+otherKey)
+	req.Header.Set(stateRouteHeader, routeSlug)
+	response := httptest.NewRecorder()
+	h.gateway.createCloudBatch(response, req)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "route_forbidden") {
+		t.Fatalf("unauthorized cloud route was admitted: %d %s", response.Code, response.Body.String())
 	}
 }

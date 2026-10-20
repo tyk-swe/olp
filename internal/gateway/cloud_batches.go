@@ -255,6 +255,10 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, notFoundError("not_found", "No matching batch route exists."))
 		return
 	}
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		s.cloudBatchFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
+		return
+	}
 	x.route = &route
 	p, e := s.selectPinSurface(r.Context(), x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
 		cfg := provider.Connector()
@@ -303,10 +307,12 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
-	if gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), ""); gate.verdict != gateAdmitted {
-		s.cloudBatchFail(x, w, gateError(gate))
-		return
-	} else {
+	if p.hold == nil {
+		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
+		if gate.verdict != gateAdmitted {
+			s.cloudBatchFail(x, w, gateError(gate))
+			return
+		}
 		p.hold = gate.hold
 	}
 	source, err := parseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})

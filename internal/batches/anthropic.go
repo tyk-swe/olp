@@ -136,7 +136,7 @@ func parseAnthropicResultLine(line []byte, model string) (Result, error) {
 	if json.Unmarshal(canonical, &object) != nil || object.CustomID == "" {
 		return Result{}, ErrCursorConflict
 	}
-	result := Result{CustomID: object.CustomID, Evidence: canonical}
+	result := Result{CustomID: object.CustomID, Evidence: canonical, Usage: usage.AttemptUsage{Complete: true}}
 	switch object.Result.Type {
 	case "errored":
 		result.Kind = ResultErrored

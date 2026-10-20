@@ -2,6 +2,7 @@ package batches
 
 import (
 	"errors"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,6 +115,10 @@ func ResultEvent(template *usage.Event, resourceID uuid.UUID, customIDDigest []b
 	event.RequestCompletedAt = now
 	event.ObservedAt = now
 	event.StatusCode = cloneInt(result.StatusCode)
+	successful := result.Kind == ResultSucceeded || result.Kind == ResultAggregate
+	if successful && event.StatusCode == nil {
+		event.StatusCode = new(http.StatusOK)
+	}
 	event.ErrorClass = nil
 	event.Committed = true
 	event.LatencyMS = 0
@@ -124,7 +129,7 @@ func ResultEvent(template *usage.Event, resourceID uuid.UUID, customIDDigest []b
 	attempt.ID = attemptID.String()
 	attempt.StartedAt = now
 	attempt.CompletedAt = now
-	attempt.StatusCode = cloneInt(result.StatusCode)
+	attempt.StatusCode = cloneInt(event.StatusCode)
 	attempt.ErrorClass = nil
 	attempt.Committed = true
 	attempt.LatencyMS = 0
@@ -132,7 +137,7 @@ func ResultEvent(template *usage.Event, resourceID uuid.UUID, customIDDigest []b
 	usageEvidence := result.Usage
 	usageEvidence.Batch = true
 	attempt.Usage = &usageEvidence
-	if result.Kind != ResultSucceeded {
+	if !successful {
 		errorClass := result.ErrorClass
 		if errorClass == "" {
 			errorClass = "batch_" + string(result.Kind)

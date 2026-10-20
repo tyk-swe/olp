@@ -342,7 +342,7 @@ func (c *Configuration) Authenticates(pluginDigest, profileID string) bool {
 // unchanged.
 func (c *Configuration) transportFingerprint() string {
 	h := sha256.New()
-	parts := []any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.BatchStorage, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID}
+	parts := []any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID}
 	if c.ProfileID != "" {
 		parts = append(parts, c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings)
 	}
@@ -351,6 +351,9 @@ func (c *Configuration) transportFingerprint() string {
 	}
 	if c.Options.Network != nil {
 		parts = append(parts, c.Options.Network)
+	}
+	if c.BatchStorage != nil {
+		parts = append(parts, c.BatchStorage)
 	}
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)

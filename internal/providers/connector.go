@@ -566,10 +566,7 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 		if status != http.StatusOK {
 			return statusError(cfg, status, body)
 		}
-		var listing struct {
-			Jobs []json.RawMessage `json:"batchPredictionJobs"`
-		}
-		if json.Unmarshal(body, &listing) != nil || listing.Jobs == nil {
+		if !validBatchListing(body, "batchPredictionJobs", true) {
 			return &probeError{Code: "provider_protocol_error", Detail: "Vertex returned a malformed batch job list."}
 		}
 		return nil
@@ -630,24 +627,28 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 		if status != http.StatusOK {
 			return statusError(cfg, status, data)
 		}
-		array := json.RawMessage(data)
-		if probe.array != "" {
-			var object map[string]json.RawMessage
-			if json.Unmarshal(data, &object) != nil || object == nil {
-				return &probeError{Code: "provider_protocol_error", Detail: "The upstream returned a malformed batch listing."}
-			}
-			var present bool
-			array, present = object[probe.array]
-			if !present && probe.optional {
-				continue // Protobuf JSON omits empty repeated fields.
-			}
-		}
-		var items []json.RawMessage
-		if json.Unmarshal(array, &items) != nil || items == nil {
+		if !validBatchListing(data, probe.array, probe.optional) {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the batch listing contract."}
 		}
 	}
 	return nil
+}
+
+func validBatchListing(data []byte, field string, optional bool) bool {
+	array := json.RawMessage(data)
+	if field != "" {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(data, &object) != nil || object == nil {
+			return false
+		}
+		var present bool
+		array, present = object[field]
+		if !present && optional {
+			return true // Protobuf JSON omits empty repeated fields.
+		}
+	}
+	var items []json.RawMessage
+	return json.Unmarshal(array, &items) == nil && items != nil
 }
 
 func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {

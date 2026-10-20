@@ -54,3 +54,16 @@ func TestBatchCertificationUsesProviderListings(t *testing.T) {
 		})
 	}
 }
+
+func TestVertexCertificationEmptyListing(t *testing.T) {
+	for _, body := range []string{`{}`, `{"batchPredictionJobs":[]}`} {
+		if !validBatchListing([]byte(body), "batchPredictionJobs", true) {
+			t.Fatalf("valid empty protobuf listing refused: %s", body)
+		}
+	}
+	for _, body := range []string{`null`, `[]`, `{"batchPredictionJobs":{}}`, `{"batchPredictionJobs":null}`} {
+		if validBatchListing([]byte(body), "batchPredictionJobs", true) {
+			t.Fatalf("malformed protobuf listing accepted: %s", body)
+		}
+	}
+}

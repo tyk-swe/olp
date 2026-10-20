@@ -460,7 +460,7 @@ func parseVertexLine(line []byte, object, generation string, lineNo int64, model
 	}
 	id := fmt.Sprintf("%s#%s:%d", object, generation, lineNo)
 	if item.Status != "" {
-		return Result{CustomID: id, Kind: ResultErrored, ErrorClass: item.Status, Evidence: evidence}, nil
+		return Result{CustomID: id, Kind: ResultErrored, ErrorClass: item.Status, Evidence: evidence, Usage: usage.AttemptUsage{Complete: true}}, nil
 	}
 	if len(item.Response) == 0 {
 		return Result{}, ErrProviderConflict
@@ -585,16 +585,17 @@ func parseBedrockManifest(body []byte) (Result, error) {
 		return Result{}, ErrProviderConflict
 	}
 	var manifest struct {
-		Total     int64 `json:"totalRecordCount"`
-		Processed int64 `json:"processedRecordCount"`
-		Input     int64 `json:"inputTokenCount"`
-		Output    int64 `json:"outputTokenCount"`
+		Total     *int64 `json:"totalRecordCount"`
+		Processed *int64 `json:"processedRecordCount"`
+		Input     *int64 `json:"inputTokenCount"`
+		Output    *int64 `json:"outputTokenCount"`
 	}
-	if json.Unmarshal(body, &manifest) != nil || manifest.Total < 0 || manifest.Processed < 0 || manifest.Input < 0 || manifest.Output < 0 {
+	if json.Unmarshal(body, &manifest) != nil || manifest.Total == nil || manifest.Processed == nil || manifest.Input == nil || manifest.Output == nil ||
+		*manifest.Total < 0 || *manifest.Processed < 0 || *manifest.Processed > *manifest.Total || *manifest.Input < 0 || *manifest.Output < 0 {
 		return Result{}, ErrProviderConflict
 	}
-	usageValue := &wire.Usage{InputTokens: manifest.Input, OutputTokens: manifest.Output, TotalTokens: manifest.Input + manifest.Output}
-	evidence := usage.ObservedAttemptUsage(usageValue, manifest.Processed == manifest.Total, "generation")
+	usageValue := &wire.Usage{InputTokens: *manifest.Input, OutputTokens: *manifest.Output, TotalTokens: *manifest.Input + *manifest.Output}
+	evidence := usage.ObservedAttemptUsage(usageValue, *manifest.Processed == *manifest.Total, "generation")
 	evidence.Batch = true
 	return Result{CustomID: "manifest", Kind: ResultAggregate, Usage: evidence, Evidence: canonical}, nil
 }

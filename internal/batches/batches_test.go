@@ -194,6 +194,36 @@ func TestBatchResultEventIDsAndValidation(t *testing.T) {
 		!gap.Batch || !gap.Attempts[0].Usage.Batch {
 		t.Fatalf("gap event did not preserve uncertain batch usage: %+v", gap)
 	}
+	for _, fixture := range []struct {
+		name  string
+		body  []byte
+		parse ResultLineParser
+	}{
+		{"anthropic", anthropicFixture(t, "batch.results.jsonl"), func(line []byte) (Result, error) { return parseAnthropicResultLine(line, model) }},
+		{"gemini", geminiBatchFixture(t, "batch.results.jsonl"), func(line []byte) (Result, error) { return parseGeminiResult(line, model) }},
+		{"vertex", cloudBatchFixture(t, "vertex", "predictions.jsonl"), func(line []byte) (Result, error) { return parseVertexLine(line, "object", "1", 1, model) }},
+		{"bedrock", cloudBatchFixture(t, "bedrock", "manifest.json.out"), parseBedrockManifest},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			for _, raw := range bytes.Split(bytes.TrimSpace(fixture.body), []byte{'\n'}) {
+				result, err := fixture.parse(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				event, err := ResultEvent(template, resourceID, digest, result, now)
+				if err != nil {
+					t.Fatalf("native result cannot be persisted: %+v err=%v", result, err)
+				}
+				if result.Kind == ResultSucceeded || result.Kind == ResultAggregate {
+					if event.StatusCode == nil || *event.StatusCode != 200 || event.ErrorClass != nil || event.Attempts[0].ErrorClass != nil {
+						t.Fatalf("native success has invalid accounting outcome: %+v", event)
+					}
+				} else if event.Attempts[0].Usage.Observed || !event.Attempts[0].Usage.Complete {
+					t.Fatalf("native error has invalid non-billable evidence: %+v", event.Attempts[0].Usage)
+				}
+			}
+		})
+	}
 }
 
 func TestBatchCursorPrefixDigestSkipAndMismatch(t *testing.T) {

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/notifications"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestReadinessMediaReconciliationReflectsDegradation(t *testing.T) {
@@ -32,5 +34,22 @@ func TestReadinessMediaReconciliationReflectsDegradation(t *testing.T) {
 				t.Fatalf("status = %q, want degraded", h.Status)
 			}
 		})
+	}
+}
+
+func TestReadinessDetectsStaleBatchSettlement(t *testing.T) {
+	health := &WorkerTaskHealth{}
+	for _, task := range WorkerTasks {
+		state := TaskStateHealthy
+		if task.Name == string(usage.TaskBatchSettlement) {
+			state = TaskStateStale
+			if notifications.WorkerStaleAfter(task.Name) == 0 {
+				t.Fatal("batch settlement staleness cannot trigger notifications")
+			}
+		}
+		health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: task.Name, State: state})
+	}
+	if health.CurrentFor(WorkerTasks) || health.StaleFor(WorkerTasks) != 1 {
+		t.Fatal("stopped batch settlement worker was considered healthy")
 	}
 }

@@ -3,6 +3,8 @@ package providers
 import (
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 func TestCredentialValidationTracksUpstreamAccess(t *testing.T) {
@@ -38,5 +40,22 @@ func TestCredentialValidationTracksUpstreamAccess(t *testing.T) {
 		if changedSlot.validationTime(&changedCfg, changedModels) != nil {
 			t.Fatal("changed upstream access retained validation")
 		}
+	}
+}
+
+func TestBatchStoragePreservesLegacyTransportFingerprint(t *testing.T) {
+	cfg := Configuration{Kind: KindOpenAI, AuthMode: AuthAPIKey}
+	cfg.Normalize()
+	// Pinned before batch_storage was introduced: unchanged providers retain
+	// their stored credential-validation evidence across an upgrade.
+	const legacy = "6c3bf07bc3b5a37b6b0d097b46a080fb"
+	if got := cfg.transportFingerprint(); got != legacy {
+		t.Fatalf("legacy transport fingerprint changed: %s", got)
+	}
+	cfg.BatchStorage = &connectors.BatchStorage{InputURIPrefix: "gs://bucket/input/", OutputURIPrefix: "gs://bucket/output/"}
+	withStorage := cfg.transportFingerprint()
+	cfg.BatchStorage.OutputURIPrefix = "gs://bucket/other/"
+	if withStorage == legacy || cfg.transportFingerprint() == withStorage {
+		t.Fatal("batch storage changes did not invalidate transport evidence")
 	}
 }

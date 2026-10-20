@@ -353,7 +353,7 @@ func parseGeminiResult(line []byte, model string) (Result, error) {
 	if json.Unmarshal(canonical, &object) != nil || object.Key == "" {
 		return Result{}, ErrCursorConflict
 	}
-	result := Result{CustomID: object.Key, Evidence: canonical, Kind: ResultErrored, ErrorClass: "gemini_batch_errored"}
+	result := Result{CustomID: object.Key, Evidence: canonical, Kind: ResultErrored, ErrorClass: "gemini_batch_errored", Usage: usage.AttemptUsage{Complete: true}}
 	if len(object.Error) > 0 && string(object.Error) != "null" {
 		if len(object.Response) > 0 && string(object.Response) != "null" {
 			return Result{}, ErrCursorConflict

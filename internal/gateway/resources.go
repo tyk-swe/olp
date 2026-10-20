@@ -562,7 +562,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	_ = json.Unmarshal(owner.Metadata, &ownerMetadata)
 	var adapter string
 	if json.Unmarshal(ownerMetadata["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral") {
-		metadata = managedFileMetadata([]byte(`{}`), nil, adapter, batchManifest{}, role)
+		metadata = managedFileMetadata(metadata, nil, adapter, batchManifest{}, role)
 	}
 	resource := &resources.Resource{
 		Kind:               kind,

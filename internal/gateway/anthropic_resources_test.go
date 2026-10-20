@@ -213,3 +213,17 @@ func TestAnthropicBatchProjectionResultsURL(t *testing.T) {
 		t.Fatalf("Anthropic batch projection = %s", projected)
 	}
 }
+
+func TestAnthropicBetaRejectionReleasesAdmission(t *testing.T) {
+	h := newHarness(t, Config{MaxInFlight: 1})
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/anthropic/v1/files", nil)
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		req.Header.Set("Anthropic-Beta", "unsupported-beta")
+		response := httptest.NewRecorder()
+		_, _, done := h.gateway.anthropicBegin(response, req, wire.AnthropicFile)
+		if !done || response.Code != http.StatusBadRequest || h.gateway.admission.Admitted() != 0 {
+			t.Fatalf("beta rejection leaked admission: status=%d admitted=%d", response.Code, h.gateway.admission.Admitted())
+		}
+	}
+}

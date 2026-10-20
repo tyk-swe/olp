@@ -275,7 +275,9 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 			return w.failOrClose(ctx, settlement, "submission_adoption_unavailable")
 		}
 		settlement.UpstreamID = &snapshot.ID
-		settlement.ExpectedResults = snapshot.Expected
+		if snapshot.Expected != nil {
+			settlement.ExpectedResults = snapshot.Expected
+		}
 		settlement.State = StateActive
 		return w.reconcileActive(ctx, settlement, target, &snapshot)
 	default:

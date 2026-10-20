@@ -52,6 +52,7 @@ func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family w
 		return x, authority, true
 	}
 	if err := validateAnthropicFilesBeta(r.Header); err != nil {
+		s.release(r.Context())
 		s.stateFail(x, w, err, family)
 		return x, authority, true
 	}
