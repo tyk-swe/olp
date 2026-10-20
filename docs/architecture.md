@@ -159,6 +159,19 @@ addressing, response observation and allowance handling. HTTP/SSE and WebSocket
 forwarding preserve raw bytes and upstream refusal envelopes, with no inference
 replay.
 
+In `gateway`, `code_attempt.go` owns generation preparation, dispatch, observations,
+settlement and workload binding for both transports. HTTP request/response copying
+stays in `code_forward.go`, WebSocket handling in `code_forward_websocket.go`;
+`code_transport.go` shares endpoint/client construction and credential headers,
+and `code_refusal.go` owns refusal envelopes and recording.
+
+The console's `ResourceEditor` dispatches to account, pool, route and budget
+editors. Each owns its fields, reference queries, validation and typed write
+payload; enrollment stays with the account editor. `resourceSubmission.svelte.ts`
+shares submission state, dirty notifications, cancellation, stale completion
+protection and ambiguous-create recovery through `useMutationIntent`.
+`ResourceEditorForm` shares the form shell and actions with Svelte snippets.
+
 The provider `CodeAuthorizer` verifies the frozen plugin, checks the live grant and
 credential eligibility, resolves its secret and delegates credential construction
 to the adapter. Dispatch includes the client path; authorization verifies that

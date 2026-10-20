@@ -1036,28 +1036,94 @@ it('does not load code-mode data without read authority', async () => {
   expect(api.listCodeAccounts).not.toHaveBeenCalled();
 });
 
-it('retries an ambiguous create with its captured input and identity', async () => {
-  vi.mocked(api.saveCodePool)
-    .mockRejectedValueOnce(new TypeError('response lost'))
-    .mockResolvedValue(pool);
-  await render();
-  await click('Pools');
-  await click('Create pool');
-  field('code-name', 'Uncertain pool');
-  await submit();
-  const first = vi.mocked(api.saveCodePool).mock.calls[0];
-  expect(
-    host.querySelector<HTMLInputElement>('#code-name')!.matches(':disabled')
-  ).toBe(true);
-  await click('Retry save');
-  expect(api.saveCodePool).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(api.saveCodePool).mock.calls[1]).toEqual(first);
-  expect(host.textContent).toContain('Changes saved.');
-  await click('Create pool');
-  field('code-name', 'Uncertain pool');
-  await submit();
-  expect(vi.mocked(api.saveCodePool).mock.calls[2][2]).not.toBe(first[2]);
-});
+it.each([
+  {
+    tab: 'Accounts',
+    noun: 'account',
+    mockSave: () => vi.mocked(api.saveCodeAccount).mockResolvedValue(account),
+    fields: [
+      ['code-name', 'Uncertain account'],
+      ['code-provider', provider.id],
+      ['code-credential', account.credential_id],
+      ['code-models', 'native-model']
+    ]
+  },
+  {
+    tab: 'Pools',
+    noun: 'pool',
+    mockSave: () => vi.mocked(api.saveCodePool).mockResolvedValue(pool),
+    fields: [['code-name', 'Uncertain pool']]
+  },
+  {
+    tab: 'Routes',
+    noun: 'route',
+    mockSave: () => vi.mocked(api.saveCodeRoute).mockResolvedValue(route),
+    fields: [
+      ['code-slug', 'uncertain-route'],
+      ['code-pool', pool.id],
+      ['code-models', 'native-model']
+    ]
+  },
+  {
+    tab: 'Token budgets',
+    noun: 'budget',
+    mockSave: () => vi.mocked(api.saveCodeBudget).mockResolvedValue(budget),
+    fields: [['code-daily', '12000']]
+  }
+])(
+  'retries an ambiguous $noun create with its captured input and identity',
+  async ({ tab, noun, mockSave, fields }) => {
+    const save = mockSave().mockRejectedValueOnce(
+      new TypeError('response lost')
+    );
+    vi.mocked(listProviderCredentials).mockResolvedValue([
+      {
+        id: account.credential_id,
+        version: 1,
+        active: false,
+        draft_selected: true,
+        created_at: '2026-10-01T00:00:00Z',
+        grant: {
+          plugin_digest: 'a'.repeat(64),
+          principal: account.principal,
+          facts: {},
+          expires_at: null,
+          lapsed_at: null
+        }
+      }
+    ]);
+    await render();
+    await click(tab);
+    await click(`Create ${noun}`);
+    for (const [id, value] of fields) {
+      field(id, value);
+      await settle();
+    }
+    await submit();
+    const first = structuredClone(save.mock.calls[0]);
+    expect(first).toEqual([expect.any(Object), undefined, expect.any(String)]);
+    expect(
+      host
+        .querySelector<HTMLInputElement>(`#${fields[0][0]}`)!
+        .matches(':disabled')
+    ).toBe(true);
+    await click('Retry save');
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]).toEqual(first);
+    expect(host.textContent).toContain(
+      noun === 'route' ? 'Draft saved.' : 'Changes saved.'
+    );
+    await click(`Create ${noun}`);
+    for (const [id, value] of fields) {
+      field(id, value);
+      await settle();
+    }
+    await submit();
+    expect(save).toHaveBeenCalledTimes(3);
+    expect(save.mock.calls[2][0]).toEqual(first[0]);
+    expect(save.mock.calls[2][2]).not.toBe(first[2]);
+  }
+);
 
 it('guards dirty inputs across local project and tab changes', async () => {
   await render();
