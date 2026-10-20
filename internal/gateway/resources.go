@@ -109,7 +109,7 @@ func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
 	for _, target := range route.Targets {
 		provider, ok := x.snapshot().Providers[target.ProviderID]
 		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
-			return serverError(http.StatusUnprocessableEntity, "target_capability",
+			return policyUnavailable("target_capability",
 				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
 		}
 	}
@@ -118,7 +118,7 @@ func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
 
 func strictBatchTargetRefusal(p *pin) *Error {
 	if p != nil && p.provider.Kind != "openai" && p.provider.Kind != "azure_openai" {
-		return serverError(http.StatusUnprocessableEntity, "target_capability",
+		return policyUnavailable("target_capability",
 			"Strict routes serve files and batches only for OpenAI and Azure.")
 	}
 	return nil
@@ -1659,7 +1659,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if !valid {
 			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
 			defer stopUnknown()
-			_ = s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now())
+			if markErr := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+				s.log.Warn("managed batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
+			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."), x.family)
 			return
 		}

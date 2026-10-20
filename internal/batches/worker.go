@@ -100,8 +100,14 @@ func (w *Worker) setup() {
 	if w.Readers == nil {
 		w.Readers = map[string]Reader{}
 	}
+	if w.Readers["anthropic"] == nil {
+		w.Readers["anthropic"] = &AnthropicReader{Auth: w.Auth, Egress: w.Egress}
+	}
 	if w.Readers["openai"] == nil {
 		w.Readers["openai"] = &OpenAIReader{Auth: w.Auth, Egress: w.Egress}
+	}
+	if w.Readers["anthropic"] == nil {
+		w.Readers["anthropic"] = &AnthropicReader{Auth: w.Auth, Egress: w.Egress}
 	}
 }
 

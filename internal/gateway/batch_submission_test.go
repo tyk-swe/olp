@@ -301,7 +301,7 @@ func parseBatchTestObject(t *testing.T, body string) oif.Document {
 }
 
 func TestStrictAndFireworksBatchRefusals(t *testing.T) {
-	if err := strictBatchTargetRefusal(&pin{provider: routing.Provider{Kind: "openai_compatible"}}); err == nil || err.Code != "target_capability" || err.Status != 422 ||
+	if err := strictBatchTargetRefusal(&pin{provider: routing.Provider{Kind: "openai_compatible"}}); err == nil || err.Type != "invalid_request_error" || err.Code != "target_capability" || err.Status != 422 ||
 		err.Message != "Strict routes serve files and batches only for OpenAI and Azure." {
 		t.Fatalf("strict managed batch refusal = %v", err)
 	}
@@ -312,7 +312,7 @@ func TestStrictAndFireworksBatchRefusals(t *testing.T) {
 		Providers: map[string]routing.Provider{"fireworks": {ID: "fireworks", Kind: "openai_compatible", VendorID: "fireworks"}},
 	}}}}
 	route := &routing.Route{Targets: []routing.Target{{ProviderID: "fireworks"}}}
-	if err := fireworksBatchRefusal(x, route); err == nil || err.Code != "target_capability" || err.Status != 422 ||
+	if err := fireworksBatchRefusal(x, route); err == nil || err.Type != "invalid_request_error" || err.Code != "target_capability" || err.Status != 422 ||
 		err.Message != "Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids." {
 		t.Fatalf("Fireworks batch refusal = %v", err)
 	}

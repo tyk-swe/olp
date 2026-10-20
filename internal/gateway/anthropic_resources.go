@@ -103,7 +103,7 @@ func (s *Server) anthropicRoute(x *call, authority access.Authority, r *http.Req
 		return nil, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
 	}
 	if x.strict() {
-		return nil, serverError(http.StatusUnprocessableEntity, "target_capability", "Strict routes do not serve Anthropic files and batches.")
+		return nil, policyUnavailable("target_capability", "Strict routes do not serve Anthropic files and batches.")
 	}
 	if e := x.guardrailSurfaceGate(&route); e != nil {
 		return nil, e
@@ -496,13 +496,17 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		if failure.status == 0 && failure.dispatched {
 			commit, stop := resourceCommitContext(r.Context())
 			defer stop()
-			_ = s.Batches.MarkUnknown(commit, submission.resource.UUID, "submission_unknown", s.now())
+			if markErr := s.Batches.MarkUnknown(commit, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+				s.log.Warn("Anthropic batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
+			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider may have accepted this batch, but its outcome is unknown."), x.family)
 			return
 		}
 		commit, stop := resourceCommitContext(r.Context())
 		defer stop()
-		_ = s.Batches.DeleteSubmission(commit, submission.resource.UUID)
+		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
+			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
+		}
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -512,7 +516,9 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if readErr != nil {
 		commit, stop := resourceCommitContext(r.Context())
 		defer stop()
-		_ = s.Batches.DeleteSubmission(commit, submission.resource.UUID)
+		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
+			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
+		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
 		return
 	}
@@ -521,7 +527,9 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if projectionErr != nil {
 		commit, stop := resourceCommitContext(r.Context())
 		defer stop()
-		_ = s.Batches.DeleteSubmission(commit, submission.resource.UUID)
+		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
+			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
+		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
 		return
 	}
@@ -529,7 +537,9 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		commit, stop := resourceCommitContext(r.Context())
 		defer stop()
-		_ = s.Batches.DeleteSubmission(commit, submission.resource.UUID)
+		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
+			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
+		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch identity."), x.family)
 		return
 	}
@@ -545,7 +555,9 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	defer stop()
 	tx, beginErr := s.Resources.Begin(commit)
 	if beginErr != nil {
-		_ = s.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now())
+		if markErr := s.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+			s.log.Warn("accepted Anthropic batch intent could not be marked unknown", "resource_id", resource.UUID, "error", markErr)
+		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The accepted batch could not be stored."), x.family)
 		return
 	}
@@ -558,7 +570,9 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		commitErr = tx.Commit(commit)
 	}
 	if commitErr != nil {
-		_ = s.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now())
+		if markErr := s.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+			s.log.Warn("accepted Anthropic batch intent could not be marked unknown", "resource_id", resource.UUID, "error", markErr)
+		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The accepted batch could not be confirmed locally."), x.family)
 		return
 	}

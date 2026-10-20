@@ -47,7 +47,8 @@ func TestAnthropicStrictRouteRefusesBatchResources(t *testing.T) {
 	authority := access.Authority{ID: h.keyID, Policy: access.KeyPolicy{Scopes: []string{"inference"}}}
 	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages/batches", nil)
 	req.Header.Set(stateRouteHeader, routeSlug)
-	if _, err := h.gateway.anthropicRoute(x, authority, req, ""); err == nil || err.Code != "target_capability" || err.Status != http.StatusUnprocessableEntity {
+	if _, err := h.gateway.anthropicRoute(x, authority, req, ""); err == nil || err.Type != "invalid_request_error" ||
+		err.Code != "target_capability" || err.Status != http.StatusUnprocessableEntity {
 		t.Fatalf("strict Anthropic batch refusal = %v", err)
 	}
 }

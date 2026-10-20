@@ -196,7 +196,7 @@
       "source_dialect": "openai-batch",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3063,7 +3063,7 @@
       "source_dialect": "anthropic-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-files",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3071,10 +3071,28 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file",
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3089,7 +3107,7 @@
       "source_dialect": "anthropic-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-files",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3097,10 +3115,28 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "before_id",
+        "after_id",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3115,7 +3151,7 @@
       "source_dialect": "anthropic-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-files",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3123,10 +3159,28 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id",
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3141,7 +3195,7 @@
       "source_dialect": "anthropic-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-files",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3149,10 +3203,28 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id",
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3167,7 +3239,7 @@
       "source_dialect": "anthropic-files",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-files",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3175,10 +3247,28 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "file_id",
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3193,7 +3283,7 @@
       "source_dialect": "anthropic-message-batches",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3201,10 +3291,31 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "requests",
+        "custom_id",
+        "params",
+        "file_id",
+        "anthropic-beta",
+        "anthropic-version"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3219,7 +3330,7 @@
       "source_dialect": "anthropic-message-batches",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3227,10 +3338,28 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "before_id",
+        "after_id",
+        "limit"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3245,7 +3374,7 @@
       "source_dialect": "anthropic-message-batches",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3253,10 +3382,26 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "message_batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3271,7 +3416,7 @@
       "source_dialect": "anthropic-message-batches",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3279,10 +3424,26 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "message_batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3297,7 +3458,7 @@
       "source_dialect": "anthropic-message-batches",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3305,10 +3466,26 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "message_batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"
@@ -3323,7 +3500,7 @@
       "source_dialect": "anthropic-message-batches",
       "dialect_revision": "m9-baseline-1",
       "provider": "anthropic",
-      "profile": "anthropic-message-batches",
+      "profile": "anthropic-messages",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -3331,10 +3508,26 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "message_batch_id"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "tests/fixtures/vendors/anthropic/contract.json",
+        "tests/fixtures/vendors/anthropic/file.upload.response.json",
+        "tests/fixtures/vendors/anthropic/file.list.response.json",
+        "tests/fixtures/vendors/anthropic/batch.create.request.json",
+        "tests/fixtures/vendors/anthropic/batch.in_progress.json",
+        "tests/fixtures/vendors/anthropic/batch.ended.json",
+        "tests/fixtures/vendors/anthropic/batch.results.jsonl",
+        "tests/fixtures/vendors/anthropic/error.json",
+        "internal/gateway/anthropic_resources.go",
+        "internal/gateway/anthropic_resources_test.go",
+        "internal/batches/anthropic.go",
+        "internal/batches/anthropic_test.go",
+        "tests/integration/anthropic_batch_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [
         "strict route"

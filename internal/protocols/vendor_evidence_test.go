@@ -71,9 +71,12 @@ type vendorEvidence struct {
 		Endpoints      map[string]string `json:"endpoints"`
 		Input          string            `json:"input"`
 		FileResponse   string            `json:"file_response"`
+		FileList       string            `json:"file_list"`
 		CreateRequest  string            `json:"create_request"`
 		CreateResponse string            `json:"create_response"`
 		Job            string            `json:"job"`
+		InProgress     string            `json:"in_progress"`
+		Ended          string            `json:"ended"`
 		Output         string            `json:"output"`
 		ErrorFile      string            `json:"error_file"`
 		ErrorBody      string            `json:"error_body"`
@@ -168,8 +171,15 @@ func TestEveryPresetHasReviewedEvidence(t *testing.T) {
 		}
 	}
 	slices.Sort(presets)
-	if !slices.Equal(documented, presets) {
-		t.Fatalf("vendor evidence %v does not match the presets %v", documented, presets)
+	for _, preset := range presets {
+		if !slices.Contains(documented, preset) {
+			t.Fatalf("vendor evidence %v is missing preset %s", documented, preset)
+		}
+	}
+	for _, vendor := range documented {
+		if !slices.Contains(presets, vendor) && vendor != "anthropic" {
+			t.Fatalf("vendor evidence %v has unexpected non-preset vendor %s", documented, vendor)
+		}
 	}
 	for _, contract := range vendors.All() {
 		if contract.Preset == nil {
@@ -191,7 +201,7 @@ func TestEveryPresetHasReviewedEvidence(t *testing.T) {
 }
 
 func TestFilesBatchesVendorEvidence(t *testing.T) {
-	for _, vendor := range []string{"groq", "together", "mistral"} {
+	for _, vendor := range []string{"groq", "together", "mistral", "anthropic"} {
 		t.Run(vendor, func(t *testing.T) {
 			evidence := readEvidence(t, vendor)
 			if evidence.FilesBatches.Basis != "documented" && evidence.FilesBatches.Basis != "schema" {
@@ -202,17 +212,25 @@ func TestFilesBatchesVendorEvidence(t *testing.T) {
 					t.Fatalf("missing %s documentation link", name)
 				}
 			}
-			for _, name := range []string{"files_upload", "files_get", "files_content", "batch_create", "batch_get", "batch_list", "batch_cancel"} {
+			endpoints := []string{"files_upload", "files_get", "files_content", "batch_create", "batch_get", "batch_list", "batch_cancel"}
+			if vendor == "anthropic" {
+				endpoints = append(endpoints, "files_list", "files_delete", "batch_delete", "batch_results")
+			}
+			for _, name := range endpoints {
 				if endpoint := evidence.FilesBatches.Endpoints[name]; !strings.HasPrefix(endpoint, "https://") {
 					t.Fatalf("missing files/batches endpoint %s", name)
 				}
 			}
-			for _, fixture := range []string{
+			fixtureNames := []string{
 				evidence.FilesBatches.Input, evidence.FilesBatches.FileResponse,
 				evidence.FilesBatches.CreateRequest, evidence.FilesBatches.CreateResponse,
 				evidence.FilesBatches.Job, evidence.FilesBatches.Output,
 				evidence.FilesBatches.ErrorFile, evidence.FilesBatches.ErrorBody,
-			} {
+			}
+			if vendor == "anthropic" {
+				fixtureNames = append(fixtureNames, evidence.FilesBatches.FileList, evidence.FilesBatches.InProgress, evidence.FilesBatches.Ended)
+			}
+			for _, fixture := range fixtureNames {
 				if fixture == "" {
 					t.Fatal("files/batches fixture is missing")
 				}

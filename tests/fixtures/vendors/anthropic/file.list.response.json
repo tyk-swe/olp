@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "file_01ABCDEF",
+      "type": "file",
+      "filename": "batch.jsonl",
+      "mime_type": "application/jsonl",
+      "size_bytes": 24,
+      "created_at": "2026-10-21T10:00:00Z",
+      "downloadable": false
+    }
+  ],
+  "has_more": false,
+  "first_id": "file_01ABCDEF",
+  "last_id": "file_01ABCDEF"
+}
