@@ -83,7 +83,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	if raw := query.Get("kind"); raw != "" {
 		if !contract.ListProviderResourcesParamsKind(raw).Valid() {
 			return access.Reply{}, access.Invalid("kind",
-				"Use file, batch, response, continuation, strict_response, interaction, strict_file, or strict_batch.")
+				"Use file, batch, response, continuation, strict_response, interaction, strict_file, strict_batch, anthropic_file, anthropic_batch, gemini_upload, gemini_file, gemini_batch, or cloud_batch.")
 		}
 		filters.kind = &raw
 	}

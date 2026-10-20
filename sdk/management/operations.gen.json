@@ -18330,7 +18330,13 @@
                 "strict_response",
                 "interaction",
                 "strict_file",
-                "strict_batch"
+                "strict_batch",
+                "anthropic_file",
+                "anthropic_batch",
+                "gemini_upload",
+                "gemini_file",
+                "gemini_batch",
+                "cloud_batch"
               ],
               "type": "string"
             },

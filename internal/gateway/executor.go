@@ -498,7 +498,9 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 			}
 			return fact
 		}
-		if x.family == wire.Batch || x.family == wire.File {
+		if x.family == wire.Batch || x.family == wire.File ||
+			x.family == wire.AnthropicFile || x.family == wire.AnthropicBatch ||
+			x.family == wire.GeminiFile || x.family == wire.GeminiBatch || x.family == wire.CloudBatch {
 			if _, ok := x.snapshot().DurableTemplate(x.route.Slug, a.TargetID); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}

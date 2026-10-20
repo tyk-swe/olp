@@ -28,6 +28,12 @@ const (
 	KindInteraction    = "interaction"
 	KindStrictFile     = "strict_file"
 	KindStrictBatch    = "strict_batch"
+	KindAnthropicFile  = "anthropic_file"
+	KindAnthropicBatch = "anthropic_batch"
+	KindGeminiUpload   = "gemini_upload"
+	KindGeminiFile     = "gemini_file"
+	KindGeminiBatch    = "gemini_batch"
+	KindCloudBatch     = "cloud_batch"
 )
 
 const StateDeleted = "deleted"
@@ -86,7 +92,9 @@ func parseLocal(local string) (uuid.UUID, error) {
 		return uuid.Nil, ErrNotFound
 	}
 	switch local[:i] {
-	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction, KindStrictFile, KindStrictBatch:
+	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction,
+		KindStrictFile, KindStrictBatch, KindAnthropicFile, KindAnthropicBatch, KindGeminiUpload,
+		KindGeminiFile, KindGeminiBatch, KindCloudBatch:
 	default:
 		return uuid.Nil, ErrNotFound
 	}

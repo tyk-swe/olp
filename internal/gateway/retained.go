@@ -64,7 +64,9 @@ func strictResourceKind(kind string) (strict, known bool) {
 	switch kind {
 	case resources.KindStrictResponse, resources.KindStrictFile, resources.KindStrictBatch, resources.KindContinuation:
 		return true, true
-	case resources.KindResponse, resources.KindFile, resources.KindBatch:
+	case resources.KindResponse, resources.KindFile, resources.KindBatch,
+		resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiUpload,
+		resources.KindGeminiFile, resources.KindGeminiBatch, resources.KindCloudBatch:
 		return false, true
 	}
 	return false, false

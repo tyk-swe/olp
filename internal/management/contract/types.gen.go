@@ -3450,9 +3450,15 @@ func (e ProviderProbeResultStatus) Valid() bool {
 
 // Defines values for ProviderResourceItemKind.
 const (
+	ProviderResourceItemKindAnthropicBatch ProviderResourceItemKind = "anthropic_batch"
+	ProviderResourceItemKindAnthropicFile  ProviderResourceItemKind = "anthropic_file"
 	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
+	ProviderResourceItemKindCloudBatch     ProviderResourceItemKind = "cloud_batch"
 	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
 	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
+	ProviderResourceItemKindGeminiBatch    ProviderResourceItemKind = "gemini_batch"
+	ProviderResourceItemKindGeminiFile     ProviderResourceItemKind = "gemini_file"
+	ProviderResourceItemKindGeminiUpload   ProviderResourceItemKind = "gemini_upload"
 	ProviderResourceItemKindInteraction    ProviderResourceItemKind = "interaction"
 	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
 	ProviderResourceItemKindStrictBatch    ProviderResourceItemKind = "strict_batch"
@@ -3463,11 +3469,23 @@ const (
 // Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
 func (e ProviderResourceItemKind) Valid() bool {
 	switch e {
+	case ProviderResourceItemKindAnthropicBatch:
+		return true
+	case ProviderResourceItemKindAnthropicFile:
+		return true
 	case ProviderResourceItemKindBatch:
+		return true
+	case ProviderResourceItemKindCloudBatch:
 		return true
 	case ProviderResourceItemKindContinuation:
 		return true
 	case ProviderResourceItemKindFile:
+		return true
+	case ProviderResourceItemKindGeminiBatch:
+		return true
+	case ProviderResourceItemKindGeminiFile:
+		return true
+	case ProviderResourceItemKindGeminiUpload:
 		return true
 	case ProviderResourceItemKindInteraction:
 		return true
@@ -4797,9 +4815,15 @@ func (e ListNotificationDeliveriesParamsStatus) Valid() bool {
 
 // Defines values for ListProviderResourcesParamsKind.
 const (
+	ListProviderResourcesParamsKindAnthropicBatch ListProviderResourcesParamsKind = "anthropic_batch"
+	ListProviderResourcesParamsKindAnthropicFile  ListProviderResourcesParamsKind = "anthropic_file"
 	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
+	ListProviderResourcesParamsKindCloudBatch     ListProviderResourcesParamsKind = "cloud_batch"
 	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
 	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindGeminiBatch    ListProviderResourcesParamsKind = "gemini_batch"
+	ListProviderResourcesParamsKindGeminiFile     ListProviderResourcesParamsKind = "gemini_file"
+	ListProviderResourcesParamsKindGeminiUpload   ListProviderResourcesParamsKind = "gemini_upload"
 	ListProviderResourcesParamsKindInteraction    ListProviderResourcesParamsKind = "interaction"
 	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
 	ListProviderResourcesParamsKindStrictBatch    ListProviderResourcesParamsKind = "strict_batch"
@@ -4810,11 +4834,23 @@ const (
 // Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
 func (e ListProviderResourcesParamsKind) Valid() bool {
 	switch e {
+	case ListProviderResourcesParamsKindAnthropicBatch:
+		return true
+	case ListProviderResourcesParamsKindAnthropicFile:
+		return true
 	case ListProviderResourcesParamsKindBatch:
+		return true
+	case ListProviderResourcesParamsKindCloudBatch:
 		return true
 	case ListProviderResourcesParamsKindContinuation:
 		return true
 	case ListProviderResourcesParamsKindFile:
+		return true
+	case ListProviderResourcesParamsKindGeminiBatch:
+		return true
+	case ListProviderResourcesParamsKindGeminiFile:
+		return true
+	case ListProviderResourcesParamsKindGeminiUpload:
 		return true
 	case ListProviderResourcesParamsKindInteraction:
 		return true

@@ -46,11 +46,16 @@ const (
 	VideoContent    Format = "video_content"
 	VideoDelete     Format = "video_delete"
 
-	File          Format = "file"
-	Batch         Format = "batch"
-	Realtime      Format = "realtime"
-	Bedrock       Format = "bedrock"
-	BedrockInvoke Format = "bedrock_invoke"
+	File           Format = "file"
+	Batch          Format = "batch"
+	AnthropicFile  Format = "anthropic_file"
+	AnthropicBatch Format = "anthropic_batch"
+	GeminiFile     Format = "gemini_file"
+	GeminiBatch    Format = "gemini_batch"
+	CloudBatch     Format = "cloud_batch"
+	Realtime       Format = "realtime"
+	Bedrock        Format = "bedrock"
+	BedrockInvoke  Format = "bedrock_invoke"
 
 	// Native generation families are vendor dialects a client speaks as
 	// they are, at /native/{dialect}/models/{route}: OLP binds the route's
@@ -72,6 +77,10 @@ func (f Format) Operation() string {
 		return "moderation"
 	case Rerank, BedrockRerank:
 		return "rerank"
+	case AnthropicFile, GeminiFile:
+		return "file"
+	case AnthropicBatch, GeminiBatch, CloudBatch:
+		return "batch"
 	case ImageGeneration, ImageEdit, ImageVariation, Speech,
 		Transcription, Translation, VideoCreate, VideoList, VideoGet,
 		VideoContent, VideoDelete, File, Batch,
@@ -88,11 +97,15 @@ func (f Format) Surface() string {
 	switch f {
 	case Anthropic, AnthropicCount:
 		return "anthropic"
+	case AnthropicFile, AnthropicBatch:
+		return "anthropic"
 	case Gemini, GeminiStream, GeminiCount, GeminiInteractions, GeminiLive:
+		return "gemini"
+	case GeminiFile, GeminiBatch:
 		return "gemini"
 	case Bedrock, BedrockInvoke:
 		return "bedrock"
-	case MistralFIM, CohereChat:
+	case MistralFIM, CohereChat, CloudBatch:
 		return "native"
 	}
 	return "openai"
