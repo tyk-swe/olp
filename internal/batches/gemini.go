@@ -26,6 +26,61 @@ type GeminiReader struct {
 	Egress *egress.Policy
 }
 
+// GeminiMetadata retains lifecycle and file identity fields, never inline
+// requests or generated responses. Result bodies are handled only in memory.
+func GeminiMetadata(body []byte, model, localInput, upstreamInput string) json.RawMessage {
+	fields := geminiLifecycleFields(body)
+	fields["upstream_model"], _ = json.Marshal(model)
+	if localInput != "" {
+		fields["local_input_file_name"], _ = json.Marshal(localInput)
+		fields["upstream_input_file_name"], _ = json.Marshal(upstreamInput)
+	}
+	encoded, _ := json.Marshal(fields)
+	return encoded
+}
+
+func geminiLifecycleFields(body []byte) map[string]json.RawMessage {
+	var source map[string]json.RawMessage
+	_ = json.Unmarshal(body, &source)
+	fields := map[string]json.RawMessage{}
+	for _, key := range []string{"name", "model", "state", "displayName", "createTime", "startTime", "endTime", "updateTime", "done",
+		"requestCount", "successfulRequestCount", "failedRequestCount", "pendingRequestCount", "fileName", "file_name", "responsesFile", "code"} {
+		if raw, ok := source[key]; ok {
+			fields[key] = raw
+		}
+	}
+	for _, key := range []string{"metadata", "batchStats", "inputConfig", "input_config", "output", "response", "error"} {
+		if raw, ok := source[key]; ok {
+			fields[key], _ = json.Marshal(geminiLifecycleFields(raw))
+		}
+	}
+	return fields
+}
+
+func geminiManagedAdoptMetadata(cursor []byte, snapshot BatchSnapshot) (json.RawMessage, string, error) {
+	var saved struct {
+		Submission struct {
+			Metadata map[string]json.RawMessage `json:"gemini_metadata"`
+		} `json:"submission"`
+	}
+	if json.Unmarshal(cursor, &saved) != nil || saved.Submission.Metadata == nil {
+		return nil, "", ErrProviderConflict
+	}
+	state := map[string]string{
+		"PENDING": "validating", "QUEUED": "validating", "RUNNING": "in_progress",
+		"SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "cancelled",
+		"EXPIRED": "expired", "CANCELLING": "cancelling",
+	}[strings.TrimPrefix(strings.TrimPrefix(batchGeminiState(snapshot.Body), "BATCH_STATE_"), "JOB_STATE_")]
+	if state == "" {
+		return nil, "", ErrProviderConflict
+	}
+	fields := saved.Submission.Metadata
+	fields["provider_batch"], _ = json.Marshal(geminiLifecycleFields(snapshot.Body))
+	fields["status"], _ = json.Marshal(state)
+	encoded, err := json.Marshal(fields)
+	return encoded, state, err
+}
+
 func (r *GeminiReader) Poll(ctx context.Context, settlement Settlement, target *PinnedTarget) (BatchSnapshot, error) {
 	if settlement.UpstreamID == nil || *settlement.UpstreamID == "" {
 		return BatchSnapshot{}, errors.New("Gemini batch upstream identity is unavailable")

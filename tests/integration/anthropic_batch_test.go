@@ -31,6 +31,9 @@ func newAnthropicBatchFixture(t *testing.T) *anthropicBatchFixture {
 	t.Helper()
 	fixture := &anthropicBatchFixture{files: map[string][]byte{}}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/files", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"data": []any{}, "has_more": false})
+	})
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"data": []any{map[string]any{"id": anthropicFixtureModel, "type": "model"}}, "has_more": false})
 	})
@@ -107,6 +110,9 @@ func newAnthropicBatchFixture(t *testing.T) *anthropicBatchFixture {
 		writeJSON(w, map[string]any{"id": "msgbatch_fixture", "type": "message_batch", "processing_status": "in_progress",
 			"request_counts": map[string]int{"processing": 1, "succeeded": 0, "errored": 0, "canceled": 0, "expired": 0},
 			"created_at":     time.Now().UTC(), "expires_at": time.Now().UTC().Add(24 * time.Hour), "results_url": nil})
+	})
+	mux.HandleFunc("GET /v1/messages/batches", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"data": []any{}, "has_more": false})
 	})
 	mux.HandleFunc("GET /v1/messages/batches/{id}", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"id": "msgbatch_fixture", "type": "message_batch", "processing_status": "ended",

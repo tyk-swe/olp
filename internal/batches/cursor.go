@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 )
@@ -33,6 +34,27 @@ type ResultLineParser func([]byte) (Result, error)
 
 type ResultPageCommit func([]Result, Cursor) error
 
+// checkpointCursor advances result progress without losing submission identity.
+func checkpointCursor(previous []byte, next any) ([]byte, error) {
+	encoded, err := json.Marshal(next)
+	if err != nil {
+		return nil, err
+	}
+	var old, progress map[string]json.RawMessage
+	if len(previous) > 0 {
+		if err = json.Unmarshal(previous, &old); err != nil {
+			return nil, err
+		}
+	}
+	if err = json.Unmarshal(encoded, &progress); err != nil {
+		return nil, err
+	}
+	if submission, ok := old["submission"]; ok {
+		progress["submission"] = submission
+	}
+	return json.Marshal(progress)
+}
+
 func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse ResultLineParser, commit ResultPageCommit) (Cursor, int64, string, error) {
 	if r == nil || file == "" || phase != "output" && phase != "error" || parse == nil || commit == nil {
 		return cursor, 0, "", errors.New("invalid batch result stream")
@@ -59,7 +81,7 @@ func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse Result
 	var bytesRead int64
 	var lineNumber int64
 	var page []Result
-	next := Cursor{Phase: phase, File: file}
+	next := Cursor{Phase: phase, File: file, OutputPrefixSHA256: cursor.OutputPrefixSHA256}
 	fullHash := sha256.New()
 	for {
 		raw, ok, err := readJSONLLine(reader)
@@ -111,7 +133,7 @@ func ReadJSONLPages(r io.Reader, cursor Cursor, file, phase string, parse Result
 		}
 	}
 	if lineNumber == startLine {
-		next = Cursor{Phase: phase, File: file, Line: lineNumber, PrefixSHA256: expectedPrefix}
+		next.Line, next.PrefixSHA256 = lineNumber, expectedPrefix
 	}
 	return next, bytesRead, hex.EncodeToString(fullHash.Sum(nil)), nil
 }

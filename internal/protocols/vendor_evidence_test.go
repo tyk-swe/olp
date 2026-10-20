@@ -199,7 +199,7 @@ func TestEveryPresetHasReviewedEvidence(t *testing.T) {
 		}
 	}
 	for _, vendor := range documented {
-		if !slices.Contains(presets, vendor) && vendor != "anthropic" && vendor != "gemini" {
+		if !slices.Contains(presets, vendor) && !slices.Contains([]string{"anthropic", "gemini", "bedrock", "vertex"}, vendor) {
 			t.Fatalf("vendor evidence %v has unexpected non-preset vendor %s", documented, vendor)
 		}
 	}

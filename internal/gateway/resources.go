@@ -1682,7 +1682,16 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	var reconciliationCursor json.RawMessage
 	if adapter == "gemini_managed" {
-		reconciliationCursor = mustJSON(map[string]any{"submission": map[string]string{"gemini_file": file.UpstreamID}})
+		clientMetadata := source.Fields()["metadata"]
+		metadata, _, metadataErr := geminiManagedBatchMetadata([]byte(`{"metadata":{"state":"BATCH_STATE_PENDING"}}`), p.model, localFile, inputManifest, nil, clientMetadata)
+		if metadataErr != nil {
+			s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The Gemini submission metadata could not be prepared."), x.family)
+			return
+		}
+		reconciliationCursor = mustJSON(map[string]any{"submission": map[string]any{
+			"gemini_file": file.UpstreamID, "local_input_file_id": localFile,
+			"endpoint": inputManifest.Endpoint, "gemini_metadata": metadata,
+		}})
 	}
 	submission, e := s.prepareBatchSubmission(r.Context(), x, authority.ID, p, source, source.Bytes(), upstream,
 		strictServing, localFile, file.UpstreamID, kind, adapter, "openai", lineOperation, completionWindow, expectedResults, reconciliationCursor)
@@ -1727,12 +1736,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = true
 	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
-		cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
-		defer stopCleanup()
-		if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
-			s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
-		}
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
+		s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider response could not be read. The batch may have been accepted."), x.family)
 		return
 	}
 	var upstreamID string
@@ -1740,12 +1744,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		var validated oif.Document
 		validated, upstreamID, err = strictBatchResult(result, "")
 		if err != nil || !strictBatchInputMatches(validated, upstream) {
-			cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
-			defer stopCleanup()
-			if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
-				s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
-			}
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result."), x.family)
+			s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider returned an invalid native batch result. The batch may have been accepted."), x.family)
 			return
 		}
 	} else if adapter == "gemini_managed" {
@@ -1778,12 +1777,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var valid bool
 		if upstreamID, valid = nativeResourceID(result, s.cfg.MaxResponseBytes); !valid {
-			cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
-			defer stopCleanup()
-			if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
-				s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
-			}
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
+			s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider returned a malformed batch object. The batch may have been accepted."), x.family)
 			return
 		}
 	}

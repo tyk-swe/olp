@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/url"
 	"testing"
@@ -14,6 +16,18 @@ func TestGeminiBatchRequestValidationAndFileRewrite(t *testing.T) {
 	valid, err := validateGeminiBatchRequest(inline, "team-model")
 	if err != nil || valid.Expected == nil || *valid.Expected != 1 || len(valid.Keys) != 1 || valid.Keys[0] != "request-1" {
 		t.Fatalf("valid inline Gemini batch: %+v, %v", valid, err)
+	}
+	var upstream struct {
+		Batch struct {
+			Input struct {
+				Requests struct {
+					Requests []json.RawMessage `json:"requests"`
+				} `json:"requests"`
+			} `json:"inputConfig"`
+		} `json:"batch"`
+	}
+	if json.Unmarshal(valid.Upstream, &upstream) != nil || len(upstream.Batch.Input.Requests.Requests) != 1 {
+		t.Fatalf("invalid upstream inline request shape: %s", valid.Upstream)
 	}
 	for _, raw := range []string{
 		`{"batch":{"output_config":{},"input_config":{"requests":{"requests":[]}}}}`,
@@ -71,5 +85,30 @@ func TestGeminiBatchPageCursor(t *testing.T) {
 		if _, _, err := geminiBatchPageCursor(query); err == nil {
 			t.Fatalf("accepted invalid page cursor %v", query)
 		}
+	}
+}
+
+func TestGeminiBatchMetadataExcludesContent(t *testing.T) {
+	content := bytes.Repeat([]byte("private-model-content"), 1024)
+	body, _ := json.Marshal(map[string]any{
+		"name": "batches/upstream", "done": true,
+		"metadata": map[string]any{
+			"state": "BATCH_STATE_SUCCEEDED", "model": "models/provider-model",
+			"inputConfig": map[string]any{"requests": map[string]any{"requests": string(content)}},
+			"output":      map[string]any{"inlinedResponses": map[string]any{"inlinedResponses": []any{map[string]any{"response": string(content)}}}},
+		},
+	})
+	metadata := geminiBatchMetadata(body, "provider-model", "files/local", "files/upstream", nil)
+	if bytes.Contains(metadata, content) || bytes.Contains(metadata, []byte("inlinedResponses")) || len(metadata) > 1024 {
+		t.Fatalf("Gemini metadata retained content (%d bytes)", len(metadata))
+	}
+	resource := &resources.Resource{ID: "gemini_batch_local", RouteSlug: "route", Metadata: metadata}
+	local, upstream := geminiBatchInternalNames(resource)
+	if local != "files/local" || upstream != "files/upstream" || geminiBatchState(metadata) != "BATCH_STATE_SUCCEEDED" {
+		t.Fatalf("Gemini metadata lost lifecycle identity: %s", metadata)
+	}
+	projected, err := (&Server{}).geminiBatchResourceObject(context.Background(), resource, body)
+	if err != nil || !bytes.Contains(projected, content) {
+		t.Fatalf("transient inline output was lost: err=%v", err)
 	}
 }

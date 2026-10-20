@@ -198,7 +198,7 @@ func (r *VertexReader) Poll(ctx context.Context, settlement Settlement, target *
 		return BatchSnapshot{}, ErrProviderConflict
 	}
 	snapshot := BatchSnapshot{ID: id, Status: state, Body: body, Terminal: terminal}
-	if stats := vertexCounts(job); stats != nil {
+	if stats := vertexCounts(job); stats != nil && terminal {
 		n := stats["successful"] + stats["failed"] + stats["incomplete"]
 		snapshot.Expected = &n
 	}
@@ -260,9 +260,14 @@ func (r *VertexReader) Reconcile(ctx context.Context, settlement Settlement, tar
 		}
 		if id != "" {
 			snapshot := BatchSnapshot{ID: id, Status: state, Body: raw, Terminal: cloudIsTerminal(status)}
-			if stats := vertexCounts(job); stats != nil {
+			if stats := vertexCounts(job); stats != nil && snapshot.Terminal {
 				total := stats["successful"] + stats["failed"] + stats["incomplete"]
 				snapshot.Expected = &total
+			}
+			if snapshot.Terminal {
+				var info map[string]json.RawMessage
+				_ = json.Unmarshal(job["outputInfo"], &info)
+				_ = json.Unmarshal(info["gcsOutputDirectory"], &snapshot.OutputFileID)
 			}
 			matches = append(matches, snapshot)
 		}
@@ -442,6 +447,10 @@ func downloadGCSObject(ctx context.Context, auth *connectors.Auth, policy *egres
 	return cloudStorageRequest(ctx, auth, policy, target, endpoint, nil, MaxBatchBytes)
 }
 func parseVertexLine(line []byte, object, generation string, lineNo int64, model string) (Result, error) {
+	evidence, err := canonicalJSON(line)
+	if err != nil {
+		return Result{}, ErrProviderConflict
+	}
 	var item struct {
 		Status   string          `json:"status"`
 		Response json.RawMessage `json:"response"`
@@ -451,7 +460,7 @@ func parseVertexLine(line []byte, object, generation string, lineNo int64, model
 	}
 	id := fmt.Sprintf("%s#%s:%d", object, generation, lineNo)
 	if item.Status != "" {
-		return Result{CustomID: id, Kind: ResultErrored, ErrorClass: item.Status}, nil
+		return Result{CustomID: id, Kind: ResultErrored, ErrorClass: item.Status, Evidence: evidence}, nil
 	}
 	if len(item.Response) == 0 {
 		return Result{}, ErrProviderConflict
@@ -460,7 +469,7 @@ func parseVertexLine(line []byte, object, generation string, lineNo int64, model
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{CustomID: id, Kind: ResultSucceeded, Usage: usage.ObservedAttemptUsage(completion.Usage, completion.Usage != nil, "generation")}, nil
+	return Result{CustomID: id, Kind: ResultSucceeded, Usage: usage.ObservedAttemptUsage(completion.Usage, completion.Usage != nil, "generation"), Evidence: evidence}, nil
 }
 
 func (r *BedrockReader) Poll(ctx context.Context, settlement Settlement, target *PinnedTarget) (BatchSnapshot, error) {
@@ -571,6 +580,10 @@ func bedrockOutputLocation(base, arn string) string {
 }
 
 func parseBedrockManifest(body []byte) (Result, error) {
+	canonical, err := canonicalJSON(body)
+	if err != nil {
+		return Result{}, ErrProviderConflict
+	}
 	var manifest struct {
 		Total     int64 `json:"totalRecordCount"`
 		Processed int64 `json:"processedRecordCount"`
@@ -583,7 +596,7 @@ func parseBedrockManifest(body []byte) (Result, error) {
 	usageValue := &wire.Usage{InputTokens: manifest.Input, OutputTokens: manifest.Output, TotalTokens: manifest.Input + manifest.Output}
 	evidence := usage.ObservedAttemptUsage(usageValue, manifest.Processed == manifest.Total, "generation")
 	evidence.Batch = true
-	return Result{CustomID: "manifest", Kind: ResultAggregate, Usage: evidence}, nil
+	return Result{CustomID: "manifest", Kind: ResultAggregate, Usage: evidence, Evidence: canonical}, nil
 }
 
 func (r *BedrockReader) Reconcile(ctx context.Context, settlement Settlement, target *PinnedTarget, _, _ string) (Reconciliation, error) {

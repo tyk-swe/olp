@@ -89,6 +89,11 @@ func TestVertexReaderPollStorageLinesAndCursorGeneration(t *testing.T) {
 	if err != nil || !done || len(results) != 2 || results[0].CustomID != "output/job123/prediction-1.jsonl#8:1" || results[1].Kind != ResultErrored || cursor.Phase != "done" {
 		t.Fatalf("Vertex results=%+v cursor=%+v done=%v err=%v", results, cursor, done, err)
 	}
+	for _, result := range results {
+		if !json.Valid(result.Evidence) {
+			t.Fatalf("Vertex result is missing canonical ledger evidence: %+v", result)
+		}
+	}
 	reconcileCursor := json.RawMessage(`{"submission":{"vertex_label":"0123456789abcdef0123456789abcdef"}}`)
 	reconciled, err := reader.Reconcile(t.Context(), Settlement{Cursor: reconcileCursor}, target, "", "")
 	if err != nil || len(reconciled.Matches) != 1 || reconciled.Matches[0].ID != "job123" {
@@ -172,7 +177,7 @@ func TestBedrockReaderSigV4ManifestAndIdempotentReissue(t *testing.T) {
 				if !strings.Contains(req.Header.Get("Authorization"), "/us-east-1/bedrock/aws4_request") {
 					t.Errorf("Bedrock create request was not signed for bedrock: %s", req.Header.Get("Authorization"))
 				}
-				return cloudResponse(req, http.StatusOK, "application/json", `{"jobArn":"`+arn+`","status":"Submitted"}`), nil
+				return cloudResponse(req, http.StatusOK, "application/json", string(cloudBatchFixture(t, "bedrock", "job.create.response.json"))), nil
 			default:
 				t.Errorf("unexpected Bedrock fixture request %s", req.URL.String())
 				return cloudResponse(req, http.StatusNotFound, "application/json", "{}"), nil
@@ -188,6 +193,9 @@ func TestBedrockReaderSigV4ManifestAndIdempotentReissue(t *testing.T) {
 	_, done, err := reader.ReadResults(t.Context(), target, snapshot, Cursor{}, func(page []Result, _ Cursor) error { results = append(results, page...); return nil })
 	if err != nil || !done || !manifestRead || len(results) != 1 || results[0].Kind != ResultAggregate || !results[0].Usage.Complete {
 		t.Fatalf("Bedrock aggregate=%+v done=%v err=%v", results, done, err)
+	}
+	if !json.Valid(results[0].Evidence) {
+		t.Fatalf("Bedrock manifest is missing canonical ledger evidence: %+v", results[0])
 	}
 	cursor, _ := json.Marshal(map[string]any{"submission": map[string]any{
 		"bedrock_client_request_token": "01234567-89ab-cdef-0123-456789abcdef", "create_body": json.RawMessage(createBody),
@@ -241,5 +249,21 @@ func TestCloudReconciliationGuards(t *testing.T) {
 		bedrockCreateReissueHasEvidence(400, []byte(`{"__type":"ValidationException"}`)) ||
 		!bedrockCreateReissueHasEvidence(500, []byte(`{"__type":"InternalServerException"}`)) {
 		t.Fatal("Bedrock idempotent reissue classification failed")
+	}
+}
+
+func TestVertexReconcileTerminalOutput(t *testing.T) {
+	var job map[string]json.RawMessage
+	if err := json.Unmarshal(cloudBatchFixture(t, "vertex", "job.succeeded.json"), &job); err != nil {
+		t.Fatal(err)
+	}
+	job["labels"] = json.RawMessage(`{"olp_submission":"submission-label"}`)
+	listing, _ := json.Marshal(map[string]any{"batchPredictionJobs": []any{job}})
+	reader, target := vertexTarget(t, func(req *http.Request) (*http.Response, error) {
+		return cloudResponse(req, 200, "application/json", string(listing)), nil
+	})
+	matches, err := reader.Reconcile(t.Context(), Settlement{Cursor: []byte(`{"submission":{"vertex_label":"submission-label"}}`)}, target, "", "")
+	if err != nil || len(matches.Matches) != 1 || !matches.Matches[0].Terminal || matches.Matches[0].OutputFileID != "gs://batch-data/output/job123/" {
+		t.Fatalf("terminal adoption lost its GCS output identity: %+v err=%v", matches, err)
 	}
 }

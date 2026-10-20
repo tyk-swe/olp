@@ -74,7 +74,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		output.String(), batchErrorLine("failed-line", "invalid_request"))
 	resourceID := batchResourceID(t, localID)
 	var apiKeyID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&apiKeyID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&apiKeyID); err != nil {
 		t.Fatal(err)
 	}
 	var pending bool

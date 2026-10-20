@@ -29,6 +29,9 @@ func newManagedBatchFixture(t *testing.T, adapter string) *managedBatchFixture {
 	t.Helper()
 	fixture := &managedBatchFixture{adapter: adapter, files: map[string]string{}}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/files", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"data": []any{}})
+	})
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"data": []any{map[string]any{"id": vendorModel, "object": "model"}}})
 	})

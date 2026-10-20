@@ -380,7 +380,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = true
 	result, err := readBounded(response.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud batch response could not be read."))
+		s.cloudBatchFail(x, w, s.batchSubmissionUnknown(r.Context(), resourceID, "The cloud batch response could not be read; the job may have been accepted."))
 		return
 	}
 	upstreamID := ""
@@ -405,6 +405,11 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		_ = s.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider returned no job identity."))
 		return
+	}
+	if dialect == "bedrock-batch-inference" {
+		// CreateModelInvocationJob acknowledges acceptance with only jobArn.
+		// The worker obtains the authoritative lifecycle status on its next poll.
+		result, _ = json.Marshal(map[string]any{"jobArn": upstreamID, "status": "Submitted", "creationTime": s.now().UTC()})
 	}
 	meta := map[string]any{
 		"adapter": submission.settlement.Adapter, "dialect": dialect, "route_model": slug, "upstream_model": p.model,
@@ -601,6 +606,10 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]json.RawMessage, 0, len(filtered))
 	for _, row := range filtered {
+		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
+			s.cloudBatchFail(x, w, authErr)
+			return
+		}
 		var metadata map[string]json.RawMessage
 		_ = json.Unmarshal(row.Metadata, &metadata)
 		var input, output, dialect string

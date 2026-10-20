@@ -3,7 +3,6 @@ package batches
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -239,7 +238,7 @@ func (s *Store) CommitPage(ctx context.Context, settlement Settlement, results [
 	if settlement.ClaimID == nil || len(results) > 100 {
 		return nil, nil, false, errors.New("invalid batch settlement page")
 	}
-	cursorBytes, err := json.Marshal(cursor)
+	cursorBytes, err := checkpointCursor(settlement.Cursor, cursor)
 	if err != nil {
 		return nil, nil, false, err
 	}

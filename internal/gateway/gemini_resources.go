@@ -865,6 +865,10 @@ func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
+		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
+			s.stateFail(x, w, authErr, "gemini")
+			return
+		}
 		var metadata map[string]json.RawMessage
 		if json.Unmarshal(row.Metadata, &metadata) != nil {
 			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "A Gemini file could not be projected."), "gemini")

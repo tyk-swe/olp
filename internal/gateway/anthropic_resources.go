@@ -489,33 +489,18 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = true
 	result, readErr := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if readErr != nil {
-		commit, stop := resourceCommitContext(r.Context())
-		defer stop()
-		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
-			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
-		}
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
+		s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider response could not be read. The batch may have been accepted."), x.family)
 		return
 	}
 	localID := resources.LocalID(resources.KindAnthropicBatch, submission.resource.UUID)
 	projected, projectionErr := projectAnthropicBatch(result, localID, s.gatewayOrigin(r))
 	if projectionErr != nil {
-		commit, stop := resourceCommitContext(r.Context())
-		defer stop()
-		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
-			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
-		}
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
+		s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider returned a malformed batch object. The batch may have been accepted."), x.family)
 		return
 	}
 	upstreamID, valid := nativeResourceID(result, s.cfg.MaxResponseBytes)
 	if !valid {
-		commit, stop := resourceCommitContext(r.Context())
-		defer stop()
-		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
-			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
-		}
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch identity."), x.family)
+		s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider returned a malformed batch identity. The batch may have been accepted."), x.family)
 		return
 	}
 	var metadata map[string]json.RawMessage
@@ -672,6 +657,10 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	}
 	items, ids := make([]json.RawMessage, 0, len(rows)), make([]string, 0, len(rows))
 	for _, row := range rows {
+		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
+			s.stateFail(x, w, authErr, family)
+			return
+		}
 		object, err := s.anthropicResourceObject(row, kind, r)
 		if err != nil {
 			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A resource could not be projected."), family)

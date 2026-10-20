@@ -89,7 +89,7 @@ func TestCloudBatchCreateRefreshCancelFixturesCompile(t *testing.T) {
 		case r.URL.Path == "/model-invocation-jobs":
 			writeJSON(w, map[string]any{"invocationJobSummaries": []any{}})
 		case r.Method == http.MethodPost && r.URL.Path == "/model-invocation-job":
-			writeJSON(w, map[string]any{"jobArn": "arn:aws:bedrock:us-east-1:123456789012:model-invocation-job/fixture-job", "status": "Submitted"})
+			writeJSON(w, map[string]any{"jobArn": "arn:aws:bedrock:us-east-1:123456789012:model-invocation-job/fixture-job"})
 		case strings.HasSuffix(r.URL.Path, "/stop"):
 			w.WriteHeader(http.StatusOK)
 		case strings.HasPrefix(r.URL.Path, "/model-invocation-job/"):

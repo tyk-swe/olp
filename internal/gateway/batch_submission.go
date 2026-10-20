@@ -233,3 +233,12 @@ func batchExpectedResults(body []byte) *int64 {
 	count := *response.RequestCounts.Total
 	return &count
 }
+
+func (s *Server) batchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *Error {
+	commitCtx, stop := resourceCommitContext(ctx)
+	defer stop()
+	if err := s.Batches.MarkUnknown(commitCtx, resourceID, "submission_unknown", s.now()); err != nil {
+		s.log.Warn("batch submission outcome could not be recorded", "resource_id", resourceID, "error", err)
+	}
+	return serverError(http.StatusBadGateway, "submission_unknown", message)
+}

@@ -284,3 +284,39 @@ func jsonValid(body []byte) bool {
 	var value any
 	return json.Unmarshal(body, &value) == nil
 }
+
+func TestBatchEmptyJobWaitsForTerminal(t *testing.T) {
+	now := time.Unix(100, 0)
+	expected := int64(0)
+	for _, terminal := range []bool{false, true} {
+		want := StateActive
+		if terminal {
+			want = StateSettled
+		}
+		if got := CloseDecision(&expected, ResultCounts{}, false, terminal, now, now.Add(time.Hour)); got.State != want {
+			t.Fatalf("terminal=%v decision=%+v want=%s", terminal, got, want)
+		}
+	}
+}
+
+func TestBatchCheckpointRetainsSubmissionAndOutputEvidence(t *testing.T) {
+	previous := []byte(`{"submission":{"input_file_id":"upstream","local_input_file_id":"local","endpoint":"/v1/chat/completions"},"phase":"output","line":100}`)
+	next := Cursor{Phase: "error", File: "errors", OutputPrefixSHA256: "output-digest"}
+	encoded, err := checkpointCursor(previous, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, local, endpoint, err := submissionFiles(encoded)
+	var progress Cursor
+	if err != nil || input != "upstream" || local != "local" || endpoint != "/v1/chat/completions" || json.Unmarshal(encoded, &progress) != nil || progress.Line != 0 {
+		t.Fatalf("checkpoint lost submission identity or retained stale progress: %s err=%v", encoded, err)
+	}
+	lines := readFixture(t, "cursor.jsonl")
+	var committed Cursor
+	_, _, _, err = ReadJSONLPages(bytes.NewReader(lines), progress, "errors", "error",
+		func(line []byte) (Result, error) { return ParseLine(line, endpoint, false) },
+		func(_ []Result, cursor Cursor) error { committed = cursor; return nil })
+	if err != nil || committed.OutputPrefixSHA256 != "output-digest" {
+		t.Fatalf("error checkpoint lost output evidence: %+v err=%v", committed, err)
+	}
+}

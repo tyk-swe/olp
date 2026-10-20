@@ -1,6 +1,6 @@
 {
   "vendor": "mistral",
-  "documentation_url": "https://docs.mistral.ai/api/endpoint/batch",
+  "documentation_url": "https://docs.mistral.ai/api/endpoint/chat",
   "reviewed_at": "2026-10-20",
   "notes": "Only max_tokens is documented, and seed is spelled random_seed, so both are renamed. Mistral documents its own /v1/conversations API rather than Responses. The documented error glossary body carries no OpenAI error envelope. Usage arrives in streams with stream_options.include_usage. The OCR endpoint, request and response are schema-built offline fixtures added 2026-10-19. Files and batches evidence records the fields and endpoints used by the M9.2 adapter: Files upload at /v1/files with purpose=batch. Batch jobs use endpoint, input_files, model, timeout_hours and optional string-map metadata; list/get/cancel use /v1/batch/jobs. Statuses are QUEUED, RUNNING, SUCCESS, FAILED, TIMEOUT_EXCEEDED, CANCELLATION_REQUESTED and CANCELLED; counters are total_requests, succeeded_requests and failed_requests.",
   "endpoints": {

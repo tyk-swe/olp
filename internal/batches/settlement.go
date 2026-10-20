@@ -222,7 +222,7 @@ func CloseDecision(expected *int64, counts ResultCounts, conflict, terminal bool
 		}
 		return Decision{State: StateConflict}
 	}
-	if expected != nil && observed >= *expected {
+	if expected != nil && observed >= *expected && (terminal || *expected > 0) {
 		return Decision{State: StateSettled}
 	}
 	if terminal || !now.Before(closeAfter) {

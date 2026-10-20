@@ -37,6 +37,9 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 	t.Helper()
 	fixture := &geminiFileFixture{batches: map[string]map[string]any{}}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1beta/files", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{})
+	})
 	mux.HandleFunc("GET /v1beta/models", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"models": []any{map[string]any{"name": "models/gemini-files-test"}}})
 	})

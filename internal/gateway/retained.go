@@ -26,6 +26,20 @@ func pinUnavailable() *Error {
 		"The provider revision, slot, or credential that owns this object is no longer available.")
 }
 
+func (s *Server) authorizeListedResource(ctx context.Context, authority access.Authority, res *resources.Resource) *Error {
+	if s.Resolver == nil {
+		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable.")
+	}
+	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, "batch")
+	if err != nil {
+		return pinUnavailable()
+	}
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		return notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
+	}
+	return nil
+}
+
 // retainedUse is what a request does with a retained resource.
 type retainedUse int
 

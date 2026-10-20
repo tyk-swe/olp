@@ -106,9 +106,22 @@ func TestGeminiReaderPollInlineAndFileResults(t *testing.T) {
 	}
 	worker := &Worker{}
 	worker.setup()
-	if worker.Readers["gemini"] == nil {
+	if worker.Readers["gemini"] == nil || worker.Readers["gemini_managed"] == nil {
 		t.Fatal("Gemini settlement reader is not registered")
 	}
 }
 
 func geminiStringPointer(value string) *string { return &value }
+
+func TestGeminiSubmissionAdoptionRetainsBindings(t *testing.T) {
+	cursor := []byte(`{"submission":{"gemini_file":"files/upstream","local_input_file_id":"file_local","endpoint":"/v1/chat/completions","gemini_metadata":{"adapter":"gemini_managed","local_input_file_id":"file_local","endpoint":"/v1/chat/completions","line_count":2}}}`)
+	input, local, endpoint, err := submissionFiles(cursor)
+	if err != nil || input != "files/upstream" || local != "file_local" || endpoint != "/v1/chat/completions" {
+		t.Fatalf("submission binding=%s %s %s err=%v", input, local, endpoint, err)
+	}
+	metadata, state, err := geminiManagedAdoptMetadata(cursor, BatchSnapshot{Body: geminiBatchFixture(t, "batch.succeeded.file.json")})
+	var fields map[string]json.RawMessage
+	if err != nil || state != "completed" || json.Unmarshal(metadata, &fields) != nil || string(fields["local_input_file_id"]) != `"file_local"` || len(fields["provider_batch"]) == 0 {
+		t.Fatalf("managed adoption metadata=%s state=%s err=%v", metadata, state, err)
+	}
+}

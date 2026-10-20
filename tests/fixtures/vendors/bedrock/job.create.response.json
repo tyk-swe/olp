@@ -1,1 +1,1 @@
-{"jobArn":"arn:aws:bedrock:us-east-1:123456789012:model-invocation-job/0123456789ab","status":"Submitted","clientRequestToken":"01234567-89ab-cdef-0123-456789abcdef"}
+{"jobArn":"arn:aws:bedrock:us-east-1:123456789012:model-invocation-job/0123456789ab"}

@@ -78,8 +78,8 @@
     <p class="eyebrow">Operations</p>
     <h1 class="page-title">Provider Resources</h1>
     <p class="page-description">
-      Metadata-only mappings for provider resources and batch settlement. Provider
-      content never appears in the console.
+      Metadata-only mappings for provider resources and batch settlement.
+      Provider content never appears in the console.
     </p>
   </div>
   <button
@@ -166,12 +166,14 @@
             ><td data-label="API key"
               >{item.api_key_name}<small class="mono">{item.api_key_id}</small
               ></td
-            ><td data-label="State">{item.state}
+            ><td data-label="State"
+              >{item.state}
               {#if item.settlement}
                 <small>
                   Settlement {item.settlement.state} ·
-                  {item.settlement.settled_results}/{item.settlement.expected_results ??
-                    '—'} settled · {item.settlement.uncertain_results} uncertain
+                  {item.settlement.settled_results}/{item.settlement
+                    .expected_results ?? '—'} settled · {item.settlement
+                    .uncertain_results} uncertain
                 </small>
               {/if}</td
             ><td data-label="Expires"

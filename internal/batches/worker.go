@@ -106,6 +106,9 @@ func (w *Worker) setup() {
 	if w.Readers["gemini"] == nil {
 		w.Readers["gemini"] = &GeminiReader{Auth: w.Auth, Egress: w.Egress}
 	}
+	if w.Readers["gemini_managed"] == nil {
+		w.Readers["gemini_managed"] = &GeminiReader{Auth: w.Auth, Egress: w.Egress}
+	}
 	if w.Readers["openai"] == nil {
 		w.Readers["openai"] = &OpenAIReader{Auth: w.Auth, Egress: w.Egress}
 	}
@@ -201,7 +204,7 @@ func (w *Worker) reconcileClaimed(ctx context.Context, settlement Settlement) re
 		return outcomeFailed
 	}
 	if w.Readers[settlement.Adapter] == nil {
-		return w.finishRetry(ctx, settlement, settlement.State, "batch_adapter_unavailable")
+		return w.failOrClose(ctx, settlement, "batch_adapter_unavailable")
 	}
 	leaseCtx, stopLease := w.keepLease(ctx, settlement)
 	defer stopLease()
@@ -333,7 +336,7 @@ func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, tar
 				return commitErr
 			}
 			progress = progress || len(results) > 0
-			encoded, _ := json.Marshal(next)
+			encoded, _ := checkpointCursor(settlement.Cursor, next)
 			settlement.Cursor = encoded
 			w.applySnapshots(ctx, snapshots)
 			if conflict {
@@ -400,6 +403,17 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		}
 	}
 	metadata, state := batchMetadata(snapshot.Body, resourceModel(settlement.Template), localInputID)
+	if settlement.Adapter == "gemini" {
+		metadata = GeminiMetadata(snapshot.Body, resourceModel(settlement.Template), localInputID, inputFileID)
+		state = batchGeminiState(snapshot.Body)
+	}
+	if settlement.Adapter == "gemini_managed" {
+		var err error
+		metadata, state, err = geminiManagedAdoptMetadata(settlement.Cursor, snapshot)
+		if err != nil {
+			return err
+		}
+	}
 	if settlement.Adapter == "vertex" || settlement.Adapter == "bedrock" {
 		var err error
 		metadata, state, err = cloudAdoptMetadata(settlement, snapshot)
@@ -546,7 +560,7 @@ func submissionFiles(cursor []byte) (inputFileID, localInputID, endpoint string,
 		return "", "", "", errors.New("batch submission identity is unavailable")
 	}
 	if value.Submission.GeminiFile != "" {
-		return value.Submission.GeminiFile, "", "", nil
+		return value.Submission.GeminiFile, value.Submission.LocalInputID, value.Submission.Endpoint, nil
 	}
 	return value.Submission.InputFileID, value.Submission.LocalInputID, value.Submission.Endpoint, nil
 }

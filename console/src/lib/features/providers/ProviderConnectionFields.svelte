@@ -197,7 +197,8 @@
     <input
       id={`${idPrefix}-batch-input-uri-prefix`}
       value={batchStorageValue('input_uri_prefix')}
-      oninput={(event) => setBatchStorageValue('input_uri_prefix', event.currentTarget.value)}
+      oninput={(event) =>
+        setBatchStorageValue('input_uri_prefix', event.currentTarget.value)}
       disabled={fieldsDisabled}
       placeholder={batchStoragePlaceholder('input')}
     />
@@ -210,7 +211,8 @@
     <input
       id={`${idPrefix}-batch-output-uri-prefix`}
       value={batchStorageValue('output_uri_prefix')}
-      oninput={(event) => setBatchStorageValue('output_uri_prefix', event.currentTarget.value)}
+      oninput={(event) =>
+        setBatchStorageValue('output_uri_prefix', event.currentTarget.value)}
       disabled={fieldsDisabled}
       placeholder={batchStoragePlaceholder('output')}
     />
@@ -222,7 +224,8 @@
       <input
         id={`${idPrefix}-batch-role-arn`}
         value={batchStorageValue('role_arn')}
-        oninput={(event) => setBatchStorageValue('role_arn', event.currentTarget.value)}
+        oninput={(event) =>
+          setBatchStorageValue('role_arn', event.currentTarget.value)}
         disabled={fieldsDisabled}
         placeholder="arn:aws:iam::123456789012:role/BedrockBatch"
       />
