@@ -127,7 +127,9 @@ func ResultEvent(template *usage.Event, resourceID uuid.UUID, customIDDigest []b
 
 	attempt := event.Attempts[0]
 	attempt.ID = attemptID.String()
-	attempt.StartedAt = now
+	// Windowed prices are selected at submission; observation may happen days
+	// later and must not change the applicable time-of-day or weekday window.
+	attempt.StartedAt = template.Attempts[0].StartedAt
 	attempt.CompletedAt = now
 	attempt.StatusCode = cloneInt(event.StatusCode)
 	attempt.ErrorClass = nil

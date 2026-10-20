@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -153,5 +154,16 @@ func TestGeminiFileListCursorAndRoutePrecedence(t *testing.T) {
 		if pattern != test.want {
 			t.Fatalf("%s %s matched %q want %q", test.method, test.path, pattern, test.want)
 		}
+	}
+}
+
+func TestGeminiUploadQueryAndDownloadAddress(t *testing.T) {
+	endpoint := "https://generativelanguage.googleapis.com/v1beta"
+	if err := validateGeminiUploadURL(endpoint+"/upload/session?upload_id=opaque", endpoint, &egress.Policy{}); err != nil {
+		t.Fatalf("opaque upload query was passed to endpoint validation: %v", err)
+	}
+	download, err := geminiDownloadURL(connectors.Config{Kind: "gemini", Endpoint: endpoint}, "model", "output-file")
+	if err != nil || download != "https://generativelanguage.googleapis.com/download/v1beta/files/output-file:download?alt=media" {
+		t.Fatalf("Gemini output download URL=%s err=%v", download, err)
 	}
 }

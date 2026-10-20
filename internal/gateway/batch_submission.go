@@ -109,7 +109,11 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 	if err != nil {
 		return nil, serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
 	}
-	digest := digester.Digest(secrets.BatchSubmissionDigest, authorityID+"\x00"+string(canonical))
+	identity, err := json.Marshal([]string{authorityID, x.route.Slug, surface, resourceKind, lineOperation, string(canonical)})
+	if err != nil {
+		return nil, serverError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be encoded.")
+	}
+	digest := digester.Digest(secrets.BatchSubmissionDigest, string(identity))
 	cursor := reconciliationCursor
 	if len(cursor) == 0 {
 		endpointValue, _ := source.Root().Lookup("endpoint")

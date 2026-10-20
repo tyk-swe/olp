@@ -18,7 +18,7 @@ func TestAcceptedBatchMappingSurvivesClientDisconnect(t *testing.T) {
 	h := newAccessHarness(t)
 	_, _, slug, key := provisionOpenAI(t, h, fixture.URL,
 		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"})
-	status, uploaded := h.uploadTestFile(slug, key, "batch-line\n")
+	status, uploaded := h.uploadTestFile(slug, key, nativeBatchInput("batch-line"))
 	if status != http.StatusOK {
 		t.Fatalf("upload status=%d body=%v", status, uploaded)
 	}

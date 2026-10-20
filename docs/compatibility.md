@@ -531,6 +531,13 @@ Unknown fields, unsupported output configuration, unsafe file references,
 out-of-prefix cloud URIs and unsupported timeout settings are refused rather
 than silently ignored.
 
+OpenAI-shaped batch input must be JSONL with unique `custom_id` values and one
+supported endpoint. Each line's `body.model` must name the route or its pinned
+provider model; transformed OpenAI and Groq uploads bind route aliases to that
+provider model before upload. Files uploaded before model qualification must be
+uploaded again before creating new batches. Native Gemini inline batches refuse
+file and cached-content references until owner and affinity binding is available.
+
 Creation requires `X-OLP-Route`; follow-up requests derive route and affinity
 from the owner-scoped gateway ID. Ambiguous creates are retained as
 `submission_unknown`: the create returns `502`, a matching reconciliation can

@@ -283,3 +283,16 @@ func TestBedrockManifestRequiresUsageCounters(t *testing.T) {
 		t.Fatalf("explicit zero usage is invalid: %+v err=%v", zero, err)
 	}
 }
+
+func TestVertexOmittedZeroCountsAndDottedS3Bucket(t *testing.T) {
+	counts := vertexCounts(map[string]json.RawMessage{"completionStats": json.RawMessage(`{"successfulCount":"2"}`)})
+	if counts == nil || counts["successful"] != 2 || counts["failed"] != 0 || counts["incomplete"] != 0 {
+		t.Fatalf("omitted protobuf zero counts became unknown: %v", counts)
+	}
+	if invalid := vertexCounts(map[string]json.RawMessage{"completionStats": json.RawMessage(`{"successfulCount":"2","failedCount":null}`)}); invalid != nil {
+		t.Fatalf("malformed supplied count became zero: %v", invalid)
+	}
+	if got := bedrockManifestURL("batch.results", "output/job/manifest.json.out", "us-east-1"); got != "https://s3.us-east-1.amazonaws.com/batch.results/output/job/manifest.json.out" {
+		t.Fatalf("dotted bucket uses a TLS-incompatible hostname: %s", got)
+	}
+}

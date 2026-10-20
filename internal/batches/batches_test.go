@@ -171,7 +171,7 @@ func TestBatchResultEventIDsAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := ResultEvent(template, resourceID, digest, result, now)
+	second, err := ResultEvent(template, resourceID, digest, result, now.Add(24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +179,9 @@ func TestBatchResultEventIDsAndValidation(t *testing.T) {
 		first.Attempts[0].ID != second.Attempts[0].ID || first.ParentRequestID == nil ||
 		*first.ParentRequestID != createID || !first.Batch || !first.Attempts[0].Usage.Batch {
 		t.Fatalf("batch event identity or provenance is invalid: %+v", first)
+	}
+	if !second.Attempts[0].StartedAt.Equal(now) || !second.ObservedAt.Equal(now.Add(24*time.Hour)) {
+		t.Fatal("delayed settlement changed the submission pricing timestamp")
 	}
 	if _, err = usage.Validate(first); err != nil {
 		t.Fatalf("batch result event failed usage validation: %v", err)

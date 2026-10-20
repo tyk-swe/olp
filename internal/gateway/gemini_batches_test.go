@@ -112,3 +112,15 @@ func TestGeminiBatchMetadataExcludesContent(t *testing.T) {
 		t.Fatalf("transient inline output was lost: err=%v", err)
 	}
 }
+
+func TestGeminiInlineBatchRefusesUnboundFileReferences(t *testing.T) {
+	for _, request := range []string{
+		`{"contents":[{"parts":[{"fileData":{"mimeType":"application/pdf","fileUri":"https://generativelanguage.googleapis.com/v1beta/files/foreign"}}]}]}`,
+		`{"contents":[{"parts":[{"text":"read this"}]}],"cachedContent":"cachedContents/foreign"}`,
+	} {
+		body := []byte(`{"batch":{"inputConfig":{"requests":{"requests":[{"request":` + request + `,"metadata":{"key":"one"}}]}}}}`)
+		if _, err := validateGeminiBatchRequest(body, "route"); err == nil || err.Code != "unsupported_parameter" {
+			t.Fatalf("unowned file reference was not refused: %s err=%v", body, err)
+		}
+	}
+}

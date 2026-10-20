@@ -371,7 +371,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	response, attemptFailure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, requestBody, "application/json")
 	if attemptFailure != nil {
-		if attemptFailure.status == 0 && attemptFailure.dispatched {
+		if attemptFailure.acceptance.Unresolved() {
 			unknownCtx, stop := resourceCommitContext(r.Context())
 			defer stop()
 			_ = s.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())

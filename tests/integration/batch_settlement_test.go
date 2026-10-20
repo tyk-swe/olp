@@ -57,7 +57,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		[]string{"batch"})
 	start := time.Now().UTC().Add(-10 * time.Minute)
 	addBatchPrice(t, h, owner, provider["id"].(string), "0.5", start)
-	fileStatus, uploaded := h.uploadTestFile(slug, key, "input-row\n")
+	fileStatus, uploaded := h.uploadTestFile(slug, key, nativeBatchInput("input-row"))
 	if fileStatus != http.StatusOK {
 		t.Fatalf("batch input upload: %d %v", fileStatus, uploaded)
 	}
@@ -227,7 +227,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	_, _, ambiguousRoute, ambiguousKey := provisionOpenAIWith(t, h, fixture.URL,
 		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}},
 		[]string{"batch"}, map[string]any{"overall_timeout_ms": 1000})
-	ambiguousUploadStatus, ambiguousUpload := h.uploadTestFile(ambiguousRoute, ambiguousKey, "ambiguous-input\n")
+	ambiguousUploadStatus, ambiguousUpload := h.uploadTestFile(ambiguousRoute, ambiguousKey, nativeBatchInput("ambiguous-input"))
 	if ambiguousUploadStatus != http.StatusOK {
 		t.Fatalf("ambiguous input upload: %d %v", ambiguousUploadStatus, ambiguousUpload)
 	}
@@ -320,6 +320,18 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatal(err)
 	}
 	assertBatchSettlement(t, h, ambiguousResource, "settled", 1, 0)
+	fixture.batchCreateStatus.Store(http.StatusBadGateway)
+	defer fixture.batchCreateStatus.Store(0)
+	serverFailureSource := []byte(fmt.Sprintf(`{"input_file_id":%q,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"case":"accepted-5xx"}}`, inputFileID))
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(serverFailureSource), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) {
+		t.Fatalf("accepted HTTP 5xx lost its intent: %d %s", status, raw)
+	}
+	beforeRetry := fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(serverFailureSource), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) || fixture.dials.Load() != beforeRetry {
+		t.Fatalf("ambiguous HTTP 5xx permitted duplicate work: %d %s", status, raw)
+	}
 }
 
 func openAIBatchReader(h *accessHarness) *batches.OpenAIReader {

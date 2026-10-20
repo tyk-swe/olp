@@ -123,6 +123,9 @@ func validateGeminiBatchRequest(body []byte, slug string) (geminiBatchInput, *Er
 			if _, err := protocols.Parse(wire.Gemini, []byte(request.Raw()), slug); err != nil {
 				return geminiBatchInput{}, invalidRequest("invalid_request", "A batch request is not a valid Gemini GenerateContent request.", nil)
 			}
+			if geminiBatchHasFileReference(request) {
+				return geminiBatchInput{}, invalidRequest("unsupported_parameter", "Inline Gemini batches do not support file references.", nil)
+			}
 			keys = append(keys, key)
 			inputItems = append(inputItems, json.RawMessage(item.Raw()))
 		}
@@ -151,6 +154,23 @@ func validateGeminiBatchRequest(body []byte, slug string) (geminiBatchInput, *Er
 	}
 	inputResult.Canonical, inputResult.Upstream = canonical, upstream
 	return inputResult, nil
+}
+
+func geminiBatchHasFileReference(value oif.Value) bool {
+	for _, member := range value.Members() {
+		if member.Name == "fileUri" || member.Name == "file_uri" || member.Name == "cachedContent" || member.Name == "cached_content" {
+			return true
+		}
+		if geminiBatchHasFileReference(member.Value) {
+			return true
+		}
+	}
+	for _, item := range value.Elements() {
+		if geminiBatchHasFileReference(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func geminiOnlyFields(value oif.Value, allowed ...string) bool {
@@ -493,7 +513,7 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, input.Upstream, "application/json")
 	if failure != nil {
 		x.dispatched = failure.dispatched
-		if failure.status == 0 && failure.dispatched {
+		if failure.acceptance.Unresolved() {
 			commitCtx, stop := resourceCommitContext(r.Context())
 			defer stop()
 			if markErr := s.Batches.MarkUnknown(commitCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {

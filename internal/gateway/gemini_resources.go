@@ -167,7 +167,9 @@ func validateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy in
 	if err != nil || !strings.EqualFold(upload.Host, provider.Host) {
 		return errors.New("Gemini resumable upload URL host differs from the provider")
 	}
-	if _, err := egressPolicy.ValidateEndpoint(uploadURL); err != nil {
+	validationURL := *upload
+	validationURL.RawQuery, validationURL.ForceQuery = "", false
+	if _, err := egressPolicy.ValidateEndpoint(validationURL.String()); err != nil {
 		return errors.New("Gemini resumable upload URL is outside egress policy")
 	}
 	return nil
@@ -362,7 +364,9 @@ func (s *Server) geminiPinnedRequest(ctx context.Context, x *call, p *pin, metho
 	if err != nil || parsed.User != nil {
 		return nil, exchange.fail(s, x, classConnect, nil)
 	}
-	if _, err := s.egress.ValidateEndpoint(parsed.String()); err != nil {
+	validationURL := *parsed
+	validationURL.RawQuery, validationURL.ForceQuery = "", false
+	if _, err := s.egress.ValidateEndpoint(validationURL.String()); err != nil {
 		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, parsed.String(), body)
@@ -894,6 +898,18 @@ func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, mustJSON(response))
 }
 
+func geminiDownloadURL(cfg connectors.Config, model, fileID string) (string, error) {
+	generation, err := cfg.URL(wire.Gemini, model, false)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(generation)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("Gemini generation URL is malformed")
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/download/v1beta/files/" + url.PathEscape(fileID) + ":download?alt=media", nil
+}
+
 func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "download" || localID == "" {
@@ -906,7 +922,7 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	r.SetPathValue("name", localID)
 	s.geminiFileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, _ access.Authority, res *resources.Resource, p *pin, _ *routing.Route) *Error {
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID)+":download", url.Values{"alt": []string{"media"}})
+		endpoint, err := geminiDownloadURL(p.provider.Connector(), p.model, res.UpstreamID)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 		}

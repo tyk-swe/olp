@@ -23,7 +23,7 @@ func TestBatchOpaquePendingUsageNeverOwnsGenerationAccounting(t *testing.T) {
 			h := newAccessHarness(t)
 			_, _, slug, secret := provisionOpenAI(t, h, fixture.URL,
 				[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"})
-			status, uploaded := h.uploadTestFile(slug, secret, "batch content")
+			status, uploaded := h.uploadTestFile(slug, secret, nativeBatchInput("batch-content"))
 			if status != http.StatusOK {
 				t.Fatalf("upload: %d %v", status, uploaded)
 			}

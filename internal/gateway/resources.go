@@ -803,8 +803,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, invalidRequest("unsupported_parameter", "Groq files used by batches require purpose=batch.", &param), x.family)
 		return
 	}
-	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
-		if purpose != "batch" || len(extra) > 0 {
+	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" || adapter == "openai" && !x.strict() && purpose == "batch" {
+		if adapter != "openai" && (purpose != "batch" || len(extra) > 0) {
 			param := "purpose"
 			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", &param), x.family)
@@ -903,6 +903,12 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	x.completePinned()
 	metadata, state, expires := fileMetadata(body, p.model)
+	if manifest.Adapter == "openai" {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(metadata, &fields)
+		fields["batch_manifest"] = mustJSON(manifest)
+		metadata = mustJSON(fields)
+	}
 	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
 		metadata = managedFileMetadata(metadata, body, adapter, manifest, "input")
 	}
@@ -1159,6 +1165,12 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 		if res.Kind != resources.KindStrictFile {
 			var prior map[string]json.RawMessage
 			_ = json.Unmarshal(res.Metadata, &prior)
+			if manifest, ok := prior["batch_manifest"]; ok {
+				var fields map[string]json.RawMessage
+				_ = json.Unmarshal(metadata, &fields)
+				fields["batch_manifest"] = manifest
+				metadata = mustJSON(fields)
+			}
 			var adapter, role string
 			_ = json.Unmarshal(prior["adapter"], &adapter)
 			_ = json.Unmarshal(prior["role"], &role)
@@ -1549,6 +1561,16 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var inputManifest batchManifest
+	if adapter == "openai" && !x.strict() {
+		var metadata map[string]json.RawMessage
+		_ = json.Unmarshal(file.Metadata, &metadata)
+		if json.Unmarshal(metadata["batch_manifest"], &inputManifest) != nil || inputManifest.Adapter != "openai" ||
+			inputManifest.Endpoint != requestEndpoint || inputManifest.LineCount < 1 || inputManifest.ManifestDigest == "" {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, invalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", strPtr("input_file_id")), x.family)
+			return
+		}
+	}
 	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
 		var meta map[string]json.RawMessage
 		_ = json.Unmarshal(file.Metadata, &meta)
@@ -1616,6 +1638,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	var upstream []byte
 	var strictServing oif.ServingIdentity
 	var expectedResults *int64
+	if inputManifest.Adapter == "openai" {
+		expectedResults = new(int64(inputManifest.LineCount))
+	}
 	requestedWindow := "24h"
 	if value, present := source.Root().Lookup("completion_window"); present {
 		requestedWindow, _ = value.Text()
@@ -1715,7 +1740,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, upstream, "application/json")
 	if failure != nil {
 		x.dispatched = failure.dispatched
-		if failure.status == 0 && failure.dispatched {
+		if failure.acceptance.Unresolved() {
 			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
 			defer stopUnknown()
 			if err := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); err != nil {

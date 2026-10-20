@@ -85,6 +85,8 @@ type openaiFixture struct {
 	batchCreateHold chan struct{}
 	batchCreateRead chan struct{}
 	dials           atomic.Int64
+
+	batchCreateStatus atomic.Int32
 }
 
 func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
@@ -229,6 +231,12 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 				close(read)
 			}
 			<-hold
+			return
+		}
+		if status := f.batchCreateStatus.Load(); status != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(int(status))
+			writeJSON(w, map[string]any{"error": map[string]any{"type": "server_error", "message": "temporary failure"}})
 			return
 		}
 		writeJSON(w, batch)
@@ -475,6 +483,10 @@ func (h *accessHarness) gatewayRaw(method, path, key string, body io.Reader, hea
 	return resp.StatusCode, raw, resp.Header
 }
 
+func nativeBatchInput(customID string) string {
+	return fmt.Sprintf(`{"custom_id":%q,"method":"POST","url":"/v1/chat/completions","body":{"model":%q,"messages":[{"role":"user","content":"batch input"}]}}`+"\n", customID, vendorModel)
+}
+
 func (h *accessHarness) uploadTestFile(slug, key, content string) (int, map[string]any) {
 	h.t.Helper()
 	var buf bytes.Buffer
@@ -585,13 +597,13 @@ func TestBatchLifecycle(t *testing.T) {
 	h.refresh()
 
 	fixture.fileEcho.Store(true)
-	status, rejected := h.uploadTestFile(slug, secret, "upload-content-marker-7\n")
+	status, rejected := h.uploadTestFile(slug, secret, nativeBatchInput("upload-content-marker-7"))
 	fixture.fileEcho.Store(false)
 	if encoded, _ := json.Marshal(rejected); status != 400 || bytes.Contains(encoded, []byte(vendorSecret)) {
 		t.Fatalf("a provider echo of the applied credential reached the client: %d %s", status, encoded)
 	}
 
-	status, uploaded := h.uploadTestFile(slug, secret, "upload-content-marker-7\n")
+	status, uploaded := h.uploadTestFile(slug, secret, nativeBatchInput("upload-content-marker-7"))
 	if status != 200 {
 		t.Fatalf("upload: %d %v", status, uploaded)
 	}

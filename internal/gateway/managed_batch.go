@@ -218,6 +218,26 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported model.", lineNumber), &param))
 		}
+		if adapter == "openai" {
+			if p.provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
+				return fail(invalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", strPtr("file")))
+			}
+			modelJSON, _ := json.Marshal(p.provider.Connector().Model(p.model))
+			bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(modelJSON), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
+			if err != nil {
+				return fail(err)
+			}
+			customIDDigest, ok := digest(line.CustomID)
+			if !ok {
+				return fail(errors.New("batch digest key is unavailable"))
+			}
+			_, _ = manifestHash.Write(customIDDigest)
+			if _, err = writer.Write(append(bound.Bytes(), '\n')); err != nil {
+				return fail(err)
+			}
+			manifest.LineCount++
+			continue
+		}
 		request, err := protocols.Parse(family, line.Body, route.Slug)
 		if err != nil || request.Stream {
 			param := "file"
@@ -285,9 +305,13 @@ func managedCustomIDLimit(adapter string) int {
 func managedBatchEndpoint(adapter, endpoint string) (string, wire.Format, bool) {
 	switch endpoint {
 	case "/v1/chat/completions":
-		return "generation", wire.Chat, adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
+		return "generation", wire.Chat, adapter == "openai" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
 	case "/v1/embeddings":
-		return "embeddings", wire.Embeddings, adapter == "mistral"
+		return "embeddings", wire.Embeddings, adapter == "openai" || adapter == "mistral"
+	case "/v1/responses":
+		return "generation", wire.Responses, adapter == "openai"
+	case "/v1/completions":
+		return "generation", wire.Completions, adapter == "openai"
 	default:
 		return "", "", false
 	}

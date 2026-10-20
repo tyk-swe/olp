@@ -525,7 +525,7 @@ func (r *BedrockReader) ReadResults(ctx context.Context, target *PinnedTarget, s
 	if !ok {
 		return cursor, false, ErrStorageScope
 	}
-	endpoint := "https://" + bucket + ".s3." + target.Config.CloudRegion + ".amazonaws.com/" + escapeS3Key(key)
+	endpoint := bedrockManifestURL(bucket, key, target.Config.CloudRegion)
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return cursor, false, err
@@ -577,6 +577,13 @@ func (r *BedrockReader) ReadResults(ctx context.Context, target *PinnedTarget, s
 func bedrockOutputLocation(base, arn string) string {
 	jobID := arn[strings.LastIndex(arn, "/")+1:]
 	return strings.TrimRight(base, "/") + "/" + jobID + "/"
+}
+
+func bedrockManifestURL(bucket, key, region string) string {
+	if strings.Contains(bucket, ".") {
+		return "https://s3." + region + ".amazonaws.com/" + bucket + "/" + escapeS3Key(key)
+	}
+	return "https://" + bucket + ".s3." + region + ".amazonaws.com/" + escapeS3Key(key)
 }
 
 func parseBedrockManifest(body []byte) (Result, error) {
@@ -662,6 +669,13 @@ func vertexCounts(job map[string]json.RawMessage) map[string]int64 {
 	}
 	out := map[string]int64{}
 	for source, target := range map[string]string{"successfulCount": "successful", "failedCount": "failed", "incompleteCount": "incomplete"} {
+		if _, present := stats[source]; !present {
+			out[target] = 0
+			continue
+		}
+		if bytes.Equal(bytes.TrimSpace(stats[source]), []byte("null")) {
+			return nil
+		}
 		var text string
 		if json.Unmarshal(stats[source], &text) == nil {
 			n, err := strconv.ParseInt(text, 10, 64)

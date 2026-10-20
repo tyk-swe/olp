@@ -108,6 +108,11 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		}
 		writeJSON(w, geminiFileObject())
 	})
+	mux.HandleFunc("GET /download/v1beta/files/upstream-gemini-file:download", func(w http.ResponseWriter, _ *http.Request) {
+		fixture.mu.Lock()
+		defer fixture.mu.Unlock()
+		_, _ = w.Write(fixture.uploadBytes)
+	})
 	mux.HandleFunc("DELETE /v1beta/files/{id}", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})

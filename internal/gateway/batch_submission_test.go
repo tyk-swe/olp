@@ -374,3 +374,26 @@ func TestBatchSubmissionPinsMissingPriceAndCurrentDiscount(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeBatchInputBindsOneModelWithoutLosingNativeFields(t *testing.T) {
+	p := &pin{provider: routing.Provider{Kind: "openai", VendorID: "openai"}, model: "provider-model"}
+	route := &routing.Route{Slug: "route-model"}
+	digest := func(id string) ([]byte, bool) { return []byte(id), true }
+	line := `{"custom_id":"one","method":"POST","url":"/v1/responses","body":{"model":"route-model","input":"hello","native":{"seed":9007199254740993,"tiny":-0}}}`
+	output, manifest, err := runManagedTranslation(line+"\n", digest, p, route, "openai")
+	if err != nil || manifest.Adapter != "openai" || manifest.LineCount != 1 || manifest.Endpoint != "/v1/responses" ||
+		!bytes.Contains(output, []byte(`"model":"provider-model"`)) || !bytes.Contains(output, []byte(`9007199254740993`)) ||
+		!bytes.Contains(output, []byte(`"tiny":-0`)) || !bytes.Contains(output, []byte(`"method":"POST"`)) {
+		t.Fatalf("native batch model binding changed other fields: %s manifest=%+v err=%v", output, manifest, err)
+	}
+	p.provider.Kind = "azure_openai"
+	p.provider.Models = map[string]json.RawMessage{"provider-model": json.RawMessage(`{"deployment":"deployed-model"}`)}
+	mapped, _, err := runManagedTranslation(line+"\n", digest, p, route, "openai")
+	if err != nil || !bytes.Contains(mapped, []byte(`"model":"deployed-model"`)) {
+		t.Fatalf("native batch ignored the pinned deployment binding: %s err=%v", mapped, err)
+	}
+	foreign := strings.Replace(line, `"model":"route-model"`, `"model":"unrelated-model"`, 1)
+	if _, _, err := runManagedTranslation(foreign+"\n", digest, p, route, "openai"); err == nil {
+		t.Fatal("native batch accepted an unpriced model outside its pinned target")
+	}
+}

@@ -594,5 +594,6 @@ pending count, oldest age and checkpoint freshness.
 Allow provider egress to the Gemini upload host `generativelanguage.googleapis.com`,
 `{location}-aiplatform.googleapis.com`, `storage.googleapis.com`,
 `bedrock.{region}.amazonaws.com` and
-`{bucket}.s3.{region}.amazonaws.com`. Keep configured storage objects available
+`{bucket}.s3.{region}.amazonaws.com` (or `s3.{region}.amazonaws.com` for dotted
+bucket names). Keep configured storage objects available
 to the reader identity until settlement closes.

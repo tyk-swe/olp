@@ -469,7 +469,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, translated, "application/json")
 	if failure != nil {
 		x.dispatched = failure.dispatched
-		if failure.status == 0 && failure.dispatched {
+		if failure.acceptance.Unresolved() {
 			commit, stop := resourceCommitContext(r.Context())
 			defer stop()
 			if markErr := s.Batches.MarkUnknown(commit, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
