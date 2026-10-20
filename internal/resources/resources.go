@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -276,6 +277,39 @@ func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, 
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) ListKindsBefore(ctx context.Context, kinds []string, apiKeyID string, limit int, beforeID string) ([]*Resource, error) {
+	id, err := parseLocal(beforeID)
+	valid := false
+	for _, kind := range kinds {
+		valid = valid || LocalID(kind, id) == beforeID
+	}
+	if err != nil || !valid {
+		return nil, ErrNotFound
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
+		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
+		AND (created_at,id)>(SELECT created_at,id FROM olp.provider_resources
+		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND state<>$3 AND (expires_at IS NULL OR expires_at>now()))
+		ORDER BY created_at ASC,id ASC LIMIT $5`, kinds, apiKeyID, StateDeleted, id, limit)
+	if err != nil {
+		return nil, fmt.Errorf("provider resource list before: %w", err)
+	}
+	defer rows.Close()
+	out := []*Resource{}
+	for rows.Next() {
+		resource, scanErr := scan(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("provider resource list before scan: %w", scanErr)
+		}
+		out = append(out, resource)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(out)
+	return out, nil
 }
 
 func (s *Store) Update(ctx context.Context, localID, state string, metadata json.RawMessage, expiresAt *time.Time) error {

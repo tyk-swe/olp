@@ -788,13 +788,18 @@ func profileTemplateForRegistration(p Profile) *Profile {
 	for i := range profileRegistry {
 		existing := &profileRegistry[i]
 		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
-			if existing.Kind == "openai_compatible" && slices.Contains(existing.Operations, "batch") {
+			if vendorBatchProfile(*existing) {
 				continue
 			}
 			template = existing
 		}
 	}
 	return template
+}
+
+func vendorBatchProfile(profile Profile) bool {
+	return profile.Kind == "openai_compatible" && slices.Contains(profile.Operations, "batch") &&
+		strings.HasSuffix(profile.ID, "-files-batches")
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {

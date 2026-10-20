@@ -227,6 +227,22 @@ func TestAnthropicBatchRequiresDirectMessageConnector(t *testing.T) {
 }
 
 func TestPluginOpenAIChatProfileSkipsBatchProfilesAsTemplates(t *testing.T) {
+	profileMu.Lock()
+	original := profileRegistry
+	filtered := make([]Profile, 0, len(original))
+	for _, registered := range original {
+		if registered.Kind == "openai_compatible" && slices.Contains(registered.Operations, "batch") {
+			continue
+		}
+		filtered = append(filtered, registered)
+	}
+	profileRegistry = filtered
+	profileMu.Unlock()
+	defer func() {
+		profileMu.Lock()
+		profileRegistry = original
+		profileMu.Unlock()
+	}()
 	profile, err := LookupProfile("compatible-chat", ProfileRevision)
 	if err != nil {
 		t.Fatal(err)
@@ -234,9 +250,17 @@ func TestPluginOpenAIChatProfileSkipsBatchProfilesAsTemplates(t *testing.T) {
 	profile.ID = "fixture-plugin-openai-chat-" + uuid.NewString()
 	profile.Label = "Fixture plugin OpenAI Chat"
 	profile.Plugin = &Plugin{Digest: strings.Repeat("a", 64), Name: "Fixture", Version: "1"}
-	profile.Authentication = []string{"none"}
-	if template := profileTemplateForRegistration(profile); template == nil || slices.Contains(template.Operations, "batch") {
-		t.Fatalf("plugin template should be the last non-batch openai-chat composition: %v", template)
+	wantTemplate := ""
+	for i := range profileRegistry {
+		existing := &profileRegistry[i]
+		if existing.Kind == profile.Kind && existing.Dialect == profile.Dialect && existing.Hosting == profile.Hosting && existing.DialectRevision == profile.DialectRevision &&
+			!vendorBatchProfile(*existing) {
+			wantTemplate = existing.ID
+			profile.Authentication = slices.Clone(existing.Authentication)
+		}
+	}
+	if template := profileTemplateForRegistration(profile); template == nil || template.ID != wantTemplate {
+		t.Fatalf("plugin template = %v, want main last-match template %q", template, wantTemplate)
 	}
 	if err := RegisterProfile(profile); err != nil {
 		t.Fatalf("compatible-chat template registration failed: %v", err)

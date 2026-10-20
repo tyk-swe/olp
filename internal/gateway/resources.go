@@ -34,6 +34,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 		return
 	}
 	if s.Media != nil {
+		s.registerAnthropicState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
@@ -239,7 +240,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
-	req.Header.Set("Accept", "application/json")
+	accept := "application/json"
+	if x.anthropicFileBinary {
+		accept = "application/binary"
+	}
+	req.Header.Set("Accept", accept)
 	if x.mode == "streaming" && (x.family == wire.GeminiInteractions || x.family == wire.Responses) {
 		req.Header.Set("Accept", "text/event-stream")
 	}
@@ -248,6 +253,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 			return nil, exchange.fail(s, x, classCancelled, nil)
 		}
 		return nil, exchange.fail(s, x, classCredential, nil)
+	}
+	if x.anthropicFilesBeta {
+		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
 	}
 	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 }
@@ -951,15 +959,17 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 			_, err = io.Copy(part, opened.File)
 			return err
 		}
-		if fileFirst {
+		if purpose != "" && fileFirst {
 			if err := writeFile(); err != nil {
 				sendDone <- failure(err)
 				return
 			}
 		}
-		if err := form.WriteField("purpose", purpose); err != nil {
-			sendDone <- failure(err)
-			return
+		if purpose != "" {
+			if err := form.WriteField("purpose", purpose); err != nil {
+				sendDone <- failure(err)
+				return
+			}
 		}
 		for name, value := range extra {
 			if err := form.WriteField(name, value); err != nil {
@@ -967,7 +977,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 				return
 			}
 		}
-		if !fileFirst {
+		if purpose == "" || !fileFirst {
 			if err := writeFile(); err != nil {
 				sendDone <- failure(err)
 				return
@@ -996,6 +1006,9 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 	req.Header.Set("Accept", "application/json")
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
 		return nil, exchange.fail(s, x, classCredential, nil)
+	}
+	if x.anthropicFilesBeta {
+		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
 	}
 	resp, failure := s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 	if failure != nil {

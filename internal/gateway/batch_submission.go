@@ -95,7 +95,7 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 	}
 	resourceID := uuid.Must(uuid.NewV7())
 	now := s.now()
-	template, err := s.batchSettlementTemplate(x, p, lineOperation, now)
+	template, err := s.batchSettlementTemplate(x, p, surface, lineOperation, now)
 	if err != nil {
 		return nil, serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
 	}
@@ -165,7 +165,7 @@ func (s *Server) prepareBatchSubmission(ctx context.Context, x *call, authorityI
 	return &batchSubmission{settlement: settlement, resource: resource}, nil
 }
 
-func (s *Server) batchSettlementTemplate(x *call, p *pin, lineOperation string, now time.Time) (*usage.Event, error) {
+func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation string, now time.Time) (*usage.Event, error) {
 	if x == nil || x.request.release == nil || x.route == nil || p == nil {
 		return nil, errors.New("batch accounting identity is incomplete")
 	}
@@ -198,7 +198,7 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, lineOperation string, 
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(),
 		PolicyDecisions: x.policyDecisions, Route: x.route.Slug, RouteRevisionID: x.route.RevisionID,
-		Operation: lineOperation, Surface: "openai", RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
+		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
 		StartedAt: now, CompletedAt: now, Attempts: []AttemptFact{fact},
 	})
 	if event == nil {
