@@ -59,7 +59,7 @@ The key never expires or refreshes. A different key is a different principal:
 rotate a key by enrolling it, creating a new code account and revoking the old
 credential version.
 
-See [code mode](../../docs/features/code-mode.md) and the
-[qualification](../../docs/qualification/code-mode.md). OpenCode Go's terms
+See [code mode](../../docs/use/code-mode.md) and the
+[qualification](../../docs/develop/qualification.md). OpenCode Go's terms
 govern its use; OLP forwards the client's requests unmodified but cannot
 guarantee that OpenCode accepts their use through a gateway.

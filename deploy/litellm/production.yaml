@@ -1,4 +1,4 @@
-# LiteLLM configuration for the gateway benchmark (docs/performance.md): the
+# LiteLLM configuration for the gateway benchmark (docs/develop/performance.md): the
 # settings its production guide documents, https://docs.litellm.ai/docs/proxy/prod,
 # in front of the benchmark's mock upstream. S1, S2, S4 and S5 run on it; S3
 # runs on high-throughput.yaml. Keep the model_list of the two files identical.

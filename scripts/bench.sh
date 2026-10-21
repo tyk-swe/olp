@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Runs the gateway benchmark scenarios (docs/roadmap/m01-measured-advantage.md)
+# Runs the gateway benchmark scenarios (docs/develop/performance.md)
 # against a disposable PostgreSQL and Valkey, and writes one result per scenario
 # to .local/bench/<scenario>.json. See tests/bench/README.md.
 usage() {
@@ -14,7 +14,7 @@ usage: scripts/bench.sh
                              external uses the ones OLP_TEST_DATABASE_URL and OLP_TEST_VALKEY_URL
                              name, whose user may create databases
 
-  OLP_BENCH_SCALE            multiplies every rate and concurrency; 1 is the roadmap's full rates (default 1)
+  OLP_BENCH_SCALE            multiplies every rate and concurrency; 1 is the performance guide's full rates (default 1)
   OLP_BENCH_DURATION         measured period of each run (default 60s)
   OLP_BENCH_WARMUP           warmup before it, at the same rate (default 10s)
   OLP_BENCH_GATEWAY_CPUS     CPUs to pin the gateway to, as taskset lists them (S1's target needs exactly two)
@@ -26,7 +26,7 @@ usage: scripts/bench.sh
   OLP_TEST_BINARY            benchmark this olp binary instead of building one from source
   OLP_BENCH_MOCK_BINARY      use this mock upstream instead of building one
 
-Scenarios are the roadmap's, and the other OLP_BENCH_ variables are in tests/bench/README.md.
+Scenarios are the performance guide's, and the other OLP_BENCH_ variables are in tests/bench/README.md.
 EOF
   exit "${1:-2}"
 }

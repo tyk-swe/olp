@@ -44,10 +44,10 @@ func TestPurposeNamesNeverChange(t *testing.T) {
 	}
 }
 
-var update = flag.Bool("update", false, "rewrite docs/security.md from the declared purposes")
+var update = flag.Bool("update", false, "rewrite docs/develop/security.md from the declared purposes")
 
 func TestPurposeDocumentation(t *testing.T) {
-	path := "../../docs/security.md"
+	path := "../../docs/develop/security.md"
 	document, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -55,12 +55,12 @@ func TestPurposeDocumentation(t *testing.T) {
 	startMarker, endMarker := "<!-- purposes -->\n", "<!-- /purposes -->"
 	start := strings.Index(string(document), startMarker)
 	if start < 0 {
-		t.Fatal("docs/security.md has no purposes region")
+		t.Fatal("docs/develop/security.md has no purposes region")
 	}
 	start += len(startMarker)
 	end := strings.Index(string(document[start:]), endMarker)
 	if end < 0 {
-		t.Fatal("docs/security.md has no closing purposes marker")
+		t.Fatal("docs/develop/security.md has no closing purposes marker")
 	}
 	end += start
 	var digests, seals []string
@@ -78,7 +78,7 @@ func TestPurposeDocumentation(t *testing.T) {
 		return
 	}
 	if !*update {
-		t.Fatal("docs/security.md purpose table differs from declared purposes; rerun with -update")
+		t.Fatal("docs/develop/security.md purpose table differs from declared purposes; rerun with -update")
 	}
 	updated := append(append(append([]byte{}, document[:start]...), rendered...), document[end:]...)
 	if err = os.WriteFile(path, updated, 0o644); err != nil {

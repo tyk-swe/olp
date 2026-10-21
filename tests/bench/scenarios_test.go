@@ -1,6 +1,6 @@
 //go:build bench
 
-// The scenario suite of the gateway benchmark (docs/roadmap/m01-measured-advantage.md).
+// The scenario suite of the gateway benchmark (docs/develop/performance.md).
 //
 // Each TestScenarioSn starts the mock upstream and a real `olp all` process
 // against the disposable PostgreSQL and Valkey that make bench provisions,
@@ -74,7 +74,7 @@ type plan struct {
 	StreamBytes int64 `json:"stream_bytes,omitempty"`
 }
 
-// scenario is one row of the roadmap's scenario table.
+// scenario is one row of the performance guide's scenario table.
 type scenario struct {
 	ID    string
 	Title string

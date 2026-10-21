@@ -18,7 +18,7 @@ establish that the checkout is a published release.
 
 ## Security architecture
 
-[docs/security.md](docs/security.md) describes the boundaries OpenLLMProxy
+[docs/develop/security.md](docs/develop/security.md) describes the boundaries OpenLLMProxy
 defends, how every call is authorized, how secrets are held, and the known
 non-goals and residual risks.
 

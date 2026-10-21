@@ -36,7 +36,7 @@ OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
 export OLP_TEST_RUN_TOKEN
 export OLP_CONSOLE_E2E_PACKAGED=true OLP_CONSOLE_E2E_CANDIDATE=true
 ./scripts/browser-integration.sh
-# Full-scale gateway scenarios (docs/roadmap/m01-measured-advantage.md) against
+# Full-scale gateway scenarios (docs/develop/performance.md) against
 # the binary this candidate ships, not one built from source. They are a
 # release-qualification suite like the ones above, but opt-in: the numbers mean
 # something only on reference hardware, with the gateway, the mock upstream and

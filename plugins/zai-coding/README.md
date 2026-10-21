@@ -61,8 +61,8 @@ The key never expires or refreshes. A different key is a different principal:
 rotate a key by enrolling it, creating a new code account and revoking the old
 credential version. Conversations pinned to the old account start again.
 
-See [code mode](../../docs/features/code-mode.md) for routes and client
-configuration, and the [qualification](../../docs/qualification/code-mode.md)
+See [code mode](../../docs/use/code-mode.md) for routes and client
+configuration, and the [qualification](../../docs/develop/qualification.md)
 for what the controlled fixtures prove. Z.ai restricts the plan to its
 officially supported tools; OLP forwards the client's requests unmodified but
 cannot guarantee that Z.ai accepts their use through a gateway.

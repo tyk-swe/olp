@@ -42,7 +42,7 @@ export const chatProviders = [
     name: 'OpenAIResponses',
     slug: models.openai,
     api: () => 'openai.responses',
-    // Open items, recorded in docs/clients.md. The client repeats the last text
+    // Open items, recorded in docs/use/clients.md. The client repeats the last text
     // delta once for each event that follows it, and every agent step streams,
     // so streaming and the agent return corrupted text whatever the server is.
     // It also drops the temperature of a model name it does not recognize.

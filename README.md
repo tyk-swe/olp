@@ -1,116 +1,24 @@
 # OpenLLMProxy
 
 OpenLLMProxy is a self-hosted AI gateway and control plane built with Go,
-SvelteKit, PostgreSQL, and Valkey. It routes OpenAI, Anthropic, Gemini, and
-Bedrock client requests across certified provider models. Providers include
-OpenAI, Anthropic, Gemini, Vertex AI, Amazon Bedrock, Azure OpenAI, and reviewed
-OpenAI-compatible endpoints.
+SvelteKit, PostgreSQL and Valkey. Connect providers, certify model capabilities,
+publish stable routes and manage access, budgets and attempt accounting across
+OpenAI, Anthropic, Gemini and Bedrock client interfaces.
+
+**[Read the handbook](docs/README.md)** or **[install and make your first request](docs/getting-started.md)**.
+For supported operations and translation limits, see
+[Compatibility](docs/use/compatibility.md). Persisted telemetry stays content-free;
+provider-retained state, response caching and opt-in external capture have
+explicit storage contracts.
 
 OpenLLMProxy 0.1.0 is a work in progress. During 0.x it makes no compatibility,
-upgrade, mixed-version or rollback promises: any release may change the
-management API, configuration and storage.
+upgrade, mixed-version or rollback promises: releases may change the management
+API, configuration and storage. [Roadmap](docs/roadmap.md) tracks unfinished work
+and qualification gates.
 
-## Develop locally
-
-Install the [development prerequisites](CONTRIBUTING.md), then run:
-
-```sh
-make setup
-make dev
-```
-
-Open http://127.0.0.1:5173 and use `.local/secrets/bootstrap.token` to create
-the first owner. See [Contributing](CONTRIBUTING.md#local-development) for the
-development workflow and [Testing](tests/README.md) for checks and suite selection.
-
-## Install
-
-Build the image locally with Compose:
-
-```sh
-cp .env.example .env
-./scripts/prepare-compose-secrets.sh
-docker compose --env-file .env \
-  -f deploy/compose.yaml -f deploy/compose.build.yaml \
-  -f deploy/compose.bootstrap.yaml up --build -d
-```
-
-Visit the configured `OLP_PUBLIC_ORIGIN` and use
-`deploy/secrets/olp_bootstrap_token` for first-owner setup. After setup,
-[recreate the application without the bootstrap overlay and retire the token](deploy/secrets/README.md#bootstrap-token-lifecycle).
-To use a published 0.x image, set `OLP_IMAGE` and omit the build overlay and
-`--build`.
-
-In the console, connect a provider, discover and certify models, and activate
-it. Create and publish a route targeting those models, then issue an API key in
-the same project with the required scopes and route access. A route is strict
-unless you declare it transformed; declare it transformed when it translates
-between dialects, redacts content or uses a provider without a provider
-profile. See [provider routing](docs/provider-routing.md) for route fidelity,
-credential pools, bulk workflows, and price, latency, throughput, and privacy
-preferences.
-
-For production, follow [deployment](docs/deployment.md) and
-[configuration](docs/configuration.md). Gateway, control, and worker modes can
-run separately; workers persist accounting and reconcile media jobs and budgets.
-
-## Make an SDK request
-
-Install the `openai` JavaScript package and set `OLP_API_KEY` to a key with
-`inference` scope. The model is a published route slug:
-
-```javascript
-import OpenAI from 'openai';
-
-const client = new OpenAI({
-  apiKey: process.env.OLP_API_KEY,
-  baseURL: 'http://127.0.0.1:5173/v1'
-});
-const response = await client.responses.create({
-  model: 'assistant',
-  input: 'Hello'
-});
-console.log(response.output_text);
-```
-
-Use `/anthropic` as the Anthropic SDK base URL and `/gemini` as the Gemini SDK
-base URL. Bedrock uses `/bedrock` and separate gateway authentication; see the
-[Bedrock guide](docs/providers/bedrock.md#bedrock-sdk-ingress), including proxy
-requirements.
-
-| Interface | Path |
-| --- | --- |
-| Management API and OpenAPI | `/api/v1` and `/api/v1/openapi.json` |
-| OpenAI | `/v1` |
-| Anthropic | `/anthropic/v1` |
-| Gemini | `/gemini/v1beta` and `/gemini/v1` |
-| Bedrock | `/bedrock` |
-| Private health and metrics | Separate observability listener on port 9090 |
-
-The [compatibility matrix](docs/compatibility.md) lists generation (including
-legacy text completions), token counting, Decisions, embeddings, rerank,
-moderation, media, and qualified file, batch, realtime, and stored-response
-operations. Support depends on the provider,
-model, and certified capability. Persisted telemetry excludes prompts, outputs,
-credentials, and uploaded content; opt-in provider state may retain content
-upstream.
-
-## Documentation
-
-Start with [concepts](docs/concepts.md) and the [compatibility matrix](docs/compatibility.md).
-
-| Task | Guides |
-| --- | --- |
-| Connect providers and publish routes | [Routing](docs/provider-routing.md), [profiles](docs/provider-profiles.md), [plugins](docs/plugins.md), [plugin SDK](docs/plugin-authoring.md) |
-| Deploy and operate | [Deployment](docs/deployment.md), [configuration](docs/configuration.md), [operations](docs/operations.md), [pricing](docs/pricing.md), [performance](docs/performance.md) |
-| Export costs and reconcile invoices | [FinOps](docs/finops.md) |
-| Manage access and secrets | [Access](docs/access.md), [security](docs/security.md), [external secrets](docs/external-secrets.md) |
-| Automate management | [CLI, Go client and MCP](docs/operator-cli.md), [GitHub Actions](docs/configuration-actions.md), [Terraform/OpenTofu](docs/terraform.md) |
-| Use clients and subscription accounts | [Qualified clients](docs/clients.md), [code mode](docs/features/code-mode.md), [qualification limits](docs/qualification/code-mode.md) |
-| Configure shared resources | [Guardrails](docs/guardrails.md), [response caching](docs/caching.md), [upstream MCP servers](docs/mcp-servers.md), [export sinks](docs/export-sinks.md), [model catalog](docs/model-catalog.md) |
-| Use the console | [Controls](docs/console.md), [installation tools](docs/operator-console.md) |
-| Develop the gateway and console | [Contributing](CONTRIBUTING.md), [testing](tests/README.md), [architecture](docs/architecture.md), [execution](docs/gateway.md), [console](console/README.md) |
-| Track remaining work | [Roadmap and parity](docs/roadmap/README.md) |
+For local development, follow [Contributing](CONTRIBUTING.md); suite selection is
+in [Testing](tests/README.md). Production operators should start with
+[Deployment](docs/operate/deployment.md) and [Operations](docs/operate/operations.md).
 
 Licensed under AGPL-3.0-only. Report vulnerabilities through the
 [security policy](SECURITY.md); participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).

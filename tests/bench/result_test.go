@@ -25,7 +25,7 @@ type result struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	Scale       float64   `json:"scale"`
 	// Reference says whether the run was made under the conditions the
-	// roadmap's targets are stated for. A smoke run is not, and its numbers
+	// performance guide's targets are stated for. A smoke run is not, and its numbers
 	// are not reference numbers.
 	Reference   referenceConditions `json:"reference_conditions"`
 	Environment environment         `json:"environment"`
@@ -280,7 +280,7 @@ const (
 	statusNotChecked      = "not_checked"
 )
 
-// targetResult is one roadmap target judged against a run. MeetsTarget is
+// targetResult is one performance target judged against a run. MeetsTarget is
 // null unless the target could be checked.
 type targetResult struct {
 	ID          string   `json:"id"`

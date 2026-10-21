@@ -2,7 +2,7 @@
 
 Real clients run headless against a gateway/scripted upstream. Suites
 assert client outcomes and recorded requests, catching bypasses and wire damage.
-[Client compatibility](../../docs/clients.md) owns version policy, configuration and limitations.
+[Client compatibility](../../docs/use/clients.md) owns version policy, configuration and limitations.
 
 ```sh
 pnpm install --frozen-lockfile        # the npm clients, once
@@ -241,7 +241,7 @@ leaked a caller credential, and each had the expected status.
 2. Configure the client with the base URL, key and route slug from the
    environment. A client without a base-URL override, or one that cannot run
    headless, is an open item: leave the row skipped with that reason and record
-   it in [Client compatibility](../../docs/clients.md). Do not patch the client.
+   it in [Client compatibility](../../docs/use/clients.md). Do not patch the client.
 3. Script the upstream with directives, run the client, then assert its outcome
    and the recording: the path, the rewritten model, that tool results and
    headers arrived, and `assertClean`.
@@ -266,7 +266,7 @@ differ from the library suites in three ways.
   private home and the proxy trap, never the harness contract, and gives it a
   working directory of its own. stdin is closed, and a run that outlives its
   deadline is killed together with every shell command it started.
-- Each agent's configuration is the one `docs/clients.md` documents, written by
+- Each agent's configuration is the one `docs/use/clients.md` documents, written by
   the test: environment variables for Claude Code and Gemini CLI, a
   `config.toml` in a private `CODEX_HOME` for Codex. Codex is started with
   `--strict-config`, so a key a release no longer knows fails the run.
@@ -306,4 +306,4 @@ Claude Code installer, which links the binary its optional package ships, and
 declines the optional native modules of Gemini CLI. Dependabot advances the
 npm pins through the root workspace and the Go pins through its own entry.
 `scripts/check-clients-doc.test.mjs` keeps
-[Client compatibility](../../docs/clients.md) equal to the manifests.
+[Client compatibility](../../docs/use/clients.md) equal to the manifests.

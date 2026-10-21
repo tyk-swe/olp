@@ -44,7 +44,7 @@ type mockProcess struct {
 	client *http.Client
 }
 
-// startMock starts the mock with the roadmap's default behavior and waits for
+// startMock starts the mock with the performance guide's default behavior and waits for
 // it to say where it listens.
 func startMock(t *testing.T, s settings) *mockProcess {
 	t.Helper()

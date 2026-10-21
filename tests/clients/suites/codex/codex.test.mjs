@@ -1,6 +1,6 @@
 // Codex CLI, the resolved latest release, in `codex exec` against OLP's OpenAI surface
 // as a custom model provider speaking the Responses API: the configuration
-// docs/clients.md documents. It runs against a transformed route with the stock
+// docs/use/clients.md documents. It runs against a transformed route with the stock
 // tool set, and against a strict route with the provider-hosted tools turned
 // off, which a strict route refuses.
 //

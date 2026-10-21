@@ -765,7 +765,7 @@ func TestHarnessWritesResults(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	// Every figure the roadmap asks of a run is present.
+	// Every figure the performance guide asks of a run is present.
 	for _, key := range []string{"added_latency_ms", "ttft_overhead_ms", "throughput", "resources", "allocations_per_request", "error_rate",
 		"request_metadata_completeness", "targets", "baseline", "gateway_run", "reference_conditions", "environment", "validity"} {
 		if _, ok := decoded[key]; !ok {

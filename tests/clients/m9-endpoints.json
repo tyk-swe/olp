@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "baseline": "docs/roadmap/m09-api-surface.md",
+  "baseline": "docs/develop/plans/api-surface.md",
   "description": "M9 method/provider scope and local evidence. Pending rows are a work ledger, not a support promise. Existing baseline support is distinct from M9 acceptance. Exact provider/model/profile certification and separate live qualification are required.",
   "sdk_locks": {
     "openai": {

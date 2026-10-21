@@ -10,7 +10,7 @@ var developmentKey = Key{ID: DevelopmentKeyID, Public: mustPublicKey("8FPiQcGvJq
 
 // releaseKeys verify documents the release workflow signed with the key only
 // CI holds. Rotation adds the incoming key here a release before documents
-// are signed with it alone; see docs/catalog.md#signing-keys.
+// are signed with it alone; see docs/develop/catalog.md#signing-keys.
 var releaseKeys = []Key{
 	{ID: "release-2026a", Public: mustPublicKey("DhzCvhBBGXWpg+mNX7Z1fE4hJBUSVi0Llmxe6U7A+Nk=")},
 }

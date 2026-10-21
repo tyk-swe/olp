@@ -1,7 +1,7 @@
 // Package abi defines the OpenLLMProxy provider plugin ABI: the functions a
 // plugin module exports, the host function it may import, and the JSON
 // messages that cross between them. OLP and the Go SDK share these
-// definitions. docs/plugin-authoring.md describes the ABI in full.
+// definitions. docs/develop/plugin-authoring.md describes the ABI in full.
 //
 // A module is a WASI preview 1 reactor. OLP runs its _initialize export,
 // checks olp_abi_version, then serves each call by writing a Request into a

@@ -1,4 +1,4 @@
-# LiteLLM configuration for S3 of the gateway benchmark (docs/performance.md):
+# LiteLLM configuration for S3 of the gateway benchmark (docs/develop/performance.md):
 # production.yaml plus the settings of LiteLLM's high-throughput profile,
 # https://docs.litellm.ai/docs/proxy/high_throughput. The profile's other half is
 # environment and sidecars, which deploy/compose.bench.yaml carries. Keep the
