@@ -87,3 +87,13 @@ func TestSubmissionCreatorDeadline(t *testing.T) {
 		t.Fatalf("legacy creator without deadline was guessed inactive: %v", got)
 	}
 }
+
+func TestManagedBatchExpectedCountPreservesNull(t *testing.T) {
+	for _, count := range []string{"null", "0"} {
+		body := []byte(`{"id":"job","status":"RUNNING","endpoint":"/v1/chat/completions","input_files":["input"],"total_requests":` + count + `}`)
+		snapshot, err := parseManagedSnapshot(body, "mistral")
+		if err != nil || (snapshot.Expected == nil) != (count == "null") {
+			t.Fatalf("nullable count lost its presence: %+v err=%v", snapshot, err)
+		}
+	}
+}

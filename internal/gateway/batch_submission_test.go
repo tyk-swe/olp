@@ -148,6 +148,26 @@ func TestManagedBatchProjection(t *testing.T) {
 	}
 }
 
+func TestManagedBatchProjectionPreservesNullTimestampsAndCounts(t *testing.T) {
+	for adapter, status := range map[string]string{"together": "IN_PROGRESS", "mistral": "RUNNING"} {
+		body := `{"id":"job","status":"` + status + `","endpoint":"/v1/chat/completions","input_file_id":"input","input_files":["input"],"created_at":null,"completed_at":null,"total_requests":null,"succeeded_requests":null,"failed_requests":null}`
+		projected, _, err := projectManagedBatch([]byte(body), adapter, "24h")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(projected, &fields) != nil || string(fields["created_at"]) != "null" || string(fields["completed_at"]) != "null" || len(fields["request_counts"]) != 0 {
+			t.Fatalf("nullable managed fields became fabricated values: %s", projected)
+		}
+	}
+	if value, ok := providerUnix(json.RawMessage(`0`)); !ok || value != 0 {
+		t.Fatal("explicit zero timestamp was lost")
+	}
+	if value, ok := providerCount(json.RawMessage(`0`)); !ok || value != 0 {
+		t.Fatal("explicit zero count was lost")
+	}
+}
+
 func TestManagedBatchRequestBodies(t *testing.T) {
 	manifest := batchManifest{Endpoint: "/v1/chat/completions", LineCount: 3}
 	source := parseBatchTestObject(t, `{"input_file_id":"file-local","endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"owner":"team"}}`)

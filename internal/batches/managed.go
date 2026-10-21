@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -213,6 +214,9 @@ func jsonText(raw json.RawMessage) string {
 }
 
 func jsonInt64(raw json.RawMessage) (int64, bool) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return 0, false
+	}
 	var value int64
 	if json.Unmarshal(raw, &value) == nil && value >= 0 {
 		return value, true

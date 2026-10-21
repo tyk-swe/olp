@@ -495,9 +495,13 @@ func projectManagedBatch(body []byte, adapter, requestedWindow string) ([]byte, 
 	}
 	if created, ok := providerUnix(job.CreatedAt); ok {
 		projected["created_at"] = created
+	} else if strings.TrimSpace(string(job.CreatedAt)) == "null" {
+		projected["created_at"] = nil
 	}
 	if completed, ok := providerUnix(job.CompletedAt); ok {
 		projected["completed_at"] = completed
+	} else if strings.TrimSpace(string(job.CompletedAt)) == "null" {
+		projected["completed_at"] = nil
 	}
 	if adapter == "mistral" {
 		total, totalOK := providerCount(job.TotalRequests)
@@ -572,6 +576,9 @@ func managedBatchPath(resource *resources.Resource, cancel bool) string {
 }
 
 func providerUnix(raw json.RawMessage) (int64, bool) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return 0, false
+	}
 	var seconds int64
 	if json.Unmarshal(raw, &seconds) == nil && seconds >= 0 {
 		return seconds, true
@@ -586,6 +593,9 @@ func providerUnix(raw json.RawMessage) (int64, bool) {
 }
 
 func providerCount(raw json.RawMessage) (int64, bool) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return 0, false
+	}
 	var number int64
 	if json.Unmarshal(raw, &number) == nil && number >= 0 {
 		return number, true
