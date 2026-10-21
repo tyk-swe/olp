@@ -308,9 +308,12 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	}
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
-	written, err := io.Copy(w, opened.File)
+	written, err := copyResourceContent(w, opened.File, part.Size)
 	x.completePinned()
 	if err != nil || written != part.Size {
+		if len(x.facts) > 0 {
+			x.facts[len(x.facts)-1].Class = classCancelled
+		}
 		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
 		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 		return nil

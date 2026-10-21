@@ -206,7 +206,7 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, err, x.family)
 		return
 	}
-	body, readErr := s.readBody(r)
+	body, readErr := s.readResourceBody(w, r)
 	if readErr != nil {
 		s.stateFail(x, w, readErr, x.family)
 		return
@@ -1014,9 +1014,12 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := io.Copy(w, opened.File)
+		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		x.completePinned()
 		if copyErr != nil || written != artifact.ContentLength {
+			if len(x.facts) > 0 {
+				x.facts[len(x.facts)-1].Class = classCancelled
+			}
 			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The Gemini download ended before all bytes were delivered.")
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil

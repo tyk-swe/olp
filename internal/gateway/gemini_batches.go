@@ -539,7 +539,7 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, err, x.family)
 		return
 	}
-	body, err := s.readBody(r)
+	body, err := s.readResourceBody(w, r)
 	if err != nil {
 		s.stateFail(x, w, err, x.family)
 		return

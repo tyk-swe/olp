@@ -333,9 +333,12 @@ func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := io.Copy(w, opened.File)
+		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		x.completePinned()
 		if copyErr != nil || written != artifact.ContentLength {
+			if len(x.facts) > 0 {
+				x.facts[len(x.facts)-1].Class = classCancelled
+			}
 			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil
@@ -372,7 +375,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	body, err := s.readBody(r)
+	body, err := s.readResourceBody(w, r)
 	if err != nil {
 		s.stateFail(x, w, err, x.family)
 		return
@@ -882,8 +885,11 @@ func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
 		x.completePinned()
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := io.Copy(w, opened.File)
+		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		if copyErr != nil || written != artifact.ContentLength {
+			if len(x.facts) > 0 {
+				x.facts[len(x.facts)-1].Class = classCancelled
+			}
 			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil

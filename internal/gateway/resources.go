@@ -1361,10 +1361,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := io.Copy(w, opened.File)
-		if copyErr == nil && written == artifact.ContentLength {
-			copyErr = http.NewResponseController(w).Flush()
-		}
+		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		if copyErr != nil || written != artifact.ContentLength {
 			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The file response ended before all bytes were delivered.")
 			x.facts[len(x.facts)-1].Class = classCancelled
@@ -1507,7 +1504,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	body, e := s.readBody(r)
+	body, e := s.readResourceBody(w, r)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return

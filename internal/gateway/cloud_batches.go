@@ -290,17 +290,11 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
-	controller := http.NewResponseController(w)
-	if err := controller.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The cloud batch request read could not be bounded."))
-		return
-	}
-	body, e := s.readBody(r)
+	body, e := s.readResourceBody(w, r)
 	if e != nil {
 		s.cloudBatchFail(x, w, e)
 		return
 	}
-	_ = controller.SetReadDeadline(time.Time{})
 	ctx, cancel := s.stateDeadline(r.Context(), &route)
 	defer cancel()
 	p, e := s.selectPinSurface(ctx, x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
