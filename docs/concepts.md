@@ -1,213 +1,99 @@
 # Concepts
 
-Routes give callers stable model names; provider revisions determine where
-requests run. This guide introduces publication, authorization, accounting, and
-privacy. See [compatibility](compatibility.md) for supported operations and
-[configuration](configuration.md) for installation settings.
+OLP separates the model name a caller uses from the providers that serve it.
+[Getting Started](getting-started.md) walks through publication;
+[Compatibility](use/compatibility.md) defines supported operations.
 
 ## Routes and slugs
 
-Ordinary generation requests name a published route slug in the `model` field or native
-URL path. File uploads use `X-OLP-Route`; retained-resource operations resolve
-the route through their stored mapping. Callers never select an upstream
-provider/model directly. Operators can change that mapping without changing the
-caller's model name.
+An ordinary request names a published route slug, usually in `model` or the native
+URL. Uploads and model-less operations use `X-OLP-Route`; retained-resource
+follow-ups resolve the route from their gateway-owned ID. Operators can change
+providers behind a slug without changing client configuration.
 
-A slug contains 1–100 bytes of lowercase ASCII letters, digits, `.`, `_`, and
-`-`, and starts with a letter or digit. Uppercase letters, slashes, and other
-characters are rejected.
-
-A route defines allowed operations, an overall deadline, an attempt budget, and
-targets with provider models, priorities, weights, and timeouts. Target timeouts
-cannot exceed the overall deadline. Credential pools can produce several
-attempts per target, so the attempt budget may exceed the target count. See
-[route configuration](provider-routing.md#routes) for bounds and publication.
-
-Every route revision has a **fidelity**: `strict` or `transformed`, and strict
-when a draft omits it. Strict routes admit only interactions that preserve
-execution, observation, permitted continuation and effects relative to the
-target's native invocation. Transformed routes may change an invocation or its
-observed result, such as translating between dialects or redacting content. A
-published slug switches between them through a new revision. See
-[route fidelity](provider-routing.md#route-fidelity).
-
-Keys can use only routes in their own project; a key without a project can use
-only routes without one. Scope and route allowlists further restrict access.
-`GET /v1/models` lists the routes visible to the calling key, not upstream
-provider models. Configured but unpublished models are not discoverable.
+A route sets operations, targets, an overall deadline and an attempt budget.
+**Strict** fidelity preserves the target's native invocation and observation
+contract. **Transformed** fidelity permits declared translation or redaction.
+A new revision changes fidelity; historical resources retain creation contracts.
+See [Routing](use/provider-routing.md#routes).
 
 ## Providers: drafts, revisions, certification
 
-This lifecycle describes ordinary inference. Code mode uses enrolled account
-identity and immutable code-route publication without synthetic inference
-probes; see [code mode](features/code-mode.md).
-
-Provider edits remain drafts until activation publishes an immutable revision:
-connection settings, enabled models, certified capabilities, and exact
-credential versions. Requests keep the revision they started with.
-
-Certification belongs to the server. A successful bounded probe earns evidence
-for an exact provider/model/operation/surface/mode tuple; a declaration or
-successful model listing alone does not certify inference. Probes use production
-connectors and codecs and retain no prompt or response content.
-
-Transport and semantic edits invalidate certification and credential-slot
-validation. Renaming a provider or rotating a credential preserves model
-certification, but rotation still requires validation before activation. See
-[provider lifecycle](provider-routing.md#provider-lifecycle) for the full probe,
-discovery, review, certification, and activation workflow.
+Ordinary providers start as drafts. Discovery lists candidate models;
+server-side certification proves exact provider/model/operation/surface/mode
+tuples with bounded probes. A model listing or capability declaration does not
+certify inference. Activation publishes connection settings, enabled certified
+models and exact credential versions together. Semantic/network edits invalidate
+certification; credential rotation requires validation before activation.
+See [Provider lifecycle](use/provider-routing.md#provider-lifecycle).
 
 ## Runtime generations and pinning
 
-Activation compiles the installation configuration into a numbered runtime
-generation with a digest. Gateways verify it and replace their snapshot
-atomically. A failed installation leaves the previous complete generation
-active.
-
-Each request pins one generation and its provider/credential revisions, even
-when a stream outlives later activations. Key and credential revocation refresh
-independently of generation installation; a failed activation cannot preserve
-revoked authority. See
-[runtime publication and authority](gateway.md#runtime-publication-and-authority).
+Publication compiles one numbered runtime generation with a digest. Gateways
+install complete valid generations atomically; a failed install retains the
+previous generation. Each request pins configuration for its lifetime, while live
+revocation remains independent. New key-authenticated work refuses after 60 seconds
+of stale authority. See [Architecture](develop/architecture.md#runtime-publication-and-authority).
 
 ## Keys, permissions, expiry, limits
 
-An API key is a machine principal, not a console session. Secrets are shown once
-and stored as HMAC; rotate/replace lost secrets. Authority polls every five
-seconds and refuses new work when 60 seconds stale. Admitted ordinary streams
-may finish; realtime rechecks.
+API keys are machine principals, separate from console sessions. Their one-time
+secrets are stored as digests. `inference` and `models_read` are independent;
+projects, route lists and route groups further bound access. Rotation preserves
+the principal's accounting; revocation/expiry denies all its versions.
 
-`inference` and `models_read` are independent. Project, explicit route and route-
-group policy bounds access; only both route lists empty gives project-wide use.
-Expiry/revocation denies every rotated secret version.
-
-Independent key/group/end-user/route/project/organization/installation/attribution
-budgets must all pass. RPM/TPM uses fixed Valkey UTC minutes; monetary day/week/
-month windows use the configured IANA calendar. ISO weeks start Monday. Calendar
-changes wait for each active boundary and never reset history. Group changes
-preserve captured owners. [Access](access.md) owns templates/temporary increases.
-
-Admission estimates tokens/applicable cost holds. Dispatched token allowance never
-refunds smaller usage; concurrency releases on settlement. Known exhausted cost
-returns 429 with boundary/hold hints; unknown balances return 503 until PostgreSQL
-reconstruction. Unpriced attempts accrue zero but remain visible. Limits are not
-invoice caps: missing usage, heuristic holds and later native work can overspend.
-Only configured rate/concurrency outages may fail open; USD/provider limits do not.
-See [limits](gateway.md#limits-and-budgets) and
-[recovery](operations.md#spend-budget-reconciliation).
+Every applicable budget boundary must pass. Rate/token windows use UTC minutes;
+monetary day/week/month windows use the configured calendar. Known exhausted
+balances refuse with 429; unknown balances refuse with 503 until reconciliation.
+Heuristic estimates, missing prices/usage and later provider work mean admission
+limits are not invoice caps. See [Access](use/access.md) and
+[budget recovery](operate/operations.md#spend-budget-reconciliation).
 
 ## Attempts, usage, pricing
 
-Every admitted request has one identity; each provider call has an ordered
-attempt identity with its pinned revisions, deadline, and outcome. Failover
-appends attempts rather than replacing earlier failures.
+One request can make several attempts, including retries and fallbacks. Each
+retains its own identity, pinned revisions, usage and outcome. A committed stream
+never restarts elsewhere and an ambiguous create never blindly repeats.
+Cancellation releases leases but cannot erase already accepted provider usage.
 
-Usage and cost attach to the attempt that produced them, beside the input
-estimate the attempt was admitted under and how it was counted
-([estimates](gateway.md#how-the-prompt-is-estimated)). Missing usage or a
-missing applicable price stays incomplete or unpriced; the gateway never invents
-usage or cost. Unpriced work contributes zero to accrued budgets, so incomplete
-pricing coverage still requires provider-side quotas.
-
-The terminal envelope records status, timing, cancellation, attempts, usage
-completeness, and pricing provenance. Cancellation closes upstream work and
-releases leases through the same completion path. Storage uniqueness prevents
-duplicate request/attempt facts. Stored background responses settle final usage
-once it is observed; see
-[retained generation accounting](gateway.md#retained-generation-accounting).
-
-Caller attribution labels can help filter and group usage. Keys explicitly allow
-label names, and values must be bounded machine tokens. Labels never grant
-access or change routing; see [request attribution](gateway.md#request-path).
-
-Cost and charge are two different numbers. *Cost* is what the provider bills
-for an attempt, priced from the published price list under any committed or
-discounted terms. *Charge* is what the consumer owes for it: the rate card of
-the consumer's project, organization or installation marks up the cost, or an
-explicit card price replaces it entirely. [Pricing](pricing.md) has the exact
-selection and rounding rules.
+Missing usage or prices remain incomplete/unpriced. **Cost** estimates provider
+billing; **charge** applies the consumer's rate card. Attempt facts, not metrics,
+are accounting authority. See [Pricing](operate/pricing.md) for exact rules and
+[FinOps](operate/finops.md) for exports and invoice reconciliation.
 
 ## What is stored — and what never is
 
-Durable diagnostics contain identifiers, timing, token/media units, status,
-error classification, pricing provenance — pinned pricing revisions, discounts
-and rate cards, components, cost and charge — and allowed attribution labels.
-They exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
-headers, and credentials. Keep secrets out of operator names and labels too.
+Request history, audit and traces retain bounded identifiers, timing, status,
+usage, pricing provenance and allowed attribution. They exclude prompts,
+responses, reasoning, tool payloads, uploads, raw headers and credentials. Keep
+operator names and labels secret-free too.
 
-Payload capture is a separate, explicit exception for operator-owned external
-sinks, not for OLP's durable records. An installation owner must enable it;
-authorized managers then opt individual projects or routes into bounded,
-sampled input, output or tool-call capture. Captured content exists only in a
-volatile gateway queue and goes directly to an installation sink. It never
-enters PostgreSQL, Valkey, ordinary logs or trace spans. Optional pinned local
-redactors inspect complete selected fields before enqueue; failures drop the
-whole capture. An empty redactor list means unredacted capture.
-Request history's capture marker means queued, not confirmed delivered. See the
-[capture runbook](operations.md#export-sinks-payload-capture-and-business-metrics).
-
-Uploaded media may occupy a bounded temporary spool during execution. Files,
-batches, and opt-in stored Responses may retain content at the upstream
-provider; OLP stores their ownership mappings and accounting metadata. This is
-separate from telemetry privacy. See
-[provider-retained state](compatibility.md#files-batches-realtime-and-provider-retained-state).
-
-Native protocols retain only encrypted dependencies required for continuation.
-The qualified [Chat-to-Anthropic helper](../clients/continuation/README.md) keeps
-native reasoning/tool history inside OLP for at most 24 hours.
-These are key/route/revision/credential-bound operational state, excluded from
-request history and telemetry; revocation/expiry fails closed. See
-[retained-state security](security.md#gateway-keys).
-
-Cost facts additionally keep the price-line decomposition (`cost_lines`,
-`charge_lines`), list and contracted cost, and the caller-credential marker;
-provider invoice imports store summed daily line items under
-`provider_invoiced_costs`. FOCUS datasets themselves are generated on demand to
-the sink — OLP stores only their delivery ledger (`focus_datasets`, revision,
-row and error state); metering payloads stay in the export queue until
-delivered. See [finops](finops.md) and [pricing](pricing.md).
-
-[Content policies](gateway.md#content-policy) inspect supported text in memory.
-Only `{rule_id, phase, action, outcome}` decisions persist, without matched
-text, offsets, patterns, or replacement strings. Unsupported surfaces refuse a
-policy rather than bypassing it.
+Other content has explicit storage contracts: temporary upload spools;
+provider-retained files/jobs/responses with OLP ownership mappings;
+sealed native continuation dependencies; encrypted responses in a dedicated
+cache; and owner-enabled external capture from bounded memory. Empty capture
+redactor lists are unredacted; failures with configured local redactors drop the
+capture. A capture marker means queued, not delivered. See
+[Security](develop/security.md), [Caching](use/caching.md) and
+[Observability](operate/observability.md#payload-capture).
 
 ## Code accounts and conversation trees
 
-A code route selects its pool through `/code/{slug}` while the request keeps a
-native model name. Personal pools restrict keys to their owner's issuer;
-shared pools require explicit key assignments. A pool may mix subscriptions, so
-one conversation can use models from several of them. The first generation of
-each model atomically pins it, for the whole conversation tree, to one account
-that lists the model and serves the client's protocol; a tree holds at most one
-account of each subscription. Children, resumes,
-compaction and reconnects retain each model's account across replicas and
-restarts. Revocation, retirement or an unavailable account refuses the model
-rather than switching it. Refresh may replace credentials for the same observed principal.
+[Code mode](use/code-mode.md) uses `/code/{slug}` with native model names and
+enrolled subscription accounts. A conversation tree pins each model to an account,
+with at most one account per subscription family. Children, resumes and reconnects
+retain those pins across replicas/restarts. Unavailable or revoked pins refuse;
+OLP never replays inference or switches accounts silently.
 
-Each generation, including messages on an existing WebSocket, requires current
-authority. Code mode never replays inference and never uses synthetic inference
-for lifecycle management. Exact client/version/operation/transport evidence is
-tracked separately from ordinary provider certification.
-
-Reported subscription usage is a token ledger. Optional hard budgets reserve a
-proven bound in every applicable daily/monthly UTC window; unknown bounds refuse
-only budgeted operations. Missing final usage remains durable uncertainty.
-Cached and reasoning token counts are subsets, not additional charges. Account
-allowance comes from provider observations and is not a local budget or monetary
-spending limit. See the [operator guide](features/code-mode.md) and current
-[qualification gaps](qualification/code-mode.md).
+Subscription usage, observed provider allowance and optional hard token budgets
+are separate ledgers. Unknown final usage remains uncertain. Budgeted operations
+need a proven native bound; controlled client fixtures do not qualify real
+subscriptions. See [Qualification](develop/qualification.md#code-mode-qualification).
 
 ## Request lifecycle
 
-The sequence below describes ordinary inference; code-mode generations use the
-separate admission and forwarding boundary above.
-
-1. Authenticate and check scope, project, route access, and expiry. Pin runtime
-   configuration and enforce admission limits before calling a provider.
-2. Select eligible targets and credential slots under the published policy and
-   attempt budget.
-3. Execute within target and route deadlines. Record each attempt; never fail
-   over a committed stream or ambiguously created resource.
-4. Complete accounting, release leases, and close streams, including on
-   cancellation. Persist metadata without request or response content.
+Authenticate and check current scope/project/route authority; pin runtime policy;
+apply admission and guardrails; select eligible targets and credential slots;
+execute within the shared deadline/attempt budget; observe usage and settle each
+attempt, release leases and persist content-free facts. Code mode uses its
+separate native forwarding and generation-admission boundary.

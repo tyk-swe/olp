@@ -1,6 +1,6 @@
 /**
  * Readiness checkpoint ages, measured against the runbook thresholds in
- * `docs/operations.md`: metadata, outbox, and gateway-epoch checkpoints are
+ * `docs/operate/operations.md`: metadata, outbox, and gateway-epoch checkpoints are
  * stale after 20 seconds. The backend reports both timestamps and pre-computed
  * ages; a timestamp is turned into an age here so an operator reading the page
  * never has to subtract clocks by hand.

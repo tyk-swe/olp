@@ -73,7 +73,7 @@ export function sharedCpus({ gateway, mock, loadgen }) {
   return shared;
 }
 
-// The conditions the roadmap's targets are stated for: full scale, each process
+// The conditions the performance guide's targets are stated for: full scale, each process
 // pinned to CPUs of its own, and load runs that delivered their schedule, with
 // nothing else wrong with the run. `all` is true only when every one holds.
 export function referenceConditions({ scale, gatewayCpus, mockCpus, loadgenCpus, baseline, gateway, problems = [] }) {

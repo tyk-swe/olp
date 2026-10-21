@@ -1,5 +1,5 @@
 // Gemini CLI, the pinned release, in headless mode (`-p`) against OLP's Gemini
-// surface: the configuration docs/clients.md documents. GOOGLE_GEMINI_BASE_URL
+// surface: the configuration docs/use/clients.md documents. GOOGLE_GEMINI_BASE_URL
 // points it at the gateway, and its settings select the Gemini API key as the
 // authentication method, which headless mode needs: a base URL alone selects
 // the gateway method, which it then refuses. It runs against a transformed

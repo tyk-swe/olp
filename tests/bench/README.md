@@ -17,7 +17,7 @@ unfiltered `go test -tags=bench ./tests/bench/...` requires those prerequisites.
 | `mockupstream`, `cmd/mockupstream` | Deterministic OpenAI (Chat Completions and Responses), Anthropic and Gemini upstream with controllable timing and failures |
 | `loadgen`, `cmd/loadgen` | Open-loop constant-arrival-rate load generator that can drive any base URL |
 | `benchtest` | In-process `http.RoundTripper` for tests that run on the fake clock of `testing/synctest` |
-| the package itself (`scenarios_test.go` and its helpers) | The roadmap's scenarios S1 to S6, run end to end by `make bench` |
+| the package itself (`scenarios_test.go` and its helpers) | The performance guide's scenarios S1 to S6, run end to end by `make bench` |
 
 ## Mock upstream
 
@@ -115,7 +115,7 @@ latency.
 ## Scenarios
 
 ```sh
-make bench                                     # all six, at the roadmap's full rates
+make bench                                     # all six, at the performance guide's full rates
 BENCH_SCENARIOS=S1,S4 OLP_BENCH_SCALE=0.05 \
   OLP_BENCH_DURATION=10s OLP_BENCH_WARMUP=3s make bench    # a smoke run
 ```
@@ -158,7 +158,7 @@ The settings are environment variables, all optional.
 
 | Variable | Meaning |
 | --- | --- |
-| `OLP_BENCH_SCALE` | Multiplies every rate and concurrency; 1 is the roadmap's full rates. Prompt sizes do not scale. |
+| `OLP_BENCH_SCALE` | Multiplies every rate and concurrency; 1 is the performance guide's full rates. Prompt sizes do not scale. |
 | `OLP_BENCH_DURATION`, `OLP_BENCH_WARMUP` | The measured period (default 60s) and the warmup before it (10s). S6 opens its streams over at most 3 seconds of warmup and 15 measured, whatever these say, and then holds them for as long as its measured period: the gateway ends a stream thirty seconds after its writes block, so S6 must open them all within less than that (see [below](#what-to-know-when-reading-a-run)). |
 | `OLP_BENCH_GATEWAY_CPUS`, `OLP_BENCH_MOCK_CPUS`, `OLP_BENCH_LOADGEN_CPUS` | Pin the process to CPUs, as `taskset` lists them (`0-1`, `2,4-5`). The gateway's vCPUs are the CPUs it may run on, read back from `/proc` as proof the pin took, and are what RPS per vCPU divides by. |
 | `OLP_BENCH_ENFORCE` | `1` fails the test on a missed target. See below. |
@@ -215,7 +215,7 @@ first; the rest of this section says what each field means.
   served them. The allocations per operation of the hot paths are reported and
   gated by the `testing.B` benchmarks that sit beside the code (`make
   bench-gate`; which paths they cover is in the
-  [performance guide](../../docs/performance.md#regression-gate)). Goroutines are
+  [performance guide](../../docs/develop/performance.md#regression-gate)). Goroutines are
   not observable from outside: the operating-system thread count is the nearest
   figure.
 - `error_rate` and the HTTP statuses and error kinds behind it. After a run with
@@ -230,7 +230,7 @@ first; the rest of this section says what each field means.
   records how long it took, how many events were still to arrive when the load
   ended and the pace they arrived at. One pipeline consumer persists an event at a
   time, so at the rates of S1 to S3 the events outlast the load by minutes: in the
-  [smoke run](../../docs/performance.md#smoke-run), S1 at 300 requests per second
+  [smoke run](../../docs/develop/performance.md#smoke-run), S1 at 300 requests per second
   produced 21,000 events, 11,288 of them still to arrive when its load ended, and
   the wait for them lasted 68.7 seconds at 164 events a second. A full-rate run
   produces 70,000 to 210,000 events, which at that pace would take many minutes
@@ -264,7 +264,7 @@ first; the rest of this section says what each field means.
   with all three processes pinned to CPUs of their own (`pins_disjoint`: no two
   share one, which with `OLP_BENCH_ENFORCE=1` stops the run before it starts)
   and valid. Smoke numbers are not reference numbers.
-- `targets`: the roadmap's targets, each judged against the run.
+- `targets`: the performance guide's targets, each judged against the run.
 
 ### Targets
 
@@ -287,7 +287,7 @@ misconfigured reference run would pass without having measured anything.
 ### Comparison with LiteLLM
 
 ```sh
-make bench-compare                             # S1 to S5, at the roadmap's full rates
+make bench-compare                             # S1 to S5, at the performance guide's full rates
 BENCH_SCENARIOS=S1 OLP_BENCH_SCALE=0.02 OLP_BENCH_DURATION=8s OLP_BENCH_WARMUP=3s \
   OLP_BENCH_GATEWAY_CPUS=2-3 OLP_BENCH_MOCK_CPUS=6 OLP_BENCH_LOADGEN_CPUS=7 scripts/bench-compare.sh
 ```
@@ -302,13 +302,13 @@ same mock upstream binary, and then compares the two
 `.local/bench/litellm/<scenario>.json` in OLP's shape, and `compare.json` and
 `compare.md` beside OLP's. S6 is not compared. The method, LiteLLM's settings,
 how to read the table and the record to fill in for a published run are in
-[docs/performance.md](../../docs/performance.md).
+[docs/develop/performance.md](../../docs/develop/performance.md).
 
 ### What to know when reading a run
 
 - **S4 measures the circuit.** A provider's circuit opens after five counted
   failures within thirty seconds and stays open for thirty seconds, then lets one
-  probe through ([gateway](../../docs/gateway.md#request-path)). With
+  probe through ([gateway](../../docs/develop/architecture.md#request-path)). With
   the first target always failing, nearly every request is served by the second
   without trying the first: `attempts.per_request` is about 1.0, not 2.0, and
   `failover.requests_failed_over` is the five that opened the circuit plus a
@@ -356,7 +356,7 @@ how to read the table and the record to fill in for a published run are in
   opened them over 70 seconds, left the gateway holding 66 at once, twice, and
   in the gateway's log of the second run every one of the 150 was ended at 30.2
   to 30.5 seconds; a 3-second warmup and a 15-second period held all 150 and the
-  run was valid ([smoke run](../../docs/performance.md#smoke-run)). S6 therefore
+  run was valid ([smoke run](../../docs/develop/performance.md#smoke-run)). S6 therefore
   opens its streams over at most those 18 seconds, whatever `OLP_BENCH_WARMUP`
   and `OLP_BENCH_DURATION` say, and keeps a shorter schedule. Filling a
   stream's buffers also costs the gateway CPU: 273 CPU milliseconds for each
@@ -373,7 +373,7 @@ how to read the table and the record to fill in for a published run are in
   request that has a budget or a limit, and a slow one shows as
   `distributed_limits_unavailable` (503) from the gateway, which fails closed.
 - **The mock listens on loopback.** A full-rate run puts the generator, the
-  gateway and the mock on one host, which the CPU pins keep apart; the roadmap
+  gateway and the mock on one host, which the CPU pins keep apart; the performance guide
   also allows a separate host for the mock.
 - **A 100K-token prompt is about 520 KB**, which the four-characters rule
   estimates at about 130K tokens. S3's upstream model is named as an OpenAI model

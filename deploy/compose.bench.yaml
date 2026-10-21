@@ -1,4 +1,4 @@
-# LiteLLM, the gateway the benchmark compares OLP with (docs/performance.md,
+# LiteLLM, the gateway the benchmark compares OLP with (docs/develop/performance.md,
 # scripts/bench-compare.sh). Use it with compose.dev.yaml, which supplies the
 # disposable PostgreSQL and Valkey it needs, or with services of your own; it
 # declares no dependency on either.

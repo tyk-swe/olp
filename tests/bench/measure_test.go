@@ -350,7 +350,7 @@ type metadataResult struct {
 	Epoch              *epochCounters `json:"gateway_epoch,omitempty"`
 	Drain              drainResult    `json:"drain"`
 	// Healthy says Valkey was reachable throughout: the limiter was available
-	// and the metadata writer never retried. The roadmap's zero-loss target is
+	// and the metadata writer never retried. The performance guide's zero-loss target is
 	// stated for a healthy Valkey.
 	Healthy bool `json:"valkey_healthy"`
 	// MetricsStale is true when the gateway's metrics did not refresh after the

@@ -26,7 +26,7 @@ GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -buildvcs=false -buildm
 ```
 
 Building with `-trimpath -buildvcs=false` makes the module's digest
-reproducible, which the [reviewed plugin index](../../../../docs/plugins.md#reviewed-plugin-index)
+reproducible, which the [reviewed plugin index](../../../../docs/use/plugins.md#reviewed-plugin-index)
 requires.
 
 ## Before you install it

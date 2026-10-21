@@ -8,4 +8,4 @@ sign the reference catalog and the plugin index after an edit
 Only builds without the `release` build tag trust this key. Release builds trust
 only the release keys in `internal/signing/keys.go`, and the release workflow
 re-signs both documents with the release key, which only CI holds. See
-[docs/catalog.md](../../../docs/catalog.md#signing-keys).
+[docs/develop/catalog.md](../../../docs/develop/catalog.md#signing-keys).

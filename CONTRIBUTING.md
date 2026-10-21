@@ -22,7 +22,7 @@ unqualified.
 | `make test-scripts` | Automation script tests |
 | `make test-race` | Uncached Go tests with race detection, also required in CI |
 | `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
-| `make bench` | Gateway benchmark scenarios against a mock upstream, in [docs/performance.md](docs/performance.md) |
+| `make bench` | Gateway benchmark scenarios against a mock upstream, in [docs/develop/performance.md](docs/develop/performance.md) |
 | `make bench-compare` | The same scenarios against OLP and the pinned LiteLLM release |
 | `make bench-gate` | Hot-path `testing.B` benchmarks against the merge base, as the CI `bench` job runs them |
 | `make api` | Generate Go and TypeScript types without building the gateway |
@@ -66,7 +66,7 @@ make dev
 ## Tests and changes
 
 Keep feature types, validation, SQL, handlers and workflows together. The
-[architecture map](docs/architecture.md) identifies backend and console owners;
+[architecture map](docs/develop/architecture.md) identifies backend and console owners;
 [testing](tests/README.md) covers focused runs, timeouts and qualification.
 
 Use `gofmt` and `go vet` for Go; console source uses Prettier, two spaces,
@@ -103,7 +103,7 @@ under `tests/fixtures/tokens`.
 
 Client qualification packages in `tests/clients` are exact development pins,
 subject to pnpm's release-age gate. Update their manifests and
-[client compatibility](docs/clients.md) together. Codex, Claude Code and OpenCode
+[client compatibility](docs/use/clients.md) together. Codex, Claude Code and OpenCode
 instead resolve the publisher's npm `latest` channel on each CI job, without a
 release-age delay. Code-mode and broader client suites share those verified
 binaries; exact versions and integrity values are retained in CI evidence.

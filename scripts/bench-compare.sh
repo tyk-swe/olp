@@ -4,8 +4,8 @@ cd "$(dirname "$0")/.."
 
 # Runs the gateway benchmark scenarios against OLP and against the LiteLLM
 # release pinned in deploy/compose.bench.yaml, on the same CPUs, the same mock
-# upstream and the same load, and compares them against the roadmap's targets
-# (docs/roadmap/m01-measured-advantage.md). See docs/performance.md.
+# upstream and the same load, and compares them against the performance guide's targets
+# (docs/develop/performance.md#scenarios-and-targets).
 #
 # For each scenario, OLP runs first, through scripts/bench.sh, which writes
 # .local/bench/<scenario>.json. LiteLLM then runs the load that result records,
@@ -25,7 +25,7 @@ usage: scripts/bench-compare.sh
                              name, whose user may create databases. LiteLLM uses both, with a
                              database of its own (litellm_bench), which is dropped and made anew.
 
-  OLP_BENCH_SCALE            multiplies every rate and concurrency; 1 is the roadmap's full rates (default 1)
+  OLP_BENCH_SCALE            multiplies every rate and concurrency; 1 is the performance guide's full rates (default 1)
   OLP_BENCH_DURATION         measured period of each run (default 60s)
   OLP_BENCH_WARMUP           warmup before it, at the same rate (default 10s)
   OLP_BENCH_GATEWAY_CPUS     CPUs for the gateway, as taskset lists them: OLP is pinned to them and
@@ -55,7 +55,7 @@ selected=()
 IFS=',' read -r -a requested <<< "$scenarios"
 for scenario in "${requested[@]}"; do
   if [[ $scenario == S6 ]]; then
-    echo "S6 has no LiteLLM counterpart: no roadmap target compares it, and its socket buffers at 10,000 held streams need more TCP memory than most hosts have. Run it with make bench." >&2
+    echo "S6 has no LiteLLM counterpart: no performance target compares it, and its socket buffers at 10,000 held streams need more TCP memory than most hosts have. Run it with make bench." >&2
     exit 2
   fi
   [[ $scenario =~ ^S[1-5]$ ]] || { echo "BENCH_SCENARIOS must list scenarios from S1 to S5, got '$scenario'" >&2; exit 2; }

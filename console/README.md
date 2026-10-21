@@ -48,7 +48,7 @@ repository-wide commands.
 `src/lib/features/` owns product workflows; shared UI lives in
 `src/lib/components/` and pages in `src/routes/`. Keep route components thin.
 The application is client-only: use the static adapter and avoid server routes,
-server hooks or `lib/server/`. See the [architecture map](../docs/architecture.md).
+server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
 ## Design system
 

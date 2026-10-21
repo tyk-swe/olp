@@ -47,7 +47,7 @@ intentionally bootstrap a fresh database, remove
 ## Master-key rotation
 
 Follow the
-[master-key rotation procedure](../../docs/operations.md#master-key-rotation-and-recovery)
+[master-key rotation procedure](../../docs/operate/operations.md#master-key-rotation-and-recovery)
 in a controlled maintenance window. Retain every referenced key version and keep
 the authentication HMAC key unchanged. Reencrypt and authenticate records before
 removing an old version; the retirement command takes a positional version, for
@@ -63,8 +63,8 @@ from [`deploy/connectors.example.json`](../connectors.example.json); unknown
 fields are rejected.
 
 Mount configuration and credential files read-only (`0600` for credentials). The
-[mounted connector reference](../../docs/configuration.md#mounted-connectors)
+[mounted connector reference](../../docs/operate/configuration.md#mounted-connectors)
 defines the `providers` format and default-slot requirements. The
-[Bedrock](../../docs/providers/bedrock.md#authentication) and
-[Azure](../../docs/providers/azure.md#authentication) guides describe cloud
+[Bedrock](../../docs/use/providers/bedrock.md#authentication) and
+[Azure](../../docs/use/providers/azure.md#authentication) guides describe cloud
 authentication; prefer workload identity where available.

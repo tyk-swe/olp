@@ -40,14 +40,14 @@ const (
 )
 
 // settings is one run's configuration: the services it runs against, the
-// binaries it starts, how much of the roadmap's load it applies and where the
+// binaries it starts, how much of the performance guide's load it applies and where the
 // processes are pinned.
 type settings struct {
 	DatabaseURL, ValkeyURL    string
 	GatewayBinary, MockBinary string
 
 	// Scale multiplies every scenario's rate and concurrency; 1 is the
-	// roadmap's full rates.
+	// performance guide's full rates.
 	Scale float64
 	// Duration is the measured period of a run, Warmup precedes it at the same
 	// rate, and Drain is how long the wait for request metadata may go with
@@ -151,10 +151,10 @@ func loadSettings(t *testing.T) settings {
 		t.Fatalf("%s: %v", envKeepLog, err)
 	}
 	if s.Enforce && s.Scale != 1 {
-		t.Fatalf("%s=1 judges the roadmap's targets, which are stated at full rates: unset %s, or unset %s for a smoke run", envEnforce, envScale, envEnforce)
+		t.Fatalf("%s=1 judges the performance guide's targets, which are stated at full rates: unset %s, or unset %s for a smoke run", envEnforce, envScale, envEnforce)
 	}
 	if shared := sharedCPUs(s); s.Enforce && len(shared) > 0 {
-		t.Fatalf("%s=1 judges the roadmap's targets, which are stated for processes with CPUs of their own, and %s", envEnforce, strings.Join(shared, ", and "))
+		t.Fatalf("%s=1 judges the performance guide's targets, which are stated for processes with CPUs of their own, and %s", envEnforce, strings.Join(shared, ", and "))
 	}
 	if s.S6Tokens, err = parsePositive(os.Getenv(envS6Tokens), defaultS6Tokens); err != nil {
 		t.Fatalf("%s: %v", envS6Tokens, err)

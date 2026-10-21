@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/tests/bench/loadgen"
 )
 
-// The roadmap's targets (docs/roadmap/m01-measured-advantage.md#targets) are
+// The performance guide's targets (docs/develop/performance.md#scenarios-and-targets) are
 // judged against every run and reported in its result, but they fail the test
 // only under OLP_BENCH_ENFORCE=1: a smoke run is not made on reference
 // hardware and cannot meet or miss a target in any way that means something.

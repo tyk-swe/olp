@@ -51,7 +51,7 @@ journeys through the OpenCode Go and GLM Coding Plan adapters, which also need
 `OLP_CLAUDE_CODE_BINARY` and `OLP_OPENCODE_BINARY`. `all` runs both CLI and
 process suites.
 
-See [qualification evidence and integration prerequisites](../docs/qualification/code-mode.md)
+See [qualification evidence and integration prerequisites](../docs/develop/qualification.md)
 for the exact upstream source/package pins and recorded qualification scope.
 A successful compile is not a passing fleet test. These shell suites do not run
 browser tests.
@@ -90,7 +90,7 @@ make test-go GO_TEST_ARGS=-cover
 
 Authorization, key-location, and secret-purpose changes surface as diffs to
 golden files under `internal/*/testdata` and to the generated tables in
-[security architecture](../docs/security.md). Review such a diff as a security
+[security architecture](../docs/develop/security.md). Review such a diff as a security
 change, then regenerate deliberately with
 `go test ./internal/access ./internal/secrets -update`.
 
@@ -160,7 +160,7 @@ against the backend before reuse, and renewed through the UI after revocation.
 ## Benchmarks
 
 `make bench` runs the gateway benchmark scenarios of
-[the M1 roadmap](../docs/roadmap/m01-measured-advantage.md) against a disposable
+[the performance guide](../docs/develop/performance.md) against a disposable
 PostgreSQL and Valkey, a deterministic mock upstream and a real `olp all`
 process, and writes one result per scenario to `.local/bench/`. The suites under
 `tests/bench/` carry the `bench` build tag, so `make test-go` and
@@ -172,7 +172,7 @@ when the services they need are not configured. Use `BENCH_SCENARIOS=S1,S2` and
 `OLP_BENCH_SCALE=0.05` for a smoke run; its numbers are not reference numbers.
 The [benchmark guide](bench/README.md) has the scenarios, the settings and how
 to read a result, and `scripts/bench-compare.sh` runs the same scenarios against
-LiteLLM; see the [performance guide](../docs/performance.md).
+LiteLLM; see the [performance guide](../docs/develop/performance.md).
 
 The hot paths have `testing.B` benchmarks beside the code, in the packages the
 [microbenchmark table](#microbenchmarks) lists, which `make bench-gate` compares
@@ -194,7 +194,7 @@ assertions.
 
 Run `./scripts/check-contracts.sh` standalone or with `--already-generated` after
 `make check` to verify deterministic regeneration and checked-in Go artifacts.
-Historical repair evidence is [recorded separately](../docs/architecture-review.md);
+Historical repair evidence is [recorded separately](../docs/develop/qualification.md#historical-qualification);
 timing diaries are not current suite budgets.
 
 ## Token oracle fixtures
@@ -265,7 +265,7 @@ given or a stream that ended, so a change that turns one into an error path, or
 into a case that is no longer the one it names, fails it instead of making it
 fast.
 
-The performance budget of [M1](../docs/roadmap/m01-measured-advantage.md#performance-budget)
+The performance budget of [Performance](../docs/develop/performance.md)
 is that a change must not slow a hot-path benchmark, or add allocations to it,
 by more than 10%. Compare a change with its merge base by running the same
 benchmarks on both with `-count=10` and giving the two outputs to
@@ -316,7 +316,7 @@ and cloud identity variables. Live calls consume provider quota.
 
 ## Client and agent qualification
 
-[Pinned clients](../docs/clients.md) run real headless CLIs/frameworks/Go SDKs
+[Pinned clients](../docs/use/clients.md) run real headless CLIs/frameworks/Go SDKs
 against deterministic gateway/upstream fixtures, asserting client results and
 recorded requests. This does not qualify paid providers.
 
@@ -337,7 +337,7 @@ signals stop child clients. Go SDK calls additionally have individual deadlines.
 checks; the runner vets its separate Go SDK module. Fix exposed incompatibility
 in gateway behavior with a regression, not a client workaround.
 See [harness ownership](clients/README.md) and
-[client limits](../docs/clients.md#open-items).
+[client limits](../docs/use/clients.md#open-items).
 
 ## Contract and browser coverage
 
@@ -369,6 +369,6 @@ go test -tags=integration ./internal/gateway -run '^$' \
 ```
 
 Run latency comparisons without other builds or load generators competing for
-CPU. The output includes `p95-ns/op`; the M8 budget allows at most 1 ms of
+CPU. The output includes `p95-ns/op`; the cache budget allows at most 1 ms of
 additional p95 latency. The ordinary `BenchmarkGatewayResponseCache` uses an
 in-memory backing store and is included in the regression gate.

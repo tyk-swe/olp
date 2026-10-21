@@ -150,7 +150,7 @@ from the historical authentication source audit above.
 These auth/configuration checks do not prove live subscription inference.
 The integrated transport/client evidence and remaining file/search, platform
 and live-account gaps are recorded in
-[the qualification matrix](../../docs/qualification/code-mode.md).
+[the qualification matrix](../../docs/develop/qualification.md).
 ChatGPT cloud tasks, standalone web-search and account
 management are outside the generated local-client setup. FedRAMP and tokens
 without usable observed identity/expiry refuse. No operation/model hard-token

@@ -29,7 +29,7 @@
 // implementing Carrier.
 //
 // A WASI reactor never runs main, so the same source builds either way. See
-// docs/plugin-authoring.md in the OpenLLMProxy repository.
+// docs/develop/plugin-authoring.md in the OpenLLMProxy repository.
 package plugin
 
 import (

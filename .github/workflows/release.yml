@@ -60,7 +60,7 @@ jobs:
           OLP_SIGNING_KEY_ID: ${{ vars.OLP_SIGNING_KEY_ID }}
         run: |
           if [[ -z $OLP_SIGNING_KEY || -z $OLP_SIGNING_KEY_ID ]]; then
-            echo "::error::Set the OLP_SIGNING_KEY secret and OLP_SIGNING_KEY_ID variable; see docs/catalog.md#signing-keys" >&2
+            echo "::error::Set the OLP_SIGNING_KEY secret and OLP_SIGNING_KEY_ID variable; see docs/develop/catalog.md#signing-keys" >&2
             exit 1
           fi
           go run ./internal/signing/cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/pluginindex/index.json

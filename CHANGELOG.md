@@ -108,7 +108,7 @@ semantic versioning and take their source from root `package.json`;
   `fireworks-completions` and `together-completions` profiles, plus a
   single-prompt mapping to Chat Completions on transformed routes. Includes
   guardrail inspection, payload capture, exact usage and console playground
-  templates. See [compatibility](docs/compatibility.md#legacy-text-completions-and-decisions).
+  templates. See [compatibility](docs/use/compatibility.md#legacy-text-completions-and-decisions).
 - The text-only Decisions API (`POST /v1/decisions` and `POST /v1/systemone`,
   M9.10) as operation `decision`, with native OpenAI Decisions and TypeSafe
   System One profiles, a restricted one-way OpenAI-to-System-One mapping and
@@ -139,11 +139,11 @@ semantic versioning and take their source from root `package.json`;
   attachments, built-in detectors, external and model evaluators, confined WASM
   plugins, streaming enforcement and content-free decision evidence. The
   console includes editors and a playground; `/v1/guardrails/apply` has generated
-  Go and TypeScript clients. See [guardrails](docs/guardrails.md).
+  Go and TypeScript clients. See [guardrails](docs/use/guardrails.md).
 - Price components for every structure the major vendors publish: audio and
   image rates with cached shares, input-token tiers, time-of-day windows,
   per-request and per-tool-call fees and a batch multiplier, priced exactly in
-  accounting and admission. See [pricing](docs/pricing.md).
+  accounting and admission. See [pricing](docs/operate/pricing.md).
 - Audio, image and server-side tool-call metering from OpenAI, Anthropic and
   Gemini responses.
 - Connection commitments for provisioned capacity, allocated across consumers
@@ -159,7 +159,7 @@ semantic versioning and take their source from root `package.json`;
   sinks with idempotent identifiers and per-sink project-to-customer maps.
 - Daily FOCUS 1.4 gzip-CSV datasets on object sinks in provider-cost or charge
   basis, with revisioned restatement and in-repo conformance checking; see
-  [finops](docs/finops.md).
+  [finops](docs/operate/finops.md).
 - Per-attempt price lines (`cost_lines`, `charge_lines`) recording each
   billed component's quantity, unit and unit prices.
 - OpenAI and Anthropic billing imports and a usage reconciliation report
@@ -179,7 +179,7 @@ semantic versioning and take their source from root `package.json`;
 - Codex device enrollment and OLP-key-only client configuration. Official CLI
   0.160.0 is qualified against controlled peers; live subscription compatibility,
   positive hard-token bounds and the remaining client scenarios are tracked in
-  [the qualification matrix](docs/qualification/code-mode.md).
+  [the qualification matrix](docs/develop/qualification.md).
 - OpenCode Go and Z.ai GLM Coding Plan code-mode adapters. The `opencode-go`
   and `zai-coding` plugins enroll a pasted API key, fingerprinted as the
   principal and fenced from ordinary routes. Routes serve Anthropic Messages,
@@ -218,7 +218,7 @@ semantic versioning and take their source from root `package.json`;
   token-estimation factors, verified at startup and published with each
   release. Catalog pricing sources refresh from it with anti-rollback;
   discovery suggests its facts, and routes warn about deprecated and retiring
-  models. See [the reference catalog](docs/catalog.md).
+  models. See [the reference catalog](docs/develop/catalog.md).
 - Plugin authoring templates for OAuth 2.0 client credentials, signed requests
   and token exchange, and a signed index of reviewed plugins the console
   browses.

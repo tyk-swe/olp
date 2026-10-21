@@ -8,8 +8,8 @@ import { formatTable, headline, number } from './bench-summary.mjs';
 // Compares the results of the gateway benchmark for OLP (.local/bench/s1.json
 // to s5.json, written by the scenario suite) with those of LiteLLM
 // (.local/bench/litellm/s1.json to s5.json, written by bench-litellm.mjs) and
-// judges the roadmap's targets that compare them
-// (docs/roadmap/m01-measured-advantage.md#targets). scripts/bench-compare.sh
+// judges the performance guide's targets that compare them
+// (docs/develop/performance.md#scenarios-and-targets). scripts/bench-compare.sh
 // runs both sides and then this.
 //
 // A target is judged only when both runs can vouch for it: full scale, valid

@@ -1,5 +1,5 @@
 // Claude Code, the resolved latest release, in print mode against OLP's Anthropic
-// surface: the configuration docs/clients.md documents. Claude Code treats an
+// surface: the configuration docs/use/clients.md documents. Claude Code treats an
 // ANTHROPIC_BASE_URL gateway as the Anthropic API and sends it the beta headers
 // and request fields it sends api.anthropic.com. The two travel as pairs, and
 // the scripted upstream refuses a field whose beta header is missing, so a

@@ -32,11 +32,11 @@ func golden(t *testing.T, name string, got []byte) {
 	}
 }
 
-// docRegion holds the marked region of docs/security.md to rendered, or
+// docRegion holds the marked region of docs/develop/security.md to be rendered, or
 // rewrites it under -update.
 func docRegion(t *testing.T, name, rendered string) {
 	t.Helper()
-	path := "../../docs/security.md"
+	path := "../../docs/develop/security.md"
 	document, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -44,14 +44,14 @@ func docRegion(t *testing.T, name, rendered string) {
 	start, end := "<!-- "+name+" -->\n", "<!-- /"+name+" -->"
 	i, j := bytes.Index(document, []byte(start)), bytes.Index(document, []byte(end))
 	if i < 0 || j < i {
-		t.Fatalf("docs/security.md has no %s region", name)
+		t.Fatalf("docs/develop/security.md has no %s region", name)
 	}
 	current := string(document[i+len(start) : j])
 	if current == rendered {
 		return
 	}
 	if !*update {
-		t.Fatalf("docs/security.md describes %s differently from the code; rerun with -update", name)
+		t.Fatalf("docs/develop/security.md describes %s differently from the code; rerun with -update", name)
 	}
 	updated := append(append(append([]byte{}, document[:i+len(start)]...), rendered...), document[j:]...)
 	if err := os.WriteFile(path, updated, 0o644); err != nil {
