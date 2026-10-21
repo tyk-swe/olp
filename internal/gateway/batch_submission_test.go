@@ -44,6 +44,20 @@ func TestBatchLineOperation(t *testing.T) {
 	}
 }
 
+func TestAggregateTariffTreatsZeroSpecializedRatesAsPresent(t *testing.T) {
+	for _, price := range []usage.Price{
+		{ImageInputPerMillion: new("0")}, {AudioOutputPerMillion: new("0.0")},
+		{CachedInputPerMillion: new("0")}, {CacheWriteInputPerMillion: new("0")}, {UnitPrice: new("0")},
+	} {
+		if !aggregateTariffNeedsPerRecordUsage(&usage.RoutingPrice{Price: price}) {
+			t.Fatalf("zero specialized rate was treated as absent: %+v", price)
+		}
+	}
+	if aggregateTariffNeedsPerRecordUsage(&usage.RoutingPrice{Price: usage.Price{PerRequest: new("0")}}) {
+		t.Fatal("zero fixed per-request fee made aggregate text pricing uncertain")
+	}
+}
+
 func TestBatchCompletionWindow(t *testing.T) {
 	for _, test := range []struct {
 		vendor string

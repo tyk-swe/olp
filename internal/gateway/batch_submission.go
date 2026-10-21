@@ -290,13 +290,16 @@ func aggregateTariffNeedsPerRecordUsage(price *usage.RoutingPrice) bool {
 	if len(price.Tiers) > 0 || len(price.ToolCalls) > 0 {
 		return true
 	}
+	if price.PerRequest != nil && strings.Trim(*price.PerRequest, "0.") != "" {
+		return true
+	}
 	for _, rate := range []*string{
-		price.PerRequest, price.UnitPrice, price.CachedInputPerMillion,
+		price.UnitPrice, price.CachedInputPerMillion,
 		price.CacheWriteInputPerMillion, price.CacheWrite5MInputPerMillion, price.CacheWrite1HInputPerMillion,
 		price.AudioInputPerMillion, price.CachedAudioInputPerMillion, price.AudioOutputPerMillion,
 		price.ImageInputPerMillion, price.CachedImageInputPerMillion, price.ImageOutputPerMillion,
 	} {
-		if rate != nil && strings.Trim(*rate, "0.") != "" {
+		if rate != nil {
 			return true
 		}
 	}

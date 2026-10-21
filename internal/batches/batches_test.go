@@ -102,6 +102,12 @@ func TestBatchLineErrorsAndMissingUsage(t *testing.T) {
 		if result.Kind != want[index] || result.ErrorClass == "" {
 			t.Fatalf("error line %d: %+v", index, result)
 		}
+		if index < 2 && (!result.Usage.Complete || result.Usage.Observed || result.Usage.BillingUncertain) {
+			t.Fatalf("known unprocessed work retained billing uncertainty: %+v", result)
+		}
+		if index == 2 && !result.Usage.BillingUncertain {
+			t.Fatal("ambiguous provider failure lost billing uncertainty")
+		}
 	}
 	result, err := ParseLine(bytes.TrimSpace(readFixture(t, "missing_usage.jsonl")), "/v1/chat/completions", false)
 	if err != nil {

@@ -434,7 +434,7 @@ func (r *GeminiReader) Reconcile(ctx context.Context, settlement Settlement, tar
 	after := ""
 	matches := make([]BatchSnapshot, 0, 1)
 	for page := 0; page < geminiListPages; page++ {
-		query := url.Values{"pageSize": {"100"}}
+		query := url.Values{"pageSize": {"100"}, "fields": {"operations(name,done,error(code),metadata(state,createTime,inputConfig(fileName),batchStats)),nextPageToken"}}
 		if after != "" {
 			query.Set("pageToken", after)
 		}
@@ -475,6 +475,18 @@ func (r *GeminiReader) Reconcile(ctx context.Context, settlement Settlement, tar
 			}
 		}
 		if listing.NextPageToken == "" {
+			if len(matches) == 1 {
+				adopted := settlement
+				adopted.UpstreamID = &matches[0].ID
+				snapshot, err := r.Poll(ctx, adopted, target)
+				if err != nil {
+					return Reconciliation{}, err
+				}
+				if snapshot.InputFileID != inputFileName {
+					return Reconciliation{}, ErrProviderConflict
+				}
+				matches[0] = snapshot
+			}
 			return Reconciliation{Matches: matches}, nil
 		}
 		if listing.NextPageToken == after {

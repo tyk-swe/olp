@@ -32,7 +32,7 @@ func TestGeminiReaderPollInlineAndFileResults(t *testing.T) {
 	listing := geminiBatchFixture(t, "batch.list.response.json")
 	results := geminiBatchFixture(t, "batch.results.jsonl")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if selector := r.URL.Query().Get("fields"); selector != "" {
+		if selector := r.URL.Query().Get("fields"); selector != "" && r.URL.Path != "/v1beta/batches" {
 			prefix, _, _ := strings.Cut(selector, "metadata(")
 			for _, field := range strings.Split(prefix, ",") {
 				if field != "" && field != "name" && field != "done" && field != "error" && field != "response" {
@@ -49,6 +49,10 @@ func TestGeminiReaderPollInlineAndFileResults(t *testing.T) {
 		case r.URL.Path == "/v1beta/batches/running":
 			_, _ = w.Write(running)
 		case r.URL.Path == "/v1beta/batches":
+			if selector := r.URL.Query().Get("fields"); !strings.HasPrefix(selector, "operations(") || strings.Contains(selector, "response") {
+				_, _ = w.Write([]byte(strings.Repeat("x", (4<<20)+1)))
+				return
+			}
 			_, _ = w.Write(listing)
 		case r.URL.Path == "/download/v1beta/files/output-gemini-file:download":
 			_, _ = w.Write(results)

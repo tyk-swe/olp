@@ -44,6 +44,9 @@ func TestReconciliationExcludesMappedJobs(t *testing.T) {
 			target := &PinnedTarget{
 				Config: connectors.Config{Kind: "openai", Endpoint: "https://api.example.test/v1", AuthMode: "api_key"}, Secret: []byte("key"),
 				Client: &http.Client{Transport: cloudRoundTripper(func(req *http.Request) (*http.Response, error) {
+					if adapter == "gemini" && strings.HasSuffix(req.URL.Path, "/lost") {
+						return cloudResponse(req, http.StatusOK, "application/json", string(items[1])), nil
+					}
 					return cloudResponse(req, http.StatusOK, "application/json", string(body)), nil
 				})},
 				KnownBatch: func(_ context.Context, id string) (bool, error) { return id == "known", nil },
