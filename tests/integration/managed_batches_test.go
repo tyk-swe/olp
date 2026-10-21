@@ -15,14 +15,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/resources"
 )
 
 type managedBatchFixture struct {
-	server  *httptest.Server
-	adapter string
-	mu      sync.Mutex
-	files   map[string]string
-	job     map[string]any
+	server        *httptest.Server
+	adapter       string
+	mu            sync.Mutex
+	files         map[string]string
+	job           map[string]any
+	loseCreateAck bool
 }
 
 func newManagedBatchFixture(t *testing.T, adapter string) *managedBatchFixture {
@@ -121,7 +123,13 @@ func newManagedBatchFixture(t *testing.T, adapter string) *managedBatchFixture {
 		fixture.job = job
 		fixture.files["file-output"] = batchChatLine("managed-result", "ok")
 		fixture.files["file-error"] = ""
+		loseAck := fixture.loseCreateAck
 		fixture.mu.Unlock()
+		if loseAck {
+			w.WriteHeader(http.StatusBadGateway)
+			writeJSON(w, map[string]any{"error": map[string]any{"message": "lost acknowledgement"}})
+			return
+		}
 		if adapter == "together" {
 			writeJSON(w, map[string]any{"job": job})
 		} else {
@@ -254,17 +262,33 @@ func TestManagedBatchSubmissionAndSettlement(t *testing.T) {
 			if inputContentStatus != http.StatusOK || !bytes.Equal(bytes.TrimSpace(inputContent), bytes.TrimSpace([]byte(translated))) {
 				t.Fatalf("managed input content proxy: %d %s", inputContentStatus, inputContent)
 			}
-			request, _ := json.Marshal(map[string]any{"input_file_id": uploaded["id"], "endpoint": "/v1/chat/completions", "completion_window": "24h"})
+			fixture.mu.Lock()
+			fixture.loseCreateAck = adapter == "together"
+			fixture.mu.Unlock()
+			request, _ := json.Marshal(map[string]any{"input_file_id": uploaded["id"], "endpoint": "/v1/chat/completions", "completion_window": "24h", "metadata": map[string]string{"client": "preserved"}})
 			status, response, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(request),
 				map[string]string{"Content-Type": "application/json", "X-OLP-Route": slug})
-			if status != http.StatusOK {
+			wantStatus := http.StatusOK
+			if adapter == "together" {
+				wantStatus = http.StatusBadGateway
+			}
+			if status != wantStatus {
 				t.Fatalf("managed batch create: %d %s", status, response)
 			}
-			var created map[string]any
-			if err := json.Unmarshal(response, &created); err != nil {
-				t.Fatal(err)
+			localID := ""
+			if adapter == "together" {
+				var intentID uuid.UUID
+				if err := h.Pool.QueryRow(t.Context(), `SELECT resource_id FROM olp.batch_settlements WHERE adapter='together' AND state='submission_unknown'`).Scan(&intentID); err != nil {
+					t.Fatal(err)
+				}
+				localID = resources.LocalID(resources.KindBatch, intentID)
+			} else {
+				var created map[string]any
+				if err := json.Unmarshal(response, &created); err != nil {
+					t.Fatal(err)
+				}
+				localID = created["id"].(string)
 			}
-			localID := created["id"].(string)
 			worker := batchWorker(h, nil)
 			if _, err := worker.ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
 				t.Fatal(err)
@@ -274,6 +298,12 @@ func TestManagedBatchSubmissionAndSettlement(t *testing.T) {
 			getStatus, batch, _ := h.gateway(http.MethodGet, "/v1/batches/"+localID, key, nil)
 			if getStatus != http.StatusOK || batch["status"] != "completed" {
 				t.Fatalf("managed batch get: %d %v", getStatus, batch)
+			}
+			if adapter == "together" {
+				metadata, _ := batch["metadata"].(map[string]any)
+				if metadata["client"] != "preserved" {
+					t.Fatalf("recovered Together metadata was lost: %v", batch)
+				}
 			}
 			outputID, _ := batch["output_file_id"].(string)
 			contentStatus, content, _ := h.gatewayRaw(http.MethodGet, "/v1/files/"+outputID+"/content", key, nil,

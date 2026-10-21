@@ -1755,7 +1755,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			"endpoint": inputManifest.Endpoint, "gemini_metadata": metadata,
 		}})
 	}
-	submission, e := s.prepareBatchSubmission(r.Context(), x, authority.ID, p, source, source.Bytes(), upstream,
+	submission, e := s.prepareBatchSubmission(ctx, x, authority.ID, p, source, source.Bytes(), upstream,
 		strictServing, localFile, file.UpstreamID, kind, adapter, "openai", lineOperation, completionWindow, expectedResults, reconciliationCursor)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)

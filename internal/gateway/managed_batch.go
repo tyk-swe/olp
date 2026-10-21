@@ -205,7 +205,11 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d repeats a custom_id.", lineNumber), &param))
 		}
 		seen[line.CustomID] = struct{}{}
-		operation, family, ok := managedBatchEndpoint(adapter, line.URL)
+		classificationEndpoint := line.URL
+		if adapter == "openai" && p.provider.Kind == "azure_openai" {
+			classificationEndpoint = wire.CanonicalBatchEndpoint(line.URL)
+		}
+		operation, family, ok := managedBatchEndpoint(adapter, classificationEndpoint)
 		if !ok || endpoint != "" && endpoint != line.URL {
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported or mixed endpoint.", lineNumber), &param))
@@ -347,7 +351,7 @@ func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
 }
 
 func endpointOperation(endpoint string) string {
-	if endpoint == "/v1/embeddings" {
+	if wire.CanonicalBatchEndpoint(endpoint) == "/v1/embeddings" {
 		return "embeddings"
 	}
 	return "generation"

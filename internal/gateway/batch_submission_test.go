@@ -26,6 +26,10 @@ func TestBatchLineOperation(t *testing.T) {
 		"/v1/responses":        "generation",
 		"/v1/completions":      "generation",
 		"/v1/embeddings":       "embeddings",
+		"/chat/completions":    "generation",
+		"/responses":           "generation",
+		"/completions":         "generation",
+		"/embeddings":          "embeddings",
 	} {
 		source := parseBatchTestObject(t, `{"endpoint":"`+endpoint+`"}`)
 		if got, err := batchLineOperation(source); err != nil || got != want {
@@ -393,6 +397,13 @@ func TestNativeBatchInputBindsOneModelWithoutLosingNativeFields(t *testing.T) {
 	mapped, _, err := runManagedTranslation(line+"\n", digest, p, route, "openai")
 	if err != nil || !bytes.Contains(mapped, []byte(`"model":"deployed-model"`)) {
 		t.Fatalf("native batch ignored the pinned deployment binding: %s err=%v", mapped, err)
+	}
+	for _, endpoint := range []string{"/chat/completions", "/responses", "/completions", "/embeddings"} {
+		line := `{"custom_id":"azure","method":"POST","url":"` + endpoint + `","body":{"model":"route-model","native":9007199254740993}}` + "\n"
+		mapped, manifest, err := runManagedTranslation(line, digest, p, route, "openai")
+		if err != nil || manifest.Endpoint != endpoint || !bytes.Contains(mapped, []byte(`"url":"`+endpoint+`"`)) {
+			t.Fatalf("Azure endpoint spelling changed: %s manifest=%+v err=%v", mapped, manifest, err)
+		}
 	}
 	foreign := strings.Replace(line, `"model":"route-model"`, `"model":"unrelated-model"`, 1)
 	if _, _, err := runManagedTranslation(foreign+"\n", digest, p, route, "openai"); err == nil {

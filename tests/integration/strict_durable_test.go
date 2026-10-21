@@ -96,8 +96,8 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	key := stateKey(t, h, owner, slug, true)
 	other := stateKey(t, h, owner, slug, true)
 	h.refresh()
-	input := `{"custom_id":"first","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n" +
-		`{"custom_id":"second","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"beta"}}` + "\n"
+	input := `{"custom_id":"first","method":"POST","url":"/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n" +
+		`{"custom_id":"second","method":"POST","url":"/embeddings","body":{"model":"` + vendorModel + `","input":"beta"}}` + "\n"
 	before := fixture.dials.Load()
 	if status, _ := h.uploadTestFile(slug, plain, input); status != http.StatusForbidden || fixture.dials.Load() != before {
 		t.Fatal("strict durable upload without state authority reached the provider")
@@ -105,7 +105,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	for _, invalid := range []string{
 		strings.Replace(input, `"custom_id":"second"`, `"custom_id":"first"`, 1),
 		strings.Replace(input, `"model":"`+vendorModel+`"`, `"model":"other-model"`, 1),
-		strings.Replace(input, `"url":"/v1/embeddings"`, `"url":"/v1/unsupported"`, 1),
+		strings.Replace(input, `"url":"/embeddings"`, `"url":"/v1/unsupported"`, 1),
 	} {
 		status, _ := h.uploadTestFile(slug, key, invalid)
 		if status < 400 || fixture.dials.Load() != before {
@@ -139,11 +139,11 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 		t.Fatal("strict file source/result leaked into ordinary metadata or ciphertext")
 	}
 
-	batchSource := `{"completion_window":"24h", "custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"` + fileID + `","endpoint":"/v1/embeddings"}`
+	batchSource := `{"completion_window":"24h", "custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"` + fileID + `","endpoint":"/embeddings"}`
 	before = fixture.dials.Load()
 	for _, invalid := range []string{
-		`{"input_file_id":"` + fileID + `","input_file_id":"` + fileID + `","endpoint":"/v1/embeddings","completion_window":"24h"}`,
-		`{"input_file_id":"` + fileID + `","endpoint":"/v1/embeddings","completion_window":"24h","output_file_id":"caller"}`,
+		`{"input_file_id":"` + fileID + `","input_file_id":"` + fileID + `","endpoint":"/embeddings","completion_window":"24h"}`,
+		`{"input_file_id":"` + fileID + `","endpoint":"/embeddings","completion_window":"24h","output_file_id":"caller"}`,
 		`{"input_file_id":"` + fileID + `","endpoint":"/v1/unsupported","completion_window":"24h"}`,
 	} {
 		status, _, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, strings.NewReader(invalid), map[string]string{"Content-Type": "application/json"})
@@ -159,7 +159,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if !ok || !strings.HasPrefix(batchID, "strict_batch_") || bytes.Contains(raw, []byte("file-up-1")) {
 		t.Fatalf("batch identity leaked upstream: %s", raw)
 	}
-	wantBound := `{"completion_window":"24h","custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"file-up-1","endpoint":"/v1/embeddings","model":"` + vendorModel + `"}`
+	wantBound := `{"completion_window":"24h","custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"file-up-1","endpoint":"/embeddings","model":"` + vendorModel + `"}`
 	if got := fixture.lastBatchRaw.Load().(string); got != wantBound {
 		t.Fatalf("source/overlay changed native JSON:\n got %s\nwant %s", got, wantBound)
 	}

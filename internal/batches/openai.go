@@ -564,7 +564,7 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 func decodeLineUsage(body json.RawMessage, endpoint string) (*wire.Usage, bool, error) {
 	var completion *wire.Completion
 	var err error
-	switch endpoint {
+	switch wire.CanonicalBatchEndpoint(endpoint) {
 	case "/v1/chat/completions":
 		completion, err = protocols.Decode(wire.Chat, wire.Chat, body, "batch", "")
 	case "/v1/completions":
@@ -587,7 +587,7 @@ func decodeLineUsage(body json.RawMessage, endpoint string) (*wire.Usage, bool, 
 }
 
 func lineOperation(endpoint string) string {
-	switch endpoint {
+	switch wire.CanonicalBatchEndpoint(endpoint) {
 	case "/v1/embeddings":
 		return "embeddings"
 	case "/v1/chat/completions", "/v1/responses", "/v1/completions":

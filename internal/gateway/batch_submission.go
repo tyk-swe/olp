@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -31,7 +32,7 @@ func batchLineOperation(source oif.Document) (string, *Error) {
 		param := "endpoint"
 		return "", invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", &param)
 	}
-	switch endpoint {
+	switch wire.CanonicalBatchEndpoint(endpoint) {
 	case "/v1/chat/completions", "/v1/responses", "/v1/completions":
 		return "generation", nil
 	case "/v1/embeddings":
@@ -130,18 +131,34 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 		if value, present := source.Root().Lookup("completion_window"); present {
 			windowLabel, _ = value.Text()
 		}
-		cursor, err = json.Marshal(map[string]any{
-			"submission": map[string]string{
-				"input_file_id":       upstreamFileID,
-				"local_input_file_id": localFileID,
-				"endpoint":            endpoint,
-				"completion_window":   windowLabel,
-			},
-		})
+		submission := map[string]any{
+			"input_file_id":       upstreamFileID,
+			"local_input_file_id": localFileID,
+			"endpoint":            endpoint,
+			"completion_window":   windowLabel,
+		}
+		if adapter == "together" {
+			if metadata, present := source.Fields()["metadata"]; present {
+				submission["client_metadata"] = metadata
+			}
+		}
+		cursor, err = json.Marshal(map[string]any{"submission": submission})
 		if err != nil {
 			return nil, serverError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be stored.")
 		}
 	}
+	var cursorFields map[string]json.RawMessage
+	var submissionFields map[string]json.RawMessage
+	if json.Unmarshal(cursor, &cursorFields) != nil || json.Unmarshal(cursorFields["submission"], &submissionFields) != nil || submissionFields == nil {
+		return nil, serverError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be stored.")
+	}
+	creatorDeadline := now.Add(time.Duration(x.route.OverallTimeout) * time.Millisecond)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(creatorDeadline) {
+		creatorDeadline = deadline
+	}
+	submissionFields["creator_deadline"], _ = json.Marshal(creatorDeadline.Add(resourceCommitTimeout))
+	cursorFields["submission"], _ = json.Marshal(submissionFields)
+	cursor, _ = json.Marshal(cursorFields)
 	closeAfter := now.Add(window + 48*time.Hour)
 	resource := &resources.Resource{
 		UUID: resourceID, Kind: resourceKind, APIKeyID: authorityID, RouteSlug: x.route.Slug,

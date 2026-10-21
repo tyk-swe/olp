@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,10 @@ func TestBatchLineUsageParsing(t *testing.T) {
 		result, err := ParseLine(line, test.endpoint, false)
 		if err != nil {
 			t.Fatalf("%s: %v", test.name, err)
+		}
+		azureResult, err := ParseLine(line, strings.TrimPrefix(test.endpoint, "/v1"), false)
+		if err != nil || !reflect.DeepEqual(result, azureResult) {
+			t.Fatalf("Azure endpoint changed result accounting: %+v err=%v", azureResult, err)
 		}
 		if result.Kind != ResultSucceeded || !result.Usage.Observed || !result.Usage.Complete {
 			t.Fatalf("%s result: %+v", test.name, result)

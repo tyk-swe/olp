@@ -70,3 +70,17 @@ func TestReconciliationExcludesMappedJobs(t *testing.T) {
 		})
 	}
 }
+
+func TestSubmissionCreatorDeadline(t *testing.T) {
+	created := time.Now().UTC().Add(-3 * time.Minute)
+	deadline := created.Add(10 * time.Minute)
+	cursor, _ := json.Marshal(map[string]any{"submission": map[string]any{"creator_deadline": deadline}})
+	settlement := Settlement{CreatedAt: created, CloseAfter: created.Add(72 * time.Hour), Cursor: cursor}
+	if got := submissionCreatorDeadline(settlement); !got.Equal(deadline) || !time.Now().Before(got) {
+		t.Fatalf("long-running creator lost its recovery fence: %v", got)
+	}
+	settlement.Cursor = json.RawMessage(`{"submission":{}}`)
+	if got := submissionCreatorDeadline(settlement); !got.Equal(settlement.CloseAfter) {
+		t.Fatalf("legacy creator without deadline was guessed inactive: %v", got)
+	}
+}

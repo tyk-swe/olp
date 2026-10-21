@@ -213,7 +213,7 @@ func (w *Worker) reconcileClaimed(ctx context.Context, settlement Settlement) re
 	defer stopLease()
 	now := w.now()
 	if settlement.State == StateSubmitting {
-		next := settlement.CreatedAt.Add(2 * time.Minute)
+		next := submissionCreatorDeadline(settlement)
 		if !now.Before(next) {
 			if err := w.Store.Finish(leaseCtx, settlement, StateSubmissionUnknown, now, "submission_interrupted"); err != nil {
 				w.logFailure(settlement, "submission_interrupted", err)
@@ -446,6 +446,16 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		}
 		fields["adapter"], _ = json.Marshal(settlement.Adapter)
 		fields["completion_window"], _ = json.Marshal(submissionWindow(settlement.Cursor))
+		if settlement.Adapter == "together" {
+			var cursor struct {
+				Submission struct {
+					Metadata json.RawMessage `json:"client_metadata"`
+				} `json:"submission"`
+			}
+			if json.Unmarshal(settlement.Cursor, &cursor) == nil && len(cursor.Submission.Metadata) > 0 {
+				fields["metadata"] = cursor.Submission.Metadata
+			}
+		}
 		metadata, _ = json.Marshal(fields)
 	}
 	resource := &resources.Resource{
@@ -596,6 +606,20 @@ func submissionWindow(cursor []byte) string {
 		return value.Submission.CompletionWindow
 	}
 	return "24h"
+}
+
+func submissionCreatorDeadline(settlement Settlement) time.Time {
+	var cursor struct {
+		Submission struct {
+			Deadline time.Time `json:"creator_deadline"`
+		} `json:"submission"`
+	}
+	if json.Unmarshal(settlement.Cursor, &cursor) == nil && cursor.Submission.Deadline.After(settlement.CreatedAt) {
+		return cursor.Submission.Deadline
+	}
+	// Legacy intents have no proof that their creator has finished. Keep their
+	// retry guard until the retention cutoff instead of racing a live request.
+	return settlement.CloseAfter
 }
 
 func (w *Worker) pinnedTarget(ctx context.Context, settlement Settlement) (*PinnedTarget, string) {

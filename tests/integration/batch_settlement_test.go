@@ -85,7 +85,15 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	// Reproduce a worker that claimed the intent just before the gateway's
 	// successful response activates it. Its stale finish must not revert state.
 	store := batches.NewStore(h.Pool)
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET state='submitting',upstream_id=NULL,next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET state='submitting',upstream_id=NULL,next_attempt_at=now(),created_at=now()-interval '3 minutes',
+		cursor=jsonb_set(cursor,'{submission,creator_deadline}',to_jsonb(now()+interval '5 minutes')) WHERE resource_id=$1`, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if pass, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil || pass.Claimed != 1 {
+		t.Fatalf("live creator fencing pass: %+v err=%v", pass, err)
+	}
+	assertBatchSettlement(t, h, resourceID, "submitting", 0, 0)
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
 		t.Fatal(err)
 	}
 	claims, err := store.Claim(t.Context(), time.Now().Add(time.Minute), 1)
