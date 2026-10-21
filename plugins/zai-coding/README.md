@@ -15,7 +15,11 @@ probes and ordinary routes, so the key serves only code-mode routes.
 
 Code mode forwards Anthropic Messages to `anthropic/v1/messages` and Chat
 Completions to `coding/paas/v4/chat/completions` beneath the upstream, with the
-key as a bearer token. Coding Plan keys work only on these coding endpoints.
+key as a bearer token. The global `zai-coding-plan` profile also supports
+optional [research tools](../../docs/use/code-mode.md#research-tools) at the
+fixed Z.ai search, web-reader and repository MCP endpoints. The route binds a
+pool account explicitly; research works independently of its inference models.
+Vision and local-file forwarding are excluded.
 
 ## Upstream evidence
 

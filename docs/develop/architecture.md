@@ -11,7 +11,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/runtime/`; console `routes/` |
 | Users, keys, identity, settings and policy | `internal/access/`, `internal/limits/`; console `access/` |
 | Admission, execution and retained resources | `internal/gateway/`, `internal/resources/`, `internal/media/`; console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `resources/code_mode.go`; console code mode |
+| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `resources/code_*.go`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
@@ -131,6 +131,16 @@ the credential generation used at handshake for upstream refusals.
 revision. `routes` retains project authority, account offers and HTTP responses.
 Console editors own typed payloads/validation and use shared mutation intent,
 cancellation and stale-callback fences. Secrets clear on abandonment.
+
+Research uses a separate `/code/{slug}/mcp/{service}` proxy. The published
+`codemode.ResearchTools` binding selects one global Z.ai account without model
+or conversation admission. `coderesearch` filters methods/discovery and preserves
+native tool definitions/results; the gateway reuses bounded SSE decoding and
+raw egress with no replay. `resources.CodeStore` rechecks live key/pool/account
+authority and stores only opaque session metadata, bound to key, revision,
+service, account, credential and grant generation. Research errors do not update
+inference health. This proxy is separate from the management MCP endpoint and
+project-owned MCP certification.
 
 Match the observed principal before one `MarkDispatched`. Prepared aborts can
 refund; dispatched unknown usage cannot. Equal settlement is idempotent, conflicting

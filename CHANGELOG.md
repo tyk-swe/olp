@@ -9,6 +9,13 @@ semantic versioning and take their source from root `package.json`;
 
 ### Added
 
+- Add opt-in code-mode research tools through an enrolled Z.ai global account,
+  independently of inference models. Freeze the account and services at route
+  publication, proxy bounded MCP traffic with live authorization and isolated
+  sessions, and generate Codex, Claude Code and OpenCode setup using an OLP key.
+  Claude's companion files appear in optional `additional_files`. Migration
+  0080 stores only transport and authorization metadata.
+
 - Expose metadata-only batch settlement progress and in-flight submission
   intents in provider-resource listings; document M9.2 provider scope,
   configuration and operator recovery.

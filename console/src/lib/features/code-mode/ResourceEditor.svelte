@@ -42,7 +42,7 @@
 {:else if editing.kind === 'pools'}
   <PoolEditor current={editing.current} {accounts} {...shared} />
 {:else if editing.kind === 'routes'}
-  <RouteEditor current={editing.current} {pools} {...shared} />
+  <RouteEditor current={editing.current} {pools} {accounts} {...shared} />
 {:else}
   <BudgetEditor current={editing.current} {routes} {...shared} />
 {/if}

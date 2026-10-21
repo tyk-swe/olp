@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -19,6 +20,25 @@ type CodeAuthorizer struct {
 	Pool        access.Queryer
 	Credentials runtime.Credentials
 	Plugins     *plugins.Host
+}
+
+// AuthorizeResearch reuses the enrolled grant's authorization boundary. Global
+// Z.ai research uses the same bearer credential as its native chat endpoint.
+func (a *CodeAuthorizer) AuthorizeResearch(ctx context.Context, cfg routing.Configuration, account codemode.Account, service string) (codemode.Authorization, error) {
+	if cfg.ProfileID != codeplans.ZAIProfile || codemode.ResearchEndpoint(service) == "" {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_configuration_unsupported")
+	}
+	auth, err := a.AuthorizeCode(ctx, cfg, account, codemode.Dispatch{Adapter: codemode.AdapterZAICoding, Protocol: codemode.ProtocolChat, ClientPath: "v1/chat/completions"})
+	if err != nil {
+		return codemode.Authorization{}, err
+	}
+	// A cached grant may lag a credential update. Never let an old generation
+	// keep a research session alive while the runtime catches up.
+	var current bool
+	if err = a.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_grants WHERE credential_id=$1 AND generation=$2 AND lapsed_at IS NULL)`, account.CredentialID, auth.GrantGeneration).Scan(&current); err != nil || !current {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
+	}
+	return auth, nil
 }
 
 // AuthorizeCode returns the upstream authorization of one request on account,

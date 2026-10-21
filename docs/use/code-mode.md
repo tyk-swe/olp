@@ -70,6 +70,116 @@ conversation mixes receives the turns the others produced. No live vendor is
 yet qualified to accept another vendor's reasoning and tool calls in that
 history; mixed conversations are qualified against scripted vendors only.
 
+## Research tools
+
+Research tools use a pool account independently of the coding model. A route
+serving only GPT can use a Z.ai global GLM Coding Plan account to search
+documentation, read a webpage and inspect a public repository. GLM does not need
+to appear in the route's model list.
+
+In the existing route editor, enable **Research tools**, select an eligible
+Z.ai global account from the route's pool, and choose **Search**, **Web reader**
+and/or **Repository research**. The sole qualifying account is preselected.
+Save and publish, then open **Client configuration**. Existing keys with the
+`inference` scope, route access and pool membership can use the enabled services;
+no model selection, conversation binding or separate MCP registration is needed.
+
+![Research tools enabled on a GPT-only route](../images/code-research-route.png)
+
+The management route write accepts an optional binding:
+
+```json
+{
+  "tools": {
+    "account_id": "11111111-1111-4111-8111-111111111111",
+    "services": ["search", "reader", "zread"]
+  }
+}
+```
+
+Omitting `tools` or setting it to `null` disables research in the next
+publication. Draft changes take effect only after publication. Account and
+service selections are frozen with the route revision, alongside its provider
+connections. The account must remain enabled, enrolled in the same project and
+assigned to that pool. Only `zai-coding-plan`, the global profile, qualifies.
+
+| Service | Route endpoint | Upstream service | Exposed tools |
+| --- | --- | --- | --- |
+| Search | `/code/{slug}/mcp/search` | `web_search_prime` | `webSearchPrime` |
+| Web reader | `/code/{slug}/mcp/reader` | `web_reader` | `webReader` |
+| Repository research | `/code/{slug}/mcp/zread` | `zread` | `search_doc`, `get_repo_structure`, `read_file` |
+
+Upstream endpoints are fixed at
+`https://api.z.ai/api/mcp/{upstream_service}/mcp` and use the account's enrolled
+grant through the published connection's egress, proxy and TLS controls.
+Vision, client roots, sampling and local-file forwarding are outside this
+surface. The management MCP endpoint and project-owned MCP registrations are
+separate features.
+
+### Client setup
+
+Set `OLP_API_KEY` in the client environment. Merge generated entries into
+existing files, preserving other MCP servers, tools and settings. Server names
+include the route slug and service. Users choose which tools to invoke in their
+client; generation does not disable built-in tools.
+
+- **Codex:** the generated TOML includes `[mcp_servers."olp_<slug>_<service>"]`
+  tables with a route endpoint and `bearer_token_env_var = "OLP_API_KEY"`.
+- **OpenCode:** generated `opencode.json` includes remote `mcp` entries with
+  `oauth: false` and `Authorization: "Bearer {env:OLP_API_KEY}"`.
+- **Claude Code:** source the generated shell setup as before and merge the
+  companion `.mcp.json` into the project. Its HTTP entries use
+  `Authorization: "Bearer ${OLP_API_KEY}"`. The management response returns this
+  companion in optional `additional_files`; the console displays and copies
+  every required file. Approve project MCP servers through Claude's normal flow.
+
+These formats follow the official [Codex MCP configuration](https://developers.openai.com/codex/mcp),
+[OpenCode remote MCP configuration](https://opencode.ai/docs/mcp-servers/), and
+[Claude Code environment expansion](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcpjson).
+Vendor credentials stay on the gateway.
+
+### Authorization and transport
+
+Every POST, GET stream and DELETE checks the live key, route publication, pool
+membership, account and grant. OLP translates upstream session IDs to opaque
+IDs bound to the key, route revision, service, account, credential and grant
+generation. Stateless upstreams also receive an OLP session fence, without
+forwarding an invented session ID to the vendor. Initialize first and send the
+returned OLP session ID on subsequent requests. Republishing or rotating
+credentials requires initialization again; another key cannot reuse a session.
+State is shared across gateway replicas,
+expires after one idle hour or 24 hours total, and is limited to 32 sessions per
+key and 10,000 per installation. Session creation reclaims expired metadata.
+SSE resume IDs are authenticated to the OLP session and credential, so an event
+ID from another key or session cannot resume a stream, including on stateless
+upstreams. OLP translates valid resume IDs back to native upstream IDs.
+Session state is tentative until a valid initialization result for the request
+reaches the client. Failed, malformed or interrupted handshakes release their
+session slots. SSE response headers are flushed immediately, including for idle
+streams that initially contain only heartbeat comments.
+
+The proxy answers upstream [MCP pings](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/ping)
+locally after rechecking live authorization and the session's credential
+generation. Ping replies use the stream's existing admission, with at most 32
+replies per stream and five seconds per reply. Other server callbacks remain
+disabled.
+
+The proxy supports [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports):
+initialization, paginated discovery, calls, notifications, cancellation, JSON,
+SSE event IDs and session termination. Discovery exposes only the listed tools;
+native schemas, structured results, source references and tool errors pass
+through. Each request is bounded to two minutes, 1 MiB of input, 8 MiB of
+upstream output and 1 MiB per SSE event; installation and route body limits can
+lower the input limit. Key and connection request/concurrency limits also apply.
+Research has no inference token usage or hard token reservation.
+
+Dispatched calls are never replayed or moved to another account. Service errors
+and tool allowance errors do not change inference account health or affect other
+services. Arguments, results and credentials are never written to diagnostic
+ledgers; retained session rows contain only transport and authorization metadata.
+Controlled fixtures qualify this boundary; live subscription and real-client
+research qualification remain release gates.
+
 ## Operator workflow
 
 Code accounts, pools, routes and budgets belong to projects. A management session
@@ -220,8 +330,9 @@ is limited to ten minutes whatever the client timeout, and OLP does not know a
 model's context window, so set the latter yourself if you need it.
 
 Claude Code's `HEAD /api/hello` connectivity probe and `count_tokens` are not
-served; it falls back to local estimates. Server tools such as web search and
-claude.ai login features are outside code mode.
+served; it falls back to local estimates. Vendor-native server tools and
+claude.ai login features are outside code mode. Optional
+[research tools](#research-tools) are exposed through the companion MCP setup.
 
 ### OpenCode
 

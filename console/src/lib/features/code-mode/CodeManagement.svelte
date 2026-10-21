@@ -84,13 +84,13 @@
     enabled: kind === 'budgets'
   }));
   const selected = $derived({ accounts, pools, routes, budgets }[kind]);
-  // Each editor chooses references from at most one other collection: pools
-  // assign accounts, routes select a pool and budgets may scope to a route.
+  // Load complete references for editors: route research binds a pool account,
+  // while budgets may scope to a route.
   const inventory = createQuery(() => ({
     queryKey: codeKeys.inventory(projectId, kind),
     queryFn: async ({ signal }) => ({
       accounts:
-        kind === 'pools'
+        kind === 'pools' || kind === 'routes'
           ? await collectCursorPages((cursor) =>
               listCodeAccounts({ project_id: projectId, cursor }, signal)
             )

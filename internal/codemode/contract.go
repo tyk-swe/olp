@@ -109,20 +109,21 @@ func (a Allowance) Validate() error {
 // published route. Configuration is text in Format, saved as File, or sourced
 // in a shell when File is nil. It never contains an OLP key.
 type ClientConfiguration struct {
-	RouteSlug         string    `json:"route_slug"`
-	BaseURL           string    `json:"base_url"`
-	NativeModels      []string  `json:"native_models"`
-	Adapters          []Adapter `json:"adapters"`
-	Client            string    `json:"client"`
-	SupportedClients  []string  `json:"supported_clients"`
-	ClientVersion     string    `json:"client_version"`
-	Model             string    `json:"model"`
-	PlanModel         *string   `json:"plan_model"`
-	SmallModel        *string   `json:"small_model"`
-	Format            string    `json:"format"`
-	File              *string   `json:"file"`
-	Configuration     string    `json:"configuration"`
-	QualificationGaps []string  `json:"qualification_gaps"`
+	AdditionalFiles   []ConfigurationFile `json:"additional_files,omitempty"`
+	RouteSlug         string              `json:"route_slug"`
+	BaseURL           string              `json:"base_url"`
+	NativeModels      []string            `json:"native_models"`
+	Adapters          []Adapter           `json:"adapters"`
+	Client            string              `json:"client"`
+	SupportedClients  []string            `json:"supported_clients"`
+	ClientVersion     string              `json:"client_version"`
+	Model             string              `json:"model"`
+	PlanModel         *string             `json:"plan_model"`
+	SmallModel        *string             `json:"small_model"`
+	Format            string              `json:"format"`
+	File              *string             `json:"file"`
+	Configuration     string              `json:"configuration"`
+	QualificationGaps []string            `json:"qualification_gaps"`
 }
 
 type Pool struct {
@@ -137,17 +138,18 @@ type Pool struct {
 }
 
 type Route struct {
-	MaxBodyBytes *int64     `json:"max_body_bytes,omitempty"`
-	ID           string     `json:"id"`
-	ProjectID    string     `json:"project_id"`
-	Slug         string     `json:"slug"`
-	PoolID       string     `json:"pool_id"`
-	Models       []string   `json:"models"`
-	Enabled      bool       `json:"enabled"`
-	RevisionID   string     `json:"revision_id"`
-	Revision     int        `json:"revision"`
-	ETag         string     `json:"etag"`
-	PublishedAt  *time.Time `json:"published_at"`
+	Tools        *ResearchTools `json:"tools"`
+	MaxBodyBytes *int64         `json:"max_body_bytes,omitempty"`
+	ID           string         `json:"id"`
+	ProjectID    string         `json:"project_id"`
+	Slug         string         `json:"slug"`
+	PoolID       string         `json:"pool_id"`
+	Models       []string       `json:"models"`
+	Enabled      bool           `json:"enabled"`
+	RevisionID   string         `json:"revision_id"`
+	Revision     int            `json:"revision"`
+	ETag         string         `json:"etag"`
+	PublishedAt  *time.Time     `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }
