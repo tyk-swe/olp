@@ -131,10 +131,16 @@ func TestFailedBatchResponsesRetainReportedUsage(t *testing.T) {
 		response["body"], _ = json.Marshal(body)
 		line["response"], _ = json.Marshal(response)
 		encoded, _ := json.Marshal(line)
-		result, err := ParseLine(encoded, "/v1/responses", false)
-		if err != nil || result.Kind != want || !result.Usage.Observed || !result.Usage.Complete || result.Usage.BillingUncertain || result.Usage.InputTokens == nil || *result.Usage.InputTokens != 8 || result.Usage.OutputTokens == nil || *result.Usage.OutputTokens != 3 {
-			t.Fatalf("failed response lost metering: %+v err=%v", result, err)
+		for _, errorFile := range []bool{false, true} {
+			result, err := ParseLine(encoded, "/v1/responses", errorFile)
+			if err != nil || result.Kind != want || !result.Usage.Observed || !result.Usage.Complete || result.Usage.BillingUncertain || result.Usage.InputTokens == nil || *result.Usage.InputTokens != 8 || result.Usage.OutputTokens == nil || *result.Usage.OutputTokens != 3 {
+				t.Fatalf("failed response lost metering (errorFile=%v): %+v err=%v", errorFile, result, err)
+			}
 		}
+	}
+	result, err := ParseLine(bytes.TrimSpace(readFixture(t, "responses.jsonl")), "/v1/responses", true)
+	if err != nil || result.Kind != ResultErrored || !result.Usage.Observed {
+		t.Fatalf("error-file role lost classification or metering: %+v %v", result, err)
 	}
 }
 

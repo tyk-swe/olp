@@ -511,7 +511,7 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 	if object.Error != nil {
 		errorCode = object.Error.Code
 	}
-	if !errorFile && object.Response != nil {
+	if object.Response != nil {
 		status := object.Response.StatusCode
 		if status < 100 || status > 599 {
 			return Result{}, errors.New("provider batch response status is invalid")
@@ -533,13 +533,13 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 			}
 			observed, complete, usageErr := decodeLineUsage(object.Response.Body, endpoint)
 			if usageErr != nil {
-				if status >= 200 && status < 300 && errorCode == "" {
+				if status >= 200 && status < 300 && errorCode == "" && !errorFile {
 					return Result{}, usageErr
 				}
 			} else if observed != nil {
 				result.Usage = usage.ObservedAttemptUsage(observed, complete, lineOperation(endpoint))
 			}
-			if status >= 200 && status < 300 && errorCode == "" {
+			if status >= 200 && status < 300 && errorCode == "" && !errorFile {
 				result.Kind = ResultSucceeded
 			}
 		}
