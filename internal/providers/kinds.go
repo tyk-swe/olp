@@ -5,6 +5,7 @@ package providers
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/vendors"
@@ -131,10 +132,10 @@ var kinds = withPresets([]kindCapability{
 		Fields:    []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}},
 	{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc",
 		AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint}},
+		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
 	{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain",
 		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint}},
+		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
 	// A SageMaker provider's models are its endpoints, or endpoint/component
 	// for inference components, which operators declare.
 	{Kind: KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: "default_chain",
@@ -213,6 +214,7 @@ func capabilityOptions() []CapabilityInput {
 		}
 		out = append(out, tuple("token_count", surface, "unary"))
 	}
+	out = append(out, tuple("batch", "gemini", "unary"))
 	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation", "decision"} {
 		out = append(out, tuple(operation, "openai", "unary"))
 	}
@@ -225,12 +227,12 @@ func capabilityOptions() []CapabilityInput {
 	for _, operation := range []string{"image_variation", "video_list", "video_get", "video_content", "video_delete"} {
 		out = append(out, tuple(operation, "openai", "unary"))
 	}
-	out = append(out, tuple("video_create", "openai", "async"), tuple("batch", "openai", "unary"), tuple("realtime", "openai", "realtime"), tuple("realtime", "gemini", "realtime"))
+	out = append(out, tuple("video_create", "openai", "async"), tuple("batch", "openai", "unary"), tuple("batch", "anthropic", "unary"), tuple("realtime", "openai", "realtime"), tuple("realtime", "gemini", "realtime"))
 	for _, operation := range []string{"generation", "bedrock_invoke"} {
 		out = append(out, tuple(operation, "bedrock", "unary"), tuple(operation, "bedrock", "streaming"))
 	}
 	// Native generation dialects, which only their profiles serve.
-	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"))
+	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"), tuple("batch", "native", "unary"))
 	out = append(out, tuple("decision", "native", "unary"))
 	return out
 }
@@ -265,7 +267,12 @@ func capabilityOptionsForKind(kind string) []CapabilityInput {
 	var profiles []Configuration
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
-			profiles = append(profiles, Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision})
+			cfg := Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}
+			if kind == KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
+				vendor := strings.TrimSuffix(profile.ID, "-files-batches")
+				cfg.Options.VendorID = &vendor
+			}
+			profiles = append(profiles, cfg)
 		}
 	}
 	out := []CapabilityInput{}
@@ -302,7 +309,22 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 		return true
 	case "ocr", "search":
 		return true
-	case "batch", "realtime":
+	case "batch":
+		if c.Surface == "native" {
+			return kind == KindVertex && vendor == "google-vertex" || kind == KindBedrock && vendor == "amazon-bedrock"
+		}
+		if c.Surface == "anthropic" {
+			return kind == KindAnthropic && vendor == "anthropic"
+		}
+		if c.Surface == "gemini" {
+			return kind == KindGemini && vendor == "google"
+		}
+		if c.Surface == "openai" && kind == KindGemini {
+			return vendor == "google"
+		}
+		return kind == KindOpenAI || kind == KindAzure || kind == KindOpenAICompatible &&
+			(vendor == "groq" || vendor == "together" || vendor == "mistral")
+	case "realtime":
 		return kind == KindOpenAI || kind == KindAzure
 	case "bedrock_invoke":
 		return kind == KindBedrock

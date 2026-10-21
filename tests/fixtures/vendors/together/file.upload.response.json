@@ -1,0 +1,10 @@
+{
+  "id": "file-upload",
+  "object": "file",
+  "bytes": 128,
+  "created_at": 1792497600,
+  "filename": "requests.jsonl",
+  "purpose": "batch-api",
+  "FileType": "jsonl",
+  "processing_status": "COMPLETED"
+}

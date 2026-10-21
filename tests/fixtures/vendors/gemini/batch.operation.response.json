@@ -1,0 +1,11 @@
+{
+  "name": "batches/batch-0123456789",
+  "metadata": {
+    "state": "BATCH_STATE_PENDING",
+    "model": "models/gemini-2.5-flash",
+    "createTime": "2026-10-21T12:00:00Z",
+    "inputConfig": {
+      "requests": {"requests": [{"request": {"contents": [{"parts": [{"text": "hello"}]}]}, "metadata": {"key": "request-1"}}]}
+    }
+  }
+}

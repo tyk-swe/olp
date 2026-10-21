@@ -28,7 +28,8 @@ change, not an automatic expansion of this milestone.
 - Governed realtime supports revocation and metering; pass-through has explicit
   limits and makes no modeled-fidelity claim.
 
-M9 is **In progress**, not implemented. The endpoint ledger, legacy completions,
+M9 is **In progress**, not implemented. The endpoint ledger, M9.2 file/batch
+lifecycle and settlement, legacy completions,
 native Decisions and a restricted OpenAI-to-System-One mapping now have focused
 local protocol/gateway, route-inspection and pinned SDK evidence. Completions
 also cover M7 input/output and stream inspection, payload capture, health
@@ -38,12 +39,20 @@ inspection. System-One-to-OpenAI translation
 is deliberately unavailable: the frozen System One response has no refusal
 variant, and incompatible mappings must remain unavailable.
 
+M9.2 now serves the OpenAI/Azure, Anthropic, Gemini, Vertex and Bedrock file or
+batch-job contracts recorded in the ledger. Settlement covers Anthropic,
+Gemini, Vertex and Bedrock results; managed OpenAI-shaped file batches translate
+for Gemini, Mistral and Together. Fireworks result retrieval is explicitly
+declined because it requires provider-returned signed URLs. Remaining acceptance
+includes full integration, official-SDK database qualification, console/browser
+qualification, per-provider live qualification and release performance.
+
 The M9.7 OCR and search slice adds the `mistral-ocr`, `perplexity-search`,
 `tavily-search`, `exa-search` and `parallel-search` codecs with native
 `/v1/ocr` and `/v1/search` endpoints, transformed search mappings, and
-gateway, fixture, SDK, console and Chromium evidence. The additional
-retained-resource families, batch-settlement worker, expanded realtime and
-governed pass-through remain unimplemented. Existing
+gateway, fixture, SDK, console and Chromium evidence. Fine-tuning, vector stores,
+Responses completion, expanded realtime and governed pass-through remain
+unimplemented. Existing
 OpenAI/Azure files and batches are building blocks, not M9 completion evidence.
 See the local evidence below for the exact boundary.
 
@@ -184,6 +193,39 @@ results. Missing lines/usage stay billing-uncertain; never invent a zero-cost
 result. Cost deduplication survives resource deletion and normal resource
 expiry for the accounting retention period. Re-reading a result file does not
 charge inference again.
+
+**M9.2 implementation decisions.** These replace the planned bounded-cost
+reservation and fix the settlement boundary:
+
+- Batch creation refuses token and non-exempt cost budgets with
+  `422 unbounded_work_budget`; this slice makes no durable reservation.
+  Unsettled settlements project pending budget subjects, so budgets enabled
+  after acceptance fail closed with `cost_accounting_incomplete` until closure.
+  Durable reservations need PostgreSQL-backed provisional debits across every
+  budget-owner kind, deferred to the shared provisional ledger M10 also requires;
+  this replaces the planning text's reservation requirement.
+- Fireworks is excluded: it has no OpenAI-compatible files/batches API, and
+  its dataset batch results use provider-returned signed URLs forbidden by the
+  egress contract.
+- Managed OpenAI-format batches are limited to Gemini, Mistral and Together.
+  Anthropic, Vertex and Bedrock remain native-only because managed requests
+  would require durable content staging or gateway writes to operator storage.
+- Non-OpenAI/Azure families are transformed-only. Strict routes refuse them
+  before dispatch with `422 target_capability`.
+- The ledger identity is `(resource_id, HMAC(custom_id), result_kind)`.
+  Per-result usage events use deterministic IDs and `Batch:true`, so
+  `batch_multiplier` applies; a missing multiplier remains unpriced. Missing
+  lines create gap events, and a conflict visibly stops settlement.
+- Persist submission intent before dispatch; identical retries during
+  `submitting` or `submission_unknown` return `409`. Reconcile only from
+  provider evidence: list-match by the gateway-owned input file, Gemini's
+  `file_name`, Vertex's `olp_submission` label, or Bedrock's
+  `clientRequestToken`. Anthropic and Gemini inline submissions remain unknown
+  until `close_after`, then become uncertain.
+  File-based adoption refuses competing unresolved intents sharing an upstream
+  credential and input file, and rechecks already-owned jobs transactionally.
+  Outcomes stay unknown and retry while the provider evidence cannot identify
+  one source; the retention deadline bounds those retries.
 
 ### M9.3 Fine-tuning
 
@@ -450,7 +492,8 @@ advertise pending methods. SDK locks were not changed.
 | M9.1 | `internal/protocols/completions_test.go`, `internal/gateway/completions_test.go`, `internal/gateway/completions_probe_test.go`, `internal/connectors/completions_test.go`, `internal/interaction/completions_test.go`, `internal/routes/completions_decisions_test.go`, capture tests in `internal/protocols/capture*_test.go` and `internal/export/capture_redaction_test.go`, token exposure test, `tests/clients/m9sdk/`; TGI profile, stream guardrails, capture, probes, usage totals and cache-write usage | Console/browser qualification; each provider's live qualification; release performance gate |
 | M9.10 | `internal/operations/decision/decision_test.go`, `internal/gateway/decisions_test.go`, `internal/operationplan/decision_test.go`, `internal/routes/completions_decisions_test.go`, `internal/routes/inspect_key_test.go`, `tests/clients/m9sdk/`; native and one-way mapped questions, typed labels, identity, usage, pricing, caller-paid budgets, inspection diagnostics and explicit refusals | Console/browser and configuration-promotion integration; per-provider live qualification |
 | M9.7 | `internal/operations/ocr/` and `internal/operations/search/` codec/mapping tests, `internal/gateway/ocr_search_test.go`, `internal/operationplan/search_test.go`, `internal/routes/ocr_search_test.go`, `tests/clients/m9sdk/ocr_search_test.go`, `tests/fixtures/vendors/{mistral,perplexity,tavily,exa,parallel}/`, `tests/clientfixture/scripted/ocr_search.go`, console `nativeOperation.test.ts` and `tests/gateway/ocr-search.spec.ts`; strict and transformed dispatch, projected ids, fail-closed inspection, refusal paths and credential isolation | Per-provider live qualification, release performance gate and full `make integration`; the provider wizard cannot select a non-default operation profile (e.g. mistral-ocr, openai-decisions), so such providers are created through the management API or configuration apply |
-| M9.2–M9.9 | Ledger records planned scope only | Implementation and all slice-specific acceptance, including durable settlement and provider control |
+| M9.2 | `internal/gateway/{anthropic_resources,gemini_resources,gemini_batches,gemini_managed,cloud_batches}_test.go`, `internal/batches/{anthropic,gemini,cloud}_test.go`, `internal/connectors/{batch_storage,profiles}_test.go`, `internal/providers/kinds_test.go`, `internal/protocols/vendor_evidence_test.go`, `tests/fixtures/vendors/{anthropic,gemini,vertex,bedrock,mistral,together}/`, `tests/integration/{anthropic_batch,gemini_files,batch_settlement,managed_batches,cloud_batch_jobs,cloud_batch_storage}_test.go`, and `tests/clients/m9-endpoints.json`; native files, resumable uploads, managed translation, cloud jobs and content-free settlement | `make integration` including batch settlement/provider tests, DB-backed official-SDK qualification (the client fixture has no database), Chromium/console qualification, per-provider live qualification, and the release performance gate |
+| M9.3–M9.9 | Ledger records planned scope only | Implementation and all slice-specific acceptance, including durable settlement and provider control |
 
 Focused SDK selection: `CLIENTS=m9-go tests/clients/run.sh`. This runs the locked
 OpenAI Go SDK against the actual gateway and a scripted upstream. It exercises

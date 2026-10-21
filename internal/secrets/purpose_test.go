@@ -3,6 +3,7 @@ package secrets
 import (
 	"flag"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,10 +20,10 @@ func TestPurposeNamesNeverChange(t *testing.T) {
 	for _, purpose := range SealPurposes() {
 		seals = append(seals, purpose.String())
 	}
-	if want := []string{"cache_key", "saml_state", "saml_cookie", "saml_assertion", "mfa_challenge", "mfa_recovery", "api_key", "workload_identity", "end_user", "management_token", "session", "recent_auth", "csrf", "oidc_state", "oidc_cookie", "invitation", "admission", "mutation", "installation"}; !slices.Equal(digests, want) {
+	if want := []string{"cache_key", "saml_state", "saml_cookie", "saml_assertion", "mfa_challenge", "mfa_recovery", "api_key", "workload_identity", "end_user", "management_token", "session", "recent_auth", "csrf", "oidc_state", "oidc_cookie", "invitation", "admission", "mutation", "installation", "batch_submission", "batch_line"}; !slices.Equal(digests, want) {
 		t.Fatalf("digest purposes %v, want %v", digests, want)
 	}
-	if want := []string{"saml_key", "saml_flow", "mfa_totp", "mfa_webauthn", "provider_credential", "provider_continuation", "notification_secret", "mutation_replay", "oidc_client", "oidc_flow", "media_job_source", "provider_grant_refresh", "grant_enrollment", "sink_credential", "mcp_credential", "billing_credential", "guardrail_credential", "response_cache"}; !slices.Equal(seals, want) {
+	if want := []string{"saml_key", "saml_flow", "mfa_totp", "mfa_webauthn", "provider_credential", "provider_continuation", "notification_secret", "mutation_replay", "oidc_client", "oidc_flow", "media_job_source", "provider_grant_refresh", "grant_enrollment", "sink_credential", "mcp_credential", "billing_credential", "guardrail_credential", "response_cache", "provider_upload_session"}; !slices.Equal(seals, want) {
 		t.Fatalf("seal purposes %v, want %v", seals, want)
 	}
 	for _, names := range [][]string{digests, seals} {
@@ -44,6 +45,46 @@ func TestPurposeNamesNeverChange(t *testing.T) {
 }
 
 var update = flag.Bool("update", false, "rewrite docs/security.md from the declared purposes")
+
+func TestPurposeDocumentation(t *testing.T) {
+	path := "../../docs/security.md"
+	document, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startMarker, endMarker := "<!-- purposes -->\n", "<!-- /purposes -->"
+	start := strings.Index(string(document), startMarker)
+	if start < 0 {
+		t.Fatal("docs/security.md has no purposes region")
+	}
+	start += len(startMarker)
+	end := strings.Index(string(document[start:]), endMarker)
+	if end < 0 {
+		t.Fatal("docs/security.md has no closing purposes marker")
+	}
+	end += start
+	var digests, seals []string
+	for _, purpose := range DigestPurposes() {
+		digests = append(digests, "`"+purpose.String()+"`")
+	}
+	for _, purpose := range SealPurposes() {
+		seals = append(seals, "`"+purpose.String()+"`")
+	}
+	rendered := "| Kind | Purposes |\n| --- | --- |\n" +
+		"| Digest | " + strings.Join(digests, ", ") + " |\n" +
+		"| Seal | " + strings.Join(seals, ", ") + " |\n"
+	current := string(document[start:end])
+	if current == rendered {
+		return
+	}
+	if !*update {
+		t.Fatal("docs/security.md purpose table differs from declared purposes; rerun with -update")
+	}
+	updated := append(append(append([]byte{}, document[:start]...), rendered...), document[end:]...)
+	if err = os.WriteFile(path, updated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // productionSources lists every non-test Go source under internal/ and cmd/,
 // at any depth.

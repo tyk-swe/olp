@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type Config struct {
@@ -81,7 +82,11 @@ func (t *Template) BindBatch(source oif.Document, route, localFile, upstreamFile
 	}
 	endpoint, ok := source.Root().Lookup("endpoint")
 	path, valid := endpoint.Text()
-	if !ok || !valid || !slices.Contains([]string{"/v1/chat/completions", "/v1/responses", "/v1/embeddings"}, path) {
+	classificationPath := path
+	if t.provider.Kind == "azure_openai" {
+		classificationPath = wire.CanonicalBatchEndpoint(path)
+	}
+	if !ok || !valid || !slices.Contains([]string{"/v1/chat/completions", "/v1/responses", "/v1/embeddings"}, classificationPath) {
 		return Bound{}, refusal("/endpoint", "native_batch_endpoint", "This batch endpoint has no qualified strict item contract.")
 	}
 	window, ok := source.Root().Lookup("completion_window")

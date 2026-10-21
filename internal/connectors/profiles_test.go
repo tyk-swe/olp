@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -210,6 +211,66 @@ func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {
 	readers.Wait()
 }
 
+func TestAnthropicBatchRequiresDirectMessageConnector(t *testing.T) {
+	direct := Config{Kind: "anthropic", ProfileID: "anthropic-messages", ProfileRevision: ProfileRevision, AuthMode: "api_key", Endpoint: "https://api.anthropic.com"}
+	if !direct.Supports("batch", "anthropic", "unary") || direct.Supports("batch", "openai", "unary") {
+		t.Fatal("direct Anthropic message connector batch capability is not surface-bound")
+	}
+	for _, config := range []Config{
+		{Kind: "vertex_ai", VendorID: "google-vertex", ProfileID: "vertex-anthropic", ProfileRevision: ProfileRevision},
+		{Kind: "bedrock", VendorID: "amazon-bedrock", ProfileID: "bedrock-anthropic-invoke", ProfileRevision: ProfileRevision},
+	} {
+		if config.Supports("batch", "anthropic", "unary") {
+			t.Fatalf("cloud Anthropic connector gained native message batches: %+v", config)
+		}
+	}
+}
+
+func TestPluginOpenAIChatProfileSkipsBatchProfilesAsTemplates(t *testing.T) {
+	profileMu.Lock()
+	original := profileRegistry
+	filtered := make([]Profile, 0, len(original))
+	for _, registered := range original {
+		if registered.Kind == "openai_compatible" && slices.Contains(registered.Operations, "batch") {
+			continue
+		}
+		filtered = append(filtered, registered)
+	}
+	profileRegistry = filtered
+	profileMu.Unlock()
+	defer func() {
+		profileMu.Lock()
+		profileRegistry = original
+		profileMu.Unlock()
+	}()
+	profile, err := LookupProfile("compatible-chat", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.ID = "fixture-plugin-openai-chat-" + uuid.NewString()
+	profile.Label = "Fixture plugin OpenAI Chat"
+	profile.Plugin = &Plugin{Digest: strings.Repeat("a", 64), Name: "Fixture", Version: "1"}
+	wantTemplate := ""
+	for i := range profileRegistry {
+		existing := &profileRegistry[i]
+		if existing.Kind == profile.Kind && existing.Dialect == profile.Dialect && existing.Hosting == profile.Hosting && existing.DialectRevision == profile.DialectRevision &&
+			!vendorBatchProfile(*existing) {
+			wantTemplate = existing.ID
+			profile.Authentication = slices.Clone(existing.Authentication)
+		}
+	}
+	if template := profileTemplateForRegistration(profile); template == nil || template.ID != wantTemplate {
+		t.Fatalf("plugin template = %v, want main last-match template %q", template, wantTemplate)
+	}
+	if err := RegisterProfile(profile); err != nil {
+		t.Fatalf("compatible-chat template registration failed: %v", err)
+	}
+	config := Config{ProfileID: profile.ID, ProfileRevision: profile.Revision, Kind: profile.Kind, AuthMode: "none", Endpoint: "https://provider.example/v1"}
+	if err := config.ValidateProfile(); err != nil {
+		t.Fatalf("registered plugin OpenAI Chat profile is invalid: %v", err)
+	}
+}
+
 func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {
 	config := profileConfig(t, "bedrock-anthropic-invoke")
 	payload := `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"exact"},"unknown":[null,false,0]}`
@@ -280,6 +341,65 @@ func assertProfileSignature(t *testing.T, request *http.Request, body []byte, se
 	}
 	if hex.EncodeToString(sign(key, toSign)) != values["Signature"] {
 		t.Fatal("signature does not cover final native body, path and headers")
+	}
+}
+
+func TestFilesBatchProfilesAreVendorBound(t *testing.T) {
+	for _, test := range []struct {
+		vendor, profile, adapter string
+	}{
+		{"groq", "groq-files-batches", "openai"},
+		{"together", "together-files-batches", "together"},
+		{"mistral", "mistral-files-batches", "mistral"},
+	} {
+		config := Config{Kind: "openai_compatible", VendorID: test.vendor, ProfileID: test.profile, ProfileRevision: "1",
+			Endpoint: "https://api.example/v1", AuthMode: "api_key"}
+		if err := config.ValidateProfile(); err != nil {
+			t.Fatalf("%s profile: %v", test.vendor, err)
+		}
+		if !config.SupportsFilesBatches() || config.FilesBatchesAdapter() != test.adapter ||
+			!config.Supports("batch", "openai", "unary") {
+			t.Fatalf("%s files/batches profile is unavailable", test.vendor)
+		}
+		config.VendorID = "fireworks"
+		if config.ValidateProfile() == nil || config.SupportsFilesBatches() {
+			t.Fatalf("%s profile can be assigned to another vendor", test.vendor)
+		}
+	}
+	generic := Config{Kind: "openai_compatible", VendorID: "groq", Endpoint: "https://api.groq.com/openai/v1", AuthMode: "api_key"}
+	if generic.SupportsFilesBatches() {
+		t.Fatal("a generic compatible profile inherited provider files/batches")
+	}
+	if config := (Config{Kind: "openai", Endpoint: "https://api.openai.com/v1"}); !config.SupportsFilesBatches() || config.FilesBatchesAdapter() != "openai" {
+		t.Fatal("official OpenAI resource endpoint lost files/batches support")
+	}
+	if config := (Config{Kind: "openai", Endpoint: "https://openai.example/v1"}); config.SupportsFilesBatches() {
+		t.Fatal("a custom OpenAI endpoint inherited official files/batches support")
+	}
+	if config := (Config{Kind: "azure_openai", Endpoint: "https://resource.example"}); !config.SupportsFilesBatches() {
+		t.Fatal("Azure resource endpoint lost files/batches support")
+	}
+}
+
+func TestCloudBatchProfilesDoNotEnableGeneration(t *testing.T) {
+	vertex := Config{Kind: "vertex_ai", ProfileID: "vertex-batch-prediction", ProfileRevision: ProfileRevision,
+		Endpoint:    DefaultProfileEndpoint("vertex_ai", "vertex-batch-prediction", "us-central1", "fixture-project"),
+		CloudRegion: "us-central1", CloudProject: "fixture-project", AuthMode: "adc"}
+	bedrock := Config{Kind: "bedrock", ProfileID: "bedrock-batch-inference", ProfileRevision: ProfileRevision,
+		Endpoint: DefaultProfileEndpoint("bedrock", "bedrock-batch-inference", "us-east-1", ""), CloudRegion: "us-east-1", AuthMode: "default_chain"}
+	for _, config := range []Config{vertex, bedrock} {
+		if !config.Supports("batch", "native", "unary") || config.Supports("generation", "openai", "unary") ||
+			config.Supports("generation", "native", "unary") {
+			t.Fatalf("%s cloud batch profile changed serving generation", config.ProfileID)
+		}
+	}
+	for _, config := range []Config{
+		{Kind: "vertex_ai", ProfileID: "vertex-gemini", ProfileRevision: ProfileRevision},
+		{Kind: "bedrock", ProfileID: "bedrock-invoke", ProfileRevision: ProfileRevision},
+	} {
+		if config.Supports("batch", "native", "unary") {
+			t.Fatalf("%s acquired cloud batch capability", config.ProfileID)
+		}
 	}
 }
 

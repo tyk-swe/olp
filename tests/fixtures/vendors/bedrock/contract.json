@@ -1,0 +1,14 @@
+{
+  "vendor": "amazon-bedrock",
+  "batch_jobs": {
+    "basis": "documented",
+    "documentation_links": {
+      "create": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_CreateModelInvocationJob.html",
+      "get": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_GetModelInvocationJob.html",
+      "stop": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_StopModelInvocationJob.html",
+      "results": "https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-results.html"
+    },
+    "fields": ["jobArn", "status", "totalRecordCount", "processedRecordCount", "successRecordCount", "errorRecordCount", "inputTokenCount", "outputTokenCount"],
+    "fixtures": ["job.create.request.json", "job.create.response.json", "job.running.json", "job.succeeded.json", "manifest.json.out", "error.json"]
+  }
+}

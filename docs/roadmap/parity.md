@@ -4,8 +4,8 @@ The LiteLLM v1.105.0 gateway baseline reviewed 2026-10-13 is compared with
 the repository's OLP 0.1.0 implementation, reconciled 2026-10-18. This is the
 [roadmap](README.md)'s tracked capability scope, not a live-provider or released
 image qualification claim. OLP-only additions have no comparative row. Current
-counts: 23 Ahead, 103 Parity, 9 Partial, 16 Gap, 2 Excluded (153 capabilities;
-legend rows excluded). Coverage is 126/151 (83.4%).
+counts: 23 Ahead, 105 Parity, 9 Partial, 14 Gap, 2 Excluded (153 capabilities;
+legend rows excluded). Coverage is 128/151 (84.8%).
 
 Each row describes the supported scope stated in its OLP column, not every
 possible provider/model combination. Native certification and declared declines
@@ -45,9 +45,9 @@ of [M3](m03-routing-resilience.md).
 | Image generation, edits and variations | [Image generation](https://docs.litellm.ai/docs/image_generation), [edits](https://docs.litellm.ai/docs/image_edits) | OpenAI and Azure OpenAI; Gemini image models on the Gemini API and Vertex, and Vertex Imagen until its retirement; Bedrock Titan and Stability; Stability AI, Recraft, Black Forest Labs and xAI. Variations are OpenAI's alone | `Parity` | |
 | Speech, transcription and translation | [Speech](https://docs.litellm.ai/docs/text_to_speech), [transcription](https://docs.litellm.ai/docs/audio_transcription) | Speech from OpenAI, Azure OpenAI, Gemini, ElevenLabs, Deepgram and Amazon Polly; transcription from OpenAI, Azure OpenAI, Gemini, Groq, ElevenLabs, Deepgram and AssemblyAI; translation from OpenAI, Azure OpenAI and Groq | `Parity` | |
 | Video generation | [/videos](https://docs.litellm.ai/docs/videos) | OpenAI and Runway, including Runway's Veo models, as durable jobs. Vendors whose video models are ending are declined ([M2.3](m02-provider-catalog.md#settled-during-implementation-1)) | `Parity` | |
-| Files and batches | [/files](https://docs.litellm.ai/docs/files_endpoints), [/batches](https://docs.litellm.ai/docs/batches) across providers | OpenAI and Azure, with gateway-owned identifiers | `Partial` | M9.2 |
-| Batch result cost tracking | [Enterprise](https://docs.litellm.ai/docs/batches) | Batch calls are accounted; per-line output usage is not settled | `Gap` | M9.2 |
-| Cross-provider managed batches | [Managed batches](https://docs.litellm.ai/docs/proxy/managed_batches) (beta) | Not available | `Gap` | M9.2 |
+| Files and batches | [/files](https://docs.litellm.ai/docs/files_endpoints), [/batches](https://docs.litellm.ai/docs/batches) across providers | OpenAI/Azure native and strict; Groq native; Together, Mistral and Gemini managed OpenAI format; native Anthropic Files/Message Batches; native Gemini resumable Files/batches/download; Vertex and Bedrock native cloud batch jobs. Fireworks is declined because result retrieval requires provider-returned signed URLs that violate egress policy. | `Parity` | M9.2 |
+| Batch result cost tracking | [Enterprise](https://docs.litellm.ai/docs/batches) | Per-result settlement prices the pinned line operation × `batch_multiplier`; missing multipliers remain unpriced. Vertex records each result line; Bedrock records one aggregate manifest result. Creation is refused with `422 unbounded_work_budget` when the budget cannot safely bound work. | `Parity` | M9.2 |
+| Cross-provider managed batches | [Managed batches](https://docs.litellm.ai/docs/proxy/managed_batches) (beta) | Managed OpenAI-shaped batches translate through Gemini, Mistral and Together; other cloud/vendor adapters are intentionally not cross-provider managed. | `Partial` | M9.2 |
 | Fine-tuning | [/fine_tuning](https://docs.litellm.ai/docs/fine_tuning) | Not available | `Gap` | M9.3 |
 | Vector stores and retrieval | [/vector_stores](https://docs.litellm.ai/docs/vector_stores/), [RAG query](https://docs.litellm.ai/docs/rag_query) | Not available | `Gap` | M9.4 |
 | Realtime over WebSocket | [/realtime](https://docs.litellm.ai/docs/realtime) | OpenAI and Azure, plus Gemini Live | `Partial` | M9.6 |

@@ -1,0 +1,3 @@
+{"custom_id":"expired-1","error":{"code":"batch_expired","message":"expired"}}
+{"custom_id":"cancelled-1","error":{"code":"batch_cancelled","message":"cancelled"}}
+{"custom_id":"errored-1","error":{"code":"invalid_request","message":"invalid"}}

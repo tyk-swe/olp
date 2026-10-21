@@ -1,0 +1,8 @@
+{
+  "batch": {
+    "display_name": "sample-file",
+    "input_config": {
+      "file_name": "files/gemini_file_0123456789abcdef0123456789abcdef"
+    }
+  }
+}

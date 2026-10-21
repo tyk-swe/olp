@@ -1,0 +1,64 @@
+{
+  "vendor": "anthropic",
+  "documentation_url": "https://docs.anthropic.com",
+  "reviewed_at": "2026-10-21",
+  "notes": "Files API beta file objects expose id, type, filename, mime_type, size_bytes, created_at, downloadable and expires_at. The files-api-2025-04-14 beta retains before_id/after_id list cursors and data, has_more, first_id and last_id. Message Batch objects use processing_status, request_counts.processing/succeeded/errored/canceled/expired, created_at, ended_at, expires_at, cancel_initiated_at and results_url. Result lines use custom_id and result.type; succeeded usage is result.message.usage with input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens and cache_creation.ephemeral_5m_input_tokens/ephemeral_1h_input_tokens.",
+  "endpoints": {
+    "generation": "https://api.anthropic.com/v1/messages",
+    "token_count": "https://api.anthropic.com/v1/messages/count_tokens",
+    "batch": "https://api.anthropic.com/v1/messages/batches"
+  },
+  "media_models": {},
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "Invalid request"
+    },
+    "class": "upstream_client"
+  },
+  "documentation_links": {
+    "files": "https://platform.claude.com/docs/en/api/beta/files/upload",
+    "files_list": "https://platform.claude.com/docs/en/api/beta/files/list",
+    "files_metadata": "https://platform.claude.com/docs/en/api/beta/files/retrieve_metadata",
+    "files_delete": "https://platform.claude.com/docs/en/api/beta/files/delete",
+    "files_content": "https://platform.claude.com/docs/en/api/beta/files/download",
+    "batches": "https://platform.claude.com/docs/en/api/messages/batches/create",
+    "batches_retrieve": "https://platform.claude.com/docs/en/api/messages/batches/retrieve",
+    "batches_list": "https://platform.claude.com/docs/en/api/messages/batches/list",
+    "batches_cancel": "https://platform.claude.com/docs/en/api/messages/batches/cancel",
+    "batches_results": "https://platform.claude.com/docs/en/api/messages/batches/results"
+  },
+  "files_batches": {
+    "basis": "documented",
+    "input": "batch.create.request.json",
+    "file_response": "file.upload.response.json",
+    "file_list": "file.list.response.json",
+    "create_request": "batch.create.request.json",
+    "create_response": "batch.in_progress.json",
+    "job": "batch.ended.json",
+    "in_progress": "batch.in_progress.json",
+    "ended": "batch.ended.json",
+    "output": "batch.results.jsonl",
+    "error_file": "batch.results.jsonl",
+    "error_body": "error.json",
+    "endpoints": {
+      "files_upload": "https://api.anthropic.com/v1/files",
+      "files_list": "https://api.anthropic.com/v1/files",
+      "files_get": "https://api.anthropic.com/v1/files/{file_id}",
+      "files_delete": "https://api.anthropic.com/v1/files/{file_id}",
+      "files_content": "https://api.anthropic.com/v1/files/{file_id}/content",
+      "batch_create": "https://api.anthropic.com/v1/messages/batches",
+      "batch_get": "https://api.anthropic.com/v1/messages/batches/{message_batch_id}",
+      "batch_list": "https://api.anthropic.com/v1/messages/batches",
+      "batch_cancel": "https://api.anthropic.com/v1/messages/batches/{message_batch_id}/cancel",
+      "batch_delete": "https://api.anthropic.com/v1/messages/batches/{message_batch_id}",
+      "batch_results": "https://api.anthropic.com/v1/messages/batches/{message_batch_id}/results"
+    }
+  }
+}

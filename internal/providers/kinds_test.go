@@ -43,6 +43,24 @@ func TestKindCapabilityOptionsIncludeDecisions(t *testing.T) {
 	}
 }
 
+func TestGeminiBatchCapabilityIsDirectGoogleOnly(t *testing.T) {
+	tuple := CapabilityInput{"batch", "gemini", ModeUnary}
+	if !slices.Contains(capabilityOptionsForKind(KindGemini), tuple) {
+		t.Fatal("Gemini batch tuple is not published")
+	}
+	if slices.Contains(capabilityOptionsForKind(KindVertex), tuple) {
+		t.Fatal("Vertex received direct Gemini batch tuple")
+	}
+	if !certifiable(KindGemini, "google", tuple) || certifiable(KindGemini, "other", tuple) || certifiable(KindVertex, "google", tuple) {
+		t.Fatal("Gemini batch certifiability escaped the direct Google connector")
+	}
+	managed := CapabilityInput{"batch", "openai", ModeUnary}
+	if !slices.Contains(CapabilityOptions, managed) || !certifiable(KindGemini, "google", managed) ||
+		certifiable(KindGemini, "other", managed) || certifiable(KindVertex, "google", managed) {
+		t.Fatal("managed Gemini batch certification escaped the direct Google connector")
+	}
+}
+
 // A commitment is a positive decimal amount on a UTC calendar period; it is
 // part of the stored provider configuration, so it flows through revisions and
 // configuration export unchanged.
@@ -70,5 +88,21 @@ func TestCommitmentValidation(t *testing.T) {
 				t.Fatalf("%+v of %q/%q passed validation", problem, tc.amount, tc.period)
 			}
 		})
+	}
+}
+
+func TestCompatibleBatchOptionsOnlyAdvertiseOpenAISurface(t *testing.T) {
+	found := false
+	for _, tuple := range capabilityOptionsForKind(KindOpenAICompatible) {
+		if tuple.Operation != "batch" {
+			continue
+		}
+		found = true
+		if tuple.Surface != "openai" || tuple.Mode != ModeUnary {
+			t.Fatalf("impossible compatible batch capability advertised: %+v", tuple)
+		}
+	}
+	if !found {
+		t.Fatal("reviewed compatible batch profiles disappeared")
 	}
 }

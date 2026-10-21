@@ -4,11 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
@@ -16,13 +19,14 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// startWorkers runs the recovery plane of one replica: the media reconciler
-// that polls durable video jobs to completion, the grant refresher that renews
+// startWorkers runs the recovery plane of one replica: the media and batch
+// reconcilers that poll accepted provider work, the grant refresher that renews
 // grants' access tokens through their plugins, the consumer that turns emitted
 // request metadata into accounting, the detector that turns an unclean
 // gateway shutdown into a recorded completeness gap, the maintenance loop that
@@ -35,12 +39,29 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, installation, region string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, focusWorker *export.FocusWorker, importer *billing.Importer, reference *catalog.Signed) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, focusWorker *export.FocusWorker, importer *billing.Importer, reference *catalog.Signed) func() {
 	ctx = usage.WithWorkerRegion(ctx, region)
 	var wg sync.WaitGroup
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
 	wg.Go(func() { managedExporter.Run(ctx, log) })
 	wg.Go(func() { mediaService.RunReconciler(ctx) })
+	batchAuth := connectors.NewAuth(policy)
+	batchAuth.Signer = pluginHost
+	batchWorker := &batches.Worker{
+		Pool: pool, Store: batches.NewStore(pool),
+		Resources: resources.NewEncrypted(pool, installation, keys),
+		Resolver:  resources.NewResolver(pool), Credentials: mediaService.Credentials,
+		Keys: keys, Installation: installation, DigestKey: auth,
+		Readers: map[string]batches.Reader{
+			"openai":   &batches.OpenAIReader{Auth: batchAuth, Egress: policy},
+			"together": batches.NewTogetherReader(batchAuth, policy),
+			"mistral":  batches.NewMistralReader(batchAuth, policy),
+		},
+		Auth: batchAuth, Egress: policy,
+		Client: policy.Client(5 * time.Minute), Connections: egress.NewConnectionClientCache(128),
+		Limiter: limiter, Log: log,
+	}
+	wg.Go(func() { batchWorker.Run(ctx) })
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })

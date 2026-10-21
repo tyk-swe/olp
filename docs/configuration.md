@@ -358,6 +358,12 @@ Production Compose can generate database credentials and their encoded URL using
 
 ## Configuration promotion artifacts
 
+Vertex `vertex-batch-prediction` and Bedrock `bedrock-batch-inference` providers
+require the nonsecret `batch_storage` object: `input_uri_prefix` and
+`output_uri_prefix`, plus Bedrock `role_arn`. Prefixes are validated, normalized
+with a trailing slash, and exported/promoted with provider configuration; they
+contain no credentials or object contents.
+
 Export/plan/apply carry nonsecret desired state (`openllmproxy.dev/config/v2`),
 not database backups. Identity is natural names: projects/providers case-insensitive,
 routes/models/credential refs exact. SHA-256 canonical digest blanks `exported_at`

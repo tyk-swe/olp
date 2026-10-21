@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,12 @@ const (
 	KindInteraction    = "interaction"
 	KindStrictFile     = "strict_file"
 	KindStrictBatch    = "strict_batch"
+	KindAnthropicFile  = "anthropic_file"
+	KindAnthropicBatch = "anthropic_batch"
+	KindGeminiUpload   = "gemini_upload"
+	KindGeminiFile     = "gemini_file"
+	KindGeminiBatch    = "gemini_batch"
+	KindCloudBatch     = "cloud_batch"
 )
 
 const StateDeleted = "deleted"
@@ -86,7 +93,9 @@ func parseLocal(local string) (uuid.UUID, error) {
 		return uuid.Nil, ErrNotFound
 	}
 	switch local[:i] {
-	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction, KindStrictFile, KindStrictBatch:
+	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction,
+		KindStrictFile, KindStrictBatch, KindAnthropicFile, KindAnthropicBatch, KindGeminiUpload,
+		KindGeminiFile, KindGeminiBatch, KindCloudBatch:
 	default:
 		return uuid.Nil, ErrNotFound
 	}
@@ -126,6 +135,18 @@ func scan(row pgx.Row) (*Resource, error) {
 }
 
 func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
+	return s.put(ctx, s.pool, r)
+}
+
+func (s *Store) PutTx(ctx context.Context, tx pgx.Tx, r *Resource) (*Resource, error) {
+	return s.put(ctx, tx, r)
+}
+
+type resourceRowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (s *Store) put(ctx context.Context, query resourceRowQuerier, r *Resource) (*Resource, error) {
 	if r.TargetID == "" {
 		return nil, ErrContract
 	}
@@ -149,13 +170,15 @@ func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
 			r.ExpiresAt = &expires
 		}
 	}
-	r.UUID = uuid.Must(uuid.NewV7())
-	out, err := scan(s.pool.QueryRow(ctx, `INSERT INTO olp.provider_resources
-		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,target_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+	if r.UUID == uuid.Nil {
+		r.UUID = uuid.Must(uuid.NewV7())
+	}
+	out, err := scan(query.QueryRow(ctx, `INSERT INTO olp.provider_resources
+		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,target_id,parent_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING `+columns,
 		r.UUID, r.Kind, r.APIKeyID, r.RouteSlug, r.ProviderID, r.ProviderRevisionID,
-		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.TargetID))
+		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.TargetID, r.ParentID))
 	if err != nil {
 		return nil, fmt.Errorf("provider resource put: %w", err)
 	}
@@ -195,17 +218,32 @@ func (r *Resource) NativeIdentity() NativeIdentity {
 }
 
 func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, false)
+}
+
+// GetByUpstreamIncludingDeleted preserves an identifier mapping during
+// projection. User access still goes through Get, which rejects tombstones.
+func (s *Store) GetByUpstreamIncludingDeleted(ctx context.Context, identity NativeIdentity) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, true)
+}
+
+func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, includeDeleted bool) (*Resource, error) {
 	if identity.TargetID == "" {
 		return nil, ErrContract
 	}
-	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
+	statement := `SELECT ` + columns + ` FROM olp.provider_resources
 		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
 		AND route_slug=$5 AND route_revision_id=$6 AND target_id=$7 AND slot_id=$8
-		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10
-		AND state<>$11 AND (expires_at IS NULL OR expires_at>now())`,
-		identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
-		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID,
-		identity.CredentialID, identity.UpstreamID, StateDeleted))
+		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10`
+	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
+		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID}
+	if includeDeleted {
+		statement += ` AND (expires_at IS NULL OR expires_at>now()) ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
+	} else {
+		statement += ` AND state<>$11 AND (expires_at IS NULL OR expires_at>now())`
+		args = append(args, StateDeleted)
+	}
+	r, err := scan(query.QueryRow(ctx, statement, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -254,6 +292,71 @@ func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, 
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) ListCloudBatches(ctx context.Context, apiKeyID, dialect string, limit int, afterID string) ([]*Resource, error) {
+	var after uuid.UUID
+	if afterID != "" {
+		parsed, err := parseLocal(afterID)
+		if err != nil || LocalID(KindCloudBatch, parsed) != afterID {
+			return nil, ErrNotFound
+		}
+		after = parsed
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
+		WHERE kind=$1 AND api_key_id=$2 AND metadata->>'dialect'=$3 AND state<>$4
+		AND (expires_at IS NULL OR expires_at>now())
+		AND ($5::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp.provider_resources
+			WHERE id=$5 AND api_key_id=$2 AND kind=$1 AND metadata->>'dialect'=$3 AND state<>$4
+			AND (expires_at IS NULL OR expires_at>now())))
+		ORDER BY created_at DESC,id DESC LIMIT $6`,
+		KindCloudBatch, apiKeyID, dialect, StateDeleted, nilUUID(after), limit)
+	if err != nil {
+		return nil, fmt.Errorf("cloud batch list: %w", err)
+	}
+	defer rows.Close()
+	out := []*Resource{}
+	for rows.Next() {
+		resource, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("cloud batch list scan: %w", err)
+		}
+		out = append(out, resource)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListKindsBefore(ctx context.Context, kinds []string, apiKeyID string, limit int, beforeID string) ([]*Resource, error) {
+	id, err := parseLocal(beforeID)
+	valid := false
+	for _, kind := range kinds {
+		valid = valid || LocalID(kind, id) == beforeID
+	}
+	if err != nil || !valid {
+		return nil, ErrNotFound
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
+		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
+		AND (created_at,id)>(SELECT created_at,id FROM olp.provider_resources
+		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND state<>$3 AND (expires_at IS NULL OR expires_at>now()))
+		ORDER BY created_at ASC,id ASC LIMIT $5`, kinds, apiKeyID, StateDeleted, id, limit)
+	if err != nil {
+		return nil, fmt.Errorf("provider resource list before: %w", err)
+	}
+	defer rows.Close()
+	out := []*Resource{}
+	for rows.Next() {
+		resource, scanErr := scan(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("provider resource list before scan: %w", scanErr)
+		}
+		out = append(out, resource)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(out)
+	return out, nil
 }
 
 func (s *Store) Update(ctx context.Context, localID, state string, metadata json.RawMessage, expiresAt *time.Time) error {

@@ -7977,6 +7977,32 @@
               "null"
             ]
           },
+          "batch_storage": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "Operator-owned object-storage prefixes used by Vertex batch prediction or Bedrock batch inference. These values are nonsecret.",
+            "properties": {
+              "input_uri_prefix": {
+                "type": "string",
+                "description": "Allowed object-storage prefix for batch input URIs. Vertex uses gs:// and Bedrock uses s3://."
+              },
+              "output_uri_prefix": {
+                "type": "string",
+                "description": "Allowed object-storage prefix for batch output URIs. The normalized prefix ends with a slash."
+              },
+              "role_arn": {
+                "type": "string",
+                "description": "Bedrock batch job IAM role ARN with permission to read input and write output."
+              }
+            },
+            "required": [
+              "input_uri_prefix",
+              "output_uri_prefix"
+            ]
+          },
           "deployment": {
             "type": [
               "string",
@@ -8024,6 +8050,7 @@
           "endpoint",
           "cloud_region",
           "cloud_project",
+          "batch_storage",
           "deployment",
           "api_version",
           "model"
@@ -9049,7 +9076,13 @@
               "strict_response",
               "interaction",
               "strict_file",
-              "strict_batch"
+              "strict_batch",
+              "anthropic_file",
+              "anthropic_batch",
+              "gemini_upload",
+              "gemini_file",
+              "gemini_batch",
+              "cloud_batch"
             ],
             "type": "string"
           },
@@ -9065,6 +9098,60 @@
           },
           "state": {
             "type": "string"
+          },
+          "settlement": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Metadata-only batch settlement progress, when the resource has a settlement record.",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "expected_results": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "settled_results": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "uncertain_results": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "last_error_class": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "close_after": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "closed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "expected_results",
+              "settled_results",
+              "uncertain_results",
+              "last_error_class",
+              "close_after",
+              "closed_at"
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -17139,14 +17226,15 @@
         "type": "object"
       },
       "RequestOrigin": {
-        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.",
+        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key.",
         "enum": [
           "caller",
           "shadow",
           "classifier",
           "cache_embedding",
           "probe",
-          "playground"
+          "playground",
+          "batch_settlement"
         ],
         "type": "string"
       },
@@ -32433,7 +32521,13 @@
                 "strict_response",
                 "interaction",
                 "strict_file",
-                "strict_batch"
+                "strict_batch",
+                "anthropic_file",
+                "anthropic_batch",
+                "gemini_upload",
+                "gemini_file",
+                "gemini_batch",
+                "cloud_batch"
               ],
               "type": "string"
             }

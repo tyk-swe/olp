@@ -1,0 +1,4 @@
+{"custom_id":"succeeded-cache","result":{"type":"succeeded","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":7,"cache_read_input_tokens":2,"cache_creation_input_tokens":5,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":2}}}}}
+{"custom_id":"errored","result":{"type":"errored","error":{"type":"invalid_request_error","message":"invalid request"}}}
+{"custom_id":"canceled","result":{"type":"canceled","error":{"type":"batch_canceled","message":"canceled by user"}}}
+{"custom_id":"expired","result":{"type":"expired","error":{"type":"batch_expired","message":"batch expired"}}}

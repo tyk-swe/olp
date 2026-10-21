@@ -26,6 +26,20 @@ func pinUnavailable() *Error {
 		"The provider revision, slot, or credential that owns this object is no longer available.")
 }
 
+func (s *Server) authorizeListedResource(ctx context.Context, authority access.Authority, res *resources.Resource) *Error {
+	if s.Resolver == nil {
+		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable.")
+	}
+	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, "batch")
+	if err != nil {
+		return pinUnavailable()
+	}
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		return notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
+	}
+	return nil
+}
+
 // retainedUse is what a request does with a retained resource.
 type retainedUse int
 
@@ -64,10 +78,30 @@ func strictResourceKind(kind string) (strict, known bool) {
 	switch kind {
 	case resources.KindStrictResponse, resources.KindStrictFile, resources.KindStrictBatch, resources.KindContinuation:
 		return true, true
-	case resources.KindResponse, resources.KindFile, resources.KindBatch:
+	case resources.KindResponse, resources.KindFile, resources.KindBatch,
+		resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiUpload,
+		resources.KindGeminiFile, resources.KindGeminiBatch, resources.KindCloudBatch:
 		return false, true
 	}
 	return false, false
+}
+
+func (x *call) retainedContentGate(resource *resources.Resource, route *routing.Route, use retainedUse) *Error {
+	if use == retainedRetrieval {
+		switch resource.Kind {
+		case resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiFile, resources.KindGeminiBatch:
+			return x.guardrailSurfaceGate(route)
+		case resources.KindFile:
+			if adapter := fileAdapter(resource); adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+				return x.guardrailSurfaceGate(route)
+			}
+		case resources.KindBatch:
+			if adapter := batchAdapter(resource); adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+				return x.guardrailSurfaceGate(route)
+			}
+		}
+	}
+	return nil
 }
 
 // resolveResource rebuilds the provider pin that owns a retained resource and
@@ -103,6 +137,9 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 				return nil, nil, e
 			}
 		}
+	}
+	if e := x.retainedContentGate(res, route, use); e != nil {
+		return nil, nil, e
 	}
 	if e := x.checkBody(route); e != nil {
 		return nil, nil, e

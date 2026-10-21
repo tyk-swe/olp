@@ -1,0 +1,1 @@
+{"name":"projects/p/locations/us-central1/batchPredictionJobs/job123","state":"JOB_STATE_SUCCEEDED","createTime":"2026-10-21T12:00:00Z","endTime":"2026-10-21T13:00:00Z","completionStats":{"successfulCount":"1","failedCount":"1","incompleteCount":"0"},"outputInfo":{"gcsOutputDirectory":"gs://batch-data/output/job123/"}}

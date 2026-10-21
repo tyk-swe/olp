@@ -202,14 +202,15 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		attempt.Routing.Retry = &retry
 	}
 	attempt.Routing.Budgets = fact.Budgets
-	if fact.PolicyDigest != "" || fact.CommitmentPinned {
+	pricingPinned := fact.PolicyDigest != "" || fact.PricingPinned
+	if pricingPinned || fact.CommitmentPinned {
 		var discountID *string
 		if fact.Discount != nil {
 			discountID = &fact.Discount.ID
 		}
 		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy,
-			"pricing_pinned": fact.PolicyDigest != "", "vendor_id": fact.VendorID,
-			"discount_pinned": fact.PolicyDigest != "", "discount_id": discountID,
+			"pricing_pinned": pricingPinned, "vendor_id": fact.VendorID,
+			"discount_pinned": pricingPinned, "discount_id": discountID,
 			"commitment_pinned": fact.CommitmentPinned, "commitment": fact.Commitment,
 			"rate_card_pinned": fact.CardPinned, "rate_card_revision_id": fact.CardRevisionID})
 		rawPolicy := json.RawMessage(policy)
@@ -271,92 +272,7 @@ func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
 }
 
 func observedAttemptUsage(u *wire.Usage, complete bool, operation string) usage.AttemptUsage {
-	fact := AttemptFact{Usage: u, UsageObserved: true, UsageComplete: complete}
-	evidence := usage.AttemptUsage{
-		Observed:         true,
-		Complete:         complete,
-		BillingUncertain: !complete,
-	}
-	evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens = accountingTokens(&fact)
-	evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens = accountingCacheWrites(&fact)
-	evidence.MediaUnits = accountingMediaUnits(&fact)
-	evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens,
-		evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens,
-		evidence.ToolCalls = accountingModality(&fact)
-	if operation == "embeddings" {
-		evidence.OutputTokens = nil
-	}
-	sanitizeUsageEvidence(&evidence)
-	return evidence
-}
-
-// accountingModality is the modality share and metered-tool detail an attempt
-// disclosed.
-func accountingModality(fact *AttemptFact) (audioInput, cachedAudioInput, audioOutput,
-	imageInput, cachedImageInput, imageOutput *int64, tools map[string]int64) {
-	if fact.Usage == nil {
-		return nil, nil, nil, nil, nil, nil, nil
-	}
-	u := fact.Usage
-	return u.AudioInputTokens, u.CachedAudioInputTokens, u.AudioOutputTokens,
-		u.ImageInputTokens, u.CachedImageInputTokens, u.ImageOutputTokens, u.ToolCalls
-}
-
-// sanitizeUsageEvidence holds an attempt's modality and tool detail to the
-// share invariants accounting stores. A provider whose detail contradicts the
-// totals it reports billed something the rates cannot describe, so the detail
-// drops and the attempt settles incomplete rather than being silently priced
-// at text rates.
-func sanitizeUsageEvidence(evidence *usage.AttemptUsage) {
-	if evidence == nil || !evidence.Observed || usage.ConsistentUsage(evidence) {
-		return
-	}
-	evidence.CachedAudioInputTokens = nil
-	evidence.AudioInputTokens = nil
-	evidence.AudioOutputTokens = nil
-	evidence.CachedImageInputTokens = nil
-	evidence.ImageInputTokens = nil
-	evidence.ImageOutputTokens = nil
-	evidence.ToolCalls = nil
-	evidence.Complete = false
-}
-
-// accountingTokens is the metering an attempt disclosed. A provider that
-// reports a negative count is reporting nonsense, and the floor keeps one
-// upstream's malformed reply from failing the whole event.
-func accountingTokens(fact *AttemptFact) (input, output, cached *int64) {
-	if fact.Usage == nil {
-		return nil, nil, nil
-	}
-	// Unit-only media usage reports no token dimensions. Inventing zero token
-	// counts would require token rates and leave a unit-priced video unpriced.
-	if fact.Usage.MediaUnits != nil && fact.Usage.InputTokens == 0 && fact.Usage.OutputTokens == 0 && fact.Usage.CachedInputTokens == nil {
-		return nil, nil, nil
-	}
-	in, out := max(fact.Usage.InputTokens, 0), max(fact.Usage.OutputTokens, 0)
-	if fact.Usage.CachedInputTokens != nil {
-		hit := max(*fact.Usage.CachedInputTokens, 0)
-		cached = &hit
-	}
-	return &in, &out, cached
-}
-
-func accountingCacheWrites(fact *AttemptFact) (write, write5m, write1h *int64) {
-	if fact.Usage == nil {
-		return nil, nil, nil
-	}
-	return fact.Usage.CacheWriteInputTokens, fact.Usage.CacheWrite5MInputTokens,
-		fact.Usage.CacheWrite1HInputTokens
-}
-
-// accountingMediaUnits is the media quantity an attempt disclosed, carried as
-// the same decimal text the usage event validates and stores.
-func accountingMediaUnits(fact *AttemptFact) *string {
-	if fact.Usage == nil || fact.Usage.MediaUnits == nil {
-		return nil
-	}
-	value := *fact.Usage.MediaUnits
-	return &value
+	return usage.ObservedAttemptUsage(u, complete, operation)
 }
 
 // streamedTokens is the output this attempt actually streamed: everything the

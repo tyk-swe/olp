@@ -634,3 +634,15 @@ session, playground authority and project visibility. Definition and policy
 writes require configuration authority; attachment writes additionally require
 the existing management permission for their installation, organization,
 project/route or key scope. All narrower attachments are additive.
+
+## Provider batch resources
+
+Files, batches and cloud batch jobs are retained provider-state resources. A
+creation pins one published route target, provider revision, slot and credential
+version; it does not fail over or migrate later. Creation requires an allowed
+route and `X-OLP-Route` when the request does not carry a model selector.
+Follow-up access uses the original API-key/project owner and the retained
+resource ID, then rechecks current route and credential authority. Foreign,
+expired, deleted or otherwise unavailable IDs are indistinguishable from
+missing. Strict routes refuse non-OpenAI/Azure files and batches with
+`422 target_capability`.

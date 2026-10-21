@@ -1,0 +1,5 @@
+{
+  "completion_window": "24h",
+  "endpoint": "/v1/chat/completions",
+  "input_file_id": "file-input"
+}

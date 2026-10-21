@@ -3,6 +3,7 @@
   import { listProviderProfiles } from './api/profiles';
   import { providerKeys } from './providerKeys';
   import type { ProviderKindCapability } from './api/models';
+  import { nativeObject, type NativeValue } from '$lib/json/nativeJson';
   import {
     authOptionsFor,
     hasApiVersion,
@@ -51,6 +52,25 @@
   const fieldsDisabled = $derived(
     disabled || values.document?.fieldsAvailable === false
   );
+  const batchStorageProfile = $derived(
+    values.profileId === 'vertex-batch-prediction' ||
+      values.profileId === 'bedrock-batch-inference'
+  );
+  const batchStorageValue = (field: string) =>
+    values.document?.text(['batch_storage', field]) ?? '';
+  function setBatchStorageValue(field: string, value: string) {
+    const current = values.document?.at(['batch_storage']);
+    const storage: Record<string, NativeValue> = nativeObject(current)
+      ? { ...current }
+      : {};
+    storage[field] = value;
+    values.document?.set(['batch_storage'], storage);
+    onChange?.();
+  }
+  const batchStoragePlaceholder = (field: 'input' | 'output') =>
+    values.profileId === 'vertex-batch-prediction'
+      ? `gs://bucket/${field}/`
+      : `s3://bucket/${field}/`;
 </script>
 
 <div class="form-field">
@@ -168,6 +188,49 @@
       required
     />
   </div>
+{/if}
+{#if batchStorageProfile}
+  <div class="form-field full">
+    <label for={`${idPrefix}-batch-input-uri-prefix`}
+      >Batch input URI prefix</label
+    >
+    <input
+      id={`${idPrefix}-batch-input-uri-prefix`}
+      value={batchStorageValue('input_uri_prefix')}
+      oninput={(event) =>
+        setBatchStorageValue('input_uri_prefix', event.currentTarget.value)}
+      disabled={fieldsDisabled}
+      placeholder={batchStoragePlaceholder('input')}
+    />
+    <small>Allowed object storage prefix for batch input files.</small>
+  </div>
+  <div class="form-field full">
+    <label for={`${idPrefix}-batch-output-uri-prefix`}
+      >Batch output URI prefix</label
+    >
+    <input
+      id={`${idPrefix}-batch-output-uri-prefix`}
+      value={batchStorageValue('output_uri_prefix')}
+      oninput={(event) =>
+        setBatchStorageValue('output_uri_prefix', event.currentTarget.value)}
+      disabled={fieldsDisabled}
+      placeholder={batchStoragePlaceholder('output')}
+    />
+    <small>Prefix must be owned by the operator and ends with a slash.</small>
+  </div>
+  {#if values.profileId === 'bedrock-batch-inference'}
+    <div class="form-field full">
+      <label for={`${idPrefix}-batch-role-arn`}>Batch job IAM role ARN</label>
+      <input
+        id={`${idPrefix}-batch-role-arn`}
+        value={batchStorageValue('role_arn')}
+        oninput={(event) =>
+          setBatchStorageValue('role_arn', event.currentTarget.value)}
+        disabled={fieldsDisabled}
+        placeholder="arn:aws:iam::123456789012:role/BedrockBatch"
+      />
+    </div>
+  {/if}
 {/if}
 {#if hasDeployment(spec)}
   <div class="form-field">

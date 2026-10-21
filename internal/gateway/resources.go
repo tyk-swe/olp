@@ -33,7 +33,10 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	if s.Resources == nil {
 		return
 	}
+	s.registerCloudBatchState(mux)
 	if s.Media != nil {
+		s.registerAnthropicState(mux)
+		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
@@ -98,7 +101,29 @@ func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	if !p.Supports(model, operation, "openai", mode) {
 		return false
 	}
-	return p.Connector().SupportsRetainedResponses()
+	return p.Connector().SupportsFilesBatches()
+}
+
+func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
+	if x == nil || route == nil {
+		return nil
+	}
+	for _, target := range route.Targets {
+		provider, ok := x.snapshot().Providers[target.ProviderID]
+		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
+			return policyUnavailable("target_capability",
+				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
+		}
+	}
+	return nil
+}
+
+func strictBatchTargetRefusal(p *pin) *Error {
+	if p != nil && p.provider.Kind != "openai" && p.provider.Kind != "azure_openai" {
+		return policyUnavailable("target_capability",
+			"Strict routes serve files and batches only for OpenAI and Azure.")
+	}
+	return nil
 }
 
 func resourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
@@ -217,7 +242,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
-	req.Header.Set("Accept", "application/json")
+	accept := "application/json"
+	if x.anthropicFileBinary || x.geminiFileBinary {
+		accept = "application/binary"
+	}
+	req.Header.Set("Accept", accept)
 	if x.mode == "streaming" && (x.family == wire.GeminiInteractions || x.family == wire.Responses) {
 		req.Header.Set("Accept", "text/event-stream")
 	}
@@ -226,6 +255,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 			return nil, exchange.fail(s, x, classCancelled, nil)
 		}
 		return nil, exchange.fail(s, x, classCredential, nil)
+	}
+	if x.anthropicFilesBeta {
+		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
 	}
 	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 }
@@ -250,6 +282,14 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.
 		return x, access.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
+	switch family {
+	case wire.AnthropicFile, wire.AnthropicBatch, wire.GeminiFile, wire.GeminiBatch, wire.CloudBatch:
+		if !authority.Policy.AllowProviderState {
+			s.release(r.Context())
+			s.stateFail(x, w, providerStateForbidden(), family)
+			return x, authority, true
+		}
+	}
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.stateFail(x, w, e, family)
@@ -373,6 +413,19 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
 		return nil, err
 	}
+	var adapter string
+	if json.Unmarshal(meta["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral" || adapter == "gemini_managed") {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(meta["provider_file"], &fields)
+		obj := map[string]json.RawMessage{"object": json.RawMessage(`"file"`)}
+		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+			if value, ok := fields[name]; ok {
+				obj[name] = value
+			}
+		}
+		obj["id"], _ = json.Marshal(res.ID)
+		return json.Marshal(obj)
+	}
 	obj := map[string]json.RawMessage{}
 	for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
 		if raw, ok := meta[name]; ok {
@@ -395,6 +448,25 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 		obj["deleted"] = json.RawMessage(`true`)
 	}
 	return json.Marshal(obj)
+}
+
+func fileAdapter(res *resources.Resource) string {
+	var metadata struct {
+		Adapter string `json:"adapter"`
+	}
+	if res != nil {
+		_ = json.Unmarshal(res.Metadata, &metadata)
+	}
+	return metadata.Adapter
+}
+
+func managedGeminiFilePath(res *resources.Resource) (string, error) {
+	name := geminiManagedFileName(res)
+	id, err := geminiFileID(name)
+	if err != nil {
+		return "", err
+	}
+	return "files/" + url.PathEscape(id), nil
 }
 
 func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
@@ -420,7 +492,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 			if !valid || upstream == "" {
 				return nil, resources.ErrContract
 			}
-			mapped, err := s.mapUpstreamFile(ctx, res, upstream)
+			mapped, err := s.mapUpstreamFile(ctx, res, upstream, strings.TrimSuffix(name, "_file_id"))
 			if err != nil {
 				return nil, err
 			}
@@ -428,13 +500,16 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 		}
 		return durableProjection(contract.Result, res.ID, files)
 	}
+	if batchAdapter(res) == "gemini_managed" {
+		return s.geminiManagedBatchObject(ctx, res)
+	}
 	var meta map[string]json.RawMessage
 	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
 		return nil, err
 	}
 	obj := map[string]json.RawMessage{}
 	for name, raw := range meta {
-		if name == "upstream_model" || name == batchLocalInputKey {
+		if name == "upstream_model" || name == batchLocalInputKey || name == "adapter" || name == "manifest" || name == "provider_file" || name == "role" {
 			continue
 		}
 		obj[name] = raw
@@ -460,7 +535,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" {
 			continue
 		}
-		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID)
+		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID, strings.TrimSuffix(name, "_file_id"))
 		if err != nil {
 			return nil, err
 		}
@@ -478,7 +553,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	return json.Marshal(obj)
 }
 
-func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamID string) (*resources.Resource, error) {
+func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamID, role string) (*resources.Resource, error) {
 	kind := resources.KindFile
 	if owner.Kind == resources.KindStrictBatch {
 		kind = resources.KindStrictFile
@@ -491,6 +566,12 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		return nil, err
 	}
 	metadata := durableMetadata(resourceModel(owner))
+	var ownerMetadata map[string]json.RawMessage
+	_ = json.Unmarshal(owner.Metadata, &ownerMetadata)
+	var adapter string
+	if json.Unmarshal(ownerMetadata["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral") {
+		metadata = managedFileMetadata(metadata, nil, adapter, batchManifest{}, role)
+	}
 	resource := &resources.Resource{
 		Kind:               kind,
 		APIKeyID:           owner.APIKeyID,
@@ -502,6 +583,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		SlotID:             owner.SlotID,
 		CredentialID:       owner.CredentialID,
 		UpstreamID:         upstreamID,
+		ParentID:           new(owner.UUID),
 		State:              "processed",
 		Metadata:           metadata,
 	}
@@ -707,8 +789,53 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}()
 	p, e := s.selectPin(r.Context(), x, &route, "batch", "unary")
 	if e != nil {
+		if refusal := fireworksBatchRefusal(x, &route); refusal != nil {
+			e = refusal
+		}
 		s.stateFail(x, w, e, x.family)
 		return
+	}
+	if x.strict() {
+		if refusal := strictBatchTargetRefusal(p); refusal != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, refusal, x.family)
+			return
+		}
+	}
+	adapter := p.provider.Connector().FilesBatchesAdapter()
+	uploadFile := file
+	uploadPurpose, uploadExtra := purpose, extra
+	var manifest batchManifest
+	if p.provider.VendorID == "groq" && purpose != "batch" {
+		param := "purpose"
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, invalidRequest("unsupported_parameter", "Groq files used by batches require purpose=batch.", &param), x.family)
+		return
+	}
+	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" || adapter == "openai" && !x.strict() && purpose == "batch" {
+		if adapter != "openai" && (purpose != "batch" || len(extra) > 0) {
+			param := "purpose"
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, invalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", &param), x.family)
+			return
+		}
+		var translated *media.Part
+		translated, manifest, e = s.translateManagedBatchInput(r.Context(), p, &route, file, adapter)
+		if e != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, e, x.family)
+			return
+		}
+		uploadFile = translated
+		defer func() {
+			if err := s.transport().Spool.Remove(translated.Handle); err != nil {
+				s.log.Warn("translated batch spool cleanup failed", "error", err)
+			}
+		}()
+		if adapter == "together" {
+			uploadPurpose = "batch-api"
+			uploadExtra = map[string]string{"file_name": file.Filename, "file_type": "jsonl"}
+		}
 	}
 	var strictServing oif.ServingIdentity
 	var strictEndpoint string
@@ -736,39 +863,64 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, "files", nil)
-	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
-		return
-	}
-	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, purpose, extra, file, fileFirst)
-	if failure != nil {
-		x.dispatched = failure.dispatched
-		s.stateFail(x, w, upstreamError(failure), x.family)
-		return
-	}
-	defer resp.Body.Close()
-	x.dispatched = true
-	body, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
-	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
-		return
-	}
+	var body []byte
 	var upstreamID string
-	if x.strict() {
-		if _, upstreamID, err = strictResult(body, ""); err != nil {
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."), x.family)
+	var err error
+	if adapter == "gemini_managed" {
+		var failure *attemptFailure
+		body, upstreamID, failure = s.uploadGeminiManagedFile(ctx, x, p, uploadFile)
+		if failure != nil {
+			x.dispatched = failure.dispatched
+			s.stateFail(x, w, upstreamError(failure), x.family)
 			return
 		}
 	} else {
-		var valid bool
-		if upstreamID, valid = nativeResourceID(body, s.cfg.MaxResponseBytes); !valid {
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+		filePath := "files"
+		if adapter == "together" {
+			filePath = "files/upload"
+		}
+		endpoint, err := resourceURL(p.provider.Connector(), p.model, filePath, nil)
+		if err != nil {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
 			return
+		}
+		resp, failure := s.uploadMultipart(ctx, x, p, endpoint, uploadPurpose, uploadExtra, uploadFile, fileFirst)
+		if failure != nil {
+			x.dispatched = failure.dispatched
+			s.stateFail(x, w, upstreamError(failure), x.family)
+			return
+		}
+		defer resp.Body.Close()
+		x.dispatched = true
+		body, err = readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		if err != nil {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
+			return
+		}
+		if x.strict() {
+			if _, upstreamID, err = strictResult(body, ""); err != nil {
+				s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."), x.family)
+				return
+			}
+		} else {
+			var valid bool
+			if upstreamID, valid = nativeResourceID(body, s.cfg.MaxResponseBytes); !valid {
+				s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+				return
+			}
 		}
 	}
 	x.completePinned()
 	metadata, state, expires := fileMetadata(body, p.model)
+	if manifest.Adapter == "openai" {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(metadata, &fields)
+		fields["batch_manifest"] = mustJSON(manifest)
+		metadata = mustJSON(fields)
+	}
+	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+		metadata = managedFileMetadata(metadata, body, adapter, manifest, "input")
+	}
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	kind := resources.KindFile
@@ -813,6 +965,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	var out []byte
 	if x.strict() {
 		out, err = durableProjection(body, res.ID, nil)
+	} else if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+		out, err = s.fileObject(r.Context(), res)
 	} else {
 		out, err = rewriteID(body, "id", res.ID)
 	}
@@ -856,15 +1010,17 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 			_, err = io.Copy(part, opened.File)
 			return err
 		}
-		if fileFirst {
+		if purpose != "" && fileFirst {
 			if err := writeFile(); err != nil {
 				sendDone <- failure(err)
 				return
 			}
 		}
-		if err := form.WriteField("purpose", purpose); err != nil {
-			sendDone <- failure(err)
-			return
+		if purpose != "" {
+			if err := form.WriteField("purpose", purpose); err != nil {
+				sendDone <- failure(err)
+				return
+			}
 		}
 		for name, value := range extra {
 			if err := form.WriteField(name, value); err != nil {
@@ -872,7 +1028,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 				return
 			}
 		}
-		if !fileFirst {
+		if purpose == "" || !fileFirst {
 			if err := writeFile(); err != nil {
 				sendDone <- failure(err)
 				return
@@ -901,6 +1057,9 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 	req.Header.Set("Accept", "application/json")
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
 		return nil, exchange.fail(s, x, classCredential, nil)
+	}
+	if x.anthropicFilesBeta {
+		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
 	}
 	resp, failure := s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 	if failure != nil {
@@ -971,7 +1130,15 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
+		path := "files/" + url.PathEscape(res.UpstreamID)
+		if fileAdapter(res) == "gemini_managed" {
+			var err error
+			path, err = managedGeminiFilePath(res)
+			if err != nil {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
+			}
+		}
+		endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
@@ -991,12 +1158,35 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
-		if res.Kind != resources.KindStrictFile {
+		adapter := fileAdapter(res)
+		if adapter == "gemini_managed" {
+			var object map[string]json.RawMessage
+			var name string
+			if json.Unmarshal(body, &object) != nil || json.Unmarshal(object["name"], &name) != nil || name != geminiManagedFileName(res) {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini file name.")
+			}
+		} else if res.Kind != resources.KindStrictFile {
 			if !retainedIdentityMatches(body, res.UpstreamID, s.cfg.MaxResponseBytes) {
 				return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
 			}
 		}
 		metadata, state, expires := fileMetadata(body, resourceModel(res))
+		if res.Kind != resources.KindStrictFile {
+			var prior map[string]json.RawMessage
+			_ = json.Unmarshal(res.Metadata, &prior)
+			if manifest, ok := prior["batch_manifest"]; ok {
+				var fields map[string]json.RawMessage
+				_ = json.Unmarshal(metadata, &fields)
+				fields["batch_manifest"] = manifest
+				metadata = mustJSON(fields)
+			}
+			var adapter, role string
+			_ = json.Unmarshal(prior["adapter"], &adapter)
+			_ = json.Unmarshal(prior["role"], &role)
+			if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+				metadata = managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, role)
+			}
+		}
 		var out []byte
 		if res.Kind == resources.KindStrictFile {
 			if _, _, err := strictResult(body, res.UpstreamID); err != nil {
@@ -1024,7 +1214,11 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 				return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
 			}
 			res.State, res.Metadata, res.ExpiresAt = state, metadata, expires
-			out, err = rewriteID(body, "id", res.ID)
+			if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+				out, err = s.fileObject(ctx, res)
+			} else {
+				out, err = rewriteID(body, "id", res.ID)
+			}
 		}
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
@@ -1036,7 +1230,47 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
+		writeDeleted := func() {
+			s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "object": "file", "deleted": true}))
+		}
+		if fileAdapter(res) == "gemini_managed" {
+			var fields struct {
+				Role string `json:"role"`
+			}
+			_ = json.Unmarshal(res.Metadata, &fields)
+			if fields.Role == "output" || fields.Role == "error" {
+				commitCtx, stop := resourceCommitContext(ctx)
+				defer stop()
+				detached, pending, err := s.Resources.DetachGeminiResultView(commitCtx, res, geminiManagedFileName(res))
+				if errors.Is(err, resources.ErrNotFound) {
+					return notFoundError("not_found", "No file with this identifier exists for this key.")
+				}
+				if err != nil {
+					return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The result file dependencies could not be read.")
+				}
+				if detached {
+					writeDeleted()
+					return nil
+				}
+				if pending {
+					return serverError(http.StatusConflict, "batch_settlement_pending", "The result file is still needed for settlement; retry after settlement closes.")
+				}
+			}
+		}
+		if fileAdapter(res) != "gemini_managed" && res.ParentID != nil {
+			if err := s.requireBatchEvidenceSettled(ctx, *res.ParentID); err != nil {
+				return err
+			}
+		}
+		path := "files/" + url.PathEscape(res.UpstreamID)
+		if fileAdapter(res) == "gemini_managed" {
+			var err error
+			path, err = managedGeminiFilePath(res)
+			if err != nil {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
+			}
+		}
+		endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
@@ -1062,17 +1296,16 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be deleted.")
 		}
-		encoded, _ := json.Marshal(res.ID)
-		out, _ := json.Marshal(map[string]json.RawMessage{
-			"id": encoded, "object": json.RawMessage(`"file"`), "deleted": json.RawMessage(`true`),
-		})
-		s.writeStateJSON(w, x, out)
+		writeDeleted()
 		return nil
 	})
 }
 
 func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+		if fileAdapter(res) == "gemini_managed" {
+			return s.geminiManagedFileContent(ctx, w, x, res, p)
+		}
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID)+"/content", nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1128,10 +1361,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := io.Copy(w, opened.File)
-		if copyErr == nil && written == artifact.ContentLength {
-			copyErr = http.NewResponseController(w).Flush()
-		}
+		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		if copyErr != nil || written != artifact.ContentLength {
 			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The file response ended before all bytes were delivered.")
 			x.facts[len(x.facts)-1].Class = classCancelled
@@ -1274,7 +1504,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	body, e := s.readBody(r)
+	body, e := s.readResourceBody(w, r)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1284,8 +1514,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, invalidRequest("invalid_json", "The request body must be one JSON object.", nil), x.family)
 		return
 	}
-	if _, supplied := source.Root().Lookup("id"); supplied {
-		s.stateFail(x, w, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id")), x.family)
+	lineOperation, e := batchLineOperation(source)
+	if e != nil {
+		s.stateFail(x, w, e, x.family)
 		return
 	}
 	fileValue, ok := source.Root().Lookup("input_file_id")
@@ -1308,33 +1539,119 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	// The batch runs under the file's retained route revision. Resolution
 	// refuses a file whose contract the current route no longer promises, so
 	// that revision's fidelity is also the route's current one.
+	if candidate, exists := x.snapshot().Routes[file.RouteSlug]; exists {
+		x.route = &candidate
+	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, file, "batch", retainedNewWork)
 	if e != nil {
+		if refusal := fireworksBatchRefusal(x, x.route); refusal != nil {
+			e = refusal
+		}
 		s.stateFail(x, w, e, x.family)
 		return
 	}
 	x.route = route
+	completionWindow, e := batchCompletionWindow(source, p.provider.VendorID)
+	if e != nil {
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, e, x.family)
+		return
+	}
+	endpointValue, endpointPresent := source.Root().Lookup("endpoint")
+	requestEndpoint, endpointValid := endpointValue.Text()
+	if p.provider.VendorID == "groq" && (!endpointPresent || !endpointValid || requestEndpoint != "/v1/chat/completions") {
+		param := "endpoint"
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, invalidRequest("unsupported_parameter", "Groq batches currently support only /v1/chat/completions.", &param), x.family)
+		return
+	}
+	adapter := p.provider.Connector().FilesBatchesAdapter()
+	if p.provider.VendorID == "together" || p.provider.VendorID == "mistral" || adapter == "gemini_managed" {
+		allowed := map[string]bool{"input_file_id": true, "endpoint": true, "completion_window": true, "metadata": true}
+		for _, field := range source.Root().Members() {
+			if !allowed[field.Name] {
+				param := field.Name
+				s.releaseHold(r.Context(), p.hold)
+				s.stateFail(x, w, invalidRequest("unsupported_parameter", "This batch parameter is not supported.", &param), x.family)
+				return
+			}
+		}
+		if adapter == "gemini_managed" {
+			for _, required := range []string{"input_file_id", "endpoint", "completion_window"} {
+				if _, present := source.Root().Lookup(required); !present {
+					param := required
+					s.releaseHold(r.Context(), p.hold)
+					s.stateFail(x, w, invalidRequest("missing_required_parameter", "Gemini managed batches require input_file_id, endpoint, and completion_window.", &param), x.family)
+					return
+				}
+			}
+		}
+	}
+	if x.strict() {
+		if refusal := strictBatchTargetRefusal(p); refusal != nil {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, refusal, x.family)
+			return
+		}
+	}
+	var inputManifest batchManifest
+	if adapter == "openai" && !x.strict() {
+		var metadata map[string]json.RawMessage
+		_ = json.Unmarshal(file.Metadata, &metadata)
+		if json.Unmarshal(metadata["batch_manifest"], &inputManifest) != nil || inputManifest.Adapter != "openai" ||
+			inputManifest.Endpoint != requestEndpoint || inputManifest.LineCount < 1 || inputManifest.ManifestDigest == "" {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, invalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", strPtr("input_file_id")), x.family)
+			return
+		}
+	}
+	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+		var meta map[string]json.RawMessage
+		_ = json.Unmarshal(file.Metadata, &meta)
+		var storedAdapter string
+		_ = json.Unmarshal(meta["adapter"], &storedAdapter)
+		_ = json.Unmarshal(meta["endpoint"], &inputManifest.Endpoint)
+		_ = json.Unmarshal(meta["line_operation"], &inputManifest.LineOperation)
+		_ = json.Unmarshal(meta["line_count"], &inputManifest.LineCount)
+		_ = json.Unmarshal(meta["manifest_digest"], &inputManifest.ManifestDigest)
+		inputManifest.Adapter = storedAdapter
+		if storedAdapter != adapter || inputManifest.Endpoint == "" || inputManifest.LineCount < 1 || inputManifest.ManifestDigest == "" {
+			s.releaseHold(r.Context(), p.hold)
+			s.stateFail(x, w, notFoundError("not_found", "The uploaded file has no compatible batch manifest."), x.family)
+			return
+		}
+	}
+	if _, supplied := source.Root().Lookup("id"); supplied && adapter != "together" && adapter != "mistral" {
+		s.releaseHold(r.Context(), p.hold)
+		s.stateFail(x, w, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id")), x.family)
+		return
+	}
 	if x.strict() {
 		if fileKind != resources.KindStrictFile || fileContract == nil || !authority.Policy.AllowProviderState || !s.Resources.Encrypted() {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id")), x.family)
 			return
 		}
 		if e := s.authorizeDurable(r.Context(), x, authority, file, fileContract, "batch", retainedNewWork); e != nil {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, e, x.family)
 			return
 		}
 		requestEndpoint, present := source.Root().Lookup("endpoint")
 		path, valid := requestEndpoint.Text()
 		if !present || !valid || fileContract.Asset == nil || fileContract.Asset.Endpoint != path || fileContract.Asset.ItemCount < 1 {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", strPtr("endpoint")), x.family)
 			return
 		}
 	}
 	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
+		s.releaseHold(r.Context(), p.hold)
 		s.stateFail(x, w, e, x.family)
 		return
 	}
 	if e := x.guardrailSurfaceGate(route); e != nil {
+		s.releaseHold(r.Context(), p.hold)
 		s.stateFail(x, w, e, x.family)
 		return
 	}
@@ -1354,21 +1671,47 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	upstreamFile, _ := json.Marshal(file.UpstreamID)
 	var upstream []byte
 	var strictServing oif.ServingIdentity
+	var expectedResults *int64
+	if x.strict() {
+		expectedResults = new(int64(fileContract.Asset.ItemCount))
+	} else if inputManifest.Adapter == "openai" {
+		expectedResults = new(int64(inputManifest.LineCount))
+	}
+	requestedWindow := "24h"
+	if value, present := source.Root().Lookup("completion_window"); present {
+		requestedWindow, _ = value.Text()
+	}
 	if x.strict() {
 		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
 		if !ok {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
 			return
 		}
 		bound, bindErr := template.BindBatch(source, route.Slug, localFile, file.UpstreamID)
 		if bindErr != nil {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The batch source cannot satisfy this native target contract.", nil), x.family)
 			return
 		}
 		upstream = bound.Effective.Document().Bytes()
 		strictServing = bound.Receipt.Serving
+	} else if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+		upstream, expectedResults, e = managedBatchRequestBody(source, adapter, file.UpstreamID, p.provider.Connector().Model(p.model), inputManifest)
+		if e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
 	} else {
 		changes := []oif.Change{{Pointer: "/input_file_id", Value: string(upstreamFile), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"}}
+		window := "24h"
+		if p.provider.VendorID == "groq" {
+			if value, present := source.Root().Lookup("completion_window"); present {
+				window, _ = value.Text()
+			}
+		}
+		windowJSON, _ := json.Marshal(window)
+		changes = append(changes, oif.Change{Pointer: "/completion_window", Value: string(windowJSON), Origin: oif.ResourceBinding, Reason: "provider batch completion window"})
 		if p.provider.Kind == "azure_openai" {
 			deployment := p.provider.Connector().Model(p.model)
 			if deployment != "" {
@@ -1383,14 +1726,70 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		upstream = effective.Bytes()
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, "batches", nil)
+	batchPath := "batches"
+	if adapter == "mistral" {
+		batchPath = "batch/jobs"
+	} else if adapter == "gemini_managed" {
+		batchPath = "models/" + url.PathEscape(p.provider.Connector().Model(p.model)) + ":batchGenerateContent"
+	}
+	endpoint, err := resourceURL(p.provider.Connector(), p.model, batchPath, nil)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
 		return
 	}
+	kind := resources.KindBatch
+	if x.strict() {
+		kind = resources.KindStrictBatch
+	}
+	var reconciliationCursor json.RawMessage
+	if adapter == "gemini_managed" {
+		clientMetadata := source.Fields()["metadata"]
+		metadata, _, metadataErr := geminiManagedBatchMetadata([]byte(`{"metadata":{"state":"BATCH_STATE_PENDING"}}`), p.model, localFile, inputManifest, nil, clientMetadata)
+		if metadataErr != nil {
+			s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The Gemini submission metadata could not be prepared."), x.family)
+			return
+		}
+		reconciliationCursor = mustJSON(map[string]any{"submission": map[string]any{
+			"gemini_file": file.UpstreamID, "local_input_file_id": localFile,
+			"endpoint": inputManifest.Endpoint, "gemini_metadata": metadata,
+		}})
+	}
+	submission, e := s.prepareBatchSubmission(ctx, x, authority.ID, p, source, source.Bytes(), upstream,
+		strictServing, localFile, file.UpstreamID, kind, adapter, "openai", lineOperation, completionWindow, expectedResults, reconciliationCursor)
+	if e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
+	}
+	if adapter == "gemini_managed" {
+		displayName := "olp-" + strings.ReplaceAll(submission.resource.UUID.String(), "-", "")
+		upstream, err = geminiManagedBatchBody(displayName, file.UpstreamID)
+		if err != nil {
+			cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
+			defer stopCleanup()
+			if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
+				s.log.Warn("Gemini batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
+			}
+			s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The Gemini batch request could not be constructed."), x.family)
+			return
+		}
+	}
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, upstream, "application/json")
 	if failure != nil {
 		x.dispatched = failure.dispatched
+		if failure.acceptance.Unresolved() {
+			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
+			defer stopUnknown()
+			if err := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); err != nil {
+				s.log.Warn("batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", err)
+			}
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider may have accepted this batch, but its outcome is unknown."), x.family)
+			return
+		}
+		cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
+		defer stopCleanup()
+		if err := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); err != nil {
+			s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", err)
+		}
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -1398,7 +1797,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = true
 	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
+		s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider response could not be read. The batch may have been accepted."), x.family)
 		return
 	}
 	var upstreamID string
@@ -1406,13 +1805,40 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		var validated oif.Document
 		validated, upstreamID, err = strictBatchResult(result, "")
 		if err != nil || !strictBatchInputMatches(validated, upstream) {
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result."), x.family)
+			s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider returned an invalid native batch result. The batch may have been accepted."), x.family)
 			return
+		}
+	} else if adapter == "gemini_managed" {
+		var identityErr error
+		upstreamID, identityErr = geminiBatchName(result)
+		if identityErr != nil {
+			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
+			defer stopUnknown()
+			if markErr := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+				s.log.Warn("Gemini batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
+			}
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider accepted a batch with an invalid operation name."), x.family)
+			return
+		}
+	} else if adapter == "together" || adapter == "mistral" {
+		var valid bool
+		result, upstreamID, valid = managedBatchResponse(result, adapter, requestedWindow)
+		if !valid {
+			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
+			defer stopUnknown()
+			if markErr := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+				s.log.Warn("managed batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
+			}
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."), x.family)
+			return
+		}
+		if metadata, present := source.Fields()["metadata"]; present {
+			result = attachBatchClientMetadata(result, metadata)
 		}
 	} else {
 		var valid bool
 		if upstreamID, valid = nativeResourceID(result, s.cfg.MaxResponseBytes); !valid {
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
+			s.stateFail(x, w, s.batchSubmissionUnknown(r.Context(), submission.resource.UUID, "The provider returned a malformed batch object. The batch may have been accepted."), x.family)
 			return
 		}
 	}
@@ -1420,41 +1846,70 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	metadata, state := batchMetadata(result, p.model, localFile)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
-	kind := resources.KindBatch
-	if x.strict() {
-		kind = resources.KindStrictBatch
-		metadata = durableMetadata(p.model)
-	}
-	resource := &resources.Resource{
-		Kind:               kind,
-		APIKeyID:           authority.ID,
-		RouteSlug:          route.Slug,
-		ProviderID:         p.provider.ID,
-		ProviderRevisionID: p.provider.RevisionID,
-		RouteRevisionID:    route.RevisionID,
-		TargetID:           p.target.ID,
-		SlotID:             p.slot.ID,
-		CredentialID:       p.slot.CredentialID,
-		UpstreamID:         upstreamID,
-		State:              state,
-		Metadata:           metadata,
+	resource := submission.resource
+	resource.UpstreamID, resource.State = upstreamID, state
+	resource.Metadata = metadata
+	if adapter == "gemini_managed" {
+		var clientMetadata json.RawMessage
+		if raw, present := source.Fields()["metadata"]; present {
+			clientMetadata = raw
+		}
+		resource.Metadata, state, err = geminiManagedBatchMetadata(result, p.model, localFile, inputManifest, nil, clientMetadata)
+		if err != nil {
+			if markErr := s.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_unknown", s.now()); markErr != nil {
+				s.log.Warn("Gemini batch submission metadata could not be recorded", "resource_id", resource.UUID, "error", markErr)
+			}
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid Gemini batch object."), x.family)
+			return
+		}
+		resource.State = state
 	}
 	var res *resources.Resource
 	if x.strict() {
-		version := resources.DurableContractVersion
-		resource.ContractVersion = &version
-		resource.ExpiresAt = s.durableExpiry(nil)
-		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: source.Bytes(), Effective: upstream, Result: result, Binding: p.model, Serving: strictServing})
-		if marshalErr != nil {
-			s.stateFail(x, w, durableError(marshalErr), x.family)
-			return
-		}
-		res, err = s.Resources.PutDurableContract(commitCtx, resource, payload)
-	} else {
-		res, err = s.Resources.Put(commitCtx, resource)
+		resource.Metadata = durableMetadata(p.model)
+	} else if adapter == "together" || adapter == "mistral" {
+		resource.Metadata, state = managedBatchMetadata(result, p.model, localFile, adapter)
+		resource.State = state
 	}
+	res, err = func() (*resources.Resource, error) {
+		tx, beginErr := s.Resources.Begin(commitCtx)
+		if beginErr != nil {
+			return nil, beginErr
+		}
+		defer tx.Rollback(commitCtx)
+		var created *resources.Resource
+		if x.strict() {
+			payload, marshalErr := json.Marshal(durableDocument{
+				Version: *resource.ContractVersion, Source: source.Bytes(), Effective: upstream,
+				Result: result, Binding: p.model, Serving: strictServing,
+			})
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			created, beginErr = s.Resources.PutDurableContractTx(commitCtx, tx, resource, payload)
+		} else {
+			created, beginErr = s.Resources.PutTx(commitCtx, tx, resource)
+		}
+		if beginErr != nil {
+			return nil, beginErr
+		}
+		acceptedExpected := expectedResults
+		if acceptedExpected == nil {
+			acceptedExpected = batchExpectedResults(result)
+		}
+		if beginErr = s.Batches.ActivateTx(commitCtx, tx, resource.UUID, upstreamID, acceptedExpected); beginErr != nil {
+			return nil, beginErr
+		}
+		if beginErr = tx.Commit(commitCtx); beginErr != nil {
+			return nil, beginErr
+		}
+		return created, nil
+	}()
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be stored."), x.family)
+		if markErr := s.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+			s.log.Warn("accepted batch submission intent could not be activated", "resource_id", resource.UUID, "error", markErr)
+		}
+		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed."), x.family)
 		return
 	}
 	out, err := s.batchObject(r.Context(), res)
@@ -1558,12 +2013,26 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
 	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
-		return s.batchRefresh(ctx, x, res, p, http.MethodGet, "batches/"+url.PathEscape(res.UpstreamID), nil, w)
+		return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
 	})
 }
 
 func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+		if batchAdapter(res) == "gemini_managed" {
+			endpoint, err := resourceURL(p.provider.Connector(), p.model, managedBatchPath(res, true), nil)
+			if err != nil {
+				return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+			}
+			response, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, []byte(`{}`), "application/json")
+			if failure != nil {
+				return upstreamError(failure)
+			}
+			_ = response.Body.Close()
+			x.dispatched = true
+			x.completePinned()
+			return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
+		}
 		if res.Kind == resources.KindStrictBatch {
 			switch res.State {
 			case "completed", "failed", "expired", "cancelled":
@@ -1577,7 +2046,7 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 		}
-		return s.batchRefresh(ctx, x, res, p, http.MethodPost, "batches/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w)
+		return s.batchRefresh(ctx, x, res, p, http.MethodPost, managedBatchPath(res, true), []byte(`{}`), w)
 	})
 }
 
@@ -1599,7 +2068,53 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
+	adapter := batchAdapter(res)
+	if method == http.MethodPost && strings.HasSuffix(path, ":cancel") && adapter == "gemini_managed" && geminiBatchCancelAcknowledgement(result) {
+		x.completePinned()
+		body, err := s.batchObject(ctx, res)
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored Gemini batch could not be projected.")
+		}
+		s.writeStateJSON(w, x, body)
+		return nil
+	}
+	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+		if adapter == "gemini_managed" {
+			upstreamID, identityErr := geminiBatchName(result)
+			if identityErr != nil || upstreamID != res.UpstreamID {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini batch identity.")
+			}
+		} else {
+			window := "24h"
+			var stored map[string]json.RawMessage
+			_ = json.Unmarshal(res.Metadata, &stored)
+			_ = json.Unmarshal(stored["completion_window"], &window)
+			projected, _, projectErr := projectManagedBatch(result, adapter, window)
+			if projectErr != nil {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unknown batch status.")
+			}
+			var prior map[string]json.RawMessage
+			_ = json.Unmarshal(res.Metadata, &prior)
+			result = attachBatchClientMetadata(projected, prior["metadata"])
+		}
+	}
 	metadata, state := batchMetadata(result, resourceModel(res), batchLocalInput(res))
+	if adapter == "gemini_managed" {
+		var clientMetadata json.RawMessage
+		var previous map[string]json.RawMessage
+		_ = json.Unmarshal(res.Metadata, &previous)
+		clientMetadata = previous["client_metadata"]
+		metadata, state, err = geminiManagedBatchMetadata(result, resourceModel(res), batchLocalInput(res),
+			geminiManagedManifest(res.Metadata), res.Metadata, clientMetadata)
+		if errors.Is(err, errGeminiManagedBatchState) {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unknown Gemini batch status.")
+		}
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed Gemini batch object.")
+		}
+	} else if adapter == "together" || adapter == "mistral" {
+		metadata, state = managedBatchMetadata(result, resourceModel(res), batchLocalInput(res), adapter)
+	}
 	commitCtx := ctx
 	stopCommit := func() {}
 	if method == http.MethodPost {
@@ -1627,6 +2142,16 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 		if _, _, err = s.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
 			return durableError(err)
 		}
+	} else if adapter == "gemini_managed" {
+		upstreamID, identityErr := geminiBatchName(result)
+		if identityErr != nil || upstreamID != res.UpstreamID {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini batch identity.")
+		}
+		x.completePinned()
+		if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
+			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
+		}
+		res.State, res.Metadata = state, metadata
 	} else {
 		if !retainedIdentityMatches(result, res.UpstreamID, s.cfg.MaxResponseBytes) {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")

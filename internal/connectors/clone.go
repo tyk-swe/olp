@@ -10,6 +10,10 @@ import (
 // Clone owns every mutable configuration value. PluginProfile is immutable.
 func (config Config) Clone() Config {
 	out := config
+	if config.BatchStorage != nil {
+		storage := *config.BatchStorage
+		out.BatchStorage = &storage
+	}
 	out.SemanticHeaders = maps.Clone(config.SemanticHeaders)
 	out.QuerySettings = maps.Clone(config.QuerySettings)
 	out.PluginOptions = maps.Clone(config.PluginOptions)

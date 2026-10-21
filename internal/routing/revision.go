@@ -40,16 +40,17 @@ type RevisionSlot struct {
 
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
-	CredentialSource string `json:"credential_source,omitempty"`
-	ProfileID        string `json:"profile_id,omitempty"`
-	ProfileRevision  string `json:"profile_revision,omitempty"`
-	Kind             string `json:"kind"`
-	AuthMode         string `json:"auth_mode"`
-	Endpoint         string `json:"endpoint"`
-	CloudRegion      string `json:"cloud_region"`
-	CloudProject     string `json:"cloud_project"`
-	Deployment       string `json:"deployment"`
-	APIVersion       string `json:"api_version"`
+	CredentialSource string                   `json:"credential_source,omitempty"`
+	ProfileID        string                   `json:"profile_id,omitempty"`
+	ProfileRevision  string                   `json:"profile_revision,omitempty"`
+	Kind             string                   `json:"kind"`
+	AuthMode         string                   `json:"auth_mode"`
+	Endpoint         string                   `json:"endpoint"`
+	CloudRegion      string                   `json:"cloud_region"`
+	CloudProject     string                   `json:"cloud_project"`
+	BatchStorage     *connectors.BatchStorage `json:"batch_storage,omitempty"`
+	Deployment       string                   `json:"deployment"`
+	APIVersion       string                   `json:"api_version"`
 	Options          struct {
 		Network           *egress.ConnectionOptions        `json:"network,omitempty"`
 		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
@@ -123,7 +124,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
 		CredentialSource: cfg.CredentialSource, Kind: cfg.Kind, AuthMode: cfg.AuthMode, Endpoint: cfg.Endpoint,
-		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
+		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, BatchStorage: cfg.BatchStorage, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,
 		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Commitment: cfg.Options.Commitment,

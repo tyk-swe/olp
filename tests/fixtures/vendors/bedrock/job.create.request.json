@@ -1,0 +1,1 @@
+{"jobName":"olp-0123456789abcdef0123456789abcdef","roleArn":"arn:aws:iam::123456789012:role/batch","modelId":"amazon.nova-lite-v1:0","inputDataConfig":{"s3InputDataConfig":{"s3Uri":"s3://batch/input/input.jsonl","s3InputFormat":"JSONL"}},"outputDataConfig":{"s3OutputDataConfig":{"s3Uri":"s3://batch/output/"}},"clientRequestToken":"01234567-89ab-cdef-0123-456789abcdef"}

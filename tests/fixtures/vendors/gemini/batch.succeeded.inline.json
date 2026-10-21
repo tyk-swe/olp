@@ -1,0 +1,30 @@
+{
+  "name": "batches/batch-0123456789",
+  "metadata": {
+    "state": "BATCH_STATE_SUCCEEDED",
+    "model": "models/gemini-2.5-flash",
+    "createTime": "2026-10-21T12:00:00Z",
+    "batchStats": {"requestCount": "2", "successfulRequestCount": "1", "failedRequestCount": "1", "pendingRequestCount": "0"},
+    "output": {
+      "inlinedResponses": {
+        "inlinedResponses": [
+          {
+            "metadata": {"key": "request-1"},
+            "response": {
+            "candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": "ok"}]}, "finishReason": "STOP",
+              "groundingMetadata": {"webSearchQueries": [{"searchQuery": "a"}, {"searchQuery": "b"}]}}],
+              "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 16,
+                "cachedContentTokenCount": 3,
+                "thoughtsTokenCount": 1
+              }
+            }
+          },
+          {"metadata": {"key": "request-2"}, "error": {"code": 400, "message": "bad request"}}
+        ]
+      }
+    }
+  }
+}

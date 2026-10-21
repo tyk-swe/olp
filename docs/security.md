@@ -129,6 +129,12 @@ only the encrypted dependencies their documented continuation protocol requires.
 
 ## Secrets
 
+Batch tables (`batch_settlements`, `batch_settlement_results` and
+`attempt_usage_facts`) contain lifecycle/accounting metadata only;
+`custom_id_digest` is an HMAC, not the custom ID or request/result lines. Gemini
+resumable upload URLs are sealed under the upload-session resource and are never
+returned from management metadata.
+
 OLP holds two keys, both mounted from files that others cannot read:
 
 - The **authentication key** computes HMAC-SHA256 digests, each bound to the
@@ -156,8 +162,8 @@ names are bound into stored data and never change:
 <!-- purposes -->
 | Kind | Purposes |
 | --- | --- |
-| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
-| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `billing_credential`, `guardrail_credential`, `response_cache` |
+| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation`, `batch_submission`, `batch_line` |
+| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `billing_credential`, `guardrail_credential`, `response_cache`, `provider_upload_session` |
 <!-- /purposes -->
 
 Passwords are hashed with Argon2id, with at most four concurrent hashes per

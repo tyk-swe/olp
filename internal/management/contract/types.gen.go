@@ -3325,6 +3325,7 @@ func (e ProviderConfigurationCredentialSource) Valid() bool {
 // Defines values for ProviderConfigurationField.
 const (
 	ProviderConfigurationFieldApiVersion   ProviderConfigurationField = "api_version"
+	ProviderConfigurationFieldBatchStorage ProviderConfigurationField = "batch_storage"
 	ProviderConfigurationFieldCloudProject ProviderConfigurationField = "cloud_project"
 	ProviderConfigurationFieldCloudRegion  ProviderConfigurationField = "cloud_region"
 	ProviderConfigurationFieldDeployment   ProviderConfigurationField = "deployment"
@@ -3336,6 +3337,8 @@ const (
 func (e ProviderConfigurationField) Valid() bool {
 	switch e {
 	case ProviderConfigurationFieldApiVersion:
+		return true
+	case ProviderConfigurationFieldBatchStorage:
 		return true
 	case ProviderConfigurationFieldCloudProject:
 		return true
@@ -3450,9 +3453,15 @@ func (e ProviderProbeResultStatus) Valid() bool {
 
 // Defines values for ProviderResourceItemKind.
 const (
+	ProviderResourceItemKindAnthropicBatch ProviderResourceItemKind = "anthropic_batch"
+	ProviderResourceItemKindAnthropicFile  ProviderResourceItemKind = "anthropic_file"
 	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
+	ProviderResourceItemKindCloudBatch     ProviderResourceItemKind = "cloud_batch"
 	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
 	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
+	ProviderResourceItemKindGeminiBatch    ProviderResourceItemKind = "gemini_batch"
+	ProviderResourceItemKindGeminiFile     ProviderResourceItemKind = "gemini_file"
+	ProviderResourceItemKindGeminiUpload   ProviderResourceItemKind = "gemini_upload"
 	ProviderResourceItemKindInteraction    ProviderResourceItemKind = "interaction"
 	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
 	ProviderResourceItemKindStrictBatch    ProviderResourceItemKind = "strict_batch"
@@ -3463,11 +3472,23 @@ const (
 // Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
 func (e ProviderResourceItemKind) Valid() bool {
 	switch e {
+	case ProviderResourceItemKindAnthropicBatch:
+		return true
+	case ProviderResourceItemKindAnthropicFile:
+		return true
 	case ProviderResourceItemKindBatch:
+		return true
+	case ProviderResourceItemKindCloudBatch:
 		return true
 	case ProviderResourceItemKindContinuation:
 		return true
 	case ProviderResourceItemKindFile:
+		return true
+	case ProviderResourceItemKindGeminiBatch:
+		return true
+	case ProviderResourceItemKindGeminiFile:
+		return true
+	case ProviderResourceItemKindGeminiUpload:
 		return true
 	case ProviderResourceItemKindInteraction:
 		return true
@@ -3660,17 +3681,20 @@ func (e RequestDetailResponseCacheResult) Valid() bool {
 
 // Defines values for RequestOrigin.
 const (
-	RequestOriginCacheEmbedding RequestOrigin = "cache_embedding"
-	RequestOriginCaller         RequestOrigin = "caller"
-	RequestOriginClassifier     RequestOrigin = "classifier"
-	RequestOriginPlayground     RequestOrigin = "playground"
-	RequestOriginProbe          RequestOrigin = "probe"
-	RequestOriginShadow         RequestOrigin = "shadow"
+	RequestOriginBatchSettlement RequestOrigin = "batch_settlement"
+	RequestOriginCacheEmbedding  RequestOrigin = "cache_embedding"
+	RequestOriginCaller          RequestOrigin = "caller"
+	RequestOriginClassifier      RequestOrigin = "classifier"
+	RequestOriginPlayground      RequestOrigin = "playground"
+	RequestOriginProbe           RequestOrigin = "probe"
+	RequestOriginShadow          RequestOrigin = "shadow"
 )
 
 // Valid indicates whether the value is a known member of the RequestOrigin enum.
 func (e RequestOrigin) Valid() bool {
 	switch e {
+	case RequestOriginBatchSettlement:
+		return true
 	case RequestOriginCacheEmbedding:
 		return true
 	case RequestOriginCaller:
@@ -4797,9 +4821,15 @@ func (e ListNotificationDeliveriesParamsStatus) Valid() bool {
 
 // Defines values for ListProviderResourcesParamsKind.
 const (
+	ListProviderResourcesParamsKindAnthropicBatch ListProviderResourcesParamsKind = "anthropic_batch"
+	ListProviderResourcesParamsKindAnthropicFile  ListProviderResourcesParamsKind = "anthropic_file"
 	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
+	ListProviderResourcesParamsKindCloudBatch     ListProviderResourcesParamsKind = "cloud_batch"
 	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
 	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindGeminiBatch    ListProviderResourcesParamsKind = "gemini_batch"
+	ListProviderResourcesParamsKindGeminiFile     ListProviderResourcesParamsKind = "gemini_file"
+	ListProviderResourcesParamsKindGeminiUpload   ListProviderResourcesParamsKind = "gemini_upload"
 	ListProviderResourcesParamsKindInteraction    ListProviderResourcesParamsKind = "interaction"
 	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
 	ListProviderResourcesParamsKindStrictBatch    ListProviderResourcesParamsKind = "strict_batch"
@@ -4810,11 +4840,23 @@ const (
 // Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
 func (e ListProviderResourcesParamsKind) Valid() bool {
 	switch e {
+	case ListProviderResourcesParamsKindAnthropicBatch:
+		return true
+	case ListProviderResourcesParamsKindAnthropicFile:
+		return true
 	case ListProviderResourcesParamsKindBatch:
+		return true
+	case ListProviderResourcesParamsKindCloudBatch:
 		return true
 	case ListProviderResourcesParamsKindContinuation:
 		return true
 	case ListProviderResourcesParamsKindFile:
+		return true
+	case ListProviderResourcesParamsKindGeminiBatch:
+		return true
+	case ListProviderResourcesParamsKindGeminiFile:
+		return true
+	case ListProviderResourcesParamsKindGeminiUpload:
 		return true
 	case ListProviderResourcesParamsKindInteraction:
 		return true
@@ -9495,7 +9537,19 @@ type ProviderConfiguration struct {
 	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
 
 	// AuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
-	AuthMode     ProviderAuthMode          `json:"auth_mode"`
+	AuthMode ProviderAuthMode `json:"auth_mode"`
+
+	// BatchStorage Operator-owned object-storage prefixes used by Vertex batch prediction or Bedrock batch inference. These values are nonsecret.
+	BatchStorage nullable.Nullable[struct {
+		// InputUriPrefix Allowed object-storage prefix for batch input URIs. Vertex uses gs:// and Bedrock uses s3://.
+		InputUriPrefix string `json:"input_uri_prefix"`
+
+		// OutputUriPrefix Allowed object-storage prefix for batch output URIs. The normalized prefix ends with a slash.
+		OutputUriPrefix string `json:"output_uri_prefix"`
+
+		// RoleArn Bedrock batch job IAM role ARN with permission to read input and write output.
+		RoleArn *string `json:"role_arn,omitempty"`
+	}] `json:"batch_storage,omitempty"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
 
@@ -9846,15 +9900,26 @@ type ProviderResourceItem struct {
 	ExpiresAt  nullable.Nullable[time.Time] `json:"expires_at"`
 
 	// Id Gateway-issued local identifier (kind_ plus a dash-free UUID).
-	Id            string                   `json:"id"`
-	Kind          ProviderResourceItemKind `json:"kind"`
-	ProviderId    openapi_types.UUID       `json:"provider_id"`
-	ProviderName  string                   `json:"provider_name"`
-	Route         string                   `json:"route"`
-	State         string                   `json:"state"`
-	UpdatedAt     time.Time                `json:"updated_at"`
-	UpstreamId    string                   `json:"upstream_id"`
-	UpstreamModel string                   `json:"upstream_model"`
+	Id           string                   `json:"id"`
+	Kind         ProviderResourceItemKind `json:"kind"`
+	ProviderId   openapi_types.UUID       `json:"provider_id"`
+	ProviderName string                   `json:"provider_name"`
+	Route        string                   `json:"route"`
+
+	// Settlement Metadata-only batch settlement progress, when the resource has a settlement record.
+	Settlement nullable.Nullable[struct {
+		CloseAfter       time.Time                    `json:"close_after"`
+		ClosedAt         nullable.Nullable[time.Time] `json:"closed_at"`
+		ExpectedResults  nullable.Nullable[int64]     `json:"expected_results"`
+		LastErrorClass   nullable.Nullable[string]    `json:"last_error_class"`
+		SettledResults   int64                        `json:"settled_results"`
+		State            string                       `json:"state"`
+		UncertainResults int64                        `json:"uncertain_results"`
+	}] `json:"settlement,omitempty"`
+	State         string    `json:"state"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	UpstreamId    string    `json:"upstream_id"`
+	UpstreamModel string    `json:"upstream_model"`
 }
 
 // ProviderResourceItemKind defines model for ProviderResourceItem.Kind.
@@ -10358,7 +10423,7 @@ type RequestDetailResponse struct {
 	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
 	Operation            string                                `json:"operation"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
@@ -10437,7 +10502,7 @@ type RequestMetadataGatewayEpochResponse struct {
 	WriterClosed     bool                                  `json:"writer_closed"`
 }
 
-// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key.
 type RequestOrigin string
 
 // RequestSummary defines model for RequestSummary.
@@ -10479,7 +10544,7 @@ type RequestSummary struct {
 	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
 	Operation            string                                `json:"operation"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 

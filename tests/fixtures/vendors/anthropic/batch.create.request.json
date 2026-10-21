@@ -1,0 +1,25 @@
+{
+  "requests": [
+    {
+      "custom_id": "cache-usage",
+      "params": {
+        "model": "claude-test",
+        "max_tokens": 16,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "document",
+                "source": {
+                  "type": "file",
+                  "file_id": "file_01ABCDEF"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

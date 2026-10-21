@@ -1,0 +1,1 @@
+{"custom_id":"request-1","method":"POST","url":"/v1/chat/completions","body":{"model":"mistral-small-latest","messages":[{"role":"user","content":"Hi"}]}}

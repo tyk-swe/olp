@@ -1,0 +1,13 @@
+{
+  "id": "file-upload",
+  "object": "file",
+  "bytes": 128,
+  "created_at": 1792497600,
+  "filename": "requests.jsonl",
+  "purpose": "batch",
+  "sample_type": "batch_request",
+  "source": "upload",
+  "num_lines": 1,
+  "mimetype": "application/jsonl",
+  "signature": null
+}

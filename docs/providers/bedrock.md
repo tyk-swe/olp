@@ -50,6 +50,13 @@ directly.
 
 ## Authentication
 
+The `bedrock-batch-inference` profile is batch-only and leaves Converse
+generation behavior unchanged. Configure nonsecret `batch_storage` prefixes
+(`s3://.../`) and the required IAM `role_arn`; the role must read inputs and
+write outputs. OLP signs control-plane calls for `bedrock` and manifest
+downloads for `s3`, validates output scope, and settles the manifest as one
+aggregate usage result.
+
 | Mode | Credentials |
 | --- | --- |
 | `default_chain` | AWS environment, profile, web identity, ECS, or EC2 providers |

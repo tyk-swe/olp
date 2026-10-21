@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
@@ -91,6 +92,8 @@ type accessHarness struct {
 	Runtime   *runtime.Manager
 	Gateway   *gateway.Server
 	Media     *media.Service
+	AuthKey   *secrets.AuthKey
+	Policy    egress.Policy
 	// UnconfinedDir is the deployment's unconfined plugin directory, which
 	// enables unconfined plugins when set.
 	UnconfinedDir string
@@ -138,8 +141,9 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	authHex := strings.Repeat("cd", 32)
 	auth, _ := secrets.DecodeKey(authHex)
+	digestKey := secrets.NewAuthKey(auth, installation)
 	bootstrap := secrets.Token()
-	server, err := access.New(t.Context(), pool, installation, "https://console.test", secrets.NewAuthKey(auth, installation), ring, bootstrap)
+	server, err := access.New(t.Context(), pool, installation, "https://console.test", digestKey, ring, bootstrap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +154,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	if len(loggers) > 0 {
 		log = loggers[0]
 	}
-	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
+	rt := runtime.NewManager(pool, installation, digestKey, ring, log)
 	// The race detector slows wazero's compiler tenfold, so the harness
 	// interprets plugins, for installing and for signing alike.
 	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
@@ -185,6 +189,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		Admission: media.NewAdmissionState(media.MinCapacityBytes),
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
+	gw.Batches = batches.NewStore(pool)
 	gw.Resolver = resources.NewResolver(pool)
 	// The management API is composed exactly as a process composes it.
 	mux := http.NewServeMux()
@@ -200,7 +205,12 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
-	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw, mediaJobs, unconfinedDir}
+	return &accessHarness{
+		t: t, Pool: pool, DBURL: dbURL, Server: server, HTTP: httpServer,
+		Bootstrap: bootstrap, Ring: ringJSON, AuthHex: authHex, Runtime: rt,
+		Gateway: gw, Media: mediaJobs, AuthKey: digestKey, Policy: policy,
+		UnconfinedDir: unconfinedDir,
+	}
 }
 
 // do performs one management request as the browser and returns the response

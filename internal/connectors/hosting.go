@@ -43,6 +43,7 @@ var hostings = map[string]hostingTraits{
 	"bedrock-converse":         {awsService: "bedrock", eventStream: true},
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true},
 	"bedrock-invoke":           {awsService: "bedrock"},
+	"bedrock-batch-inference":  {awsService: "bedrock"},
 	"sagemaker-openai":         {awsService: "sagemaker", awsBearer: true},
 	"vertex-google":            {vertexPath: "/publishers/google"},
 	"vertex-anthropic":         {vertexPath: "/publishers/anthropic"},

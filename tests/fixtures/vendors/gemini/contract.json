@@ -1,0 +1,80 @@
+{
+  "vendor": "google",
+  "documentation_url": "https://ai.google.dev",
+  "reviewed_at": "2026-10-21",
+  "notes": "Gemini Files uses resumable start headers X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length and X-Goog-Upload-Header-Content-Type; the response returns X-Goog-Upload-URL. Chunk commands use X-Goog-Upload-Offset and X-Goog-Upload-Command. File fields include name, displayName, mimeType, sizeBytes, createTime, updateTime, expirationTime, sha256Hash, uri, downloadUri, state and source.",
+  "endpoints": {},
+  "media_models": {},
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": null,
+    "class": "upstream_client"
+  },
+  "gemini_files": {
+    "basis": "documented",
+    "documentation_links": {
+      "files": "https://ai.google.dev/api/files",
+      "resumable_upload": "https://ai.google.dev/gemini-api/docs/files"
+    },
+    "endpoints": {
+      "upload_start": "https://generativelanguage.googleapis.com/upload/v1beta/files",
+      "upload_session": "https://generativelanguage.googleapis.com/upload/session",
+      "files_list": "https://generativelanguage.googleapis.com/v1beta/files",
+      "files_get": "https://generativelanguage.googleapis.com/v1beta/files/{name}",
+      "files_delete": "https://generativelanguage.googleapis.com/v1beta/files/{name}",
+      "files_download": "https://generativelanguage.googleapis.com/v1beta/files/{name}:download?alt=media"
+    },
+    "start_response": "resumable.start.response.json",
+    "finalize_response": "file.finalize.response.json",
+    "list_response": "files.list.response.json",
+    "error_body": "error.json"
+  },
+  "gemini_batches": {
+    "basis": "documented",
+    "documentation_links": {
+      "batch_api": "https://ai.google.dev/api/batch-api",
+      "batch_guide": "https://ai.google.dev/gemini-api/docs/batch-api"
+    },
+    "endpoints": {
+      "create": "https://generativelanguage.googleapis.com/v1beta/models/{model}:batchGenerateContent",
+      "list": "https://generativelanguage.googleapis.com/v1beta/batches",
+      "get": "https://generativelanguage.googleapis.com/v1beta/batches/{name}",
+      "cancel": "https://generativelanguage.googleapis.com/v1beta/batches/{name}:cancel",
+      "delete": "https://generativelanguage.googleapis.com/v1beta/batches/{name}",
+      "results_download": "https://generativelanguage.googleapis.com/download/v1beta/{responsesFile}:download?alt=media"
+    },
+    "fields": [
+      "batch.displayName",
+      "batch.inputConfig.requests.requests[].request",
+      "batch.inputConfig.requests.requests[].metadata.key",
+      "batch.inputConfig.fileName",
+      "name",
+      "metadata.state",
+      "metadata.model",
+      "metadata.inputConfig.fileName",
+      "metadata.batchStats.requestCount",
+      "metadata.output.inlinedResponses.inlinedResponses[]",
+      "metadata.output.responsesFile",
+      "response.usageMetadata.promptTokenCount",
+      "response.usageMetadata.candidatesTokenCount",
+      "response.usageMetadata.cachedContentTokenCount",
+      "response.usageMetadata.thoughtsTokenCount",
+      "key",
+      "error"
+    ],
+    "fixtures": [
+      "batch.create.inline.request.json",
+      "batch.create.file.request.json",
+      "batch.operation.response.json",
+      "batch.list.response.json",
+      "batch.running.json",
+      "batch.succeeded.inline.json",
+      "batch.succeeded.file.json",
+      "batch.results.jsonl"
+    ]
+  }
+}

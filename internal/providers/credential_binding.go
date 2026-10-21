@@ -10,7 +10,7 @@ import (
 // credentialBoundary includes inputs that can change where or how a secret
 // is sent. Credential IDs are excluded so rotation preserves the boundary.
 func (c *Configuration) credentialBoundary() string {
-	encoded, _ := json.Marshal([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject,
+	encoded, _ := json.Marshal([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.BatchStorage,
 		c.CredentialSource, c.ProfileID, c.ProfileRevision, c.Options.CredentialHeaders,
 		c.credentialNetwork(), c.Options.PluginOptions})
 	return string(encoded)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -77,19 +78,23 @@ func (s *Server) validateBatchInput(part *media.Part, model string, provider *ro
 			return "", 0, resources.ErrContract
 		}
 		path, ok := get(doc.Root(), "url")
-		if !ok || path != "/v1/chat/completions" && path != "/v1/responses" && path != "/v1/embeddings" || endpoint != "" && endpoint != path {
+		classificationPath := path
+		if provider.Kind == "azure_openai" {
+			classificationPath = wire.CanonicalBatchEndpoint(path)
+		}
+		if !ok || classificationPath != "/v1/chat/completions" && classificationPath != "/v1/responses" && classificationPath != "/v1/embeddings" || endpoint != "" && endpoint != path {
 			return "", 0, resources.ErrContract
 		}
 		operation := "generation"
-		if path == "/v1/embeddings" {
+		if classificationPath == "/v1/embeddings" {
 			operation = "embeddings"
 		}
 		profile, err := provider.Connector().Profile()
 		if err != nil || !slices.Contains(route.Operations, operation) || !provider.Supports(model, operation, "openai", "unary") ||
 			!provider.Connector().Supports(operation, "openai", "unary") ||
-			path == "/v1/chat/completions" && profile.Dialect != "openai-chat" ||
-			path == "/v1/responses" && profile.Dialect != "openai-responses" ||
-			path == "/v1/embeddings" && profile.OperationDialect("embeddings") != "openai-embeddings" {
+			classificationPath == "/v1/chat/completions" && profile.Dialect != "openai-chat" ||
+			classificationPath == "/v1/responses" && profile.Dialect != "openai-responses" ||
+			classificationPath == "/v1/embeddings" && profile.OperationDialect("embeddings") != "openai-embeddings" {
 			return "", 0, resources.ErrContract
 		}
 		endpoint = path

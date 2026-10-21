@@ -15,8 +15,88 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/resources"
 )
+
+func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"batch", "generation"},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	status, uploaded := h.uploadTestFile(slug, key, nativeBatchInput("recovered"))
+	if status != http.StatusOK {
+		t.Fatalf("strict upload: %d %v", status, uploaded)
+	}
+	fixture.batchCreateStatus.Store(http.StatusBadGateway)
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key,
+		bytes.NewReader(batchCreateBody(uploaded["id"].(string))), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) {
+		t.Fatalf("strict lost response: %d %s", status, raw)
+	}
+	authority, err := h.Runtime.Authenticate(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resourceID uuid.UUID
+	if err := h.Pool.QueryRow(t.Context(), `SELECT resource_id FROM olp.batch_settlements WHERE api_key_id=$1 AND state='submission_unknown'`, authority.ID).Scan(&resourceID); err != nil {
+		t.Fatal(err)
+	}
+	var expected int64
+	if err := h.Pool.QueryRow(t.Context(), `SELECT expected_results FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&expected); err != nil || expected != 1 {
+		t.Fatalf("strict submission lost its validated file count: %d err=%v", expected, err)
+	}
+	apiKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+authority.ID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+authority.ID+"/revoke", nil,
+		withMatch(apiKey, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	setBatchFixtureResults(t, fixture, "batch-up-1", "validating", 0, "", "", "", "")
+	poolConfig, err := database.Configuration(h.DBURL, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	singlePool, err := database.Open(t.Context(), poolConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer singlePool.Close()
+	worker := batchWorker(h, nil)
+	worker.Pool, worker.Store = singlePool, batches.NewStore(singlePool)
+	worker.Resources = resources.NewEncrypted(singlePool, h.Media.Installation, h.Media.Keys)
+	recoveryCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stop()
+	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT expected_results FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&expected); err != nil || expected != 1 {
+		t.Fatalf("provisional zero overwrote validated input count: %d err=%v", expected, err)
+	}
+	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "recovered-output", "", batchChatLine("recovered", "ok"), "")
+	fixture.mu.Lock()
+	delete(fixture.batches["batch-up-1"], "request_counts")
+	fixture.mu.Unlock()
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, resourceID, "settled", 1, 0)
+	localID := resources.LocalID(resources.KindStrictBatch, resourceID)
+	if _, _, err := h.Gateway.Resources.ReadDurableContract(t.Context(), resources.KindStrictBatch, authority.ID, localID); err == nil {
+		t.Fatal("revoked caller retained strict batch access")
+	}
+}
 
 func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	fixture := newOpenAIFixture(t, "")
@@ -39,8 +119,8 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	key := stateKey(t, h, owner, slug, true)
 	other := stateKey(t, h, owner, slug, true)
 	h.refresh()
-	input := `{"custom_id":"first","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n" +
-		`{"custom_id":"second","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"beta"}}` + "\n"
+	input := `{"custom_id":"first","method":"POST","url":"/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n" +
+		`{"custom_id":"second","method":"POST","url":"/embeddings","body":{"model":"` + vendorModel + `","input":"beta"}}` + "\n"
 	before := fixture.dials.Load()
 	if status, _ := h.uploadTestFile(slug, plain, input); status != http.StatusForbidden || fixture.dials.Load() != before {
 		t.Fatal("strict durable upload without state authority reached the provider")
@@ -48,7 +128,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	for _, invalid := range []string{
 		strings.Replace(input, `"custom_id":"second"`, `"custom_id":"first"`, 1),
 		strings.Replace(input, `"model":"`+vendorModel+`"`, `"model":"other-model"`, 1),
-		strings.Replace(input, `"url":"/v1/embeddings"`, `"url":"/v1/unsupported"`, 1),
+		strings.Replace(input, `"url":"/embeddings"`, `"url":"/v1/unsupported"`, 1),
 	} {
 		status, _ := h.uploadTestFile(slug, key, invalid)
 		if status < 400 || fixture.dials.Load() != before {
@@ -82,11 +162,11 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 		t.Fatal("strict file source/result leaked into ordinary metadata or ciphertext")
 	}
 
-	batchSource := `{"completion_window":"24h", "custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"` + fileID + `","endpoint":"/v1/embeddings"}`
+	batchSource := `{"completion_window":"24h", "custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"` + fileID + `","endpoint":"/embeddings"}`
 	before = fixture.dials.Load()
 	for _, invalid := range []string{
-		`{"input_file_id":"` + fileID + `","input_file_id":"` + fileID + `","endpoint":"/v1/embeddings","completion_window":"24h"}`,
-		`{"input_file_id":"` + fileID + `","endpoint":"/v1/embeddings","completion_window":"24h","output_file_id":"caller"}`,
+		`{"input_file_id":"` + fileID + `","input_file_id":"` + fileID + `","endpoint":"/embeddings","completion_window":"24h"}`,
+		`{"input_file_id":"` + fileID + `","endpoint":"/embeddings","completion_window":"24h","output_file_id":"caller"}`,
 		`{"input_file_id":"` + fileID + `","endpoint":"/v1/unsupported","completion_window":"24h"}`,
 	} {
 		status, _, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, strings.NewReader(invalid), map[string]string{"Content-Type": "application/json"})
@@ -102,7 +182,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if !ok || !strings.HasPrefix(batchID, "strict_batch_") || bytes.Contains(raw, []byte("file-up-1")) {
 		t.Fatalf("batch identity leaked upstream: %s", raw)
 	}
-	wantBound := `{"completion_window":"24h","custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"file-up-1","endpoint":"/v1/embeddings","model":"` + vendorModel + `"}`
+	wantBound := `{"completion_window":"24h","custom_native":{"large":9007199254740993,"zero":-0},"input_file_id":"file-up-1","endpoint":"/embeddings","model":"` + vendorModel + `"}`
 	if got := fixture.lastBatchRaw.Load().(string); got != wantBound {
 		t.Fatalf("source/overlay changed native JSON:\n got %s\nwant %s", got, wantBound)
 	}

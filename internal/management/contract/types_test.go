@@ -34,7 +34,7 @@ func roundTrip[T any](t *testing.T, raw string) T {
 // by default. Management handlers must explicitly enforce additionalProperties:false.
 
 func TestRequestOriginsMatchUsageEvents(t *testing.T) {
-	for _, origin := range []string{usage.OriginCaller, usage.OriginShadow, usage.OriginClassifier, usage.OriginCacheEmbedding, usage.OriginProbe, usage.OriginPlayground} {
+	for _, origin := range []string{usage.OriginCaller, usage.OriginShadow, usage.OriginClassifier, usage.OriginCacheEmbedding, usage.OriginProbe, usage.OriginPlayground, usage.OriginBatchSettlement} {
 		t.Run(origin, func(t *testing.T) {
 			value := roundTrip[contract.RequestOrigin](t, `"`+origin+`"`)
 			if !value.Valid() {

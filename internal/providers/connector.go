@@ -123,6 +123,9 @@ func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []by
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp/probe")
+	if cfg.Kind == KindAnthropic && req.URL.Query().Get("beta") == "true" {
+		req.Header.Set("Anthropic-Beta", "files-api-2025-04-14")
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -551,8 +554,69 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 }
 
 func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
-	for _, resource := range []string{"files", "batches"} {
-		path, err := cfg.transport().ResourceURL("", resource, url.Values{"limit": []string{"1"}})
+	if cfg.ProfileID == "vertex-batch-prediction" {
+		endpoint, err := cfg.transport().VertexBatchJobsURL("", "")
+		if err != nil {
+			return err
+		}
+		status, body, err := s.call(ctx, cfg, credential, http.MethodGet, endpoint+"?pageSize=1", nil)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return statusError(cfg, status, body)
+		}
+		if !validBatchListing(body, "batchPredictionJobs", true) {
+			return &probeError{Code: "provider_protocol_error", Detail: "Vertex returned a malformed batch job list."}
+		}
+		return nil
+	}
+	if cfg.ProfileID == "bedrock-batch-inference" {
+		endpoint, err := cfg.transport().BedrockBatchJobsURL("", "")
+		if err != nil {
+			return err
+		}
+		status, body, err := s.call(ctx, cfg, credential, http.MethodGet, endpoint+"?maxResults=1", nil)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return statusError(cfg, status, body)
+		}
+		var listing struct {
+			Jobs []json.RawMessage `json:"invocationJobSummaries"`
+		}
+		if json.Unmarshal(body, &listing) != nil || listing.Jobs == nil {
+			return &probeError{Code: "provider_protocol_error", Detail: "Bedrock returned a malformed batch job list."}
+		}
+		return nil
+	}
+	type listingProbe struct {
+		resource, array string
+		query           url.Values
+		optional        bool
+	}
+	probes := []listingProbe{
+		{resource: "files", array: "data", query: url.Values{"limit": {"1"}}},
+		{resource: "batches", array: "data", query: url.Values{"limit": {"1"}}},
+	}
+	switch {
+	case cfg.Kind == KindAnthropic:
+		probes[0].query.Set("beta", "true")
+		probes[1].resource = "messages/batches"
+	case cfg.Kind == KindGemini:
+		probes = []listingProbe{
+			{resource: "files", array: "files", query: url.Values{"pageSize": {"1"}}, optional: true},
+			{resource: "batches", array: "operations", query: url.Values{"pageSize": {"1"}}, optional: true},
+		}
+	case cfg.transport().FilesBatchesAdapter() == "mistral":
+		probes[0].query = nil
+		probes[1].resource, probes[1].query = "batch/jobs", url.Values{"page_size": {"1"}}
+	case cfg.transport().FilesBatchesAdapter() == "together":
+		probes = []listingProbe{{resource: "batches"}}
+	}
+	for _, probe := range probes {
+		path, err := cfg.transport().ResourceURL("", probe.resource, probe.query)
 		if err != nil {
 			return err
 		}
@@ -563,14 +627,28 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 		if status != http.StatusOK {
 			return statusError(cfg, status, data)
 		}
-		var list struct {
-			Data []json.RawMessage `json:"data"`
-		}
-		if json.Unmarshal(data, &list) != nil || list.Data == nil {
+		if !validBatchListing(data, probe.array, probe.optional) {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the batch listing contract."}
 		}
 	}
 	return nil
+}
+
+func validBatchListing(data []byte, field string, optional bool) bool {
+	array := json.RawMessage(data)
+	if field != "" {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(data, &object) != nil || object == nil {
+			return false
+		}
+		var present bool
+		array, present = object[field]
+		if !present && optional {
+			return true // Protobuf JSON omits empty repeated fields.
+		}
+	}
+	var items []json.RawMessage
+	return json.Unmarshal(array, &items) == nil && items != nil
 }
 
 func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {

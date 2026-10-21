@@ -1,0 +1,12 @@
+{
+  "id": "batch-job",
+  "status": "QUEUED",
+  "endpoint": "/v1/chat/completions",
+  "input_files": [
+    "file-input"
+  ],
+  "total_requests": "1",
+  "succeeded_requests": "0",
+  "failed_requests": "0",
+  "created_at": 1792497600
+}

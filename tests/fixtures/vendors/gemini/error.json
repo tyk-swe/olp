@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 400,
+    "message": "Invalid upload offset",
+    "status": "INVALID_ARGUMENT"
+  }
+}

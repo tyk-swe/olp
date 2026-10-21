@@ -60,19 +60,20 @@ type Options struct {
 // ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
 // as the profile revision; Pin resolves that plugin profile.
 type Configuration struct {
-	CredentialSource string   `json:"credential_source,omitempty"`
-	ProviderID       string   `json:"-"`
-	ProfileID        string   `json:"profile_id,omitempty"`
-	ProfileRevision  string   `json:"profile_revision,omitempty"`
-	ProbeModels      []string `json:"-"`
-	Kind             string   `json:"kind"`
-	AuthMode         string   `json:"auth_mode"`
-	Endpoint         *string  `json:"endpoint"`
-	CloudRegion      *string  `json:"cloud_region"`
-	CloudProject     *string  `json:"cloud_project"`
-	Deployment       *string  `json:"deployment"`
-	APIVersion       *string  `json:"api_version"`
-	Options          Options  `json:"options"`
+	CredentialSource string                   `json:"credential_source,omitempty"`
+	ProviderID       string                   `json:"-"`
+	ProfileID        string                   `json:"profile_id,omitempty"`
+	ProfileRevision  string                   `json:"profile_revision,omitempty"`
+	ProbeModels      []string                 `json:"-"`
+	Kind             string                   `json:"kind"`
+	AuthMode         string                   `json:"auth_mode"`
+	Endpoint         *string                  `json:"endpoint"`
+	CloudRegion      *string                  `json:"cloud_region"`
+	CloudProject     *string                  `json:"cloud_project"`
+	BatchStorage     *connectors.BatchStorage `json:"batch_storage,omitempty"`
+	Deployment       *string                  `json:"deployment"`
+	APIVersion       *string                  `json:"api_version"`
+	Options          Options                  `json:"options"`
 	plugin           *connectors.PluginProfile
 }
 
@@ -207,6 +208,11 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if c.Endpoint == nil || *c.Endpoint == "" {
 		return access.Invalid("configuration.endpoint", "Provide the base URL of the API.")
 	}
+	batchStorage, err := connectors.NormalizeBatchStorage(c.Kind, c.ProfileID, c.BatchStorage)
+	if err != nil {
+		return access.Invalid("configuration.batch_storage", err.Error())
+	}
+	c.BatchStorage = batchStorage
 	if _, err := policy.ValidateEndpoint(*c.Endpoint); err != nil {
 		return access.Invalid("configuration.endpoint", err.Error())
 	}
@@ -346,6 +352,9 @@ func (c *Configuration) transportFingerprint() string {
 	if c.Options.Network != nil {
 		parts = append(parts, c.Options.Network)
 	}
+	if c.BatchStorage != nil {
+		parts = append(parts, c.BatchStorage)
+	}
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
@@ -373,5 +382,5 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), BatchStorage: c.BatchStorage, Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }

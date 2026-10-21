@@ -1,0 +1,1 @@
+{"name":"projects/p/locations/us-central1/batchPredictionJobs/job123","state":"JOB_STATE_RUNNING","completionStats":{"successfulCount":"1","failedCount":"0","incompleteCount":"1"},"outputInfo":{"gcsOutputDirectory":"gs://batch-data/output/job123/"}}

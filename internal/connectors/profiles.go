@@ -78,6 +78,8 @@ var profileRegistry = []Profile{
 	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
 	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
 	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
 	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
@@ -119,10 +121,16 @@ func init() {
 		case "anthropic":
 			p.SemanticHeaders = []string{"Anthropic-Version", "Anthropic-Beta"}
 			p.Documentation = "https://platform.claude.com/docs/en/api/versioning"
+			if p.Hosting == "direct-anthropic" {
+				p.Operations = append(p.Operations, "batch")
+			}
 		case "gemini", "vertex_ai":
 			p.Documentation = "https://ai.google.dev/api/generate-content"
 			p.QuerySettings = []string{"$xgafv"}
 			p.Operations = []string{"generation", "token_count", "embeddings"}
+			if p.Kind == "gemini" && p.Hosting == "direct-gemini" {
+				p.Operations = append(p.Operations, "batch")
+			}
 			if p.Kind == "vertex_ai" {
 				p.Authentication = []string{"adc", "service_account"}
 				p.Operations = append(p.Operations, "image_generation")
@@ -153,6 +161,16 @@ func init() {
 				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"
 			}
 		}
+		switch p.ID {
+		case "vertex-batch-prediction":
+			p.Authentication = []string{"adc", "service_account"}
+			p.Operations = []string{"batch"}
+			p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/batch-prediction"
+		case "bedrock-batch-inference":
+			p.Authentication = []string{"static", "default_chain"}
+			p.Operations = []string{"batch"}
+			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html"
+		}
 		// Interactions and Live have independent request and event grammars.
 		// Their profile tuples cannot fall through GenerateContent's codec.
 		switch p.Dialect {
@@ -175,6 +193,7 @@ func init() {
 	}
 	registerUnaryProfiles()
 	registerCompletionProfiles()
+	registerFilesBatchesProfiles()
 }
 
 // Profiles returns detached catalogue metadata; registering a new hosting profile
@@ -343,6 +362,9 @@ func (c Config) ValidateProfile() error {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
 	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
+		p.ID == "groq-files-batches" && c.VendorID != "groq" ||
+		p.ID == "together-files-batches" && c.VendorID != "together" ||
+		p.ID == "mistral-files-batches" && c.VendorID != "mistral" ||
 		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
 		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
 		p.Dialect == "exa-search" && c.VendorID != "exa" ||
@@ -476,6 +498,24 @@ func generationFamily(dialect string) (wire.Format, bool) {
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {
+	if operation == "batch" {
+		if surface == "native" {
+			return mode == "unary" && (c.Kind == "vertex_ai" && c.ProfileID == "vertex-batch-prediction" && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||
+				c.Kind == "bedrock" && c.ProfileID == "bedrock-batch-inference" && c.ProfileRevision == ProfileRevision && c.Hosting() == "bedrock-batch-inference")
+		}
+		if surface == "openai" {
+			return c.SupportsFilesBatches() && mode == "unary"
+		}
+		switch surface {
+		case "anthropic":
+			return c.Kind == "anthropic" && mode == "unary" &&
+				(c.ProfileID == "" || c.ProfileID == "anthropic-messages" && c.Hosting() == "direct-anthropic")
+		case "gemini":
+			return c.Kind == "gemini" && mode == "unary" &&
+				(c.ProfileID == "" || c.ProfileID == "gemini-generation" && c.Hosting() == "direct-gemini")
+		}
+		return false
+	}
 	if c.Kind == KindPlugin {
 		p, err := c.profile()
 		return err == nil && slices.Contains(p.Operations, operation) && Supports(c.Kind, c.VendorID, operation, surface, mode)
@@ -735,10 +775,8 @@ func RegisterProfile(p Profile) error {
 		if existing.ID == p.ID && existing.Revision == p.Revision {
 			return errors.New("profile revision already registered")
 		}
-		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
-			template = existing
-		}
 	}
+	template = profileTemplateForRegistration(p)
 	if template == nil || len(profileRegistry) >= 4096 {
 		return errors.New("profile components do not form an existing registered composition")
 	}
@@ -769,6 +807,25 @@ func RegisterProfile(p Profile) error {
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil
+}
+
+func profileTemplateForRegistration(p Profile) *Profile {
+	var template *Profile
+	for i := range profileRegistry {
+		existing := &profileRegistry[i]
+		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
+			if vendorBatchProfile(*existing) {
+				continue
+			}
+			template = existing
+		}
+	}
+	return template
+}
+
+func vendorBatchProfile(profile Profile) bool {
+	return profile.Kind == "openai_compatible" && slices.Contains(profile.Operations, "batch") &&
+		strings.HasSuffix(profile.ID, "-files-batches")
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {

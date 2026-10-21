@@ -124,8 +124,9 @@ or `all`; configured capability flags do not establish live worker health.
 | Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
 | FOCUS dataset export | 60-second pass; PostgreSQL leases, no Valkey; at most four due days per sink |
 | Billing import | 60-second scan; each due import runs hourly after success, five-minute geometric backoff on failure |
+| Batch settlement | 5-second durable claim scan for submission reconciliation, polling and result settlement |
 
-Media/grant/consumer/epoch checkpoints stale at 20 seconds; maintenance/cost/
+Media/grant/consumer/epoch/batch settlement checkpoints stale at 20 seconds; maintenance/cost/
 notification/focus-export/billing-import checkpoints at 180. Follower skips do not prove leader success.
 Healthy async status requires expected current tasks and zero pending/lag;
 backlogged is not lost, and missing evidence is unknown. Unsupported integer
@@ -568,3 +569,37 @@ admission and accounting on their original Valkey. Monitor
 `olp_cache_requests_total`, `olp_cache_bytes_stored_total` and
 `olp_cache_errors_total`. Route/project purges invalidate a namespace without
 scanning content. [Configuration, controls and accounting](caching.md).
+
+## Batch settlement recovery
+
+The `batch_settlement` worker claims due work on its 5-second pass. Normal
+transitions are `submitting → active → settling → settled`; ambiguous creates
+remain `submission_unknown` until provider-specific reconciliation proves one
+job. Conflicting evidence closes as `conflict`; missing or incomplete result
+evidence closes as `uncertain`, never as zero cost. Monitor its health task,
+pending count, oldest age and checkpoint freshness.
+
+- For `submission_unknown`, inspect the stored submission cursor and the
+  provider control plane. Vertex matches the preallocated submission label;
+  Bedrock reissues the original body with the same client request token. Do not
+  submit a second job manually.
+- For `conflict`, preserve the metadata and compare the provider identifier and
+  reconciliation evidence. Escalate rather than attaching a guessed job.
+- Unmapped `conflict` and `uncertain` submission intents retain duplicate-submit
+  protection until their normal retention cutoff; they remain visible in the
+  resource inventory.
+- Vertex checkpoints include completed-shard bytes so the result limit applies
+  across shards and restarts. A legacy checkpoint without this proof enters
+  `conflict`; review it rather than guessing the remaining allowance.
+- For `uncertain`, inspect `last_error_class`, result gaps and configured
+  storage scope. Restore read access or provider output evidence and use the
+  reviewed recovery process; never rewrite a missing result as zero usage.
+- Retain batch settlement rows and result facts under the configured usage
+  retention. Do not delete individual rows to unblock a worker.
+
+Allow provider egress to the Gemini upload host `generativelanguage.googleapis.com`,
+`{location}-aiplatform.googleapis.com`, `storage.googleapis.com`,
+`bedrock.{region}.amazonaws.com` and
+`{bucket}.s3.{region}.amazonaws.com` (or `s3.{region}.amazonaws.com` for dotted
+bucket names). Keep configured storage objects available
+to the reader identity until settlement closes.
