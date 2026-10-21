@@ -297,9 +297,6 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 			return w.failOrClose(ctx, settlement, "submission_adoption_unavailable")
 		}
 		settlement.UpstreamID = &snapshot.ID
-		if snapshot.Expected != nil {
-			settlement.ExpectedResults = snapshot.Expected
-		}
 		settlement.State = StateActive
 		return w.reconcileActive(ctx, settlement, target, &snapshot)
 	default:
@@ -328,7 +325,9 @@ func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, tar
 			return w.failOrClose(ctx, settlement, "batch_poll_unavailable")
 		}
 	}
-	if snapshot.Expected != nil && (settlement.ExpectedResults == nil || *settlement.ExpectedResults != *snapshot.Expected) {
+	// Nonterminal zero counts are provisional, not evidence of an empty input.
+	if snapshot.Expected != nil && (snapshot.Terminal || *snapshot.Expected > 0) &&
+		(settlement.ExpectedResults == nil || *settlement.ExpectedResults != *snapshot.Expected) {
 		if err = w.Store.SetExpected(ctx, settlement, snapshot.Expected); err != nil {
 			return w.failOrClose(ctx, settlement, "batch_checkpoint_unavailable")
 		}
@@ -517,6 +516,9 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		return err
 	}
 	expected := snapshot.Expected
+	if expected != nil && *expected == 0 && !snapshot.Terminal {
+		expected = nil
+	}
 	if settlement.ExpectedResults != nil {
 		expected = settlement.ExpectedResults
 	}

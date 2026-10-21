@@ -415,6 +415,24 @@ func TestBatchSubmissionPinsMissingPriceAndCurrentDiscount(t *testing.T) {
 	}
 }
 
+func TestBatchSubmissionRefusesUnavailablePricingInputs(t *testing.T) {
+	h := newHarness(t, Config{})
+	now := time.Now().UTC()
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	target := route.Targets[0]
+	provider := h.rt.release.Snapshot.Providers[target.ProviderID]
+	p := &pin{target: target, provider: provider, slot: provider.Slots[0], model: target.ProviderModel,
+		attempt: routing.Attempt{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel}}
+	for _, inputs := range []*usage.RoutingInputs{nil, {RefreshedAt: now.Add(-2 * usage.PerformanceMaxAge)}} {
+		h.rt.inputs = inputs
+		x := &call{request: request{id: uuid.NewString(), minted: true, release: h.rt.release}, keyID: h.keyID, family: wire.Batch, mode: "unary"}
+		x.route = &route
+		if event, err := h.gateway.batchSettlementTemplate(x, p, "openai", "generation", now); err == nil || event != nil {
+			t.Fatalf("unavailable pricing cache became a pinned absence: event=%+v err=%v", event, err)
+		}
+	}
+}
+
 func TestNativeBatchInputBindsOneModelWithoutLosingNativeFields(t *testing.T) {
 	p := &pin{provider: routing.Provider{Kind: "openai", VendorID: "openai"}, model: "provider-model"}
 	route := &routing.Route{Slug: "route-model"}

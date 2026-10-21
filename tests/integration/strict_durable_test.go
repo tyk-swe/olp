@@ -54,10 +54,7 @@ func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
 	apiKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+authority.ID, nil, nil, http.StatusOK)
 	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+authority.ID+"/revoke", nil,
 		withMatch(apiKey, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
-	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "recovered-output", "", batchChatLine("recovered", "ok"), "")
-	fixture.mu.Lock()
-	delete(fixture.batches["batch-up-1"], "request_counts")
-	fixture.mu.Unlock()
+	setBatchFixtureResults(t, fixture, "batch-up-1", "validating", 0, "", "", "", "")
 	poolConfig, err := database.Configuration(h.DBURL, 1, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +69,25 @@ func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
 	worker.Resources = resources.NewEncrypted(singlePool, h.Media.Installation, h.Media.Keys)
 	recoveryCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stop()
+	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT expected_results FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&expected); err != nil || expected != 1 {
+		t.Fatalf("provisional zero overwrote validated input count: %d err=%v", expected, err)
+	}
+	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "recovered-output", "", batchChatLine("recovered", "ok"), "")
+	fixture.mu.Lock()
+	delete(fixture.batches["batch-up-1"], "request_counts")
+	fixture.mu.Unlock()
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, resourceID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
 		t.Fatal(err)
 	}

@@ -222,9 +222,19 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 	if x == nil || x.request.release == nil || x.route == nil || p == nil {
 		return nil, errors.New("batch accounting identity is incomplete")
 	}
+	if s.Runtime == nil {
+		return nil, errors.New("batch pricing inputs are unavailable")
+	}
+	inputs := s.Runtime.RoutingInputs()
+	if inputs == nil || now.Sub(inputs.RefreshedAt) > usage.PerformanceMaxAge {
+		return nil, errors.New("batch pricing inputs are unavailable or stale")
+	}
 	attemptCount, attemptVendor, routingInputs := x.attemptCount, x.attemptVendor, x.routingInputs
 	fact := s.newFact(x, p.attempt, p.slot, 1, &p.provider)
 	x.attemptCount, x.attemptVendor, x.routingInputs = attemptCount, attemptVendor, routingInputs
+	pricingCall := *x
+	pricingCall.routingInputs = inputs
+	fact.cardRev = pricingCall.attemptCardRevision(p.provider.ID, now)
 	fact.StartedAt = now
 	fact.Status = http.StatusOK
 	fact.Class = classSuccess
@@ -239,13 +249,8 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 	if p.hold != nil {
 		fact.Budgets = append([]string(nil), p.hold.budgets...)
 	}
-	if inputs := s.Runtime.RoutingInputs(); inputs != nil {
-		fact.Price = inputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
-		fact.Discount = inputs.Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, now)
-	} else {
-		fact.Price = nil
-		fact.Discount = nil
-	}
+	fact.Price = inputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
+	fact.Discount = inputs.Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, now)
 	fact.PricingPinned = true
 	fact.CardPinned = true
 	fact.CardRevisionID = nil
