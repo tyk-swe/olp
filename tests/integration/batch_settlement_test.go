@@ -232,6 +232,8 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatalf("ambiguous input upload: %d %v", ambiguousUploadStatus, ambiguousUpload)
 	}
 	ambiguousSource := batchCreateBody(ambiguousUpload["id"].(string))
+	knownID := createBatchForSettlement(t, h, ambiguousKey, ambiguousRoute, ambiguousUpload["id"].(string))
+	setBatchFixtureResults(t, fixture, batchUpstreamID(t, h, knownID), "completed", 1, "known-reuse-output", "", batchChatLine("ambiguous-input", "ok"), "")
 	hold := make(chan struct{})
 	read := make(chan struct{})
 	fixture.batchCreateHold, fixture.batchCreateRead = hold, read

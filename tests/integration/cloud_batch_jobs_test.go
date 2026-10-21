@@ -236,7 +236,11 @@ func TestCloudBatchCreateRefreshCancelFixturesCompile(t *testing.T) {
 			t.Fatalf("%s settlement counts=%v err=%v", tc.profile, counts, err)
 		}
 		var facts int
-		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.attempt_usage_facts f JOIN olp.batch_settlement_results r ON r.event_id=f.event_id WHERE r.resource_id=$1`, cloudBatchUUID(t, id)).Scan(&facts); err != nil || facts != 1 {
+		expectedFacts := 1
+		if tc.kind == "vertex_ai" {
+			expectedFacts = 2
+		}
+		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.attempt_usage_facts f JOIN olp.batch_settlement_results r ON r.event_id=f.event_id WHERE r.resource_id=$1`, cloudBatchUUID(t, id)).Scan(&facts); err != nil || facts != expectedFacts {
 			t.Fatalf("%s aggregate/line fact count=%d err=%v", tc.profile, facts, err)
 		}
 	}

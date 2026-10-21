@@ -249,6 +249,18 @@ func (w *Worker) reconcileClaimed(ctx context.Context, settlement Settlement) re
 
 func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement, target *PinnedTarget) reconcileOutcome {
 	reader := w.Readers[settlement.Adapter]
+	target.KnownBatch = func(ctx context.Context, upstreamID string) (bool, error) {
+		_, err := w.Resources.GetByUpstreamIncludingDeleted(ctx, resources.NativeIdentity{
+			Kind: settlement.Kind, APIKeyID: settlement.APIKeyID, RouteSlug: settlement.RouteSlug,
+			ProviderID: settlement.ProviderID, ProviderRevisionID: settlement.ProviderRevisionID,
+			RouteRevisionID: settlement.RouteRevisionID, TargetID: settlement.TargetID,
+			SlotID: settlement.SlotID, CredentialID: settlement.CredentialID, UpstreamID: upstreamID,
+		})
+		if errors.Is(err, resources.ErrNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	}
 	inputFileID, _, endpoint, err := submissionFiles(settlement.Cursor)
 	if settlement.Adapter == "vertex" || settlement.Adapter == "bedrock" {
 		inputFileID, err = "cloud-submission", nil
@@ -467,7 +479,7 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		expires := settlement.CreatedAt.Add(resources.DurableLifetime - time.Second)
 		resource.ExpiresAt = &expires
 		resource.Metadata, _ = json.Marshal(map[string]string{"upstream_model": resourceModel(settlement.Template)})
-		_, err = w.Resources.PutDurableContractTx(ctx, tx, resource, payload)
+		_, err = w.Resources.PutRecoveredBatchContractTx(ctx, tx, resource, payload, *settlement.ClaimID)
 	} else {
 		_, err = w.Resources.PutTx(ctx, tx, resource)
 	}

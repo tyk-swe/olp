@@ -39,6 +39,15 @@ type PinnedTarget struct {
 	Model  string
 	Secret []byte
 	Client *http.Client
+	// KnownBatch excludes provider jobs already represented in this owner pin.
+	KnownBatch func(context.Context, string) (bool, error)
+}
+
+func (t *PinnedTarget) knownBatch(ctx context.Context, id string) (bool, error) {
+	if t.KnownBatch == nil {
+		return false, nil
+	}
+	return t.KnownBatch(ctx, id)
 }
 
 type BatchSnapshot struct {
@@ -124,7 +133,15 @@ func (r *OpenAIReader) Reconcile(ctx context.Context, settlement Settlement, tar
 			}
 			candidates = append(candidates, snapshot)
 		}
-		matches = append(matches, MatchSubmission(candidates, inputFileID, settlement.CreatedAt.Add(-5*time.Minute))...)
+		for _, candidate := range MatchSubmission(candidates, inputFileID, settlement.CreatedAt.Add(-5*time.Minute)) {
+			known, err := target.knownBatch(ctx, candidate.ID)
+			if err != nil {
+				return Reconciliation{}, err
+			}
+			if !known {
+				matches = append(matches, candidate)
+			}
+		}
 		if len(matches) > 1 {
 			return Reconciliation{Matches: matches}, nil
 		}

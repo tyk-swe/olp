@@ -67,6 +67,13 @@ func (r *managedReader) Reconcile(ctx context.Context, settlement Settlement, ta
 		}
 		for _, item := range items {
 			if item.InputFileID == inputFileID && !item.CreatedAt.Before(settlement.CreatedAt.Add(-5*time.Minute)) {
+				known, err := target.knownBatch(ctx, item.ID)
+				if err != nil {
+					return Reconciliation{}, err
+				}
+				if known {
+					continue
+				}
 				matches = append(matches, item)
 				if len(matches) > 1 {
 					return Reconciliation{Matches: matches}, nil

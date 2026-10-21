@@ -461,6 +461,13 @@ func (r *GeminiReader) Reconcile(ctx context.Context, settlement Settlement, tar
 			}
 			if snapshot.InputFileID == inputFileName && !snapshot.CreatedAt.IsZero() &&
 				!snapshot.CreatedAt.Before(settlement.CreatedAt.Add(-5*time.Minute)) {
+				known, err := target.knownBatch(ctx, snapshot.ID)
+				if err != nil {
+					return Reconciliation{}, err
+				}
+				if known {
+					continue
+				}
 				matches = append(matches, snapshot)
 				if len(matches) > 1 {
 					return Reconciliation{Matches: matches}, nil

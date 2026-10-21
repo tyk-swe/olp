@@ -169,6 +169,9 @@ func TestBedrockReaderSigV4ManifestAndIdempotentReissue(t *testing.T) {
 				return cloudResponse(req, http.StatusOK, "application/json", string(job)), nil
 			case req.URL.Host == "batch.s3.us-east-1.amazonaws.com":
 				manifestRead = true
+				if req.Header.Get("X-Amz-Content-Sha256") != emptyPrefixDigest() {
+					t.Error("S3 manifest request lacks the empty-body payload hash")
+				}
 				if !strings.Contains(req.Header.Get("Authorization"), "/us-east-1/s3/aws4_request") {
 					t.Errorf("S3 manifest was not signed for s3: %s", req.Header.Get("Authorization"))
 				}

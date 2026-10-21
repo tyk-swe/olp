@@ -577,6 +577,7 @@ func (r *BedrockReader) ReadResults(ctx context.Context, target *PinnedTarget, s
 	}
 	cfg := target.Config
 	cfg.SigningService = "s3"
+	req.Header.Set("X-Amz-Content-Sha256", emptyPrefixDigest())
 	if _, err = r.Auth.Apply(ctx, req, cfg, target.Secret, nil); err != nil {
 		return cursor, false, err
 	}

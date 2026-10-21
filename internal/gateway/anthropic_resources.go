@@ -1011,6 +1011,8 @@ func visitAnthropicFileSources(value map[string]any, visit func(map[string]any) 
 		for _, rawBlock := range blocks {
 			block, _ := rawBlock.(map[string]any)
 			switch block["type"] {
+			case "container_upload":
+				return fmt.Errorf("container-upload file references are unsupported in batch requests")
 			case "image", "document":
 				source, _ := block["source"].(map[string]any)
 				if source["type"] == "file" {

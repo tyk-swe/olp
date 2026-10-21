@@ -56,6 +56,35 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 }
 
 func (s *Store) PutDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
+	return s.putDurableContractTx(ctx, tx, r, payload, true)
+}
+
+// PutRecoveredBatchContractTx adopts already-accepted work under its fenced
+// submission intent. Current caller authorization still applies to API access.
+func (s *Store) PutRecoveredBatchContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte, claimID uuid.UUID) (*Resource, error) {
+	if r == nil || r.Kind != KindStrictBatch || claimID == uuid.Nil {
+		return nil, ErrContract
+	}
+	var claimed bool
+	err := tx.QueryRow(ctx, `SELECT true FROM olp.batch_settlements
+		WHERE resource_id=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
+		AND route_revision_id=$5 AND target_id=$6 AND slot_id=$7
+		AND credential_id IS NOT DISTINCT FROM $8::uuid AND claim_id=$9
+		AND kind='strict_batch' AND state='submission_unknown' FOR UPDATE`,
+		r.UUID, r.APIKeyID, r.ProviderID, r.ProviderRevisionID, r.RouteRevisionID, r.TargetID, r.SlotID, r.CredentialID, claimID).Scan(&claimed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrContract
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		return nil, ErrContract
+	}
+	return s.putDurableContractTx(ctx, tx, r, payload, false)
+}
+
+func (s *Store) putDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte, authorize bool) (*Resource, error) {
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
@@ -65,8 +94,10 @@ func (s *Store) PutDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource
 	if r.UUID == uuid.Nil {
 		r.UUID = uuid.Must(uuid.NewV7())
 	}
-	if err := s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
-		return nil, err
+	if authorize {
+		if err := s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
+			return nil, err
+		}
 	}
 	if len(r.Metadata) == 0 {
 		r.Metadata = []byte(`{}`)

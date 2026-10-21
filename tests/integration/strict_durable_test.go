@@ -15,8 +15,50 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/resources"
 )
+
+func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	status, uploaded := h.uploadTestFile(slug, key, nativeBatchInput("recovered"))
+	if status != http.StatusOK {
+		t.Fatalf("strict upload: %d %v", status, uploaded)
+	}
+	fixture.batchCreateStatus.Store(http.StatusBadGateway)
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key,
+		bytes.NewReader(batchCreateBody(uploaded["id"].(string))), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"submission_unknown"`)) {
+		t.Fatalf("strict lost response: %d %s", status, raw)
+	}
+	authority, err := h.Runtime.Authenticate(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resourceID uuid.UUID
+	if err := h.Pool.QueryRow(t.Context(), `SELECT resource_id FROM olp.batch_settlements WHERE api_key_id=$1 AND state='submission_unknown'`, authority.ID).Scan(&resourceID); err != nil {
+		t.Fatal(err)
+	}
+	apiKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+authority.ID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+authority.ID+"/revoke", nil,
+		withMatch(apiKey, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "recovered-output", "", batchChatLine("recovered", "ok"), "")
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, resourceID, "settled", 1, 0)
+	localID := resources.LocalID(resources.KindStrictBatch, resourceID)
+	if _, _, err := h.Gateway.Resources.ReadDurableContract(t.Context(), resources.KindStrictBatch, authority.ID, localID); err == nil {
+		t.Fatal("revoked caller retained strict batch access")
+	}
+}
 
 func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	fixture := newOpenAIFixture(t, "")

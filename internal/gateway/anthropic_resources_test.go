@@ -125,6 +125,17 @@ func TestAnthropicResourceRoutesOverrideNativeFallback(t *testing.T) {
 }
 
 func TestAnthropicFileReferencesAndAffinity(t *testing.T) {
+	for _, content := range []string{
+		`[{"type":"container_upload","file_id":"foreign-file"}]`,
+		`[{"type":"tool_result","tool_use_id":"tool","content":[{"type":"container_upload","file_id":"foreign-file"}]}]`,
+	} {
+		if _, err := anthropicFileReferences([]byte(`{"messages":[{"role":"user","content":` + content + `}]}`)); err == nil {
+			t.Fatal("unsupported container-upload file reached batch dispatch")
+		}
+	}
+	if _, err := anthropicFileReferences([]byte(`{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"tool","name":"example","input":{"type":"container_upload","file_id":"application-data"}}]}]}`)); err != nil {
+		t.Fatalf("application tool input was treated as a file reference: %v", err)
+	}
 	params := []byte(`{"system":[{"type":"document","source":{"type":"file","file_id":"anthropic_file_a"}}],"messages":[{"role":"user","content":[{"type":"image","source":{"type":"file","file_id":"anthropic_file_b"}}]}]}`)
 	ids, err := anthropicFileReferences(params)
 	if err != nil || len(ids) != 2 || !slices.Contains(ids, "anthropic_file_a") || !slices.Contains(ids, "anthropic_file_b") {
