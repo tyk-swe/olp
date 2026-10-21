@@ -1675,7 +1675,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	var upstream []byte
 	var strictServing oif.ServingIdentity
 	var expectedResults *int64
-	if inputManifest.Adapter == "openai" {
+	if x.strict() {
+		expectedResults = new(int64(fileContract.Asset.ItemCount))
+	} else if inputManifest.Adapter == "openai" {
 		expectedResults = new(int64(inputManifest.LineCount))
 	}
 	requestedWindow := "24h"

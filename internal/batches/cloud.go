@@ -563,7 +563,10 @@ func (r *BedrockReader) ReadResults(ctx context.Context, target *PinnedTarget, s
 	if !ok {
 		return cursor, false, ErrStorageScope
 	}
-	endpoint := bedrockManifestURL(bucket, key, target.Config.CloudRegion)
+	endpoint, err := bedrockManifestURL(bucket, key, target.Config.CloudRegion)
+	if err != nil {
+		return cursor, false, err
+	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return cursor, false, err
@@ -618,11 +621,24 @@ func bedrockOutputLocation(base, arn string) string {
 	return strings.TrimRight(base, "/") + "/" + jobID + "/"
 }
 
-func bedrockManifestURL(bucket, key, region string) string {
-	if strings.Contains(bucket, ".") {
-		return "https://s3." + region + ".amazonaws.com/" + bucket + "/" + escapeS3Key(key)
+func bedrockManifestURL(bucket, key, region string) (string, error) {
+	endpoint, err := connectors.BedrockEndpoint(region, true)
+	if err != nil {
+		return "", err
 	}
-	return "https://" + bucket + ".s3." + region + ".amazonaws.com/" + escapeS3Key(key)
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	partitionHost, ok := strings.CutPrefix(parsed.Host, "bedrock.")
+	if !ok {
+		return "", errors.New("Bedrock partition endpoint is not recognized")
+	}
+	host := "s3." + partitionHost
+	if strings.Contains(bucket, ".") {
+		return "https://" + host + "/" + bucket + "/" + escapeS3Key(key), nil
+	}
+	return "https://" + bucket + "." + host + "/" + escapeS3Key(key), nil
 }
 
 func parseBedrockManifest(body []byte) (Result, error) {

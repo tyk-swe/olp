@@ -27,6 +27,12 @@ type interruptedBatchReader struct {
 	interrupted bool
 }
 
+type oversizedPollingBatchReader struct{ batches.Reader }
+
+func (r *oversizedPollingBatchReader) Poll(context.Context, batches.Settlement, *batches.PinnedTarget) (batches.BatchSnapshot, error) {
+	return batches.BatchSnapshot{}, batches.ErrBatchTooLarge
+}
+
 func (r *interruptedBatchReader) Poll(ctx context.Context, settlement batches.Settlement, target *batches.PinnedTarget) (batches.BatchSnapshot, error) {
 	return r.inner.Poll(ctx, settlement, target)
 }
@@ -330,6 +336,11 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatal(err)
 	}
 	assertBatchSettlement(t, h, ambiguousResource, "settled", 1, 0)
+	oversizedID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	if _, err := batchWorker(h, &oversizedPollingBatchReader{Reader: openAIBatchReader(h)}).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, batchResourceID(t, oversizedID), "uncertain", 0, 1)
 	fixture.batchCreateStatus.Store(http.StatusBadGateway)
 	defer fixture.batchCreateStatus.Store(0)
 	serverFailureSource := []byte(fmt.Sprintf(`{"input_file_id":%q,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"case":"accepted-5xx","rank":9007199254740993}}`, inputFileID))

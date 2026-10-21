@@ -24,7 +24,7 @@ func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
 	fixture := newOpenAIFixture(t, "")
 	h := newAccessHarness(t)
 	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"batch", "generation"},
 		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
 		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
 	key := stateKey(t, h, owner, slug, true)
@@ -47,10 +47,17 @@ func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), `SELECT resource_id FROM olp.batch_settlements WHERE api_key_id=$1 AND state='submission_unknown'`, authority.ID).Scan(&resourceID); err != nil {
 		t.Fatal(err)
 	}
+	var expected int64
+	if err := h.Pool.QueryRow(t.Context(), `SELECT expected_results FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&expected); err != nil || expected != 1 {
+		t.Fatalf("strict submission lost its validated file count: %d err=%v", expected, err)
+	}
 	apiKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+authority.ID, nil, nil, http.StatusOK)
 	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+authority.ID+"/revoke", nil,
 		withMatch(apiKey, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "recovered-output", "", batchChatLine("recovered", "ok"), "")
+	fixture.mu.Lock()
+	delete(fixture.batches["batch-up-1"], "request_counts")
+	fixture.mu.Unlock()
 	poolConfig, err := database.Configuration(h.DBURL, 1, time.Second)
 	if err != nil {
 		t.Fatal(err)

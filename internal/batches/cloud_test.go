@@ -296,8 +296,23 @@ func TestVertexOmittedZeroCountsAndDottedS3Bucket(t *testing.T) {
 	if invalid := vertexCounts(map[string]json.RawMessage{"completionStats": json.RawMessage(`{"successfulCount":"2","failedCount":null}`)}); invalid != nil {
 		t.Fatalf("malformed supplied count became zero: %v", invalid)
 	}
-	if got := bedrockManifestURL("batch.results", "output/job/manifest.json.out", "us-east-1"); got != "https://s3.us-east-1.amazonaws.com/batch.results/output/job/manifest.json.out" {
-		t.Fatalf("dotted bucket uses a TLS-incompatible hostname: %s", got)
+	if got, err := bedrockManifestURL("batch.results", "output/job/manifest.json.out", "us-east-1"); err != nil || got != "https://s3.us-east-1.amazonaws.com/batch.results/output/job/manifest.json.out" {
+		t.Fatalf("dotted bucket uses a TLS-incompatible hostname: %s err=%v", got, err)
+	}
+}
+
+func TestBedrockManifestPartitions(t *testing.T) {
+	for region, suffix := range map[string]string{"us-east-1": "amazonaws.com", "cn-north-1": "amazonaws.com.cn", "us-gov-west-1": "amazonaws.com"} {
+		for _, bucket := range []string{"batch-output", "batch.output"} {
+			endpoint, err := bedrockManifestURL(bucket, "job/manifest.json.out", region)
+			want := "https://" + bucket + ".s3." + region + "." + suffix + "/job/manifest.json.out"
+			if strings.Contains(bucket, ".") {
+				want = "https://s3." + region + "." + suffix + "/" + bucket + "/job/manifest.json.out"
+			}
+			if err != nil || endpoint != want {
+				t.Fatalf("partition manifest endpoint=%s want=%s err=%v", endpoint, want, err)
+			}
+		}
 	}
 }
 

@@ -273,6 +273,9 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 	}
 	reconciliation, err := reader.Reconcile(ctx, settlement, target, inputFileID, endpoint)
 	if err != nil {
+		if errors.Is(err, ErrBatchTooLarge) {
+			return w.closeUncertainWithError(ctx, settlement, "batch_result_too_large")
+		}
 		if errors.Is(err, ErrProviderConflict) {
 			return w.finishConflict(ctx, settlement)
 		}
@@ -316,6 +319,9 @@ func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, tar
 	} else {
 		snapshot, err = reader.Poll(ctx, settlement, target)
 		if err != nil {
+			if errors.Is(err, ErrBatchTooLarge) {
+				return w.closeUncertainWithError(ctx, settlement, "batch_result_too_large")
+			}
 			if errors.Is(err, ErrProviderConflict) || errors.Is(err, ErrCursorConflict) {
 				return w.finishConflict(ctx, settlement)
 			}
