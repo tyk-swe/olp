@@ -4,8 +4,8 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "engines": {
-    "node": ">=26.0.0",
-    "pnpm": ">=11 <12"
+    "node": ">=22.22.2",
+    "pnpm": ">=10.26.0"
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "4.0.80",

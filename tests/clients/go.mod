@@ -1,6 +1,6 @@
 module github.com/tyk-swe/olp/tests/clients
 
-go 1.27.1
+go 1.26.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.82.0

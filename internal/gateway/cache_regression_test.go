@@ -108,7 +108,7 @@ func TestSemanticCacheEmbeddingRetryDeadline(t *testing.T) {
 					ID: uuid.NewString(), Slug: "cache-embedding", RevisionID: uuid.NewString(), RoutingID: uuid.NewString(),
 					Operations: []string{"embeddings"}, OverallTimeout: 100, MaxAttempts: 2,
 					Fidelity: routing.RouteFidelity{Mode: fidelity},
-					Retry:    routing.Retry{classRateLimit: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}},
+					Behavior: routing.Behavior{Retry: routing.Retry{classRateLimit: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}},
 					Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 3000, RoutingID: uuid.NewString()}},
 				}
 			})
@@ -170,7 +170,8 @@ func TestSemanticCacheEmbeddingRequestDebitOnAdmissionFailure(t *testing.T) {
 					s.Routes[routeSlug] = route
 					s.Routes["cache-embedding"] = routing.Route{
 						ID: uuid.NewString(), Slug: "cache-embedding", RevisionID: uuid.NewString(), RoutingID: uuid.NewString(),
-						Operations: []string{"embeddings"}, OverallTimeout: 5000, MaxAttempts: 1, MaxBodyBytes: tc.bodyLimit,
+						Operations: []string{"embeddings"}, OverallTimeout: 5000, MaxAttempts: 1,
+						Behavior: routing.Behavior{MaxBodyBytes: tc.bodyLimit},
 						Fidelity: routing.RouteFidelity{Mode: fidelity},
 						Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 3000, RoutingID: uuid.NewString()}},
 					}

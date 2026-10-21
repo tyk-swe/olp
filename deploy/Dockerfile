@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27.2-trixie@sha256:e58d6f83b3416618d8bcac2b3dde1b7f7e3c4a77d25e88637f8bbae81536c48d AS go-build
+FROM golang:1-trixie AS go-build
 ARG TARGETARCH
 ARG OLP_VERSION
 # The release workflow builds with the release tag, so the binary trusts only
@@ -27,11 +27,11 @@ RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v
     cp "$glide_dir/THIRD_PARTY_LICENSES_GO" /out/GLIDE-THIRD-PARTY-LICENSES
 RUN cp internal/operations/tokenization/estimate/ranks/LICENSE /out/TIKTOKEN-LICENSE
 
-FROM node:26.10.0-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS console-build
+FROM node:lts-alpine AS console-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV CI=true
 WORKDIR /src
-RUN npm install --global pnpm@11.24.0
+RUN npm install --global 'pnpm@>=10.26.0'
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY console/package.json ./console/package.json
 COPY tests/sdk-smoke/package.json ./tests/sdk-smoke/package.json

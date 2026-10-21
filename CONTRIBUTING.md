@@ -1,8 +1,11 @@
 # Contributing
 
-Install Go 1.27.2, a C compiler/linker and glibc development headers, Node.js
-26, pnpm 11.24.0, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, jq,
-Python 3, bubblewrap and ripgrep. Run commands from the repository root. GLIDE links a
+Install Go 1.26.0 or newer, Node.js 22.22.2 or newer, and pnpm 10.26.0 or newer.
+Use the current stable Go and pnpm releases and the latest Node.js LTS release
+(selected by `.nvmrc`) for development. pnpm 10.26.0 is needed for the workspace's
+build-script permissions. Also install a C compiler/linker and glibc development
+headers, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, jq, Python 3,
+bubblewrap and ripgrep. Run commands from the repository root. GLIDE links a
 pinned prebuilt native core, so development needs CGO but no Rust toolchain.
 Release platforms are native Linux amd64 and arm64. macOS and musl are
 unqualified.

@@ -3,7 +3,7 @@ packages:
   - tests/sdk-smoke
   - tests/clients
 
-engineStrict: true
+engineStrict: false
 
 allowBuilds:
   esbuild: true
