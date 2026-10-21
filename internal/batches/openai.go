@@ -531,15 +531,13 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 					errorCode = providerError.Code
 				}
 			}
-			if errorCode == "" {
-				observed, complete, usageErr := decodeLineUsage(object.Response.Body, endpoint)
-				if usageErr != nil {
-					if status >= 200 && status < 300 {
-						return Result{}, usageErr
-					}
-				} else if observed != nil {
-					result.Usage = usage.ObservedAttemptUsage(observed, complete, lineOperation(endpoint))
+			observed, complete, usageErr := decodeLineUsage(object.Response.Body, endpoint)
+			if usageErr != nil {
+				if status >= 200 && status < 300 && errorCode == "" {
+					return Result{}, usageErr
 				}
+			} else if observed != nil {
+				result.Usage = usage.ObservedAttemptUsage(observed, complete, lineOperation(endpoint))
 			}
 			if status >= 200 && status < 300 && errorCode == "" {
 				result.Kind = ResultSucceeded
@@ -550,11 +548,15 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 	case "batch_expired":
 		result.Kind = ResultExpired
 		result.ErrorClass = "batch_expired"
-		result.Usage = usage.AttemptUsage{Complete: true, Batch: true}
+		if !result.Usage.Observed {
+			result.Usage = usage.AttemptUsage{Complete: true, Batch: true}
+		}
 	case "batch_cancelled", "batch_canceled":
 		result.Kind = ResultCancelled
 		result.ErrorClass = "batch_cancelled"
-		result.Usage = usage.AttemptUsage{Complete: true, Batch: true}
+		if !result.Usage.Observed {
+			result.Usage = usage.AttemptUsage{Complete: true, Batch: true}
+		}
 	default:
 		if result.Kind != ResultSucceeded {
 			result.ErrorClass = "batch_line_error"

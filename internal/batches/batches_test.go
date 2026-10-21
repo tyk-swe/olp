@@ -118,6 +118,26 @@ func TestBatchLineErrorsAndMissingUsage(t *testing.T) {
 	}
 }
 
+func TestFailedBatchResponsesRetainReportedUsage(t *testing.T) {
+	for code, want := range map[string]ResultKind{"server_error": ResultErrored, "batch_expired": ResultExpired, "batch_cancelled": ResultCancelled} {
+		var line, response, body map[string]json.RawMessage
+		if err := json.Unmarshal(readFixture(t, "responses.jsonl"), &line); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.Unmarshal(line["response"], &response)
+		_ = json.Unmarshal(response["body"], &body)
+		body["status"] = json.RawMessage(`"failed"`)
+		body["error"], _ = json.Marshal(map[string]string{"code": code, "message": "failed after metered work"})
+		response["body"], _ = json.Marshal(body)
+		line["response"], _ = json.Marshal(response)
+		encoded, _ := json.Marshal(line)
+		result, err := ParseLine(encoded, "/v1/responses", false)
+		if err != nil || result.Kind != want || !result.Usage.Observed || !result.Usage.Complete || result.Usage.BillingUncertain || result.Usage.InputTokens == nil || *result.Usage.InputTokens != 8 || result.Usage.OutputTokens == nil || *result.Usage.OutputTokens != 3 {
+			t.Fatalf("failed response lost metering: %+v err=%v", result, err)
+		}
+	}
+}
+
 func TestBatchCloseDecision(t *testing.T) {
 	expected := int64(4)
 	tests := []struct {
