@@ -26,6 +26,8 @@ import (
 )
 
 func (s *Server) registerGeminiFilesState(mux *http.ServeMux) {
+	mux.HandleFunc("OPTIONS /gemini/upload/", s.preflight)
+	mux.HandleFunc("OPTIONS /gemini/download/", s.preflight)
 	mux.HandleFunc("POST /gemini/upload/v1beta/files", s.geminiUploadStart)
 	mux.HandleFunc("POST /gemini/upload/{session}", s.geminiUploadCommand)
 	mux.HandleFunc("GET /gemini/v1beta/files", s.geminiListFiles)

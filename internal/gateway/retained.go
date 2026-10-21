@@ -86,6 +86,24 @@ func strictResourceKind(kind string) (strict, known bool) {
 	return false, false
 }
 
+func (x *call) retainedContentGate(resource *resources.Resource, route *routing.Route, use retainedUse) *Error {
+	if use == retainedRetrieval {
+		switch resource.Kind {
+		case resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiFile, resources.KindGeminiBatch:
+			return x.guardrailSurfaceGate(route)
+		case resources.KindFile:
+			if adapter := fileAdapter(resource); adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+				return x.guardrailSurfaceGate(route)
+			}
+		case resources.KindBatch:
+			if adapter := batchAdapter(resource); adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+				return x.guardrailSurfaceGate(route)
+			}
+		}
+	}
+	return nil
+}
+
 // resolveResource rebuilds the provider pin that owns a retained resource and
 // refuses a use its route no longer promises.
 func (s *Server) resolveResource(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
@@ -119,6 +137,9 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 				return nil, nil, e
 			}
 		}
+	}
+	if e := x.retainedContentGate(res, route, use); e != nil {
+		return nil, nil, e
 	}
 	if e := x.checkBody(route); e != nil {
 		return nil, nil, e

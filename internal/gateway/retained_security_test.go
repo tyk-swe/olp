@@ -8,7 +8,42 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/resources"
 )
+
+func TestRetainedNativeContentHonorsCurrentGuardrails(t *testing.T) {
+	h := newHarness(t, Config{})
+	installTestGuardrail(t, h, guardrails.Output, guardrails.Block, "builtin.keywords", `{"words":["secret"]}`)
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	for _, item := range []struct {
+		kind    string
+		family  wire.Format
+		adapter string
+	}{
+		{resources.KindAnthropicFile, wire.AnthropicFile, ""},
+		{resources.KindAnthropicBatch, wire.AnthropicBatch, ""},
+		{resources.KindGeminiFile, wire.GeminiFile, ""},
+		{resources.KindGeminiBatch, wire.GeminiBatch, ""},
+		{resources.KindFile, wire.File, "together"},
+		{resources.KindFile, wire.File, "mistral"},
+		{resources.KindFile, wire.File, "gemini_managed"},
+		{resources.KindBatch, wire.Batch, "together"},
+		{resources.KindBatch, wire.Batch, "mistral"},
+		{resources.KindBatch, wire.Batch, "gemini_managed"},
+	} {
+		x := &call{request: request{release: h.rt.release}, keyID: h.keyID, family: item.family}
+		metadata, _ := json.Marshal(map[string]string{"adapter": item.adapter})
+		resource := &resources.Resource{Kind: item.kind, Metadata: metadata}
+		if err := x.retainedContentGate(resource, &route, retainedRetrieval); err == nil || err.Code != "guardrail_surface_unavailable" {
+			t.Fatalf("retained %s content bypassed enforcing output policy: %v", item.kind, err)
+		}
+		if err := x.retainedContentGate(resource, &route, retainedHousekeeping); err != nil {
+			t.Fatalf("retained %s cleanup was blocked by output policy: %v", item.kind, err)
+		}
+	}
+}
 
 func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 	credential := "historical-secret"

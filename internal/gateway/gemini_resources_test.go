@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -12,6 +14,32 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/resources"
 )
+
+func TestGeminiFileTransferCORS(t *testing.T) {
+	server := &Server{cfg: Config{CORSAllowedOrigins: []string{"https://console.example"}}, Resources: resources.New(nil), Media: &MediaDeps{}}
+	mux := http.NewServeMux()
+	server.registerNative(mux)
+	server.registerState(mux)
+	for _, path := range []string{"/gemini/upload/v1beta/files", "/gemini/upload/session", "/gemini/download/v1beta/files/file:download"} {
+		req := httptest.NewRequest(http.MethodOptions, path, nil)
+		req.Header.Set("Origin", "https://console.example")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "https://console.example" {
+			t.Fatalf("Gemini transfer preflight failed: %s %d %v", path, response.Code, response.Header())
+		}
+		for _, name := range []string{"X-Goog-Upload-Protocol", "X-Goog-Upload-Command", "X-Goog-Upload-Header-Content-Length", "X-Goog-Upload-Header-Content-Type", "X-Goog-Upload-Offset"} {
+			if !strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), name) {
+				t.Errorf("upload preflight cannot send %s", name)
+			}
+		}
+		for _, name := range []string{"X-Goog-Upload-URL", "X-Goog-Upload-Status", "X-Goog-Upload-Size-Received"} {
+			if !strings.Contains(response.Header().Get("Access-Control-Expose-Headers"), name) {
+				t.Errorf("browser cannot read %s", name)
+			}
+		}
+	}
+}
 
 type allowGeminiEndpoint struct{ reject bool }
 
