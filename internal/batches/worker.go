@@ -24,6 +24,7 @@ const (
 	WorkerConcurrency = 4
 	WorkerBatchSize   = 16
 	leaseHeartbeat    = 30 * time.Second
+	reconcileTimeout  = 5 * time.Minute
 )
 
 var (
@@ -712,7 +713,7 @@ func (w *Worker) pinnedTarget(ctx context.Context, settlement Settlement) (*Pinn
 }
 
 func (w *Worker) keepLease(ctx context.Context, settlement Settlement) (context.Context, func()) {
-	leaseCtx, cancel := context.WithCancel(ctx)
+	leaseCtx, cancel := context.WithTimeout(ctx, reconcileTimeout)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
