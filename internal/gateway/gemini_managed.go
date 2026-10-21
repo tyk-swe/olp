@@ -274,18 +274,23 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if contentType == "" {
 		contentType = "application/jsonl"
 	}
+	limit := min(s.cfg.MaxResponseBytes, batches.MaxBatchBytes)
 	raw, err := spool.Put(ctx, media.Upload{
-		Filename: "gemini-managed-results", ContentType: contentType, MaximumLength: batches.MaxBatchBytes, Body: response.Body,
+		Filename: "gemini-managed-results", ContentType: contentType, MaximumLength: limit, Body: response.Body,
 	})
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini batch file exceeded the bounded spool limit.")
 	}
 	defer spool.Remove(raw.Handle)
-	part := &media.Part{Handle: raw.Handle, Filename: "gemini-managed-results", ContentType: raw.ContentType, Size: raw.ContentLength, Limit: batches.MaxBatchBytes}
+	part := &media.Part{Handle: raw.Handle, Filename: "gemini-managed-results", ContentType: raw.ContentType, Size: raw.ContentLength, Limit: limit}
 	role := geminiManagedFileRole(resource)
 	if role != "input" {
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, role)
 		if err != nil {
+			var tooLarge *media.TooLargeError
+			if errors.As(err, &tooLarge) {
+				return serverError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
+			}
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini batch results could not be translated.")
 		}
 		defer spool.Remove(part.Handle)
@@ -327,6 +332,7 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 	}
 	defer opened.File.Close()
 	reader, writer := io.Pipe()
+	limit := min(s.cfg.MaxResponseBytes, source.Limit, batches.MaxBatchBytes)
 	done := make(chan error, 1)
 	go func() {
 		scanner := bufio.NewScanner(opened.File)
@@ -422,7 +428,7 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		_ = writer.Close()
 	}()
 	artifact, spoolErr := s.transport().Spool.Put(ctx, media.Upload{
-		Filename: source.Filename, ContentType: "application/jsonl", MaximumLength: batches.MaxBatchBytes, Body: reader,
+		Filename: source.Filename, ContentType: "application/jsonl", MaximumLength: limit, Body: reader,
 	})
 	_ = reader.Close()
 	translateErr := <-done
@@ -435,7 +441,7 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		}
 		return nil, translateErr
 	}
-	return &media.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: batches.MaxBatchBytes}, nil
+	return &media.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: limit}, nil
 }
 
 func geminiRawString(raw json.RawMessage) string {

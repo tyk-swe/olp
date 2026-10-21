@@ -106,12 +106,21 @@ func parseBatchStorageURI(uri string) (scheme, bucket, object string, ok bool) {
 }
 
 func (b BatchStorage) Contains(prefixURI, candidate string) bool {
+	return b.contains(prefixURI, candidate, false)
+}
+
+// ContainsPrefix also permits a bucket root as an output destination.
+func (b BatchStorage) ContainsPrefix(prefixURI, candidate string) bool {
+	return b.contains(prefixURI, candidate, true)
+}
+
+func (b BatchStorage) contains(prefixURI, candidate string, allowRoot bool) bool {
 	prefixScheme, prefixBucket, prefixObject, ok := parseBatchStorageURI(prefixURI)
 	if !ok {
 		return false
 	}
 	candidateScheme, candidateBucket, candidateObject, ok := parseBatchStorageURI(candidate)
-	if !ok || candidateScheme != prefixScheme || candidateBucket != prefixBucket || candidateObject == "" {
+	if !ok || candidateScheme != prefixScheme || candidateBucket != prefixBucket || candidateObject == "" && !allowRoot {
 		return false
 	}
 	if prefixObject == "" {

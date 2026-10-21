@@ -26,6 +26,20 @@ func localPolicy() *egress.Policy {
 	return &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 }
 
+func TestS3SignaturePreservesEscapedObjectPath(t *testing.T) {
+	const secret = "s3-secret-for-signature-verification"
+	request, err := http.NewRequest(http.MethodGet, "https://batch.s3.us-east-1.amazonaws.com/output/job%20folder/manifest.json.out", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := Config{Kind: "bedrock", AuthMode: "static", CloudRegion: "us-east-1", SigningService: "s3"}
+	credentials, _ := json.Marshal(map[string]string{"access_key_id": "S3ACCESSKEY1234567890", "secret_access_key": secret})
+	if _, err := NewAuth(localPolicy()).Apply(t.Context(), request, config, credentials, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertProfileSignature(t, request, nil, secret)
+}
+
 func TestGoogleServiceAccountRefreshADCBoundsAndPublicTokenEgress(t *testing.T) {
 	key, e := rsa.GenerateKey(rand.Reader, 2048)
 	if e != nil {

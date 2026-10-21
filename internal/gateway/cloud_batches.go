@@ -54,7 +54,7 @@ func validateCloudBatchRequest(raw []byte, dialect string, storage *connectors.B
 		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "output_uri_prefix is required.", strPtr("output_uri_prefix"))
 	}
 	if storage == nil || !storage.Contains(storage.InputURIPrefix, input.InputURI) ||
-		!storage.Contains(storage.OutputURIPrefix, input.OutputURIPrefix) {
+		!storage.ContainsPrefix(storage.OutputURIPrefix, input.OutputURIPrefix) {
 		return cloudBatchRequest{}, invalidRequest("storage_scope", "The input or output URI is outside the configured batch storage prefixes.", nil)
 	}
 	if value, ok := doc.Root().Lookup("display_name"); ok {

@@ -384,7 +384,10 @@ func (a *Auth) authenticateAWS(ctx context.Context, req *http.Request, c Config,
 	}
 	sign := func(ctx context.Context, req *http.Request, body []byte) ([]string, error) {
 		hash := sha256.Sum256(body)
-		if err := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), c.awsService(), c.CloudRegion, time.Now()); err != nil {
+		signer := v4.NewSigner(func(options *v4.SignerOptions) {
+			options.DisableURIPathEscaping = c.awsService() == "s3"
+		})
+		if err := signer.SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), c.awsService(), c.CloudRegion, time.Now()); err != nil {
 			return nil, ErrAuthentication
 		}
 		header := req.Header.Get("Authorization")

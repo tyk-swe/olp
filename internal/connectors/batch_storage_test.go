@@ -3,6 +3,14 @@ package connectors
 import "testing"
 
 func TestBatchStorageValidationAndContainment(t *testing.T) {
+	for _, scheme := range []string{"gs", "s3"} {
+		root := scheme + "://batch-output/"
+		storage := BatchStorage{OutputURIPrefix: root}
+		if !storage.ContainsPrefix(root, root) || storage.Contains(root, root) ||
+			storage.ContainsPrefix(root+"scoped/", root) || storage.ContainsPrefix(root, scheme+"://other-bucket/") {
+			t.Fatal("bucket root scope confused object inputs with output prefixes")
+		}
+	}
 	storage, err := NormalizeBatchStorage("vertex_ai", "vertex-batch-prediction", &BatchStorage{
 		InputURIPrefix: "gs://vertex-data/input", OutputURIPrefix: "gs://vertex-data/output",
 	})

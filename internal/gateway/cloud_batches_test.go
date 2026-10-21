@@ -12,6 +12,16 @@ import (
 )
 
 func TestCloudBatchValidationAndProjection(t *testing.T) {
+	for dialect, scheme := range map[string]string{"vertex-batch-prediction": "gs", "bedrock-batch-inference": "s3"} {
+		root := scheme + "://batch-data/"
+		storage := &connectors.BatchStorage{InputURIPrefix: root, OutputURIPrefix: root}
+		if _, failure := validateCloudBatchRequest([]byte(`{"input_uri":"`+root+`input.jsonl","output_uri_prefix":"`+root+`"}`), dialect, storage); failure != nil {
+			t.Fatalf("configured output bucket root refused: %v", failure)
+		}
+		if _, failure := validateCloudBatchRequest([]byte(`{"input_uri":"`+root+`","output_uri_prefix":"`+root+`"}`), dialect, storage); failure == nil {
+			t.Fatal("input URI accepted an empty object")
+		}
+	}
 	storage, err := connectors.NormalizeBatchStorage("vertex_ai", "vertex-batch-prediction", &connectors.BatchStorage{
 		InputURIPrefix: "gs://batch-data/in", OutputURIPrefix: "gs://batch-data/out",
 	})

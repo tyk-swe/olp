@@ -12,8 +12,32 @@ import (
 
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestGeminiManagedDownloadEnforcesResponseCap(t *testing.T) {
+	h, x, p := pinnedExchangeFixture(t)
+	x.family, x.actor = wire.File, "api_key_resource"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, strings.Repeat("x", 17))
+	}))
+	defer upstream.Close()
+	p.provider.Kind, p.provider.Endpoint, p.provider.VendorID = "gemini", upstream.URL+"/v1beta", "google"
+	h.gateway.client, h.gateway.cfg.MaxResponseBytes = upstream.Client(), 16
+	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	h.gateway.Media = &MediaDeps{Jobs: &media.Service{Transport: &media.Transport{Spool: spool}}}
+	response := httptest.NewRecorder()
+	failure := h.gateway.geminiManagedFileContent(t.Context(), response, x,
+		&resources.Resource{UpstreamID: "files/output", RouteSlug: routeSlug}, p)
+	if failure == nil || failure.Code != "upstream_response_too_large" || response.Body.Len() != 0 || spool.UsedBytes() != 0 {
+		t.Fatalf("oversized managed Gemini file escaped or leaked: %v bytes=%d spool=%d", failure, response.Body.Len(), spool.UsedBytes())
+	}
+}
 
 func TestGeminiManagedUploadCompletesStartAttempt(t *testing.T) {
 	h, x, p := pinnedExchangeFixture(t)
@@ -176,7 +200,7 @@ func TestGeminiManagedContentLineTranslation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer spool.Close()
-	server := &Server{Media: &MediaDeps{Jobs: &media.Service{Transport: &media.Transport{Spool: spool}}}}
+	server := &Server{cfg: Config{MaxResponseBytes: 1 << 20}, Media: &MediaDeps{Jobs: &media.Service{Transport: &media.Transport{Spool: spool}}}}
 	source := func(body string) *media.Part {
 		artifact, err := spool.Put(t.Context(), media.Upload{Filename: "results.jsonl", ContentType: "application/jsonl", MaximumLength: 1 << 20, Body: strings.NewReader(body)})
 		if err != nil {
@@ -224,6 +248,12 @@ func TestGeminiManagedContentLineTranslation(t *testing.T) {
 		string(errorLineObject["response"]) != "null" || !bytes.Contains(errorLineObject["error"], []byte(`"code":"400"`)) {
 		t.Fatalf("error content translation=%s", errorBody)
 	}
+	server.cfg.MaxResponseBytes = 16
+	before := spool.UsedBytes()
+	if _, err := server.translateGeminiManagedContent(t.Context(), "route-slug", valid, "output"); err == nil || spool.UsedBytes() != before {
+		t.Fatalf("translated Gemini results ignored response cap or leaked spool bytes: %v", err)
+	}
+	server.cfg.MaxResponseBytes = 1 << 20
 	for _, malformed := range []string{`{"response":{}}`, `{"key":"missing"}`, `{"key":"both","response":{},"error":{}}`} {
 		part := source(malformed + "\n")
 		if _, err := server.translateGeminiManagedContent(t.Context(), "route-slug", part, "output"); err == nil {

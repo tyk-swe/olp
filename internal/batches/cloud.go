@@ -289,7 +289,7 @@ func (r *VertexReader) ReadResults(ctx context.Context, target *PinnedTarget, sn
 	var outURI string
 	_ = json.Unmarshal(info["gcsOutputDirectory"], &outURI)
 	storage := target.Config.BatchStorage
-	if storage == nil || !storage.Contains(storage.OutputURIPrefix, outURI) {
+	if storage == nil || !storage.ContainsPrefix(storage.OutputURIPrefix, outURI) {
 		return cursor, false, ErrStorageScope
 	}
 	scheme, bucket, prefix, ok := parseGCSURI(outURI)
@@ -556,7 +556,7 @@ func (r *BedrockReader) ReadResults(ctx context.Context, target *PinnedTarget, s
 	var base string
 	_ = json.Unmarshal(s3["s3Uri"], &base)
 	location := bedrockOutputLocation(base, snapshot.ID)
-	if target.Config.BatchStorage == nil || !target.Config.BatchStorage.Contains(target.Config.BatchStorage.OutputURIPrefix, location) {
+	if target.Config.BatchStorage == nil || !target.Config.BatchStorage.ContainsPrefix(target.Config.BatchStorage.OutputURIPrefix, location) {
 		return cursor, false, ErrStorageScope
 	}
 	bucket, key, ok := parseS3URI(location + "manifest.json.out")
