@@ -192,6 +192,27 @@ func TestGeminiManagedStatusAndCounts(t *testing.T) {
 	}
 }
 
+func TestGeminiManagedMetadataStoresOnlyLifecycleFields(t *testing.T) {
+	body := []byte(`{"name":"batches/private","done":true,"metadata":{"state":"BATCH_STATE_SUCCEEDED","createTime":"2026-10-21T12:00:00Z","batchStats":{"requestCount":"1","successfulRequestCount":"1"},"inputConfig":{"fileName":"files/input","requests":[{"prompt":"request-content-sentinel"}]},"output":{"responsesFile":"files/output","inlinedResponses":{"responses":[{"text":"output-content-sentinel"}]}}},"response":{"inlinedResponses":{"responses":[{"text":"response-content-sentinel"}]}},"error":{"code":3,"message":"error-content-sentinel","details":[{"data":"error-detail-sentinel"}]}}`)
+	body = bytes.ReplaceAll(body, []byte("output-content-sentinel"), bytes.Repeat([]byte("output-content-sentinel"), 1024))
+	manifest := batchManifest{Adapter: "gemini_managed", Endpoint: "/v1/chat/completions", LineOperation: "generation", LineCount: 1, ManifestDigest: "digest"}
+	metadata, state, err := geminiManagedBatchMetadata(body, "model", "file_local", manifest, nil, nil)
+	if err != nil || state != "completed" {
+		t.Fatalf("metadata failed: %s %v", state, err)
+	}
+	if len(metadata) > 16<<10 {
+		t.Fatalf("provider payload exceeded the lifecycle metadata bound: %d", len(metadata))
+	}
+	for _, sentinel := range []string{"request-content-sentinel", "output-content-sentinel", "response-content-sentinel", "error-content-sentinel", "error-detail-sentinel"} {
+		if bytes.Contains(metadata, []byte(sentinel)) {
+			t.Fatalf("provider content persisted in metadata: %s", sentinel)
+		}
+	}
+	if !bytes.Contains(metadata, []byte(`"responsesFile":"files/output"`)) || !bytes.Contains(metadata, []byte(`"requestCount":"1"`)) {
+		t.Fatalf("lifecycle/file/count evidence was dropped: %s", metadata)
+	}
+}
+
 func TestGeminiManagedContentLineTranslation(t *testing.T) {
 	usageLine := `{"key":"ok","response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}}`
 	errorLine := `{"key":"bad","error":{"code":400,"message":"bad"}}`

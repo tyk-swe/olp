@@ -32,7 +32,7 @@ func geminiManagedBatchMetadata(body []byte, model, localInput string, manifest 
 		return nil, "", errGeminiManagedBatchState
 	}
 	metadata := map[string]json.RawMessage{}
-	metadata["provider_batch"] = bytes.Clone(body)
+	metadata["provider_batch"] = batches.GeminiMetadata(body, model, "", "")
 	metadata["upstream_model"], _ = json.Marshal(model)
 	metadata["adapter"], _ = json.Marshal("gemini_managed")
 	metadata["endpoint"], _ = json.Marshal(manifest.Endpoint)

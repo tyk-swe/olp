@@ -168,7 +168,7 @@ func (s *Store) MarkUnknown(ctx context.Context, resourceID uuid.UUID, errorClas
 
 func (s *Store) ActivateTx(ctx context.Context, tx pgx.Tx, resourceID uuid.UUID, upstreamID string, expected *int64) error {
 	tag, err := tx.Exec(ctx, `UPDATE olp.batch_settlements
-		SET state='active',upstream_id=$2,expected_results=$3,next_attempt_at=now(),
+		SET state='active',upstream_id=$2,expected_results=COALESCE(expected_results,$3),next_attempt_at=now(),
 		    last_error_class=NULL,updated_at=now()
 		WHERE resource_id=$1 AND state IN ('submitting','submission_unknown')`, resourceID, upstreamID, expected)
 	if err != nil {
@@ -272,11 +272,13 @@ func (s *Store) ExtendClaim(ctx context.Context, settlement Settlement, now time
 	return nil
 }
 
+// SetExpected learns an unknown total; later provider counters cannot replace
+// submission-derived or previously established expectations.
 func (s *Store) SetExpected(ctx context.Context, settlement Settlement, expected *int64) error {
 	if settlement.ClaimID == nil {
 		return ErrClaimLost
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE olp.batch_settlements SET expected_results=$3,updated_at=now()
+	tag, err := s.Pool.Exec(ctx, `UPDATE olp.batch_settlements SET expected_results=COALESCE(expected_results,$3),updated_at=now()
 		WHERE resource_id=$1 AND claim_id=$2`, settlement.ResourceID, *settlement.ClaimID, expected)
 	if err != nil {
 		return fmt.Errorf("update batch expected result count: %w", err)

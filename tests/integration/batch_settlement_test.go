@@ -135,11 +135,12 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		[]string{"batch"})
 	start := time.Now().UTC().Add(-10 * time.Minute)
 	addBatchPrice(t, h, owner, provider["id"].(string), "0.5", start)
-	fileStatus, uploaded := h.uploadTestFile(slug, key, nativeBatchInput("input-row"))
-	if fileStatus != http.StatusOK {
-		t.Fatalf("batch input upload: %d %v", fileStatus, uploaded)
+	inputIDs := make([]string, 0, 102)
+	for i := 0; i < 101; i++ {
+		inputIDs = append(inputIDs, fmt.Sprintf("line-%03d", i))
 	}
-	inputFileID := uploaded["id"].(string)
+	inputIDs = append(inputIDs, "failed-line")
+	inputFileID := uploadBatchInputForSettlement(t, h, key, slug, inputIDs...)
 
 	var output bytes.Buffer
 	for i := 0; i < 101; i++ {
@@ -183,12 +184,15 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	expected := int64(102)
+	expected := int64(1)
 	if err = store.ActivateTx(t.Context(), tx, resourceID, upstreamID, &expected); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT expected_results FROM olp.batch_settlements WHERE resource_id=$1`, resourceID).Scan(&expected); err != nil || expected != 102 {
+		t.Fatalf("activation lowered the submission expectation: %d err=%v", expected, err)
 	}
 	if err = store.Finish(t.Context(), claims[0], batches.StateSubmitting, time.Now(), ""); !errors.Is(err, batches.ErrClaimLost) {
 		t.Fatalf("stale submission claim overwrote activation: %v", err)
@@ -236,7 +240,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 
 	addBatchPrice(t, h, owner, provider["id"].(string), "", start.Add(time.Minute))
-	unpricedID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	unpricedID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "unpriced-line"))
 	unpricedUpstream := batchUpstreamID(t, h, unpricedID)
 	unpricedOutput := "file-result-" + unpricedUpstream
 	setBatchFixtureResults(t, fixture, unpricedUpstream, "completed", 1, unpricedOutput, "",
@@ -250,9 +254,9 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatalf("missing batch multiplier was priced: total=%d batch=%d unpriced=%d cost=%s", facts, batchFacts, unpricedFacts, cost)
 	}
 
-	missingID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	missingID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "only-line", "missing-line"))
 	missingUpstream := batchUpstreamID(t, h, missingID)
-	setBatchFixtureResults(t, fixture, missingUpstream, "completed", 2, "file-result-"+missingUpstream, "",
+	setBatchFixtureResults(t, fixture, missingUpstream, "completed", 1, "file-result-"+missingUpstream, "",
 		batchChatLine("only-line", "ok"), "")
 	missingResource := batchResourceID(t, missingID)
 	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
@@ -260,7 +264,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 	assertBatchSettlement(t, h, missingResource, "uncertain", 1, 1)
 
-	conflictID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	conflictID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "duplicate-line", "other-line"))
 	conflictUpstream := batchUpstreamID(t, h, conflictID)
 	conflictContent := batchChatLine("duplicate-line", "first") + batchChatLine("duplicate-line", "different")
 	setBatchFixtureResults(t, fixture, conflictUpstream, "completed", 2, "file-result-"+conflictUpstream, "",
@@ -278,7 +282,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 	assertBatchSettlement(t, h, conflictResource, "uncertain", 1, 1)
 
-	lateConflictID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	lateConflictID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "duplicate-line"))
 	lateUpstream := batchUpstreamID(t, h, lateConflictID)
 	setBatchFixtureResults(t, fixture, lateUpstream, "completed", 1, "file-result-"+lateUpstream, "", conflictContent, "")
 	lateResource := batchResourceID(t, lateConflictID)
@@ -290,7 +294,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 	assertBatchSettlement(t, h, lateResource, "uncertain", 1, 1)
 
-	failedID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	failedID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "failed-partial", "failed-line"))
 	failedUpstream := batchUpstreamID(t, h, failedID)
 	setBatchFixtureResults(t, fixture, failedUpstream, "failed", 2, "file-result-"+failedUpstream, "file-error-"+failedUpstream,
 		batchChatLine("failed-partial", "ok"), batchErrorLine("failed-line", "invalid_request"))
@@ -300,7 +304,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 	assertBatchSettlement(t, h, failedResource, "settled", 2, 0)
 
-	cancelledID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	cancelledID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "paid-partial", "cancelled-line"))
 	cancelledUpstream := batchUpstreamID(t, h, cancelledID)
 	setBatchFixtureResults(t, fixture, cancelledUpstream, "cancelled", 2, "file-result-"+cancelledUpstream, "file-error-"+cancelledUpstream,
 		batchChatLine("paid-partial", "ok"), batchErrorLine("cancelled-line", "batch_cancelled"))
@@ -408,7 +412,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 		t.Fatal(err)
 	}
 	assertBatchSettlement(t, h, ambiguousResource, "settled", 1, 0)
-	oversizedID := createBatchForSettlement(t, h, key, slug, inputFileID)
+	oversizedID := createBatchForSettlement(t, h, key, slug, uploadBatchInputForSettlement(t, h, key, slug, "oversized-line"))
 	if _, err := batchWorker(h, &oversizedPollingBatchReader{Reader: openAIBatchReader(h)}).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
 		t.Fatal(err)
 	}
@@ -468,6 +472,19 @@ func batchWorker(h *accessHarness, reader batches.Reader) *batches.Worker {
 			"mistral": batches.NewMistralReader(connectors.NewAuth(&h.Policy), &h.Policy),
 		},
 	}
+}
+
+func uploadBatchInputForSettlement(t *testing.T, h *accessHarness, key, route string, customIDs ...string) string {
+	t.Helper()
+	var source strings.Builder
+	for _, id := range customIDs {
+		source.WriteString(nativeBatchInput(id))
+	}
+	status, uploaded := h.uploadTestFile(route, key, source.String())
+	if status != http.StatusOK {
+		t.Fatalf("batch input upload: %d %v", status, uploaded)
+	}
+	return uploaded["id"].(string)
 }
 
 func createBatchForSettlement(t *testing.T, h *accessHarness, key, route, inputFileID string) string {

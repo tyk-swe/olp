@@ -327,7 +327,7 @@ func (w *Worker) reconcileActive(ctx context.Context, settlement Settlement, tar
 	}
 	// Nonterminal zero counts are provisional, not evidence of an empty input.
 	if snapshot.Expected != nil && (snapshot.Terminal || *snapshot.Expected > 0) &&
-		(settlement.ExpectedResults == nil || *settlement.ExpectedResults != *snapshot.Expected) {
+		settlement.ExpectedResults == nil {
 		if err = w.Store.SetExpected(ctx, settlement, snapshot.Expected); err != nil {
 			return w.failOrClose(ctx, settlement, "batch_checkpoint_unavailable")
 		}
