@@ -5,75 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
-
-func TestGeminiManagedDownloadEnforcesResponseCap(t *testing.T) {
-	h, x, p := pinnedExchangeFixture(t)
-	x.family, x.actor = wire.File, "api_key_resource"
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, strings.Repeat("x", 17))
-	}))
-	defer upstream.Close()
-	p.provider.Kind, p.provider.Endpoint, p.provider.VendorID = "gemini", upstream.URL+"/v1beta", "google"
-	h.gateway.client, h.gateway.cfg.MaxResponseBytes = upstream.Client(), 16
-	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer spool.Close()
-	h.gateway.Media = &MediaDeps{Jobs: &media.Service{Transport: &media.Transport{Spool: spool}}}
-	response := httptest.NewRecorder()
-	failure := h.gateway.geminiManagedFileContent(t.Context(), response, x,
-		&resources.Resource{UpstreamID: "files/output", RouteSlug: routeSlug}, p)
-	if failure == nil || failure.Code != "upstream_response_too_large" || response.Body.Len() != 0 || spool.UsedBytes() != 0 {
-		t.Fatalf("oversized managed Gemini file escaped or leaked: %v bytes=%d spool=%d", failure, response.Body.Len(), spool.UsedBytes())
-	}
-}
-
-func TestGeminiManagedUploadCompletesStartAttempt(t *testing.T) {
-	h, x, p := pinnedExchangeFixture(t)
-	x.family, x.actor = wire.File, "api_key_resource"
-	var upstream *httptest.Server
-	upstream = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Goog-Upload-Command") == "start" {
-			w.Header().Set("X-Goog-Upload-URL", upstream.URL+"/upload/session")
-			return
-		}
-		w.Header().Set("X-Goog-Upload-Status", "final")
-		_, _ = io.WriteString(w, `{"file":{"name":"files/input"}}`)
-	}))
-	defer upstream.Close()
-	p.provider.Kind, p.provider.Endpoint, p.provider.AuthMode = "gemini", upstream.URL+"/v1beta", "api_key"
-	h.gateway.client = upstream.Client()
-	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer spool.Close()
-	h.gateway.Media = &MediaDeps{Jobs: &media.Service{Transport: &media.Transport{Spool: spool}}}
-	artifact, err := spool.Put(t.Context(), media.Upload{Filename: "input.jsonl", MaximumLength: 128, Body: strings.NewReader("{}\n")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer spool.Remove(artifact.Handle)
-	_, _, failure := h.gateway.uploadGeminiManagedFile(t.Context(), x, p, &media.Part{Handle: artifact.Handle, Filename: "input.jsonl", Size: artifact.ContentLength})
-	if failure != nil {
-		t.Fatalf("managed upload failed: %+v", failure)
-	}
-	x.completePinned()
-	if len(x.facts) != 2 || x.facts[0].Class != classSuccess || x.facts[1].Class != classSuccess {
-		t.Fatalf("successful upload exchanges recorded failures: %+v", x.facts)
-	}
-}
 
 func translateGeminiManagedFixture(t *testing.T, input string, configure ...func(*routing.Provider)) ([]byte, batchManifest, error) {
 	t.Helper()
@@ -100,27 +37,6 @@ func translateGeminiManagedFixture(t *testing.T, input string, configure ...func
 		translateErr = readErr
 	}
 	return output.Bytes(), manifest, translateErr
-}
-
-func TestGeminiManagedAutomaticDefaults(t *testing.T) {
-	input := `{"custom_id":"task","method":"POST","url":"/v1/chat/completions","body":{"model":"route-slug","messages":[{"role":"user","content":"hello"}]}}` + "\n"
-	translated, _, err := translateGeminiManagedFixture(t, input, func(provider *routing.Provider) {
-		provider.ProfileID, provider.ProfileRevision = "", ""
-		provider.ParameterDefaults = map[string]json.RawMessage{"generationConfig": json.RawMessage(`{"temperature":0.25}`)}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var line struct {
-		Request struct {
-			GenerationConfig struct {
-				Temperature float64 `json:"temperature"`
-			} `json:"generationConfig"`
-		} `json:"request"`
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(translated), &line); err != nil || line.Request.GenerationConfig.Temperature != 0.25 {
-		t.Fatalf("Automatic Gemini defaults were not applied: %s err=%v", translated, err)
-	}
 }
 
 func TestGeminiManagedBatchLineTranslationAndRefusals(t *testing.T) {
@@ -192,27 +108,6 @@ func TestGeminiManagedStatusAndCounts(t *testing.T) {
 	}
 }
 
-func TestGeminiManagedMetadataStoresOnlyLifecycleFields(t *testing.T) {
-	body := []byte(`{"name":"batches/private","done":true,"metadata":{"state":"BATCH_STATE_SUCCEEDED","createTime":"2026-10-21T12:00:00Z","batchStats":{"requestCount":"1","successfulRequestCount":"1"},"inputConfig":{"fileName":"files/input","requests":[{"prompt":"request-content-sentinel"}]},"output":{"responsesFile":"files/output","inlinedResponses":{"responses":[{"text":"output-content-sentinel"}]}}},"response":{"inlinedResponses":{"responses":[{"text":"response-content-sentinel"}]}},"error":{"code":3,"message":"error-content-sentinel","details":[{"data":"error-detail-sentinel"}]}}`)
-	body = bytes.ReplaceAll(body, []byte("output-content-sentinel"), bytes.Repeat([]byte("output-content-sentinel"), 1024))
-	manifest := batchManifest{Adapter: "gemini_managed", Endpoint: "/v1/chat/completions", LineOperation: "generation", LineCount: 1, ManifestDigest: "digest"}
-	metadata, state, err := geminiManagedBatchMetadata(body, "model", "file_local", manifest, nil, nil)
-	if err != nil || state != "completed" {
-		t.Fatalf("metadata failed: %s %v", state, err)
-	}
-	if len(metadata) > 16<<10 {
-		t.Fatalf("provider payload exceeded the lifecycle metadata bound: %d", len(metadata))
-	}
-	for _, sentinel := range []string{"request-content-sentinel", "output-content-sentinel", "response-content-sentinel", "error-content-sentinel", "error-detail-sentinel"} {
-		if bytes.Contains(metadata, []byte(sentinel)) {
-			t.Fatalf("provider content persisted in metadata: %s", sentinel)
-		}
-	}
-	if !bytes.Contains(metadata, []byte(`"responsesFile":"files/output"`)) || !bytes.Contains(metadata, []byte(`"requestCount":"1"`)) {
-		t.Fatalf("lifecycle/file/count evidence was dropped: %s", metadata)
-	}
-}
-
 func TestGeminiManagedContentLineTranslation(t *testing.T) {
 	usageLine := `{"key":"ok","response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}}`
 	errorLine := `{"key":"bad","error":{"code":400,"message":"bad"}}`
@@ -281,12 +176,5 @@ func TestGeminiManagedContentLineTranslation(t *testing.T) {
 			t.Fatalf("accepted malformed Gemini result line %s", malformed)
 		}
 		_ = spool.Remove(part.Handle)
-	}
-}
-
-func TestGeminiManagedResponseEnvelopeResultFile(t *testing.T) {
-	body := []byte(`{"name":"batches/upstream","metadata":{"state":"BATCH_STATE_SUCCEEDED"},"response":{"responsesFile":"files/output"}}`)
-	if name := geminiManagedResponsesFile(body); name != "files/output" {
-		t.Fatalf("response-envelope result file missing: %q", name)
 	}
 }

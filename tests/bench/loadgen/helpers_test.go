@@ -91,22 +91,3 @@ func near(t testing.TB, what string, got, want float64) {
 		t.Errorf("%s = %.3f ms, want %.3f ms", what, got, want)
 	}
 }
-
-// within checks a difference of two histogram values, each of which is
-// rounded to its bucket.
-func within(t testing.TB, what string, got, want, tolerance float64) {
-	t.Helper()
-	if math.Abs(got-want) > tolerance {
-		t.Errorf("%s = %.3f ms, want %.3f ms within %.3f", what, got, want, tolerance)
-	}
-}
-
-func ms(n float64) time.Duration { return time.Duration(n * float64(time.Millisecond)) }
-
-// delayed adds a fixed delay in front of a handler, as a gateway would.
-func delayed(h http.Handler, d time.Duration) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(d)
-		h.ServeHTTP(w, r)
-	})
-}

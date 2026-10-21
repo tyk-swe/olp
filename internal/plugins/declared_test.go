@@ -131,9 +131,6 @@ func TestLoadBoundsDecoderAllocations(t *testing.T) {
 	}
 }
 
-// recurse is olp_call's instructions calling itself, forever.
-var recurse = []byte{0x20, 0, 0x20, 1, 0x10, 2}
-
 // Its olp_call returns no JSON response, which only a module OLP
 // instantiated and called can fail with.
 

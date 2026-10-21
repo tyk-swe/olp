@@ -6,33 +6,12 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/tyk-swe/olp/tests/bench/mockupstream"
 )
-
-// target serves a mock on loopback and returns its origin.
-func target(t *testing.T) string {
-	t.Helper()
-	server, err := mockupstream.New(mockupstream.Config{Default: mockupstream.DefaultBehavior()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- mockupstream.Serve(ctx, ln, server) }()
-	t.Cleanup(func() { cancel(); <-done })
-	return "http://" + ln.Addr().String()
-}
 
 // The x-mock headers took effect: the first frame waited for them.
 

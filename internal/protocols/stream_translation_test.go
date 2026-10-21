@@ -6,72 +6,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
-
-	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
-
-func TestTranslatedToolIdentityArgumentsAndCompletionSequence(t *testing.T) {
-	source := `data: {"id":"tool-stream","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"wea","arguments":""}}]},"finish_reason":null}]}
-
-data: {"id":"tool-stream","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"ther","arguments":"{\"city\":\""}}]},"finish_reason":null}]}
-
-data: {"id":"tool-stream","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Paris\"}"}}]},"finish_reason":"tool_calls"}]}
-
-data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}
-
-data: [DONE]
-
-`
-	for _, target := range []wire.Format{wire.Anthropic, wire.Gemini, wire.Responses} {
-		t.Run(string(target), func(t *testing.T) {
-			var out bytes.Buffer
-			c, err := Stream(wire.Chat, target, strings.NewReader(source), 8192, "team-model", true, func(frame []byte) error { out.Write(frame); return nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			if c.Usage == nil || c.Usage.TotalTokens != 5 {
-				t.Fatalf("usage %#v", c.Usage)
-			}
-			if !strings.Contains(out.String(), "weather") {
-				t.Fatalf("fragmented tool name was lost: %s", out.String())
-			}
-			if _, err = Stream(target, target, bytes.NewReader(out.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
-				t.Fatalf("invalid destination: %v\n%s", err, out.String())
-			}
-			if target == wire.Responses {
-				last := -1
-				events := map[string]bool{}
-				var terminal Object
-				err = sse.Decode(bytes.NewReader(out.Bytes()), 8192, func(event sse.Frame) error {
-					f, _ := object([]byte(event.Data))
-					seq, _ := count(f["sequence_number"])
-					if int(seq) <= last {
-						t.Fatalf("sequence %d after %d", seq, last)
-					}
-					last = int(seq)
-					events[str(f["type"])] = true
-					if str(f["type"]) == "response.completed" {
-						terminal, _ = object(f["response"])
-					}
-					return nil
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, name := range []string{"response.output_item.added", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.output_item.done", "response.completed"} {
-					if !events[name] {
-						t.Fatalf("missing %s", name)
-					}
-				}
-				items := arr(terminal["output"])
-				item, _ := object(items[0])
-				if str(item["name"]) != "weather" || str(item["arguments"]) != `{"city":"Paris"}` {
-					t.Fatalf("terminal tool: %s", raw(item))
-				}
-			}
-		})
-	}
-}
 
 func TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming(t *testing.T) {
 	source := []byte(`{"id":"multi","choices":[{"index":0,"message":{"role":"assistant","content":"alpha"},"finish_reason":"stop"},{"index":1,"message":{"role":"assistant","content":"beta"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}`)

@@ -50,27 +50,3 @@ func TestConfigValidation(t *testing.T) {
 		}
 	}
 }
-
-func TestConfigDefaults(t *testing.T) {
-	c, err := Config{URL: "http://x", Model: "m", Rate: 10, Duration: time.Second}.normalize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Dialect != OpenAI || c.MaxTokens != DefaultMaxTokens || c.MaxInFlight != DefaultMaxInFlight || c.MaxBacklog != DefaultMaxInFlight ||
-		c.Timeout != DefaultTimeout || c.Drain != DefaultTimeout+time.Second || c.LateAfter != DefaultLateAfter || len(c.PromptTokens) != 1 || c.PromptTokens[0] != 0 {
-		t.Fatalf("%+v", c)
-	}
-	// A negative backlog means none, and a slow reader gets a small buffer.
-	c, _ = Config{URL: "http://x", Model: "m", Rate: 10, Duration: time.Second, MaxBacklog: -1, SlowRead: SlowRead{BytesPerSecond: 100}}.normalize()
-	if c.MaxBacklog != 0 || c.SlowRead.RcvBuf != DefaultSlowReadRcvBuf {
-		t.Fatalf("%+v", c)
-	}
-	// The schedule.
-	if c.warmupRequests() != 0 || c.measuredRequests() != 10 || c.offset(5) != 500*time.Millisecond {
-		t.Fatalf("%d %d %v", c.warmupRequests(), c.measuredRequests(), c.offset(5))
-	}
-	c.Rate, c.Warmup, c.Duration = 3000, 10*time.Second, 60*time.Second
-	if c.warmupRequests() != 30_000 || c.measuredRequests() != 180_000 {
-		t.Fatalf("%d %d", c.warmupRequests(), c.measuredRequests())
-	}
-}

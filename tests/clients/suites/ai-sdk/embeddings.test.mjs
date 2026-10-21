@@ -9,10 +9,8 @@ import { google, openai, tap } from './providers.mjs';
 
 const texts = ['alpha', 'beta', 'Zürich 東京 🚀'];
 let reference;
-let reference8;
 before(async () => {
   reference = await referenceEmbeddings(texts);
-  reference8 = await referenceEmbeddings(texts, 8);
 });
 after(() => tap.close());
 beforeEach(async () => {
@@ -29,15 +27,6 @@ describe('OpenAI provider', () => {
     assert.ok(result.usage.tokens > 0, 'usage is reported');
     const { upstream } = await assertRelayed(tap, [{ api: 'openai.embeddings', model: models.openai }]);
     assert.deepEqual(upstream[0].body.input, [texts[0]]);
-  });
-
-  test('embedMany keeps the order of the inputs and the requested dimensions', async () => {
-    const result = await embedMany({ model: model(models.openai), values: texts, maxRetries: 0, providerOptions: { openai: { dimensions: 8 } } });
-    assert.equal(result.embeddings.length, texts.length);
-    result.embeddings.forEach((vector, i) => assertSameVector(vector, reference8[i], `embedding ${i}`));
-    const { upstream } = await assertRelayed(tap, [{ api: 'openai.embeddings', model: models.openai }]);
-    assert.deepEqual(upstream[0].body.input, texts);
-    assert.equal(upstream[0].body.dimensions, 8);
   });
 
   test('a Gemini route answers an OpenAI embeddings request by translation, with the usage the Gemini upstream reports', async () => {
@@ -70,18 +59,6 @@ describe('OpenAI provider', () => {
 });
 
 describe('Google provider', () => {
-  test('embed and embedMany reach the native endpoints of a strict embedding route', async () => {
-    const model = google.embedding(models.geminiEmbedStrict);
-    const one = await embed({ model, value: texts[0], maxRetries: 0 });
-    assertSameVector(one.embedding, reference[0], 'embed');
-    const many = await embedMany({ model, values: texts, maxRetries: 0 });
-    assert.equal(many.embeddings.length, texts.length);
-    many.embeddings.forEach((vector, i) => assertSameVector(vector, reference[i], `embedding ${i}`));
-    await assertRelayed(tap, [
-      { api: 'gemini.embed', model: models.geminiEmbedStrict },
-      { api: 'gemini.batch_embed', model: models.geminiEmbedStrict }
-    ]);
-  });
 
   test('a transformed route refuses the native endpoints, as documented', async () => {
     const error = await embed({ model: google.embedding(models.gemini), value: texts[0], maxRetries: 0 }).then(

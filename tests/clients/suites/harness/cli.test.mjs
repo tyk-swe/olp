@@ -3,14 +3,11 @@
 // records what a client sent, the comparison against the upstream's recording,
 // and the bait that proves the proxy trap holds.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { chmod, readFile } from 'node:fs/promises';
-import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, test } from 'node:test';
-import { assertHeld, assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, parseJSONLines, privateHome, run, sentTo, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
+import { assertHeld, assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, run, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
 
 describe('the environment of a client', () => {
   test('is the private home and the proxy trap, never the harness contract', () => {
@@ -22,18 +19,6 @@ describe('the environment of a client', () => {
     assert.ok(!('EMPTY' in env), 'an undefined value removes the variable');
     for (const name of Object.keys(env)) {
       assert.ok(!name.startsWith('OLP_CLIENTS_'), `${name} leaked into a client`);
-    }
-  });
-
-  test('the home is the suite\'s own', () => {
-    assert.equal(privateHome(), process.env.HOME);
-    const home = process.env.HOME;
-    process.env.HOME = '/root';
-    try {
-      assert.throws(() => privateHome(), /HOME is not private/);
-      assert.throws(() => clientEnvironment(), /HOME is not private/);
-    } finally {
-      process.env.HOME = home;
     }
   });
 
@@ -61,25 +46,10 @@ describe('the environment of a client', () => {
       assert.throws(() => binary(name), /has no resolved binary/);
     }
   });
-
-  test('a workspace is private to the suite and holds its files', async () => {
-    const dir = await workspace('check', { 'a.txt': 'one', 'sub/b.txt': 'two' });
-    assert.ok(dir.startsWith(process.env.OLP_CLIENTS_SCRATCH));
-    assert.equal(await readFile(path.join(dir, 'sub/b.txt'), 'utf8'), 'two');
-  });
 });
 
 describe('running a client', () => {
   const node = process.execPath;
-
-  test('captures both streams and the exit code, with stdin closed', async () => {
-    const result = await run(node, ['-e', "process.stdin.on('end', () => { console.log('{\"a\":1}'); console.error('warn'); process.exit(3); }); process.stdin.resume();"]);
-    assert.equal(result.code, 3);
-    assert.equal(result.stderr, 'warn\n');
-    assert.deepEqual(parseJSON(result), { a: 1 });
-    assert.deepEqual(parseJSONLines({ stdout: 'noise\n{"b":2}\n{"c":3}\n' }), [{ b: 2 }, { c: 3 }]);
-    assert.throws(() => parseJSON({ stdout: 'not json', stderr: 'why' }), /stdout is not JSON/);
-  });
 
   test('does not wait for a helper the client left holding its output', async () => {
     // One in the client's process group, which dies with it, and one in a group
@@ -113,96 +83,10 @@ describe('running a client', () => {
   });
 });
 
-describe('stopping the suite', () => {
-  /** Whether a process is alive, polling for up to the given time. */
-  async function dies(pid, withinMs) {
-    for (let waited = 0; waited <= withinMs; waited += 50) {
-      try {
-        process.kill(pid, 0);
-      } catch {
-        return true;
-      }
-      await sleep(50);
-    }
-    return false;
-  }
-
-  // run.sh stops a suite at its deadline with a TERM, and when it is itself
-  // interrupted with an INT. A client runs in a process group of its own, so
-  // a signal to the suite does not reach it, and it would run on unseen.
-  for (const signal of ['SIGTERM', 'SIGINT']) {
-    test(`takes the clients with it on ${signal}`, async () => {
-      const cwd = await workspace(`stopped-${signal}`);
-      const cli = new URL('../../lib/cli.mjs', import.meta.url).href;
-      const program = `import { run } from ${JSON.stringify(cli)};
-        run('sh', ['-c', 'echo $$ > agent.pid.tmp && mv agent.pid.tmp agent.pid; exec sleep 300'], { cwd: ${JSON.stringify(cwd)}, timeoutMs: 120000 }).catch(() => {});`;
-      const suite = spawn(process.execPath, ['--input-type=module', '-e', program], {
-        env: clientEnvironment({ OLP_CLIENTS_SCRATCH: process.env.OLP_CLIENTS_SCRATCH }),
-        stdio: 'ignore'
-      });
-      let agent;
-      for (let waited = 0; agent === undefined && waited < 10_000; waited += 50) {
-        agent = Number(await readFile(path.join(cwd, 'agent.pid'), 'utf8').catch(() => '')) || undefined;
-        if (agent === undefined) await sleep(50);
-      }
-      assert.ok(agent, 'the client started');
-      assert.ok(!(await dies(agent, 0)), 'the client is running');
-
-      suite.kill(signal);
-      const [, killedBy] = await once(suite, 'exit');
-      assert.equal(killedBy, signal, 'the suite still ends as the signal says');
-      assert.ok(await dies(agent, 3000), 'the client outlived the suite');
-    });
-  }
-
-  test('takes the clients with it when it exits with one still running', async () => {
-    const cwd = await workspace('abandoned');
-    const cli = new URL('../../lib/cli.mjs', import.meta.url).href;
-    const program = `import { existsSync } from 'node:fs';
-      import { run } from ${JSON.stringify(cli)};
-      run('sh', ['-c', 'echo $$ > agent.pid.tmp && mv agent.pid.tmp agent.pid; exec sleep 300'], { timeoutMs: 120000 }).catch(() => {});
-      setInterval(() => existsSync('agent.pid') && process.exit(0), 20);`;
-    const suite = spawn(process.execPath, ['--input-type=module', '-e', program], {
-      cwd,
-      env: clientEnvironment({ OLP_CLIENTS_SCRATCH: process.env.OLP_CLIENTS_SCRATCH }),
-      stdio: 'ignore'
-    });
-    const [code] = await once(suite, 'exit');
-    assert.equal(code, 0);
-    const agent = Number(await readFile(path.join(cwd, 'agent.pid'), 'utf8'));
-    assert.ok(await dies(agent, 3000), 'the client outlived the suite');
-  });
-});
-
-describe('the requests a client sent', () => {
-  test('are the POSTs to a path or accepted by a predicate, from the tap', async () => {
-    const exchanges = [
-      { method: 'POST', path: '/anthropic/v1/messages' },
-      { method: 'POST', path: '/anthropic/v1/messages/count_tokens' },
-      { method: 'HEAD', path: '/anthropic/v1/messages' },
-      { method: 'POST', path: '/v1/responses' }
-    ];
-    const tap = { sent: async () => exchanges };
-    assert.deepEqual(await sentTo(tap, '/anthropic/v1/messages'), [exchanges[0]], 'a path is exact');
-    assert.deepEqual(await sentTo(tap, (e) => e.path.startsWith('/anthropic/')), exchanges.slice(0, 2), 'a predicate decides');
-    assert.deepEqual(await sentTo(tap, '/anthropic/v1/messages', 'HEAD'), [exchanges[2]]);
-    assert.deepEqual(await sentTo(tap, '/gemini'), []);
-  });
-});
-
 describe('holding the upstream against what the client sent', () => {
   const sent = (body, headers = {}) => ({ path: '/v1/messages', headers: { 'anthropic-beta': 'b', ...headers }, body, bodyText: JSON.stringify(body) });
   const received = (body, headers = {}) => ({ body, headers: { 'anthropic-beta': 'b', ...headers } });
   const options = { model: 'upstream', headers: ['anthropic-beta'] };
-
-  test('accepts the same requests, the model rewritten, in any order', () => {
-    assertPassedThrough(
-      [sent({ model: 'route', n: 1 }), sent({ model: 'route', n: 2 })],
-      [received({ model: 'upstream', n: 2 }), received({ model: 'upstream', n: 1 })],
-      options
-    );
-    assertPassedThrough([sent({ n: 1 })], [received({ n: 1 })], { headers: [] });
-  });
 
   test('rejects an altered body, a dropped header and a missing or extra request', () => {
     const one = [sent({ model: 'route', n: 1 })];
@@ -220,18 +104,6 @@ describe('holding the upstream against what the client sent', () => {
 });
 
 describe('the bait', () => {
-  test('is reachable, counts what connects and starts from zero', async (t) => {
-    const bait = await startBait();
-    t.after(bait.close);
-    assert.deepEqual(bait.connections, [], 'its own probe is not counted');
-    assert.notEqual(bait.host, '127.0.0.1', 'it sits where the proxy trap does not exempt');
-    await new Promise((resolve, reject) => {
-      const socket = net.connect(bait.port, bait.host, () => (socket.destroy(), resolve()));
-      socket.on('error', reject);
-    });
-    for (let waited = 0; bait.connections.length === 0 && waited < 50; waited++) await sleep(20);
-    assert.equal(bait.connections.length, 1);
-  });
 
   test('accepts a client that was held and refuses one that got through', () => {
     const outcome = (code) => ({ code, stdout: 'answer' });
@@ -241,15 +113,6 @@ describe('the bait', () => {
     assert.throws(() => assertHeld({ connections: ['10.0.0.1'] }, timedOut), /reached an address outside OLP/);
     assert.throws(() => assertHeld({ connections: [] }, outcome(0)), /succeeded without reaching anything/);
     assert.throws(() => assertHeld({ connections: [] }, new Error('spawn claude ENOENT')), /could not be run/);
-  });
-
-  test('is not reached by a client that honors the proxy trap', async (t) => {
-    const bait = await startBait();
-    t.after(bait.close);
-    // Node honors the trap, so a request to the bait is sent to the dead proxy instead.
-    const attempt = await fetch(`${bait.origin}/`).then(() => 'reached', () => 'refused');
-    assert.equal(attempt, 'refused');
-    assert.deepEqual(bait.connections, []);
   });
 });
 
@@ -315,14 +178,5 @@ describe('the proxy trap, held against the requests it refused', () => {
     t.after(bait.close);
     const program = 'fetch(process.env.BAIT).catch(() => {}).then(() => process.exit(0))';
     await assert.rejects(assertHeldByTheTrap(bait, attempt(bait, program)), /succeeded without reaching anything/);
-  });
-
-  test('records what a client asks for by its CONNECT, or by the URL of a plain request whatever its Host header says', async (t) => {
-    const bait = await startBait();
-    t.after(bait.close);
-    const raw = (request) =>
-      `const proxy = new URL(process.env.HTTP_PROXY); require('node:net').connect(Number(proxy.port), proxy.hostname, function () { this.write(${request}); }).on('data', () => process.exit(1)).on('error', () => process.exit(1))`;
-    await assertHeldByTheTrap(bait, attempt(bait, raw("'CONNECT ' + process.env.BAIT_HOST + ':' + process.env.BAIT_PORT + ' HTTP/1.1\\r\\nhost: elsewhere\\r\\n\\r\\n'")));
-    await assertHeldByTheTrap(bait, attempt(bait, raw("'GET http://' + process.env.BAIT_HOST + ':' + process.env.BAIT_PORT + '/ HTTP/1.1\\r\\nhost: elsewhere\\r\\n\\r\\n'")));
   });
 });

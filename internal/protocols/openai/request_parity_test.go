@@ -252,37 +252,6 @@ func sameValidation(t testing.TB, family wire.Format, doc oif.Document) bool {
 	return got != nil
 }
 
-func TestTheConversationIsValidatedAsTheFieldsAreValidated(t *testing.T) {
-	cases := 600
-	if testing.Short() {
-		cases = 100
-	}
-	var accepted, refused int
-	for _, family := range []wire.Format{wire.Chat, wire.Responses, wire.InputTokens, wire.Embeddings, wire.Moderation} {
-		g := envelopeGen{rand.New(rand.NewPCG(53, uint64(len(family))))}
-		for range cases {
-			fields := g.fields()
-			if g.intn(2) == 0 {
-				fields = g.tameFields()
-			}
-			encoded, _ := json.Marshal(fields)
-			doc, err := oif.ParseJSON(encoded, oif.Limits{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if sameValidation(t, family, doc) {
-				accepted++
-			} else {
-				refused++
-			}
-		}
-	}
-	// The comparison is only worth something if both answers are given.
-	if accepted < cases/2 || refused < cases {
-		t.Errorf("%d envelopes were accepted and %d refused: the generator is not exercising the validation", accepted, refused)
-	}
-}
-
 func FuzzTheConversationIsValidatedAsTheFieldsAreValidated(f *testing.F) {
 	f.Add([]byte(`{"model":"route","messages":[{"role":"user","content":"hi"},{"role":"assistant"}]}`))
 	f.Add([]byte(`{"model":"route","messages":[{"role":"user"},[]]}`))

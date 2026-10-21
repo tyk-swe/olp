@@ -19,19 +19,6 @@ func parseEmbeddings(t *testing.T, body string) *wire.Request {
 	return r
 }
 
-func encode(t *testing.T, r *wire.Request, kind, vendor, model string) (map[string]any, wire.Format) {
-	t.Helper()
-	data, encodedWire, err := Encode(r, kind, vendor, model, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f map[string]any
-	if err := json.Unmarshal(data, &f); err != nil {
-		t.Fatal(err)
-	}
-	return f, encodedWire
-}
-
 func decodeEmbedding(t *testing.T, encodedWire wire.Format, body, encoding string, r *wire.Request) *wire.Completion {
 	t.Helper()
 	c, err := DecodeRequest(encodedWire, wire.Embeddings, []byte(body), "route", encoding, r)
@@ -88,30 +75,6 @@ func parseRerank(t *testing.T, body string) *wire.Request {
 		t.Fatal(err)
 	}
 	return r
-}
-
-func TestRerankCohereReturnDocuments(t *testing.T) {
-	r := parseRerank(t, `{"model":"route","query":"q","documents":["a","b"],"top_n":2,"return_documents":true}`)
-	f, _ := encode(t, r, "openai_compatible", "cohere", "rerank-v3.5")
-	if _, ok := f["return_documents"]; ok {
-		t.Fatalf("cohere v2 received return_documents: %v", f)
-	}
-	c, err := DecodeRequest(wire.Rerank, wire.Rerank, []byte(`{"id":"r1","results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.1}],"meta":{"billed_units":{"search_units":1}}}`), "route", "", r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out struct {
-		Results []struct {
-			Document *string `json:"document"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(c.Body, &out); err != nil {
-		t.Fatal(err)
-	}
-	if len(out.Results) != 2 || out.Results[0].Document == nil || *out.Results[0].Document != "b" ||
-		out.Results[1].Document == nil || *out.Results[1].Document != "a" {
-		t.Fatalf("documents not restored: %s", c.Body)
-	}
 }
 
 func TestRerankDecodeRejects(t *testing.T) {

@@ -4,18 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
-
-func at(t *time.Time, from time.Time) time.Duration {
-	if t == nil {
-		return 0
-	}
-	return t.Sub(from)
-}
 
 // A refresh renews the grant's own account: a refresh that observes another
 // principal or reports other grant facts, like one the upstream refuses with

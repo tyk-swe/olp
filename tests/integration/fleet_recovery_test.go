@@ -3,108 +3,17 @@
 package integration_test
 
 import (
-	"context"
 	"net/http"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
 )
-
-// fleetLeaderSQL finds the backend holding the cost reconciliation advisory lock.
-// The lock identifier is one 64-bit key, which PostgreSQL reports split across
-// the class and object columns, so it is reassembled here rather than written
-// out as two magic numbers. Advisory locks are scoped to a database and every
-// test here runs in its own, so the probe is scoped the same way: without the
-// database predicate it would count the leaders of every other installation on
-// the cluster and report several holders of a lock only one session can hold.
-const fleetLeaderSQL = `SELECT pid FROM pg_locks
-    WHERE locktype = 'advisory' AND objsubid = 1 AND granted
-      AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-      AND ((classid::bigint << 32) | objid::bigint) = x'4f4c505f4352'::bigint`
-
-// fleetLeader is the backend that currently holds cost reconciliation leadership,
-// and whether anybody holds it at all.
-func fleetLeader(t *testing.T, pool *pgxpool.Pool) (int32, bool) {
-	t.Helper()
-	rows, err := pool.Query(t.Context(), fleetLeaderSQL)
-	if err != nil {
-		t.Fatalf("read reconciliation leadership: %v", err)
-	}
-	defer rows.Close()
-	var holders []int32
-	for rows.Next() {
-		var pid int32
-		if err := rows.Scan(&pid); err != nil {
-			t.Fatalf("read reconciliation leadership: %v", err)
-		}
-		holders = append(holders, pid)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read reconciliation leadership: %v", err)
-	}
-	if len(holders) > 1 {
-		t.Fatalf("reconciliation leadership is held by %d backends at once: %v", len(holders), holders)
-	}
-	if len(holders) == 0 {
-		return 0, false
-	}
-	return holders[0], true
-}
-
-// fleetReconcile runs one cost reconciliation pass from the test itself, which is
-// what a worker's leader does on its own schedule. Leadership is released again
-// so a worker process in the same scenario can take it.
-func fleetReconcile(t *testing.T, pool *pgxpool.Pool, limiter *limits.Limiter) limits.Report {
-	t.Helper()
-	leader, err := limits.TryAcquireLeader(t.Context(), pool)
-	if err != nil {
-		t.Fatalf("acquire reconciliation leadership: %v", err)
-	}
-	if leader == nil {
-		t.Fatal("reconciliation leadership was held by another replica")
-	}
-	defer leader.Close(context.WithoutCancel(t.Context()))
-	report, err := leader.Reconcile(t.Context(), limiter, time.Now())
-	if err != nil {
-		t.Fatalf("reconcile cost budgets: %v", err)
-	}
-	return report
-}
 
 // costKeys are the day and month hashes one API key's spend is admitted
 // against, named exactly as the admission scripts name them.
 func (in *fleetInstall) costKeys(apiKeyID string) (string, string) {
 	return limCostKeys(in.namespace, apiKeyID)
-}
-
-// fleetExists reports whether one shared Valkey key is present.
-func fleetExists(t *testing.T, c *coordination.Client, key string) bool {
-	t.Helper()
-	return do(t, c, "EXISTS", key) == int64(1)
-}
-
-// fleetConsumerPending is how many deliveries one consumer still owes an
-// acknowledgement for.
-func fleetConsumerPending(t *testing.T, c *coordination.Client, stream, consumer string) int64 {
-	t.Helper()
-	for _, row := range fleetList(t, do(t, c, "XINFO", "CONSUMERS", stream, usage.Group), "XINFO CONSUMERS") {
-		fields := fleetFields(t, row)
-		if fields["name"] != consumer {
-			continue
-		}
-		pending, err := strconv.ParseInt(fields["pending"], 10, 64)
-		if err != nil {
-			t.Fatalf("consumer %s pending %q: %v", consumer, fields["pending"], err)
-		}
-		return pending
-	}
-	return 0
 }
 
 // Nothing consumes yet, so the events are still on the stream and one of

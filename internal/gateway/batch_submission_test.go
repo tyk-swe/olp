@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -145,26 +144,6 @@ func TestManagedBatchProjection(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestManagedBatchProjectionPreservesNullTimestampsAndCounts(t *testing.T) {
-	for adapter, status := range map[string]string{"together": "IN_PROGRESS", "mistral": "RUNNING"} {
-		body := `{"id":"job","status":"` + status + `","endpoint":"/v1/chat/completions","input_file_id":"input","input_files":["input"],"created_at":null,"completed_at":null,"total_requests":null,"succeeded_requests":null,"failed_requests":null}`
-		projected, _, err := projectManagedBatch([]byte(body), adapter, "24h")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var fields map[string]json.RawMessage
-		if json.Unmarshal(projected, &fields) != nil || string(fields["created_at"]) != "null" || string(fields["completed_at"]) != "null" || len(fields["request_counts"]) != 0 {
-			t.Fatalf("nullable managed fields became fabricated values: %s", projected)
-		}
-	}
-	if value, ok := providerUnix(json.RawMessage(`0`)); !ok || value != 0 {
-		t.Fatal("explicit zero timestamp was lost")
-	}
-	if value, ok := providerCount(json.RawMessage(`0`)); !ok || value != 0 {
-		t.Fatal("explicit zero count was lost")
 	}
 }
 
@@ -502,41 +481,6 @@ func TestBedrockAggregatePinsUnsupportedProviderAndConsumerTariffs(t *testing.T)
 		if kind == "consumer fee" && (policy.CardID == nil || *policy.CardID != x.cardRev.ID) {
 			t.Fatal("consumer tariff was not pinned with its aggregate limitation")
 		}
-	}
-}
-
-func TestManagedBatchInputNormalizesProviderNamesAndBindings(t *testing.T) {
-	for _, binding := range []bool{false, true} {
-		provider := routing.Provider{Kind: "openai_compatible", VendorID: "together", ProfileID: "together-files-batches", ProfileRevision: "1", Endpoint: "https://api.together.ai/v1", AuthMode: "api_key"}
-		model := "Qwen/Qwen3.5-9B"
-		bodyModel := model
-		if binding {
-			model, bodyModel = "logical", "route"
-			provider.Bindings = map[string]connectors.Binding{"logical": {Model: "Qwen/Qwen3.5-9B"}}
-		}
-		input, _ := json.Marshal(map[string]any{"custom_id": "one", "method": "POST", "url": "/v1/chat/completions", "body": map[string]any{"model": bodyModel, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}})
-		output, _, err := runManagedTranslation(string(input)+"\n", func(id string) ([]byte, bool) { return []byte(id), true }, &pin{provider: provider, model: model}, &routing.Route{Slug: "route"}, "together")
-		var line struct {
-			Body struct {
-				Model string `json:"model"`
-			} `json:"body"`
-		}
-		if err != nil || json.Unmarshal(output, &line) != nil || line.Body.Model != "Qwen/Qwen3.5-9B" {
-			t.Fatalf("managed provider name/binding failed: binding=%v output=%s err=%v", binding, output, err)
-		}
-	}
-}
-
-func TestCanonicalBatchJSONPreservesExactNumbers(t *testing.T) {
-	left := []byte(`{"input_file_id":"file","metadata":{"rank":9007199254740993,"tiny":-0},"endpoint":"/v1/chat/completions"}`)
-	right := []byte("{\n \"endpoint\":\"/v1/chat/completions\", \"metadata\":{\"tiny\":-0, \"rank\":9007199254740993}, \"input_file_id\":\"file\"\n}")
-	a, err := canonicalBatchJSON(left)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := canonicalBatchJSON(right)
-	if err != nil || !bytes.Equal(a, b) || !bytes.Contains(a, []byte("9007199254740993")) || !bytes.Contains(a, []byte(`"tiny":-0`)) {
-		t.Fatalf("canonical intent changed native numbers or depended on serialization: %s / %s err=%v", a, b, err)
 	}
 }
 

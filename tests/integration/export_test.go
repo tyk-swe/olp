@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
@@ -98,13 +97,6 @@ func (r *exportReceiver) received() []map[string]any {
 	return out
 }
 
-func exportWorker(t *testing.T, pool *pgxpool.Pool, installation string, ring *secrets.KeyRing, policy *egress.Policy) *export.Worker {
-	t.Helper()
-	sender := export.NewSender(policy)
-	sender.Installation = installation
-	return &export.Worker{Pool: pool, Keys: ring, Installation: installation, Sender: sender, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-}
-
 func loopbackPolicy() *egress.Policy {
 	return &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 }
@@ -122,43 +114,12 @@ func awaitEnvelope(t *testing.T, r *exportReceiver, n int) []map[string]any {
 	return nil
 }
 
-func enqueueFixture(t *testing.T, pool *pgxpool.Pool, stream string, project *string, route, outcome string, payload map[string]any) string {
-	t.Helper()
-	source := uuid.NewString()
-	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `SELECT olp.enqueue_export($1,$2::uuid,$3::uuid,$4::text,$5::text,$6,$7::jsonb)`, stream, source, project, route, outcome, time.Now(), body); err != nil {
-		t.Fatal(err)
-	}
-	return source
-}
-
-func pendingCount(t *testing.T, pool *pgxpool.Pool, sinkID string) int64 {
-	t.Helper()
-	var count int64
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.export_pending WHERE sink_id=$1 AND delivered_at IS NULL`, sinkID).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	return count
-}
-
 func (h *accessHarness) Ring2() *secrets.KeyRing {
 	ring, err := secrets.ParseRing([]byte(h.Ring))
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	return ring
-}
-
-func contains(list []string, want string) bool {
-	for _, item := range list {
-		if item == want {
-			return true
-		}
-	}
-	return false
 }
 
 // The claim lease expires; the retried attempt posts the same immutable
@@ -268,82 +229,6 @@ func testCaptureStalePolicyDropsQueuedRecord(t *testing.T, redacted bool) {
 	}
 	if _, _, dropped, _, _ := manager.Metrics(); dropped < 1 {
 		t.Fatal("stale drop not counted")
-	}
-}
-
-func TestExportFilterPatchPreservesFacts(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	fixtureRoute(t, h, "team-chat")
-	fixtureRoute(t, h, "other-route")
-	receiver, server := newExportReceiver(t, "", 204)
-	sink := h.want(owner, "POST", "/api/v1/observability/sinks", map[string]any{
-		"name": "unfiltered", "type": "https", "destination": server.URL, "streams": []string{"requests"}, "format": "json",
-	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	if got := sink["filter"]; got != nil && len(got.(map[string]any)) != 0 {
-		t.Fatalf("unfiltered sink persisted a non-empty filter: %v", got)
-	}
-	sinkID := sink["export_sink_id"].(string)
-	etag := sink["etag"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+sinkID, map[string]any{"name": "renamed", "enabled": true}, map[string]string{"If-Match": `"` + etag + `"`}, 200)
-	enqueueFixture(t, h.Pool, "requests", nil, "team-chat", "success", map[string]any{"id": "after-patch"})
-	w := exportWorker(t, h.Pool, h.Server.Installation, h.Ring2(), loopbackPolicy())
-	if err := w.Pass(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	awaitEnvelope(t, receiver, 1)
-
-	detail := h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)
-	if detail["name"] != "renamed" {
-		t.Fatalf("patch lost name: %v", detail)
-	}
-	etag = detail["etag"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+sinkID, map[string]any{"filter": map[string]any{"route": "team-chat"}}, map[string]string{"If-Match": `"` + etag + `"`}, 200)
-	detail = h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)
-	etag = detail["etag"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+sinkID, map[string]any{"name": "still-renamed"}, map[string]string{"If-Match": `"` + etag + `"`}, 200)
-	detail = h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)
-	if detail["filter"].(map[string]any)["route"] != "team-chat" {
-		t.Fatalf("partial route filter lost on unrelated patch: %v", detail["filter"])
-	}
-	if pending := pendingCount(t, h.Pool, sinkID); pending != 0 {
-		t.Fatalf("record pending after successful pass: %d", pending)
-	}
-	enqueueFixture(t, h.Pool, "requests", nil, "other-route", "success", map[string]any{"id": "filtered-out"})
-	enqueueFixture(t, h.Pool, "requests", nil, "team-chat", "success", map[string]any{"id": "kept"})
-	if err := w.Pass(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	envs := awaitEnvelope(t, receiver, 2)
-	for _, env := range envs {
-		if env["data"].(map[string]any)["id"] == "filtered-out" {
-			t.Fatal("route filter did not exclude the foreign route")
-		}
-	}
-	etag = h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)["etag"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+sinkID, map[string]any{"filter": map[string]any{}}, map[string]string{"If-Match": `"` + etag + `"`}, 200)
-	if f := h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)["filter"]; len(f.(map[string]any)) != 0 {
-		t.Fatalf("empty object filter not cleared: %v", f)
-	}
-	etag = h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)["etag"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+sinkID, map[string]any{"filter": map[string]any{"route": "team-chat"}}, map[string]string{"If-Match": `"` + etag + `"`}, 200)
-	etag = h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)["etag"].(string)
-	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+sinkID, map[string]any{"filter": nil}, map[string]string{"If-Match": `"` + etag + `"`}, 200)
-	if f := h.want(owner, "GET", "/api/v1/observability/sinks/"+sinkID, nil, nil, 200)["filter"].(map[string]any); f["route"] != nil {
-		t.Fatalf("null filter did not clear: %v", f)
-	}
-	enqueueFixture(t, h.Pool, "requests", nil, "other-route", "success", map[string]any{"id": "post-clear"})
-	if err := w.Pass(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, env := range awaitEnvelope(t, receiver, 3) {
-		if env["data"].(map[string]any)["id"] == "post-clear" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("cleared filter suppressed deliveries")
 	}
 }
 

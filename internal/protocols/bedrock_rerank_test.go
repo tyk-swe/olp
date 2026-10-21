@@ -9,8 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-const rerankARN = "arn:aws:bedrock:us-west-2::foundation-model/cohere.rerank-v3-5:0"
-
 func bedrockRerankRequest(t *testing.T, body string) *wire.Request {
 	t.Helper()
 	r, err := Parse(wire.Rerank, []byte(body), "team-rerank")

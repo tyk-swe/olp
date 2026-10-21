@@ -16,13 +16,6 @@ func (f endUserRuntime) EndUserDigest(project *string, identifier string) string
 	return access.DigestEndUser(secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), "installation"), project, identifier)
 }
 
-func endUserHarness(t *testing.T, source string) *harness {
-	t.Helper()
-	h := strictHarness(t, nil)
-	identifyHarness(h, source)
-	return h
-}
-
 func identifyHarness(h *harness, source string) {
 	authority := h.rt.keys[fullKey]
 	authority.Policy.EndUserSource = &source

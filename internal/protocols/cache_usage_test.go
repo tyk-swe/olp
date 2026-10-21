@@ -2,22 +2,7 @@ package protocols
 
 import (
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
-
-func anthropicBody(usage string) []byte {
-	return []byte(`{"id":"msg_1","type":"message","role":"assistant","model":"wire-model","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":` + usage + `}`)
-}
-
-func bedrockUsageValue(t *testing.T, usage string) *wire.Usage {
-	t.Helper()
-	u, err := bedrockUsage([]byte(usage))
-	if err != nil {
-		t.Fatalf("bedrockUsage: %v", err)
-	}
-	return u
-}
 
 // AWS's prompt-caching example reports the cache write beside inputTokens.
 

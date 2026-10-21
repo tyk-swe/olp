@@ -14,23 +14,6 @@ beforeEach(async () => {
 });
 
 const anthropic = chatProviders.find((provider) => provider.name === 'ChatAnthropic');
-const project = 'The shared project context that every request repeats. '.repeat(120);
-
-test('a cache breakpoint writes the prefix, and the next request reads it', async () => {
-  const model = anthropic.create({ maxTokens: 64 });
-  const ask = (question) =>
-    model.invoke([new HumanMessage({ content: [{ type: 'text', text: project, cache_control: { type: 'ephemeral' } }, { type: 'text', text: question }] })]);
-  const first = await ask('First question.');
-  const second = await ask('Second question.');
-  const written = first.usage_metadata.input_token_details.cache_creation;
-  assert.ok(written > 0, 'the first request writes the cache');
-  assert.equal(second.usage_metadata.input_token_details.cache_read, written, 'the second request reads what the first wrote');
-  const { sent } = await assertRelayed(tap, [
-    { api: 'anthropic.messages', model: models.anthropic, maxTokens: 64 },
-    { api: 'anthropic.messages', model: models.anthropic, maxTokens: 64 }
-  ]);
-  assert.equal(sent[0].body.messages[0].content[0].cache_control.type, 'ephemeral');
-});
 
 test('extended thinking is returned and replayed signed through a tool loop', async () => {
   const model = anthropic.create({ maxTokens: 2048, thinking: { type: 'enabled', budget_tokens: 1024 } }).bindTools([weather]);

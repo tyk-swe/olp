@@ -92,9 +92,6 @@ export const weatherSchema = {
   additionalProperties: false
 };
 
-/** A city that exercises UTF-8 from the prompt, through the tool arguments, to the result. */
-export const city = 'Zürich 東京 🚀';
-
 export const weather = tool({
   name: 'get_weather',
   description: 'Look up the weather for a city',

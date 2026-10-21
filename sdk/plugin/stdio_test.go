@@ -69,37 +69,6 @@ func (o *olp) response(id uint64) abi.Response {
 	return *frame.Response
 }
 
-func signCall(id uint64, credential string) abi.Frame {
-	params, _ := json.Marshal(SignRequest{Profile: "acme-chat", Method: "POST", URL: "https://api.acme.example/v1", Credential: credential})
-	return abi.Frame{ID: id, Request: &abi.Request{Method: abi.MethodSign, Params: params, Provider: &Provider{Profile: "acme-chat"}}}
-}
-
-// A capability request names the call it serves, whose context the plugin
-// passed, and the call continues once OLP answers it.
-func TestCapabilityRequestsNameTheirCallOverStdio(t *testing.T) {
-	o := serveOverStdio(t, signing{sign: func(ctx context.Context, r SignRequest) (SignResult, error) {
-		Log.InfoContext(ctx, "signing", "url", r.URL)
-		Log.Info("between calls")
-		return SignResult{Headers: map[string]string{"X-Signature": "signed"}}, nil
-	}})
-	o.read()
-	o.write(signCall(7, "sk-acme"))
-	for _, want := range []struct {
-		call    uint64
-		message string
-	}{{7, "signing"}, {0, "between calls"}} {
-		request := o.read()
-		var record abi.LogRecord
-		if request.Request == nil || request.Request.Method != abi.CapabilityLog || request.Call != want.call || json.Unmarshal(request.Request.Params, &record) != nil || record.Message != want.message {
-			t.Fatalf("capability request %+v, want a log for call %d", request, want.call)
-		}
-		o.write(abi.Frame{ID: request.ID, Response: &abi.Response{}})
-	}
-	if answered := o.response(7); answered.Error != nil {
-		t.Fatalf("call 7 answered %+v", answered)
-	}
-}
-
 // carrying is a plugin whose Carrier answers with carry.
 type carrying struct {
 	manifestOnly

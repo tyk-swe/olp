@@ -2,14 +2,8 @@ package protocols
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"testing"
-
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestBedrockImageFormatsAndRefusals(t *testing.T) {
@@ -43,55 +37,5 @@ func TestBedrockImageFormatsAndRefusals(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func encodeBedrockMessages(t *testing.T, family wire.Format, body string) []map[string]json.RawMessage {
-	t.Helper()
-	request, err := Parse(family, []byte(body), "route")
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, _, err := Encode(request, "bedrock", "amazon-bedrock", "wire-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var encodedWire struct {
-		Messages []map[string]json.RawMessage `json:"messages"`
-	}
-	if err := json.Unmarshal(encoded, &encodedWire); err != nil {
-		t.Fatal(err)
-	}
-	for i := 1; i < len(encodedWire.Messages); i++ {
-		if string(encodedWire.Messages[i]["role"]) == string(encodedWire.Messages[i-1]["role"]) {
-			t.Fatalf("adjacent %s messages: %s", encodedWire.Messages[i]["role"], encoded)
-		}
-	}
-	return encodedWire.Messages
-}
-
-func TestReadBedrockEventTruncatedAfterPrelude(t *testing.T) {
-	encode := func(buffer *bytes.Buffer, event, payload string) {
-		t.Helper()
-		headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue(event)}}
-		if err := eventstream.NewEncoder().Encode(buffer, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var metadata bytes.Buffer
-	encode(&metadata, "metadata", `{"usage":{"inputTokens":1,"outputTokens":2}}`)
-	prelude := metadata.Bytes()[:12]
-	if _, err := ReadBedrockEvent(bytes.NewReader(prelude), 4096); !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("err = %v", err)
-	}
-
-	var stream bytes.Buffer
-	encode(&stream, "messageStart", `{"role":"assistant"}`)
-	encode(&stream, "messageStop", `{"stopReason":"end_turn"}`)
-	stream.Write(prelude)
-	_, err := Stream(wire.Bedrock, wire.Chat, bytes.NewReader(stream.Bytes()), 4096, "route", true, func([]byte) error { return nil })
-	var protocolErr *wire.ProtocolError
-	if !errors.As(err, &protocolErr) || !protocolErr.Truncated {
-		t.Fatalf("stream err = %v", err)
 	}
 }

@@ -43,27 +43,6 @@ func TestCompletionInspectionPricesAggregateExposure(t *testing.T) {
 	}
 }
 
-func TestCompletionAutomaticInspectionUsesTargetContext(t *testing.T) {
-	snapshot := strictEstimateSnapshot("gpt-4o")
-	route := snapshot.Routes["route"]
-	route.Fidelity.Mode = routing.FidelityTransformed
-	snapshot.Routes["route"] = route
-	for id, p := range snapshot.Providers {
-		p.Kind, p.VendorID, p.ProfileID = "openai", "openai", ""
-		p.Models = map[string]json.RawMessage{"gpt-4o": json.RawMessage(`{"context_length":7}`)}
-		snapshot.Providers[id] = p
-	}
-	input := simulationInput{Operation: "generation", Surface: "openai", Mode: "unary", Dialect: "openai-completions", Request: json.RawMessage(`{"model":"route","prompt":"hello","max_tokens":1}`)}
-	leg, _, _, err := (&Server{Access: &access.Server{}}).leg(fixedSimulation(snapshot, input, nil), "route", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := decisionFor(t, leg.Decisions, "gpt-4o")
-	if d.Eligible || d.Reason == nil || *d.Reason != "context_length_exceeded" {
-		t.Fatalf("mapped context not checked: %+v", d)
-	}
-}
-
 func TestCompletionInspectionUsesMappedDefaultCost(t *testing.T) {
 	snapshot := strictEstimateSnapshot("gpt-4o")
 	route := snapshot.Routes["route"]

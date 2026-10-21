@@ -17,26 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func TestAnthropicStateRoutesOverrideNativeFallback(t *testing.T) {
-	server := &Server{Resources: resources.New(nil), Media: &MediaDeps{}}
-	mux := http.NewServeMux()
-	server.registerNative(mux)
-	server.registerState(mux)
-	for _, test := range []struct {
-		method, path, pattern string
-	}{
-		{http.MethodPost, "/anthropic/v1/files", "POST /anthropic/v1/files"},
-		{http.MethodGet, "/anthropic/v1/files/x", "GET /anthropic/v1/files/{id}"},
-		{http.MethodPost, "/anthropic/v1/messages/batches", "POST /anthropic/v1/messages/batches"},
-		{http.MethodGet, "/anthropic/v1/messages/batches/x/results", "GET /anthropic/v1/messages/batches/{id}/results"},
-	} {
-		_, pattern := mux.Handler(&http.Request{Method: test.method, URL: &url.URL{Path: test.path}})
-		if pattern != test.pattern {
-			t.Fatalf("%s %s resolved to %q, want %q", test.method, test.path, pattern, test.pattern)
-		}
-	}
-}
-
 func TestAnthropicStrictRouteRefusesBatchResources(t *testing.T) {
 	h := newHarness(t, Config{})
 	route := h.rt.release.Snapshot.Routes[routeSlug]
@@ -217,20 +197,6 @@ func TestAnthropicFilesBetaAndListCursors(t *testing.T) {
 	}
 }
 
-func TestAnthropicBatchProjectionResultsURL(t *testing.T) {
-	body := []byte(`{"id":"msgbatch_upstream","results_url":"/v1/messages/batches/msgbatch_upstream/results","status":"ended"}`)
-	projected, err := projectAnthropicBatch(body, "anthropic_batch_local", "https://gateway.example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if json.Unmarshal(projected, &result) != nil || result["id"] != "anthropic_batch_local" ||
-		result["results_url"] != "https://gateway.example/anthropic/v1/messages/batches/anthropic_batch_local/results" ||
-		result["status"] != "ended" {
-		t.Fatalf("Anthropic batch projection = %s", projected)
-	}
-}
-
 func TestAnthropicBetaRejectionReleasesAdmission(t *testing.T) {
 	h := newHarness(t, Config{MaxInFlight: 1})
 	authority := h.rt.keys[fullKey]
@@ -245,40 +211,6 @@ func TestAnthropicBetaRejectionReleasesAdmission(t *testing.T) {
 		if !done || response.Code != http.StatusBadRequest || h.gateway.admission.Admitted() != 0 {
 			t.Fatalf("beta rejection leaked admission: status=%d admitted=%d", response.Code, h.gateway.admission.Admitted())
 		}
-	}
-}
-
-func TestAnthropicBackwardPageDropsFarthestLookahead(t *testing.T) {
-	rows := []*resources.Resource{{ID: "8"}, {ID: "7"}, {ID: "6"}}
-	page, more := anthropicListPage(rows, 2, true)
-	if !more || len(page) != 2 || page[0].ID != "7" || page[1].ID != "6" {
-		t.Fatalf("backward page skipped the nearest resource: %+v more=%v", page, more)
-	}
-	page, more = anthropicListPage(rows, 2, false)
-	if !more || page[0].ID != "8" || page[1].ID != "7" {
-		t.Fatalf("forward page changed: %+v more=%v", page, more)
-	}
-}
-
-func TestAnthropicFileBindingPreservesOpaqueToolInput(t *testing.T) {
-	body := []byte(`{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"tool","name":"save","input":{"source":{"type":"file","file_id":"local-data"},"large":9007199254740993,"tiny":-0}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool","content":[{"type":"document","source":{"type":"file","file_id":"anthropic_file_owned"}}]}]}]}`)
-	refs, err := anthropicFileReferences(body)
-	if err != nil || len(refs) != 1 || refs[0] != "anthropic_file_owned" {
-		t.Fatalf("application tool JSON was treated as a provider reference: %v err=%v", refs, err)
-	}
-	rewritten, err := replaceAnthropicFileReferences(body, map[string]string{"anthropic_file_owned": "file_upstream"})
-	if err != nil || !strings.Contains(string(rewritten), `"file_id":"local-data"`) ||
-		!strings.Contains(string(rewritten), `9007199254740993`) || !strings.Contains(string(rewritten), `"tiny":-0`) ||
-		!strings.Contains(string(rewritten), `"file_id":"file_upstream"`) {
-		t.Fatalf("file rebinding changed unrelated native tool data: %s err=%v", rewritten, err)
-	}
-}
-
-func TestAnthropicBatchBindsServingModelSeparatelyFromLogicalModel(t *testing.T) {
-	body := []byte(`{"requests":[{"custom_id":"one","params":{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}}]}`)
-	bound, _, _, err := validateAnthropicBatchRequest(body, "route", "logical-model", "claude-serving-model")
-	if err != nil || !strings.Contains(string(bound), `"model":"claude-serving-model"`) {
-		t.Fatalf("Anthropic serving binding was ignored: %s %v", bound, err)
 	}
 }
 

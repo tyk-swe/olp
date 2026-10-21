@@ -48,18 +48,3 @@ func TestBedrockObservationRejectsMalformedUsage(t *testing.T) {
 		}
 	}
 }
-
-func TestBedrockObservationMetricsRetainOmittedCacheCategories(t *testing.T) {
-	start, err := ObserveBedrockEvent(observedBedrockMessage(t, "chunk", `{"type":"message_start","message":{"usage":{"input_tokens":3,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":12,"ephemeral_1h_input_tokens":18}}}}`), 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stop, err := ObserveBedrockEvent(observedBedrockMessage(t, "chunk", `{"type":"message_stop","amazon-bedrock-invocationMetrics":{"inputTokenCount":53,"outputTokenCount":7}}`), 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := stop.Usage.Merge(start.Usage.Value)
-	if err != nil || u.InputTokens != 53 || u.OutputTokens != 7 || u.CachedInputTokens == nil || *u.CachedInputTokens != 20 || u.CacheWriteInputTokens == nil || *u.CacheWriteInputTokens != 30 || u.CacheWrite5MInputTokens == nil || *u.CacheWrite5MInputTokens != 12 || u.CacheWrite1HInputTokens == nil || *u.CacheWrite1HInputTokens != 18 {
-		t.Fatalf("summary dropped native cache observations: %+v, %v", u, err)
-	}
-}

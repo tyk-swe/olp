@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -202,33 +201,8 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 	}
 }
 
-func decodedMatches(t *testing.T, want *Event, got *Event) bool {
-	t.Helper()
-	wantJSON, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal want: %v", err)
-	}
-	gotJSON, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal got: %v", err)
-	}
-	return string(wantJSON) == string(gotJSON)
-}
-
 // The first attempt never carried routing or usage evidence, so neither key
 // is written at all.
-
-func assertJSONKeys(t *testing.T, label string, object map[string]json.RawMessage, want []string) {
-	t.Helper()
-	got := make([]string, 0, len(object))
-	for key := range object {
-		got = append(got, key)
-	}
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Errorf("%s keys = %v, want %v", label, got, want)
-	}
-}
 
 func TestDecodeRejectsMalformedFields(t *testing.T) {
 	base := metadataEvent()

@@ -64,8 +64,6 @@ func TestObserveResponseUsageRejectsMalformedAccounting(t *testing.T) {
 	}
 }
 
-const partialResponseUsageEvent = `{"type":"response.in_progress","response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"usage":{"input_tokens":8,"output_tokens":3,"input_tokens_details":{"cached_tokens":2},"output_tokens_details":{"reasoning_tokens":1}}}}`
-
 func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 	for _, tc := range []struct {
 		kind, status, wantStatus string

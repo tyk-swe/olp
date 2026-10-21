@@ -90,10 +90,3 @@ func TestPendingUsagePreservesKnownDimensionsAndCachePartitions(t *testing.T) {
 
 // Complete native evidence remains authoritative even when a
 // derived partition is lower than the provisional observation.
-
-func pendingUsageEventWithIdentity(event *usage.Event, evidence usage.AttemptUsage) *usage.Event {
-	want := *event
-	want.Attempts = append([]usage.Attempt(nil), event.Attempts...)
-	setPendingUsage(&want, evidence)
-	return &want
-}

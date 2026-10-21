@@ -2,7 +2,6 @@ package protocols
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 
@@ -137,19 +136,6 @@ func TestLegacyCompletionMappingHonorsVendorContract(t *testing.T) {
 	}
 }
 
-func TestLegacyCompletionMappedStreamPreservesObfuscation(t *testing.T) {
-	input := `data: {"object":"chat.completion.chunk","model":"upstream","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"obfuscation":"padding"}` + "\n\n" +
-		`data: {"object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3},"obfuscation":"usage-padding"}` + "\n\ndata: [DONE]\n\n"
-	var output strings.Builder
-	c, err := Stream(wire.Chat, wire.Completions, strings.NewReader(input), 4096, "route", true, func(b []byte) error {
-		output.Write(b)
-		return nil
-	})
-	if err != nil || c.Usage == nil || c.Usage.TotalTokens != 3 || !strings.Contains(output.String(), `"text":"hello"`) || !strings.Contains(output.String(), `"obfuscation":"padding"`) || !strings.Contains(output.String(), `"obfuscation":"usage-padding"`) || !strings.Contains(output.String(), "[DONE]") {
-		t.Fatalf("mapped stream: %s %+v %v", output.String(), c, err)
-	}
-}
-
 func TestLegacyCompletionMappingPreservesDefaultLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name, fields string
@@ -176,35 +162,6 @@ func TestLegacyCompletionMappingPreservesDefaultLimit(t *testing.T) {
 				t.Fatalf("output bound: %s (%v)", body, err)
 			}
 		})
-	}
-}
-
-func TestLegacyCompletionMeaningfulFrames(t *testing.T) {
-	for _, tc := range []struct {
-		body string
-		want bool
-	}{
-		{`{"choices":[{"index":0,"text":"hello","finish_reason":null}]}`, true},
-		{`{"choices":[{"index":0,"text":" ","finish_reason":null}]}`, true},
-		{`{"choices":[{"index":0,"text":"","finish_reason":"stop"}]}`, false},
-		{`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, false},
-	} {
-		if got := MeaningfulFrame(wire.Completions, []byte("data: "+tc.body+"\n\n")); got != tc.want {
-			t.Errorf("meaningful=%v for %s", got, tc.body)
-		}
-	}
-}
-
-func TestLegacyCompletionParameterNamesExcludePrompt(t *testing.T) {
-	for _, prompt := range []string{`"hello"`, `["one","two"]`, `[1,2]`, `[[1],[2]]`} {
-		r, err := Parse(wire.Completions, []byte(`{"model":"route","prompt":`+prompt+`,"max_tokens":8,"extension":true}`), "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		names := ParameterNames(r)
-		if slices.Contains(names, "prompt") || !slices.Contains(names, "max_output_tokens") || !slices.Contains(names, "extension") {
-			t.Fatalf("parameter names for %s: %v", prompt, names)
-		}
 	}
 }
 

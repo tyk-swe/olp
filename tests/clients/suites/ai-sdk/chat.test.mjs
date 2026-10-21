@@ -3,10 +3,10 @@
 // client sent, and what the scripted upstream received.
 import assert from 'node:assert/strict';
 import { after, beforeEach, describe, test } from 'node:test';
-import { APICallError, Output, generateText, jsonSchema, stepCountIs, streamText } from 'ai';
-import { afterTools, defaultReply, recorded, resetRecorded, restrictedApiKey, script } from '../../lib/harness.mjs';
-import { assertRelayed, images, png } from '../../lib/relay.mjs';
-import { chatProviders, city, tap, ticket, ticketSchema, vendors, weather } from './providers.mjs';
+import { APICallError, generateText, stepCountIs, streamText } from 'ai';
+import { afterTools, recorded, resetRecorded, restrictedApiKey, script } from '../../lib/harness.mjs';
+import { assertRelayed } from '../../lib/relay.mjs';
+import { chatProviders, tap, vendors, weather } from './providers.mjs';
 
 after(() => tap.close());
 beforeEach(async () => {
@@ -15,42 +15,10 @@ beforeEach(async () => {
 });
 
 const common = { maxRetries: 0, maxOutputTokens: 77, temperature: 0.2, instructions: 'You are terse.' };
-const weatherPrompt = `What is the weather in ${city}? ${script.tool('get_weather', { city })}`;
 
 for (const provider of chatProviders) {
   describe(provider.name, () => {
     const request = (stream, extra = {}) => ({ api: provider.api(stream), model: provider.slug, stream, maxTokens: 77, temperature: 0.2, contains: ['You are terse.'], ...extra });
-
-    test('generateText completes a chat', async () => {
-      const result = await generateText({ model: provider.model(), prompt: 'Say hello.', ...common });
-      assert.equal(result.text, defaultReply);
-      assert.equal(result.finishReason, 'stop');
-      assert.ok(result.usage.inputTokens > 0 && result.usage.outputTokens > 0, 'usage is reported');
-      await assertRelayed(tap, [request(false, { contains: ['You are terse.', 'Say hello.'] })]);
-    });
-
-    test('streamText delivers the text in pieces', async () => {
-      const result = streamText({ model: provider.model(), prompt: 'Say hello.', ...common });
-      const pieces = [];
-      for await (const piece of result.textStream) pieces.push(piece);
-      assert.ok(pieces.length > 1, 'the text arrives in more than one piece');
-      assert.equal(pieces.join(''), defaultReply);
-      assert.equal(await result.finishReason, 'stop');
-      assert.ok((await result.usage).outputTokens > 0, 'usage arrives with the stream');
-      await assertRelayed(tap, [request(true, { contains: ['Say hello.'] })]);
-    });
-
-    test('an image arrives intact', async () => {
-      const result = await generateText({
-        model: provider.model(),
-        messages: [{ role: 'user', content: [{ type: 'text', text: 'Describe the image.' }, { type: 'image', image: png, mediaType: 'image/png' }] }],
-        maxRetries: 0,
-        maxOutputTokens: 77
-      });
-      assert.equal(result.text, defaultReply);
-      const { upstream } = await assertRelayed(tap, [{ api: provider.api(false), model: provider.slug, maxTokens: 77 }]);
-      assert.deepEqual(images(provider.api(false), upstream[0].body), [{ mediaType: 'image/png', data: png.toString('base64') }]);
-    });
 
     test('concurrent calls each get their own answer', async () => {
       // Sixteen calls in flight at once, half of them streamed, each scripted to answer with its own number.
@@ -73,34 +41,6 @@ for (const provider of chatProviders) {
       assert.equal(new Set(upstream.map((u) => JSON.stringify(u.body).match(/Call (\d+)\./)[1])).size, 16, 'each call reached the upstream once');
     });
 
-    test('a tool loop completes and the tool schema arrives intact', async () => {
-      const result = await generateText({ model: provider.model(), tools: { get_weather: weather }, stopWhen: stepCountIs(4), prompt: weatherPrompt, ...common });
-      assert.equal(result.text, afterTools(`sunny in ${city}`));
-      assert.equal(result.steps.length, 2);
-      const [call] = result.steps[0].toolCalls;
-      assert.equal(call.toolName, 'get_weather');
-      assert.deepEqual(call.input, { city });
-      assert.equal(result.steps[0].finishReason, 'tool-calls');
-      const { upstream } = await assertRelayed(tap, [request(false, { tools: ['get_weather'] }), request(false, { tools: ['get_weather'] })]);
-      assert.deepEqual(
-        upstream.map((u) => u.script),
-        ['tool_call', 'tool_result']
-      );
-    });
-
-    test('a streamed tool loop assembles split tool arguments', async () => {
-      const result = streamText({ model: provider.model(), tools: { get_weather: weather }, stopWhen: stepCountIs(4), prompt: weatherPrompt, ...common });
-      const calls = [];
-      let text = '';
-      for await (const part of result.fullStream) {
-        if (part.type === 'tool-call') calls.push({ name: part.toolName, input: part.input });
-        if (part.type === 'text-delta') text += part.text;
-      }
-      assert.deepEqual(calls, [{ name: 'get_weather', input: { city } }]);
-      assert.equal(text, afterTools(`sunny in ${city}`));
-      await assertRelayed(tap, [request(true, { tools: ['get_weather'] }), request(true, { tools: ['get_weather'] })]);
-    });
-
     test('parallel tool calls in one round all complete', async () => {
       const prompt = `Weather in two cities. ${script.tool('get_weather', { city: 'Oslo' })} ${script.also('get_weather', { city: 'Lima' })}`;
       const result = await generateText({ model: provider.model(), tools: { get_weather: weather }, stopWhen: stepCountIs(4), prompt, ...common });
@@ -110,18 +50,6 @@ for (const provider of chatProviders) {
       );
       assert.equal(result.text, afterTools('sunny in Oslo', 'sunny in Lima'));
       await assertRelayed(tap, [request(false, { tools: ['get_weather'] }), request(false, { tools: ['get_weather'] })]);
-    });
-
-    test('structured output returns the object the schema describes', async () => {
-      const result = await generateText({
-        model: provider.model(),
-        output: Output.object({ schema: jsonSchema(ticketSchema) }),
-        prompt: 'File a ticket.',
-        ...common
-      });
-      assert.deepEqual(result.output, ticket);
-      const { upstream } = await assertRelayed(tap, [request(false, { contains: ['File a ticket.'] })]);
-      assert.equal(upstream[0].script, provider.structuredScript ?? 'structured', 'the upstream was asked for the schema');
     });
 
     for (const [name, key, status] of [

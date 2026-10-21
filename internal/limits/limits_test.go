@@ -115,33 +115,11 @@ func TestParseReservationRejectsMalformedResponses(t *testing.T) {
 	}
 }
 
-// everyBudget is a request bound by a rate limit and a cost budget, which is what
-// it takes to be given every key.
-func everyBudget(lookup, owner string) Request {
-	return Request{
-		CostOwnerID: owner, LookupID: lookup,
-		RequestsPerMinute: pointer(int64(1)), DailyCostLimit: pointer("1"),
-	}
-}
-
 // The rate and concurrency keys of one lookup must share a hash tag so a
 // single script can touch both, and both cost keys must follow the API key
 // no matter which lookup spends from it.
 
 // A counter must never be split per dimension: one hash holds them all.
-
-// hashTag extracts what Valkey Cluster uses to place a key.
-func hashTag(key string) string {
-	open := strings.IndexByte(key, '{')
-	if open < 0 {
-		return ""
-	}
-	closed := strings.IndexByte(key[open:], '}')
-	if closed < 0 {
-		return ""
-	}
-	return key[open+1 : open+closed]
-}
 
 func TestRequestValidationRejectsBypassableLimits(t *testing.T) {
 	t.Parallel()

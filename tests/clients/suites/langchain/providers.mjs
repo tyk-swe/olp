@@ -78,19 +78,3 @@ export const weather = tool(async ({ city }) => `sunny in ${city}`, {
   description: 'Look up the weather for a city',
   schema: weatherSchema
 });
-
-/** The structured-output schema, and the instance the scripted upstream answers with. */
-export const ticketSchema = {
-  type: 'object',
-  title: 'ticket',
-  properties: {
-    title: { type: 'string' },
-    priority: { type: 'string', enum: ['low', 'high'] },
-    score: { type: 'integer' },
-    done: { type: 'boolean' },
-    tags: { type: 'array', items: { type: 'string' } }
-  },
-  required: ['title', 'priority', 'score', 'done', 'tags'],
-  additionalProperties: false
-};
-export const ticket = { title: 'fixture', priority: 'low', score: 42, done: true, tags: ['fixture'] };

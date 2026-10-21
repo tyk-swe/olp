@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // meteringFixtures seeds the smallest priced-attempt chain: an owner, a
@@ -83,42 +82,6 @@ func seedMeteringFixtures(t *testing.T, pool *pgxpool.Pool) meteringFixtures {
 		t.Fatal(err)
 	}
 	return f
-}
-
-// meteringEvent is a one-attempt request the consumer records end to end.
-func meteringEvent(t *testing.T, f meteringFixtures, provider string, observed time.Time, model string, inputTokens int64) *usage.Event {
-	t.Helper()
-	status := 200
-	event := &usage.Event{
-		Version: usage.WireVersion, EventID: uuid.NewString(), RequestID: uuid.NewString(),
-		RuntimeGenerationID: uuid.NewString(), APIKeyID: f.key, RouteSlug: "metering-route",
-		Operation: "generation", Surface: "openai",
-		RequestStartedAt: observed.Add(-time.Second), RequestCompletedAt: observed,
-		ObservedAt: observed, StatusCode: &status, LatencyMS: 1000,
-	}
-	event.Attempts = append(event.Attempts, usage.Attempt{
-		ID: uuid.NewString(), Ordinal: 1, ProviderID: provider, UpstreamModel: model,
-		StartedAt: observed.Add(-time.Second), CompletedAt: observed.Add(-500 * time.Millisecond),
-		StatusCode: &status, Committed: true, LatencyMS: 500,
-		Usage: &usage.AttemptUsage{Observed: true, Complete: true, InputTokens: &inputTokens},
-	})
-	event.ProviderID, event.UpstreamModel, event.Committed = &provider, &model, true
-	return event
-}
-
-func persistMetering(t *testing.T, pool *pgxpool.Pool, event *usage.Event) {
-	t.Helper()
-	payload, err := usage.Encode(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := usage.PersistEvent(t.Context(), pool, event, payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Outcome != usage.PersistOutcomePersisted {
-		t.Fatalf("outcome %v", result.Outcome)
-	}
 }
 
 func insertSink(t *testing.T, pool *pgxpool.Pool, name, typ, format, destination string, streams []string, settings string, credentialID *string, projectID *string) string {

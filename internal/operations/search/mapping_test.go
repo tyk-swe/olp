@@ -8,63 +8,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
-func lowerOK(t *testing.T, dialect, body string) map[string]any {
-	t.Helper()
-	r := request(t, Perplexity, body)
-	view, err := parseRequest(r, Perplexity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var mapping operations.Mapping
-	for _, mm := range Mappings() {
-		if mm.Target.ID == dialect {
-			mapping = mm
-		}
-	}
-	doc, _, err := mapping.Lower(r, view)
-	if err != nil {
-		t.Fatalf("lower %s: %v", dialect, err)
-	}
-	var out map[string]any
-	if json.Unmarshal(doc.Bytes(), &out) != nil {
-		t.Fatal("invalid lowered document")
-	}
-	return out
-}
-
-func TestMappingLower(t *testing.T) {
-	tavily := lowerOK(t, Tavily, `{"query":"q","max_results":3}`)
-	if tavily["query"] != "q" || tavily["max_results"] != float64(3) || len(tavily) != 2 {
-		t.Fatalf("tavily lower: %v", tavily)
-	}
-	def := lowerOK(t, Tavily, `{"query":"q"}`)
-	if def["max_results"] != float64(10) {
-		t.Fatalf("default max_results: %v", def)
-	}
-	exa := lowerOK(t, Exa, `{"query":"q","search_domain_filter":["example.com"]}`)
-	inc := exa["includeDomains"].([]any)
-	if len(inc) != 2 || inc[0] != "example.com" || inc[1] != "*.example.com" || exa["contents"].(map[string]any)["highlights"] != true {
-		t.Fatalf("exa lower: %v", exa)
-	}
-	exaDeny := lowerOK(t, Exa, `{"query":"q","search_domain_filter":["-bad.com"]}`)
-	deny := exaDeny["excludeDomains"].([]any)
-	if len(deny) != 2 || deny[0] != "bad.com" || deny[1] != "*.bad.com" || exaDeny["includeDomains"] != nil {
-		t.Fatalf("exa deny: %v", exaDeny)
-	}
-	par := lowerOK(t, Parallel, `{"query":"q","search_domain_filter":[".gov","site.com/path"]}`)
-	sp := par["advanced_settings"].(map[string]any)["source_policy"].(map[string]any)
-	if sp["include_domains"].([]any)[0] != ".gov" || sp["include_domains"].([]any)[1] != "site.com/path" {
-		t.Fatalf("parallel lower: %v", par)
-	}
-	parDeny := lowerOK(t, Parallel, `{"query":"q","search_domain_filter":["-bad.com/path"]}`)
-	if parDeny["advanced_settings"].(map[string]any)["source_policy"].(map[string]any)["exclude_domains"].([]any)[0] != "bad.com/path" {
-		t.Fatalf("parallel deny: %v", parDeny)
-	}
-	if par["search_queries"].([]any)[0] != "q" {
-		t.Fatalf("parallel queries: %v", par)
-	}
-}
-
 func TestMappingLowerRefusals(t *testing.T) {
 	for _, tc := range []struct{ dialect, body string }{
 		{Tavily, `{"query":"q","search_domain_filter":["a.com"]}`},

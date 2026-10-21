@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,13 +22,6 @@ func priceInputs() *usage.RoutingInputs {
 	return &usage.RoutingInputs{Prices: []usage.RoutingPrice{
 		{Price: usage.Price{ProviderKind: "openai_compatible", Model: modelA, Operation: "generation", InputPerMillion: rate("1"), OutputPerMillion: rate("2"), Currency: currency}, EffectiveAt: time.Now()},
 	}, RefreshedAt: time.Now()}
-}
-
-func completionUsageMissing() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"c","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`)
-	}
 }
 
 func TestBusinessMetricsCallerPaidBudgetExemptCosts(t *testing.T) {

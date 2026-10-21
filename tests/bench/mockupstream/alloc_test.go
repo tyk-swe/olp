@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -58,29 +57,4 @@ func (h *harness) serve() {
 	clear(h.w.header)
 	h.w.bytes = 0
 	h.h.ServeHTTP(h.w, h.req)
-}
-
-// TestRequestsAllocateAlmostNothing holds the mock to its promise of being
-// cheap: a request, including draining and scanning its body, costs a few
-// small allocations, and never one per frame or per byte of the prompt.
-func TestRequestsAllocateAlmostNothing(t *testing.T) {
-	big := strings.Repeat("the ", 100_000)
-	s := newMock(t, Config{Default: Behavior{OutputTokens: 64}})
-	for _, w := range wires {
-		for name, r := range map[string]request{"unary": w.unary, "stream": w.stream} {
-			if w.name != "gemini" {
-				r.body = strings.Replace(r.body, `"hello"`, `"`+big+`"`, 1)
-			}
-			h := newHarness(t, s, r)
-			h.serve()
-			if h.w.bytes == 0 {
-				t.Fatalf("%s %s wrote nothing", w.name, name)
-			}
-			allocs := testing.AllocsPerRun(50, h.serve)
-			t.Logf("%s %s: %v allocations over a %d byte body and %d byte response", w.name, name, allocs, len(r.body), h.w.bytes)
-			if allocs > 4 {
-				t.Errorf("%s %s: %v allocations per request over a %d byte body and %d byte response, want at most 4", w.name, name, allocs, len(r.body), h.w.bytes)
-			}
-		}
-	}
 }

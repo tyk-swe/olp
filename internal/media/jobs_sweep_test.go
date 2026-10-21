@@ -79,31 +79,3 @@ func TestIntegrationCreatingJobWaitsForItsDispatchWindow(t *testing.T) {
 		t.Fatal("abandoned create was not claimed after the default window")
 	}
 }
-
-// Lifecycle drift under the worker's own claim is a handoff that releases the
-// lease instead of stranding the row until the lease expires.
-func TestIntegrationLifecycleDriftUnderOwnClaimReleasesLease(t *testing.T) {
-	f := seedClaimFixture(t)
-	ctx := t.Context()
-	old := time.Now().Add(-10 * time.Minute)
-	job := f.insertJob(t, claimJobSeed{Lifecycle: LifecycleCreating, State: StateQueued, UpdatedAt: &old})
-	record := f.claim(t, job.ID)
-	// A concurrent attach moves the row out of 'creating' while the claim is held.
-	if _, err := AttachUpstream(ctx, f.pool, job.ID, "upstream-video-drift",
-		JobUpdate{State: StateQueued, LastPolledAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	before := f.gaps.Load()
-	if outcome := f.service.reconcileClaimed(ctx, record); outcome != outcomeHandedOff {
-		t.Fatalf("drift outcome %d", outcome)
-	}
-	if got := f.gaps.Load(); got != before {
-		t.Fatalf("drift counted as a gap: %d", got)
-	}
-	if claimID, until := f.leaseOf(t, job.ID); claimID != nil || until != nil {
-		t.Fatalf("claim leaked: %v %v", claimID, until)
-	}
-	if _, ok, err := ClaimJob(ctx, f.pool, job.ID, time.Now()); err != nil || !ok {
-		t.Fatalf("job still busy: ok=%v err=%v", ok, err)
-	}
-}

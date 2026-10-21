@@ -1,7 +1,6 @@
 package estimate
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -14,21 +13,6 @@ func mustParse(t testing.TB, family wire.Format, body string) *wire.Request {
 	request, err := openai.Parse(family, []byte(body))
 	if err != nil {
 		t.Fatalf("parse %s: %v", body, err)
-	}
-	return request
-}
-
-// native builds a request of a dialect this package does not parse, the way
-// the dialect's codec hands one to admission: its fields, unvalidated.
-func native(t testing.TB, family wire.Format, body string) *wire.Request {
-	t.Helper()
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(body), &fields); err != nil {
-		t.Fatal(err)
-	}
-	request, err := wire.FromFields(family, "route", false, fields)
-	if err != nil {
-		t.Fatal(err)
 	}
 	return request
 }
@@ -65,14 +49,6 @@ func native(t testing.TB, family wire.Format, body string) *wire.Request {
 
 // Past what is counted exactly, a count is extrapolated from the start, and
 // the same segments in another order are another count.
-
-// walkKeeping walks a request into an input that keeps at most retain bytes of
-// its text.
-func walkKeeping(request *wire.Request, retain int) *input {
-	in := &input{retain: retain}
-	walkInput(in, request.Family, requestFields(request))
-	return in
-}
 
 // A segment may begin anywhere relative to the point where the prompt stops
 // keeping text, and a cut may fall inside a character.

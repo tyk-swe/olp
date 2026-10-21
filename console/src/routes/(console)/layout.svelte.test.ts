@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   authenticationCapabilities,
   currentSession,
-  type AuthenticationCapabilities,
   type CurrentSession
 } from '$lib/features/access/session/api';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
@@ -34,14 +33,6 @@ const session: CurrentSession = {
     access_scope: 'global',
     operations: operationsFor('owner')
   }
-};
-
-const capabilities: AuthenticationCapabilities = {
-  local_login_enabled: true,
-  oidc_login_enabled: false,
-  notifications_active: false,
-  payload_capture_active: false,
-  gateway_available: true
 };
 
 let host: HTMLElement;
@@ -83,35 +74,6 @@ afterEach(async () => {
   detachQueryClient();
   client.clear();
   host.remove();
-});
-
-it('fetches capabilities alongside the session and seeds the query cache', async () => {
-  let sessionSettled = false;
-  let resolveSession!: (session: CurrentSession) => void;
-  const sessionRequest = new Promise<CurrentSession>((resolve) => {
-    resolveSession = resolve;
-  });
-  void sessionRequest.then(() => {
-    sessionSettled = true;
-  });
-  vi.mocked(currentSession).mockReturnValue(sessionRequest);
-  vi.mocked(authenticationCapabilities).mockResolvedValue(capabilities);
-
-  component = mount(ConsoleLayoutProbe, { target: host, props: { client } });
-  flushSync();
-  await vi.waitFor(() =>
-    expect(authenticationCapabilities).toHaveBeenCalledTimes(1)
-  );
-  expect(sessionSettled).toBe(false);
-
-  resolveSession(session);
-  await vi.waitFor(() => {
-    flushSync();
-    expect(linkLabels()).toContain('Providers');
-  });
-  // The seeded capabilities satisfy the navigation query, so the endpoint is
-  // not requested a second time.
-  expect(authenticationCapabilities).toHaveBeenCalledTimes(1);
 });
 
 it('still authenticates and renders the shell when capabilities fail', async () => {

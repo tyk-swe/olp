@@ -84,30 +84,12 @@ func newTestHost(t testing.TB, engine Engine, limits Limits, log *slog.Logger, m
 	return NewHost(startRuntime(t, engine, limits, log), nil, table), table
 }
 
-const fixtureDigest = "fixture"
-
 // The providers the fixture's and the reference plugin's signing profiles
 // sign for.
 var (
 	fixtureProvider   = abi.Provider{Profile: "fixture-chat"}
 	referenceProvider = abi.Provider{Profile: "reference-signed-chat"}
 )
-
-func signRequest(credential string, body []byte) abi.SignRequest {
-	return abi.SignRequest{
-		Profile: "fixture-chat", Method: "POST", URL: "https://api.example.com/v1/chat/completions?api-version=1",
-		Header: map[string][]string{"Content-Type": {"application/json"}}, Body: body, Credential: credential,
-	}
-}
-
-func signedCalls(t *testing.T, host *Host) string {
-	t.Helper()
-	result, err := host.Sign(t.Context(), fixtureDigest, fixtureProvider, signRequest("sk-fixture", []byte("{}")), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result.Headers["X-Fixture-Calls"]
-}
 
 // A failed Fetch includes the requested URL in its error.
 

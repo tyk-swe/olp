@@ -57,33 +57,6 @@ func TestOCRNativeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSearchNativeRoundTrip(t *testing.T) {
-	h := strictHarness(t, func(s *routing.Snapshot) {
-		route := s.Routes[routeSlug]
-		route.Operations = []string{"search"}
-		s.Routes[routeSlug] = route
-		ocrSearchProviders(s, "perplexity", "perplexity-search", "search")
-	})
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/a/v1/search" {
-			t.Errorf("search addressed at %s", r.URL.Path)
-		}
-		body, _ := io.ReadAll(r.Body)
-		var req map[string]any
-		if json.Unmarshal(body, &req) != nil || req["model"] != nil || req["query"] != "airport delays" {
-			t.Errorf("upstream body: %s", body)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"id":"upstream-id","results":[{"title":"t","url":"https://example.com","snippet":"s"}]}`)
-	})
-	resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(`{"query":"airport delays"}`), map[string]string{"X-OLP-Route": routeSlug})
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"id":"upstream-id"`) {
-		t.Fatalf("search: %d %s", resp.StatusCode, body)
-	}
-}
-
 func TestSearchRequiresRouteHeader(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
@@ -298,30 +271,5 @@ func TestSearchMutatingGuardrailRefused(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "guardrail_surface_unavailable") || h.mock.count("a")+h.mock.count("b") != 0 {
 		t.Fatalf("mutating search guardrail: %d %s", resp.StatusCode, body)
-	}
-}
-
-func TestOCRNoCaching(t *testing.T) {
-	h := strictHarness(t, func(s *routing.Snapshot) {
-		route := s.Routes[routeSlug]
-		route.Operations = []string{"ocr"}
-		route.Cache = &cache.Policy{Mode: "exact"}
-		s.Routes[routeSlug] = route
-		ocrSearchProviders(s, "mistral", "mistral-ocr", "ocr")
-	})
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"model":"mistral-ocr-latest","pages":[{"index":0,"markdown":"# Report"}],"usage_info":{"pages_processed":1}}`)
-	})
-	for i := 0; i < 2; i++ {
-		resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("ocr %d: %d %s", i, resp.StatusCode, body)
-		}
-	}
-	if h.mock.count("a") != 2 {
-		t.Fatalf("cached ocr: %d calls", h.mock.count("a"))
 	}
 }

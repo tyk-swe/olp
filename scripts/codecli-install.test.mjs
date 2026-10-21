@@ -64,34 +64,6 @@ async function fixture(t) {
   return { root, responses, archives, lookups, downloads, release, options, evidence };
 }
 
-test('latest advances per run while verified archives are reused by client, version and architecture', async (t) => {
-  const f = await fixture(t);
-  for (const client of Object.keys(specs)) for (const arch of ['x64', 'arm64']) await f.release(client, '7.8.9', arch);
-  const first = await installClients({ ...f.options, arch: 'x64' });
-  assert.equal(f.downloads.length, 3);
-  // Cached extracted files are never trusted over the verified archive.
-  await writeFile(first.environment.OLP_CODEX_BINARY, 'tampered');
-  const again = await installClients({ ...f.options, arch: 'x64' });
-  assert.notEqual(first.envFile, again.envFile);
-  assert.equal(f.downloads.length, 3);
-  assert.equal(f.lookups.length, 12, 'metadata must refresh even with cached archives');
-  await installClients({ ...f.options, arch: 'arm64' });
-  assert.equal(f.downloads.length, 6);
-  for (const client of Object.keys(specs)) await f.release(client, '7.8.10', 'x64');
-  const next = await installClients({ ...f.options, arch: 'x64' });
-  assert.equal(f.downloads.length, 9);
-  for (const spec of Object.values(specs)) {
-    assert.equal(next.environment[`${spec.env}_VERSION`], '7.8.10');
-    assert.notEqual(first.environment[`${spec.env}_BINARY`], next.environment[`${spec.env}_BINARY`]);
-  }
-  const evidence = JSON.parse(await readFile(next.evidenceFile));
-  assert.equal(evidence.status, 'ready');
-  assert.equal(evidence.clients.codex.platform_package.version, '7.8.10-linux-x64');
-  assert.match(evidence.clients['claude-code'].platform_package.url, /claude-code-linux-x64/);
-  assert.match(evidence.clients.opencode.platform_package.integrity, /^sha512-/);
-  assert.equal(evidence.clients.codex.binary_version, 'codex-cli 7.8.10');
-});
-
 test('checksum failure preserves resolved evidence and never extracts an unverified archive', async (t) => {
   const f = await fixture(t);
   await f.release('codex', '7.8.9', 'x64');

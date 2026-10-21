@@ -405,13 +405,11 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "tests/clients/m9sdk/m9_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -462,13 +460,11 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "tests/clients/m9sdk/m9_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -519,12 +515,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -575,12 +569,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -625,12 +617,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -677,12 +667,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -736,12 +724,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -792,12 +778,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -848,12 +832,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -904,12 +886,10 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -957,13 +937,11 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "tests/clients/m9sdk/m9_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -1018,13 +996,11 @@
       "expected_refusal": null,
       "evidence": [
         "internal/protocols/completions_test.go",
-        "internal/connectors/completions_test.go",
         "internal/gateway/completions_test.go",
         "internal/operations/tokenization/estimate/completions_test.go",
         "tests/clients/m9sdk/m9_test.go",
         "internal/interaction/completions_test.go",
-        "internal/routes/completions_decisions_test.go",
-        "internal/gateway/completions_probe_test.go"
+        "internal/routes/completions_decisions_test.go"
       ],
       "live_qualification": "required",
       "refusals": [
@@ -1511,9 +1487,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1554,9 +1528,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1596,9 +1568,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1638,9 +1608,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1680,9 +1648,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1723,9 +1689,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1766,9 +1730,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1808,9 +1770,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1850,9 +1810,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -1892,9 +1850,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2085,9 +2041,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2128,9 +2082,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2170,9 +2122,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2212,9 +2162,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2254,9 +2202,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2290,7 +2236,6 @@
       "expected_refusal": null,
       "evidence": [
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/provider_resources_test.go",
         "tests/integration/batch_settlement_test.go"
       ],
@@ -2344,7 +2289,6 @@
       "status": "implemented",
       "expected_refusal": null,
       "evidence": [
-        "internal/batches/batches_test.go",
         "tests/integration/provider_resources_test.go",
         "tests/integration/batch_settlement_test.go"
       ],
@@ -2401,7 +2345,6 @@
       "expected_refusal": null,
       "evidence": [
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/provider_resources_test.go",
         "tests/integration/batch_settlement_test.go"
       ],
@@ -2455,7 +2398,6 @@
       "status": "implemented",
       "expected_refusal": null,
       "evidence": [
-        "internal/batches/batches_test.go",
         "tests/integration/provider_resources_test.go",
         "tests/integration/batch_settlement_test.go"
       ],
@@ -2521,9 +2463,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2564,9 +2504,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2606,9 +2544,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2648,9 +2584,7 @@
         "tests/fixtures/vendors/groq/batch.output.jsonl",
         "tests/fixtures/vendors/groq/batch.error.jsonl",
         "tests/fixtures/vendors/groq/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2693,9 +2627,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2736,9 +2668,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2778,9 +2708,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2820,9 +2748,7 @@
         "tests/fixtures/vendors/together/batch.output.jsonl",
         "tests/fixtures/vendors/together/batch.error.jsonl",
         "tests/fixtures/vendors/together/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -2985,9 +2911,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -3028,9 +2952,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -3070,9 +2992,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -3112,9 +3032,7 @@
         "tests/fixtures/vendors/mistral/batch.output.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.jsonl",
         "tests/fixtures/vendors/mistral/batch.error.json",
-        "internal/connectors/profiles_test.go",
         "internal/gateway/batch_submission_test.go",
-        "internal/batches/batches_test.go",
         "tests/integration/managed_batches_test.go"
       ],
       "live_qualification": "required",
@@ -3158,7 +3076,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3202,7 +3119,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3246,7 +3162,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3290,7 +3205,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3334,7 +3248,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3381,7 +3294,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3425,7 +3337,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3467,7 +3378,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3509,7 +3419,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3551,7 +3460,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3593,7 +3501,6 @@
         "internal/gateway/anthropic_resources.go",
         "internal/gateway/anthropic_resources_test.go",
         "internal/batches/anthropic.go",
-        "internal/batches/anthropic_test.go",
         "tests/integration/anthropic_batch_test.go"
       ],
       "live_qualification": "required",
@@ -3831,7 +3738,6 @@
         "internal/gateway/gemini_batches.go",
         "internal/gateway/gemini_batches_test.go",
         "internal/batches/gemini.go",
-        "internal/batches/gemini_test.go",
         "tests/integration/gemini_files_test.go"
       ],
       "live_qualification": "required",
@@ -3875,7 +3781,6 @@
         "internal/gateway/gemini_batches.go",
         "internal/gateway/gemini_batches_test.go",
         "internal/batches/gemini.go",
-        "internal/batches/gemini_test.go",
         "tests/integration/gemini_files_test.go"
       ],
       "live_qualification": "required",
@@ -3918,7 +3823,6 @@
         "internal/gateway/gemini_batches.go",
         "internal/gateway/gemini_batches_test.go",
         "internal/batches/gemini.go",
-        "internal/batches/gemini_test.go",
         "tests/integration/gemini_files_test.go"
       ],
       "live_qualification": "required",
@@ -3961,7 +3865,6 @@
         "internal/gateway/gemini_batches.go",
         "internal/gateway/gemini_batches_test.go",
         "internal/batches/gemini.go",
-        "internal/batches/gemini_test.go",
         "tests/integration/gemini_files_test.go"
       ],
       "live_qualification": "required",
@@ -4004,7 +3907,6 @@
         "internal/gateway/gemini_batches.go",
         "internal/gateway/gemini_batches_test.go",
         "internal/batches/gemini.go",
-        "internal/batches/gemini_test.go",
         "tests/integration/gemini_files_test.go"
       ],
       "live_qualification": "required",
@@ -4039,10 +3941,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4075,10 +3975,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4110,10 +4008,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4145,10 +4041,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4183,10 +4077,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4219,10 +4111,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4254,10 +4144,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",
@@ -4289,10 +4177,8 @@
         "internal/gateway/cloud_batches_test.go",
         "internal/connectors/batch_storage.go",
         "internal/batches/cloud.go",
-        "internal/batches/cloud_test.go",
         "tests/fixtures/vendors/vertex/contract.json",
         "tests/fixtures/vendors/bedrock/contract.json",
-        "tests/integration/cloud_batch_storage_test.go",
         "tests/integration/cloud_batch_jobs_test.go"
       ],
       "live_qualification": "required",

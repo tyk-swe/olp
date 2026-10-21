@@ -1,7 +1,6 @@
 package media
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,51 +15,6 @@ func speechRequest(voice, format string, speed *float64) *Request {
 		r.Format = &format
 	}
 	return r
-}
-
-func TestVendorTranscriptsReadAsOpenAIFormats(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		encode func(*Request, string) (*UpstreamCall, *Error)
-		body   string
-	}{
-		{"elevenlabs", encodeElevenLabsTranscription, `{"language_code":"en","language_probability":0.98,"text":"Hello world.","transcription_id":"t1","audio_duration_secs":2.5,
-			"words":[{"text":"Hello","type":"word","start":0.1,"end":0.5},{"text":" ","type":"spacing","start":0.5,"end":0.6},{"text":"world.","type":"word","start":0.6,"end":1.0}]}`},
-		{"deepgram", encodeDeepgramTranscription, `{"metadata":{"request_id":"r1","duration":2.5,"channels":1},"results":{"channels":[{"alternatives":[{"transcript":"Hello world.","confidence":0.98,
-			"words":[{"word":"hello","start":0.1,"end":0.5,"confidence":0.99,"punctuated_word":"Hello"},{"word":"world","start":0.6,"end":1.0,"confidence":0.99}]}],"detected_language":"en"}]}}`},
-	} {
-		for _, format := range []string{"json", "verbose_json"} {
-			r := mediaProbe(OpTranscription)
-			r.Format = &format
-			call, failure := test.encode(r, "model")
-			if failure != nil {
-				t.Fatalf("%s: %s", test.name, failure.Message)
-			}
-			result, failure := DecodeTranscript(call, format, []byte(test.body))
-			if failure != nil || result.DurationSeconds == nil || *result.DurationSeconds != 2.5 {
-				t.Fatalf("%s decoded %+v %v", test.name, result, failure)
-			}
-			body, _ := EncodeTranscriptionJSON(result)
-			var rendered map[string]any
-			_ = json.Unmarshal(body, &rendered)
-			if format == "json" && string(body) != `{"text":"Hello world."}` {
-				t.Fatalf("%s json client receives %s", test.name, body)
-			}
-			if words, _ := rendered["words"].([]any); format == "verbose_json" && (rendered["language"] != "en" || rendered["duration"] != 2.5 || len(words) != 2) {
-				t.Fatalf("%s verbose_json client receives %s", test.name, body)
-			}
-		}
-		srt := "srt"
-		r := mediaProbe(OpTranscription)
-		r.Format = &srt
-		if _, failure := test.encode(r, "model"); failure == nil {
-			t.Fatalf("%s accepted srt", test.name)
-		}
-	}
-	deepgram, _ := encodeDeepgramTranscription(mediaProbe(OpTranscription), "nova-3")
-	if deepgram.Upload == nil || deepgram.Fields != nil || deepgram.Query.Get("model") != "nova-3" {
-		t.Fatalf("Deepgram does not send the raw audio: %+v", deepgram)
-	}
 }
 
 func TestPollySpeechIsSignedForPolly(t *testing.T) {

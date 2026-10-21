@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
@@ -22,17 +20,6 @@ func setRoutePolicy(h *harness, rules ...contentpolicy.Rule) {
 func policyDecisions(h *harness) []contentpolicy.Decision {
 	h.t.Helper()
 	return h.sink.last(h.t).PolicyDecisions
-}
-
-func providerByName(h *harness, name string) routing.Provider {
-	h.t.Helper()
-	for _, p := range h.rt.release.Snapshot.Providers {
-		if p.Name == name {
-			return p
-		}
-	}
-	h.t.Fatalf("provider %s missing", name)
-	return routing.Provider{}
 }
 
 func TestContentPolicyOutputBlocksWithAccounting(t *testing.T) {

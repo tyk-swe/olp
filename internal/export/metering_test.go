@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -131,8 +130,6 @@ func fieldOf(err error) string {
 
 // project and route filters stay legal — only the outcome is refused
 // before the destination check runs.
-
-func stringptr(s string) *string { return &s }
 
 func meteringSink(t *testing.T, raw string) *Sink {
 	t.Helper()
@@ -372,8 +369,6 @@ func (s *fakeStripe) received() []stripeHit {
 	defer s.mu.Unlock()
 	return append([]stripeHit(nil), s.hits...)
 }
-
-var stripeIdentifier = regexp.MustCompile(`^olp-[0-9a-f]{32}-[0-9a-f]{32}$`)
 
 func stripeDestination(server *httptest.Server, project string) (Destination, []byte) {
 	settings, _ := json.Marshal(map[string]any{

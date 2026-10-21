@@ -67,20 +67,6 @@ func limReserveStated(t *testing.T, c *coordination.Client, limiter *limits.Limi
 	return lease, lease.RateState(), [2]int64{before, after}
 }
 
-// limRefusedState reserves request and reports the allowance its refusal carries,
-// with the readings of Valkey's clock around the call.
-func limRefusedState(t *testing.T, c *coordination.Client, limiter *limits.Limiter, request limits.Request, dimension limits.Dimension) (limits.RateState, [2]int64) {
-	t.Helper()
-	before := limServerTimeMS(t, c)
-	_, err := limiter.Reserve(t.Context(), request)
-	after := limServerTimeMS(t, c)
-	exceeded, ok := errors.AsType[*limits.ExceededError](err)
-	if !ok || exceeded.Dimension != dimension {
-		t.Fatalf("Reserve error = %v, want a %s rejection", err, dimension)
-	}
-	return exceeded.Rate, [2]int64{before, after}
-}
-
 // The refusal states what the window holds: the request reserved nothing,
 // so the tokens it asked for are still there.
 

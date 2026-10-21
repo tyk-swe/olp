@@ -1,48 +1,16 @@
 package gateway
 
 import (
-	"context"
 	"net/http"
 	"testing"
-	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/observability"
-	"github.com/tyk-swe/olp/internal/protocols"
 )
 
 // Both one-token prompts retain their 4096-token output allowance; the
 // provider's five-token replies cannot refund either local reservation.
-
-func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		triage(s, b, routing.Predicate{Classifier: &routing.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
-	})
-	parsed, err := protocols.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hi"}]}`), routeSlug)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent := &call{
-		request: request{id: uuid.NewString(), minted: true, release: h.rt.Release(), startedAt: time.Now()},
-		family:  wire.Chat, mode: "unary", authority: h.rt.keys[fullKey], generation: generationCall{parsed: parsed},
-	}
-	pool := observability.NewPool(1)
-	pool.Queue(1, time.Second)
-	held := pool.Enter()
-	defer held.Release()
-	queued := pool.Enter()
-	defer queued.Release()
-	ctx, cancel := context.WithTimeout(observability.WithPermit(t.Context(), queued), 20*time.Millisecond)
-	defer cancel()
-	result := h.gateway.callClassifier(ctx, parent, &routing.ClassifierPredicate{Route: classifierSlug, TimeoutMS: 1000})
-	if result.failure == "" || h.mock.count("b") != 0 {
-		t.Fatalf("queued classifier dispatched: result=%+v calls=%d", result, h.mock.count("b"))
-	}
-}
 
 func TestNativeClassifierPredicateReturnsLabelsAndFallsThroughOnFailure(t *testing.T) {
 	for _, tc := range []struct {

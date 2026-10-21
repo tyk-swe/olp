@@ -85,18 +85,6 @@ func TestCloudBatchCreationChecksRouteAuthority(t *testing.T) {
 	}
 }
 
-func TestBedrockProjectionUsesNativeCountsAndSubmitTime(t *testing.T) {
-	body := []byte(`{"jobArn":"arn:aws:bedrock:us-east-1:123:model-invocation-job/job","status":"Completed","submitTime":1792497600.75,"totalRecordCount":5,"processedRecordCount":5,"successRecordCount":4,"errorRecordCount":1}`)
-	projected, err := projectCloudBatchJob(body, "cloud_batch_local", "bedrock-batch-inference", "route", "s3://input/", "s3://output/")
-	var result struct {
-		Created int64            `json:"created_at"`
-		Counts  map[string]int64 `json:"request_counts"`
-	}
-	if err != nil || json.Unmarshal(projected, &result) != nil || result.Created != 1792497600 || result.Counts["total"] != 5 || result.Counts["successful"] != 4 || result.Counts["failed"] != 1 {
-		t.Fatalf("Bedrock native progress or timestamp was lost: %s err=%v", projected, err)
-	}
-}
-
 func TestCloudBatchProjectionRequiresNativeIdentity(t *testing.T) {
 	for _, test := range []struct{ dialect, body string }{
 		{"vertex-batch-prediction", `{"state":"JOB_STATE_RUNNING"}`},

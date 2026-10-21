@@ -113,8 +113,6 @@ func (s *Server) post(t testing.TB, r request) (*http.Response, []byte) {
 	return resp, body
 }
 
-func wantText(n int) string { return string(text(nil, n)) }
-
 func mustContain(t testing.TB, haystack []byte, needles ...string) {
 	t.Helper()
 	for _, n := range needles {

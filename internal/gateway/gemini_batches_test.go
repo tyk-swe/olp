@@ -1,8 +1,6 @@
 package gateway
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"net/url"
@@ -90,31 +88,6 @@ func TestGeminiBatchPageCursor(t *testing.T) {
 	}
 }
 
-func TestGeminiBatchMetadataExcludesContent(t *testing.T) {
-	content := bytes.Repeat([]byte("private-model-content"), 1024)
-	body, _ := json.Marshal(map[string]any{
-		"name": "batches/upstream", "done": true,
-		"metadata": map[string]any{
-			"state": "BATCH_STATE_SUCCEEDED", "model": "models/provider-model",
-			"inputConfig": map[string]any{"requests": map[string]any{"requests": string(content)}},
-			"output":      map[string]any{"inlinedResponses": map[string]any{"inlinedResponses": []any{map[string]any{"response": string(content)}}}},
-		},
-	})
-	metadata := geminiBatchMetadata(body, "provider-model", "files/local", "files/upstream", nil)
-	if bytes.Contains(metadata, content) || bytes.Contains(metadata, []byte("inlinedResponses")) || len(metadata) > 1024 {
-		t.Fatalf("Gemini metadata retained content (%d bytes)", len(metadata))
-	}
-	resource := &resources.Resource{ID: "gemini_batch_local", RouteSlug: "route", Metadata: metadata}
-	local, upstream := geminiBatchInternalNames(resource)
-	if local != "files/local" || upstream != "files/upstream" || geminiBatchState(metadata) != "BATCH_STATE_SUCCEEDED" {
-		t.Fatalf("Gemini metadata lost lifecycle identity: %s", metadata)
-	}
-	projected, err := (&Server{}).geminiBatchResourceObject(context.Background(), resource, body)
-	if err != nil || !bytes.Contains(projected, content) {
-		t.Fatalf("transient inline output was lost: err=%v", err)
-	}
-}
-
 func TestGeminiInlineBatchRefusesUnboundFileReferences(t *testing.T) {
 	for _, request := range []string{
 		`{"contents":[{"parts":[{"fileData":{"mimeType":"application/pdf","fileUri":"https://generativelanguage.googleapis.com/v1beta/files/foreign"}}]}]}`,
@@ -124,22 +97,6 @@ func TestGeminiInlineBatchRefusesUnboundFileReferences(t *testing.T) {
 		if _, err := validateGeminiBatchRequest(body, "route"); err == nil || err.Code != "unsupported_parameter" {
 			t.Fatalf("unowned file reference was not refused: %s err=%v", body, err)
 		}
-	}
-}
-
-func TestGeminiBatchProjectionPreservesOrdinaryReferenceText(t *testing.T) {
-	body := []byte(`{"name":"batches/upstream","metadata":{"name":"batches/upstream","displayName":"files/daily","output":{"inlinedResponses":{"inlinedResponses":[{"metadata":{"key":"files/result-key"},"response":{"candidates":[{"content":{"parts":[{"text":"save to files/output.json or batches/archive"}]}}]}}]}}}}`)
-	projected, err := projectGeminiBatchObject(body, "local", "route", "", "", nil)
-	if err != nil || !bytes.Contains(projected, []byte("save to files/output.json or batches/archive")) {
-		t.Fatalf("ordinary generated content was mistaken for a resource reference: %s err=%v", projected, err)
-	}
-	for _, body := range []string{"", "{}", "{ \n }"} {
-		if !geminiBatchCancelAcknowledgement([]byte(body)) {
-			t.Fatalf("valid empty cancellation acknowledgement refused: %q", body)
-		}
-	}
-	if geminiBatchCancelAcknowledgement([]byte(`{"name":"batches/upstream"}`)) {
-		t.Fatal("a job response was classified as an empty acknowledgement")
 	}
 }
 

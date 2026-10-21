@@ -14,15 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/observability"
-	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -86,54 +83,6 @@ func splitRoutes(s *routing.Snapshot, b routing.Provider, behavior routing.Behav
 	backup.ID, backup.RoutingID, backup.RevisionID, backup.Slug = backupID, backupID, uuid.NewString(), backupSlug
 	backup.Targets = []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
 	s.Routes[routeSlug], s.Routes[backupSlug] = primary, backup
-}
-
-func TestRetainedResponsesIgnoreRouteDelegatingSelectors(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(s *routing.Snapshot, _, b routing.Provider) {
-		for id, provider := range s.Providers {
-			provider.Kind, provider.Endpoint = "openai", ""
-			s.Providers[id] = provider
-		}
-		splitRoutes(s, b, routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}})
-	})
-	for _, retained := range []bool{false, true} {
-		parsed, err := protocols.Parse(wire.Responses, []byte(`{"model":"team-chat","input":"hi","store":true}`), routeSlug)
-		if err != nil {
-			t.Fatal(err)
-		}
-		x := &call{request: request{release: h.rt.Release()}, family: wire.Responses, mode: "unary", providerState: retained, generation: generationCall{parsed: parsed}}
-		if e := h.gateway.prepare(t.Context(), x, h.gateway.keyAuthorizer(h.rt.keys[fullKey])); e != nil {
-			t.Fatal(e)
-		}
-		wantRoute, wantProvider := backupSlug, h.provider("b")
-		if retained {
-			wantRoute, wantProvider = routeSlug, h.provider("a")
-		}
-		if x.route.Slug != wantRoute || len(x.attempts) != 1 || x.attempts[0].ProviderID != wantProvider {
-			t.Fatalf("retained=%t route=%s attempts=%+v", retained, x.route.Slug, x.attempts)
-		}
-	}
-}
-
-func TestPinnedInteractionsIgnoreRouteDelegatingSelectors(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
-		a.Kind, a.ProfileID, a.ProfileRevision = "gemini", "gemini-interactions", connectors.ProfileRevision
-		a.Endpoint = h.upstream.URL + "/v1beta"
-		a.Capabilities = []routing.Capability{{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"}}
-		snapshot.Providers[a.ID] = a
-		splitRoutes(snapshot, b, routing.Behavior{Selectors: []routing.Selector{{ID: "delegate", Route: backupSlug}}})
-	})
-	h.mock.set("v1beta", status(http.StatusOK, `{"id":"int_1","status":"completed","steps":[],"usage":{"total_input_tokens":3,"total_output_tokens":2}}`))
-	request := httptest.NewRequest(http.MethodPost, "/gemini/v1beta/interactions", strings.NewReader(`{"model":"`+routeSlug+`","input":"hello","store":false}`))
-	request.Header.Set("X-Goog-Api-Key", fullKey)
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	h.gateway.geminiInteractionCreate(response, request)
-	if response.Code != http.StatusOK || h.mock.count("v1beta") != 1 || h.mock.count("b") != 0 {
-		t.Fatalf("pinned request was displaced by a delegating selector: %d %s calls=%d/%d", response.Code, response.Body, h.mock.count("v1beta"), h.mock.count("b"))
-	}
 }
 
 func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {

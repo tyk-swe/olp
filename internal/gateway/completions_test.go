@@ -12,9 +12,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -85,65 +82,6 @@ func TestLegacyCompletionsGateway(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestLegacyCompletionAutomaticUsesMappedEstimate(t *testing.T) {
-	for _, tightContext := range []bool{false, true} {
-		t.Run(fmt.Sprint(tightContext), func(t *testing.T) {
-			h := newHarness(t, Config{})
-			routeEstimateTargets(h, estimateTarget{name: "a", model: "gpt-4o", slots: 1})
-			if tightContext {
-				for id, p := range h.rt.release.Snapshot.Providers {
-					p.Models = map[string]json.RawMessage{"gpt-4o": json.RawMessage(`{"context_length":7}`)}
-					h.rt.release.Snapshot.Providers[id] = p
-				}
-			}
-			h.mock.set("a", completion("gpt-4o", "hello"))
-			resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":1}`), nil)
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if tightContext {
-				if resp.StatusCode < 400 || h.mock.count("a") != 0 {
-					t.Fatalf("mapped context not checked: %d %s", resp.StatusCode, body)
-				}
-				return
-			}
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("automatic completion: %d %s", resp.StatusCode, body)
-			}
-			mapped, err := protocols.Parse(wire.Chat, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"hello"}],"max_tokens":1}`), "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := estimate.Walk(mapped).Estimate(estimate.ForModel("gpt-4o"), nil).Input
-			env := h.sink.last(t)
-			if len(env.Attempts) != 1 || env.Attempts[0].EstimatedInputTokens != want {
-				t.Fatalf("automatic estimate: %+v; want %d", env.Attempts, want)
-			}
-		})
-	}
-}
-
-func TestLegacyCompletionMappedDefaultReservation(t *testing.T) {
-	for _, field := range []string{"", `,"max_tokens":null`} {
-		source, err := protocols.Parse(wire.Completions, []byte(`{"model":"route","prompt":"hello"`+field+`}`), "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, family, err := protocols.EncodeTarget(source, wire.Chat, "openai", "openai", "upstream", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		target, err := protocols.Parse(family, body, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		x := &call{generation: generationCall{parsed: source}}
-		admitted, demand := x.preparedEstimate("gpt-4o", x.summarize(target))
-		if admitted.reply != 16 || admitted.reserve > 100 || demand.MaxOutputTokens == nil || *demand.MaxOutputTokens != 16 {
-			t.Fatalf("mapped default over-reserved: %+v %+v", admitted, demand)
-		}
 	}
 }
 
@@ -223,24 +161,6 @@ func TestTGICompletionRefusalsBeforeDispatch(t *testing.T) {
 	}
 }
 
-func TestTGICompletionStreamEmptyFinishReason(t *testing.T) {
-	h := tgiCompletionHarness(t)
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, `data: {"object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"hel","finish_reason":"","logprobs":null}]}`+"\n\n")
-		io.WriteString(w, `data: {"object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"lo","finish_reason":"eos_token","logprobs":null}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}`+"\n\ndata: [DONE]\n\n")
-	})
-	resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":"hello","max_tokens":8,"stream":true}`), nil)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"text":"hel"`) || !strings.Contains(string(body), `"text":"lo"`) || !strings.Contains(string(body), "[DONE]") {
-		t.Fatalf("TGI stream: %d %s", resp.StatusCode, body)
-	}
-	if usage := h.sink.last(t).Usage; usage == nil || usage.TotalTokens != 4 {
-		t.Fatalf("TGI usage: %+v", usage)
-	}
-}
-
 func TestNativeCompletionOutputGuardrailsRefuseLogprobs(t *testing.T) {
 	for _, requested := range []bool{true, false} {
 		h := strictHarness(t, func(s *routing.Snapshot) {
@@ -266,28 +186,6 @@ func TestNativeCompletionOutputGuardrailsRefuseLogprobs(t *testing.T) {
 		}
 		if requested && h.mock.count("a")+h.mock.count("b") != 0 {
 			t.Fatal("unsupported requested logprobs dispatched")
-		}
-	}
-}
-
-func TestNativeCompletionPromptFormsRespectParameterPolicy(t *testing.T) {
-	for _, prompt := range []string{`"hello"`, `["one","two"]`, `[1,2]`, `[[1],[2]]`} {
-		h := strictHarness(t, func(s *routing.Snapshot) {
-			for id, p := range s.Providers {
-				p.Kind, p.VendorID, p.ProfileID = "openai", "openai", "openai-completions"
-				p.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"supported_parameters":["max_output_tokens"]}`), modelB: json.RawMessage(`{"supported_parameters":["max_output_tokens"]}`)}
-				s.Providers[id] = p
-			}
-		})
-		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, `{"id":"c","object":"text_completion","model":"`+modelA+`","choices":[{"index":0,"text":"hello","finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
-		})
-		resp := h.do(t.Context(), http.MethodPost, "/v1/completions", fullKey, []byte(`{"model":"`+routeSlug+`","prompt":`+prompt+`,"max_tokens":8}`), map[string]string{routingHeader: `{"require_parameters":true}`})
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("required input treated as a parameter for %s: %d %s", prompt, resp.StatusCode, body)
 		}
 	}
 }

@@ -2,19 +2,8 @@ package management
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 )
-
-func tokenFile(t *testing.T, secret string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(path, []byte(secret+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
 
 func TestRequestSerializesDeclaredScalarQueriesLosslessly(t *testing.T) {
 	operation := Operation{Method: "GET", Path: "/api/v1/scalars", Parameters: []Parameter{

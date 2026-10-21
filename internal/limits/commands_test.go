@@ -124,31 +124,6 @@ func isService(err error) bool {
 	return ok
 }
 
-func isUnexpected(err error) bool { return errors.Is(err, ErrUnexpectedResponse) }
-
-func isExceeded(err error) bool {
-	_, ok := errors.AsType[*ExceededError](err)
-	return ok
-}
-
-// rateRequest limits the requests and tokens one lookup may use in a minute, and
-// asks to be told what is left of them.
-func rateRequest() Request {
-	return Request{
-		CostOwnerID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", LookupID: "lookup_one_abc",
-		RequestsPerMinute: pointer(int64(10)), TokensPerMinute: pointer(int64(1000)),
-		RequestedTokens: 5, LeaseTTL: 5 * time.Second, ReportRate: true,
-	}
-}
-
-// reserveAnswered reserves request against a server whose rate script answers with
-// answer.
-func reserveAnswered(t *testing.T, request Request, answer any) (*Lease, error) {
-	t.Helper()
-	server := &scripted{answer: answering(t, map[string][2]any{"reserve_limits": {answer, nil}})}
-	return (&Limiter{client: server, namespace: "olp:test"}).Reserve(t.Context(), request)
-}
-
 // The same request answered the other way is not the script that was run.
 
 // A key that limits neither requests nor tokens is not answered with an

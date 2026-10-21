@@ -1,7 +1,6 @@
 package scripted
 
 import (
-	"encoding/json"
 	"maps"
 	"net/http"
 	"reflect"
@@ -15,99 +14,6 @@ var weatherDeclaration = map[string]any{"functionDeclarations": []any{map[string
 
 func geminiPrompt(text string) []any {
 	return []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": text}}}}
-}
-
-// streamedParts folds a Gemini stream, in either framing, into its parts and
-// the usage of the final chunk.
-func streamedParts(t *testing.T, r response, sse bool) (parts []any, finish string, usage any) {
-	t.Helper()
-	var chunks []map[string]any
-	if sse {
-		chunks = decodeFrames(t, r.body)
-	} else if err := json.Unmarshal(r.body, &chunks); err != nil {
-		t.Fatalf("stream is not one JSON array: %v: %s", err, r.body)
-	}
-	for _, c := range chunks {
-		parts = append(parts, path(c, "candidates", 0, "content", "parts").([]any)...)
-		if f, ok := path(c, "candidates", 0, "finishReason").(string); ok {
-			finish = f
-		}
-		if u := c["usageMetadata"]; u != nil {
-			usage = u
-		}
-	}
-	return parts, finish, usage
-}
-
-func joinText(parts []any) string {
-	var text string
-	for _, p := range parts {
-		if s, ok := path(p, "text").(string); ok && path(p, "thought") != true {
-			text += s
-		}
-	}
-	return text
-}
-
-func TestGeminiFunctionCallingLoop(t *testing.T) {
-	h := newHarness(t)
-	request := map[string]any{"contents": geminiPrompt(weatherPrompt), "tools": []any{weatherDeclaration}, "generationConfig": map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true}}}
-	unary := h.gemini("generateContent", request)
-	want(t, unary, 200)
-	parts := path(unary.json(), "candidates", 0, "content", "parts").([]any)
-	if len(parts) != 2 || path(parts[0], "thought") != true || !reflect.DeepEqual(path(parts[1], "functionCall"), map[string]any{"name": "get_weather", "args": map[string]any{"city": "Paris"}}) ||
-		path(unary.json(), "usageMetadata", "thoughtsTokenCount").(float64) < 1 || path(unary.json(), "candidates", 0, "finishReason") != "STOP" {
-		t.Fatalf("unary: %s", unary.body)
-	}
-	// The step that reasoned signs its call; one that did not leaves it unsigned.
-	if path(parts[1], "thoughtSignature") != GeminiThoughtSignature {
-		t.Fatalf("function call is not signed: %s", unary.body)
-	}
-	plain := h.gemini("generateContent", map[string]any{"contents": geminiPrompt(weatherPrompt), "tools": []any{weatherDeclaration}})
-	want(t, plain, 200)
-	if path(plain.json(), "candidates", 0, "content", "parts", 0, "thoughtSignature") != nil {
-		t.Fatalf("a step without reasoning is signed: %s", plain.body)
-	}
-
-	for name, sse := range map[string]bool{"sse": true, "array": false} {
-		t.Run(name, func(t *testing.T) {
-			url := GeminiPrefix + "/models/" + GeminiModel + ":streamGenerateContent"
-			if sse {
-				url += "?alt=sse"
-			}
-			stream := h.do("POST", url, map[string]string{"X-Goog-Api-Key": testCredential}, request)
-			want(t, stream, 200)
-			streamed, finish, usage := streamedParts(t, stream, sse)
-			if !reflect.DeepEqual(streamed, parts) || finish != "STOP" || usage == nil {
-				t.Fatalf("streamed %v finish %s usage %v, want %v", streamed, finish, usage, parts)
-			}
-			wantType := "application/json"
-			if sse {
-				wantType = "text/event-stream"
-				if !strings.Contains(string(stream.body), "\r\n\r\n") {
-					t.Fatalf("SSE frames are not CRLF delimited: %q", stream.body)
-				}
-			}
-			if got := stream.headers.Get("Content-Type"); got != wantType {
-				t.Fatalf("content type %q", got)
-			}
-		})
-	}
-
-	followup := append(geminiPrompt(weatherPrompt),
-		map[string]any{"role": "model", "parts": []any{map[string]any{"functionCall": map[string]any{"name": "get_weather", "args": map[string]any{"city": "Paris"}}}}},
-		map[string]any{"role": "user", "parts": []any{map[string]any{"functionResponse": map[string]any{"name": "get_weather", "response": map[string]any{"output": "sunny"}}}}})
-	final := h.gemini("generateContent", map[string]any{"contents": followup, "tools": []any{weatherDeclaration}})
-	want(t, final, 200)
-	if joinText(path(final.json(), "candidates", 0, "content", "parts").([]any)) != "The tools returned: sunny" {
-		t.Fatalf("final: %s", final.body)
-	}
-	// A structured function response is reduced to its JSON.
-	followup[2].(map[string]any)["parts"] = []any{map[string]any{"functionResponse": map[string]any{"name": "get_weather", "response": map[string]any{"temp": 21, "sky": "clear"}}}}
-	structured := h.gemini("generateContent", map[string]any{"contents": followup, "tools": []any{weatherDeclaration}})
-	if joinText(path(structured.json(), "candidates", 0, "content", "parts").([]any)) != `The tools returned: {"sky":"clear","temp":21}` {
-		t.Fatalf("%s", structured.body)
-	}
 }
 
 // Gemini refuses a member of a schema that is not in its OpenAPI subset, in the

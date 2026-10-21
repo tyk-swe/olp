@@ -38,13 +38,3 @@ func TestNativeGenerationRequestsAreValidatedForTheirRoute(t *testing.T) {
 		t.Fatal("an operation dialect was taken for generation")
 	}
 }
-
-func cohereStream(events ...string) string {
-	var b strings.Builder
-	for _, event := range events {
-		kind := event[strings.Index(event, `"type":"`)+8:]
-		kind = kind[:strings.Index(kind, `"`)]
-		b.WriteString("event: " + kind + "\ndata: " + event + "\n\n")
-	}
-	return b.String()
-}

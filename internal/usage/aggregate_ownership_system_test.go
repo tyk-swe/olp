@@ -5,7 +5,6 @@ package usage
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,14 +38,6 @@ func aggregateAccount(t *testing.T, pool *pgxpool.Pool, level, subject string) s
 	return limits.AggregateBudgetID(level, subject)
 }
 
-func aggregateBalance(t *testing.T, pool *pgxpool.Pool, account string, want string) {
-	t.Helper()
-	var got string
-	if err := pool.QueryRow(t.Context(), `SELECT accrued::text FROM olp.aggregate_cost_windows WHERE account_id=$1 AND window_kind='month'`, account).Scan(&got); err != nil || got != want {
-		t.Fatalf("aggregate balance %s: got %q want %q: %v", account, got, want, err)
-	}
-}
-
 func aggregateReport(t *testing.T, pool *pgxpool.Pool, table, subject, query, want string) {
 	t.Helper()
 	var report struct {
@@ -61,15 +52,6 @@ func aggregateReport(t *testing.T, pool *pgxpool.Pool, table, subject, query, wa
 	if err := json.Unmarshal(raw, &report); err != nil || parityCost(t, report.Monthly.Accrued).Cmp(parityCost(t, want)) != 0 {
 		t.Fatalf("reported balance %q want %q: %v", report.Monthly.Accrued, want, err)
 	}
-}
-
-func aggregateObservedAt() time.Time {
-	now := time.Now().UTC()
-	observed := now.Add(-time.Minute)
-	if observed.Year() != now.Year() || observed.Month() != now.Month() {
-		return now
-	}
-	return observed
 }
 
 func aggregatePriceCase(model, rate string) parityCase {

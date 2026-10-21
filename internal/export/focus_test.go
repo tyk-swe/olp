@@ -89,15 +89,6 @@ func gunzip(t *testing.T, body []byte) []byte {
 	return out.Bytes()
 }
 
-func readCSV(t *testing.T, body []byte) [][]string {
-	t.Helper()
-	rows, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return rows
-}
-
 // Every non-committed usage row: billed = effective = contracted.
 
 // Committed row: billed 0, effective = list × amount/weight = 6×10/2 = 30? — wait, that is >0

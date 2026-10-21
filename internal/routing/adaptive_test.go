@@ -17,14 +17,6 @@ func reasonOf(plan Plan, targetID string) string {
 	return ""
 }
 
-func attemptTargets(plan Plan) []string {
-	out := make([]string, len(plan.Attempts))
-	for i, a := range plan.Attempts {
-		out[i] = a.TargetID
-	}
-	return out
-}
-
 // A classifier failure falls through; a forbidden delegate is skipped.
 
 // Without features, as on surfaces that do not compute them, selectors

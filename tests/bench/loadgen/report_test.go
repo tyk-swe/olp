@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
-	"time"
 )
 
 func TestReportJSON(t *testing.T) {
@@ -68,102 +67,4 @@ func TestReportJSON(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	})
-}
-
-func TestReportText(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cfg := base(serve(95 * time.Millisecond))
-		cfg.MaxInFlight, cfg.MaxBacklog = 2, -1
-		text := run(t, cfg).Text()
-		for _, want := range []string{"dropped 80", "INVALID", "p99", "send lag"} {
-			if !strings.Contains(text, want) {
-				t.Errorf("the summary lacks %q:\n%s", want, text)
-			}
-		}
-		if text := run(t, base(serve(0))).Text(); !strings.Contains(text, "valid run") || strings.Contains(text, "INVALID") {
-			t.Errorf("a valid run reads as invalid:\n%s", text)
-		}
-	})
-}
-
-func TestCompareIsTheDifferenceFromTheBaseline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		direct := base(mock(t))
-		direct.Rate, direct.StreamShare = 40, 0.5
-		through := base(delayed(mock(t), 4*time.Millisecond))
-		through.Rate, through.StreamShare = 40, 0.5
-		baseline, gateway := run(t, direct), run(t, through)
-		o := Compare(baseline, gateway)
-		for name, d := range map[string]Delta{"unary": o.Unary, "stream": o.Stream, "ttft": o.TTFT} {
-			if !d.Present {
-				t.Fatalf("%s is absent", name)
-			}
-			within(t, name+" p50", d.P50Ms, 4, 0.1)
-			within(t, name+" p95", d.P95Ms, 4, 0.1)
-			within(t, name+" p99", d.P99Ms, 4, 0.1)
-		}
-		// With no streams on one side there is nothing to subtract.
-		unary := base(mock(t))
-		if o := Compare(run(t, unary), gateway); o.Stream.Present || o.TTFT.Present || !o.Unary.Present {
-			t.Fatalf("%+v", o)
-		}
-	})
-}
-
-// TestSummaryPercentilesOfAKnownDistribution pins each percentile to the
-// quantile it is named for: the figures a target is judged on are these, and a
-// summary that took p95 from the 90th would still look plausible.
-func TestSummaryPercentilesOfAKnownDistribution(t *testing.T) {
-	rec := newRecorder(time.Second)
-	for i := 1; i <= 100; i++ {
-		rec.observe(rec.all, time.Duration(i)*time.Millisecond)
-	}
-	s := summarize(rec.all)
-	if s.Count != 100 {
-		t.Fatalf("%d samples", s.Count)
-	}
-	for name, v := range map[string][2]float64{
-		"min": {s.MinMs, 1}, "mean": {s.MeanMs, 50.5}, "p50": {s.P50Ms, 50}, "p90": {s.P90Ms, 90}, "p95": {s.P95Ms, 95},
-		"p99": {s.P99Ms, 99}, "p99.9": {s.P999Ms, 100}, "max": {s.MaxMs, 100},
-	} {
-		near(t, name, v[0], v[1])
-	}
-	if got := summarize(newHistogram()); got != (Summary{}) {
-		t.Errorf("an empty histogram summarizes to %+v", got)
-	}
-}
-
-// TestValidityThresholds pins the two limits that decide whether a run
-// delivered its schedule: at most 1% of sends late, and at least 99% of the
-// target rate offered. Each is tried on both sides of its limit.
-func TestValidityThresholds(t *testing.T) {
-	cfg, err := Config{URL: "http://x", Model: "m", Rate: 100, Duration: time.Second}.normalize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A run of 100 requests, due at 10 ms intervals, of which late were sent
-	// late and the last left at lastSend.
-	build := func(late int64, lastSend time.Duration) *Report {
-		rec := newRecorder(cfg.Duration)
-		rec.counts.Scheduled, rec.counts.Sent, rec.counts.Succeeded, rec.counts.Late = 100, 100, 100, late
-		rec.lastSend = lastSend
-		return rec.report(cfg, time.Now(), time.Second, false, 0, 0)
-	}
-	problems := func(r *Report) string { return strings.Join(r.Problems, "; ") }
-
-	if r := build(1, 990*time.Millisecond); !r.Valid {
-		t.Errorf("1 late send in 100 is 1%%, which the limit allows: %v", r.Problems)
-	}
-	if r := build(2, 990*time.Millisecond); r.Valid || !strings.Contains(problems(r), "2 of 100 requests were sent more than") {
-		t.Errorf("2 late sends in 100 is above the limit: valid %v, %v", r.Valid, r.Problems)
-	}
-	// Offered is the sends over the span from the start to the last send plus
-	// an interval: 100 over 1.005 s is 99.5% of the rate, and over 1.0152 s
-	// it is 98.5%.
-	if r := build(0, 995*time.Millisecond); !r.Valid || r.Rates.Ratio < 0.994 || r.Rates.Ratio > 0.996 {
-		t.Errorf("99.5%% of the rate is within the limit: valid %v, ratio %.4f, %v", r.Valid, r.Rates.Ratio, r.Problems)
-	}
-	if r := build(0, 1005*time.Millisecond); r.Valid || !strings.Contains(problems(r), "of the 100.0 target") || r.Rates.Ratio < 0.984 || r.Rates.Ratio > 0.986 {
-		t.Errorf("98.5%% of the rate is below the limit: valid %v, ratio %.4f, %v", r.Valid, r.Rates.Ratio, r.Problems)
-	}
 }

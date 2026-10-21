@@ -2,9 +2,7 @@ package secrets
 
 import (
 	"flag"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -84,26 +82,4 @@ func TestPurposeDocumentation(t *testing.T) {
 	if err = os.WriteFile(path, updated, 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// productionSources lists every non-test Go source under internal/ and cmd/,
-// at any depth.
-func productionSources(t *testing.T) []string {
-	t.Helper()
-	var sources []string
-	for _, root := range []string{"..", "../../cmd"} {
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err == nil && !entry.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
-				sources = append(sources, path)
-			}
-			return err
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(sources) < 100 {
-		t.Fatalf("found only %d sources", len(sources))
-	}
-	return sources
 }

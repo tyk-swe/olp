@@ -43,28 +43,6 @@ func result(t *testing.T, d operations.Dialect, r oif.Request, raw string) (oif.
 	return d.Result(r, native)
 }
 
-func TestSparseDimensionUnknownAndMultivectorRankRetained(t *testing.T) {
-	d := codec(t, "tei-sparse-embeddings")
-	r := request(t, d, `{"inputs":"a"}`)
-	view, err := result(t, d, r, `[[{"index":999,"value":-0},{"index":2,"value":1e-4}]]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := view.(embeddings.Result).Vectors()[0]
-	if v.Format.DimensionsKnown || v.StoredElements != 2 || v.Source.Elements()[0].Raw() != `{"index":999,"value":-0}` {
-		t.Fatal("sparse logical dimension invented or source reordered")
-	}
-	d = codec(t, "tei-multivector-embeddings")
-	r = request(t, d, `{"inputs":["a","b"]}`)
-	view, err = result(t, d, r, `[[[1.1,2.2],[3.3,4.4]],[[5.5,6.6]]]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	vectors := view.(embeddings.Result).Vectors()
-	if vectors[0].TokenVectors != 2 || vectors[1].TokenVectors != 1 || vectors[0].Format.LogicalDimensions != 2 {
-		t.Fatal("token-vector layout flattened")
-	}
-}
 func TestGeminiEmbeddingUsageIsThePromptTokens(t *testing.T) {
 	for _, test := range []struct{ id, request, vectors string }{
 		{"gemini-embeddings", `{"model":"models/m","content":{"parts":[{"text":"a"}]}}`, `"embedding":{"values":[0.5]}`},

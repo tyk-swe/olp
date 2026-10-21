@@ -3,15 +3,10 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -201,51 +196,6 @@ func glRetryAfter(t *testing.T, header http.Header) int {
 	return seconds
 }
 
-// glStream runs a streaming request to completion and reports the status it
-// received. Errors are returned rather than failed on: the caller runs it in
-// its own goroutine, and a cancelled client is a scenario, not a fault.
-func glStream(ctx context.Context, h *accessHarness, key string) (int, error) {
-	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}],"stream":true}`
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(body))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	_, err = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode, err
-}
-
-// glStreamWith is glStream with more fields in the request.
-func glStreamWith(ctx context.Context, h *accessHarness, key string, fields map[string]any) (int, error) {
-	body := map[string]any{"model": routeSlug, "stream": true, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
-	for name, value := range fields {
-		body[name] = value
-	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return 0, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/v1/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	_, err = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode, err
-}
-
 // glAccounting runs the fixture's usage events through the pipeline a process
 // runs: the gateway emits them, the writer appends them to the stream, and a
 // consumer prices and stores them and applies the spend they recorded to the
@@ -270,12 +220,6 @@ func glAccounting(t *testing.T, f *glFixture) {
 	acctConsumer(t, f.h.Pool, acctValkey(t), stream, "gateway-accounting", f.limiter, 30*time.Second)
 }
 
-// glInFlight waits until the upstream has taken the request a caller started.
-func glInFlight(t *testing.T, up *vendor, before int64) {
-	t.Helper()
-	eventually(t, "the upstream to receive the request", 15*time.Second, func() bool { return up.chats.Load() > before })
-}
-
 // The message is part of the contract, not decoration: it is the only
 // place the API tells an operator why a request was refused while the
 // spend they can see still reads below the limit.
@@ -283,25 +227,3 @@ func glInFlight(t *testing.T, up *vendor, before int64) {
 // A slot edit is a draft until the provider is published again.
 
 // The upstream is gone: every attempt now fails before a byte is written.
-
-// glBrokenLimiter is a limiter whose connection is gone: every command fails
-// the way a Valkey outage does, without the wait a firewalled host would add.
-func glBrokenLimiter(t *testing.T) *limits.Limiter {
-	t.Helper()
-	cfg, err := coordination.Configuration(required(t, "OLP_TEST_VALKEY_URL"), "", 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	c, err := coordination.Open(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	limiter, err := limits.New(c, "olp-test:limits:broken:"+rand.Text())
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.Close()
-	return limiter
-}

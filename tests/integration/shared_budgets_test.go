@@ -10,17 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// sbGroup creates a budget group with a daily budget, opens its balance, and
-// returns its identifier.
-func sbGroup(t *testing.T, f *glFixture, name, daily string) string {
-	t.Helper()
-	group := f.h.want(f.owner, "POST", "/api/v1/budget-groups",
-		map[string]any{"name": name, "daily_cost_limit": daily}, idem("group-"+name), 201)
-	id := group["id"].(string)
-	kbOpen(t, f, id)
-	return id
-}
-
 // The group's budget is used up, which is what the answer says.
 
 func TestSharedBudgetAccounting(t *testing.T) {

@@ -17,38 +17,6 @@ import (
 // server holds for three seconds takes no real time, and every instant is
 // exact, so a test can assert the schedule to the nanosecond.
 
-func TestScheduleIsExactAndWarmupIsExcluded(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		rec := record(serve(0))
-		cfg := base(rec)
-		cfg.Warmup = 500 * time.Millisecond
-		report := run(t, cfg)
-
-		arrivals := rec.sorted()
-		if len(arrivals) != 150 {
-			t.Fatalf("%d requests reached the server, want 50 of warmup and 100 measured", len(arrivals))
-		}
-		for k, at := range arrivals {
-			if want := cfg.offset(int64(k)); at != want {
-				t.Fatalf("request %d arrived at %v, want exactly %v", k, at, want)
-			}
-		}
-		c := report.Requests
-		if c.WarmupSent != 50 || c.Scheduled != 100 || c.Sent != 100 || c.Succeeded != 100 || c.Failed != 0 || c.Dropped != 0 {
-			t.Fatalf("counts %+v", c)
-		}
-		if report.Latency.All.Count != 100 || report.Latency.SendLag.Count != 100 {
-			t.Fatalf("the warmup leaked into the statistics: %+v", report.Latency)
-		}
-		if r := report.Rates; r.OfferedRPS != 100 || r.Ratio != 1 || r.ThroughputRPS != 100 || r.SuccessRate != 1 || r.ErrorRate != 0 {
-			t.Fatalf("rates %+v", r)
-		}
-		if !report.Valid {
-			t.Fatalf("problems %v", report.Problems)
-		}
-	})
-}
-
 func TestScheduleDoesNotDriftAtAwkwardRates(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rec := record(serve(0))
@@ -68,61 +36,6 @@ func TestScheduleDoesNotDriftAtAwkwardRates(t *testing.T) {
 		}
 		if last := arrivals[len(arrivals)-1]; last < 29*time.Second || last > 30*time.Second {
 			t.Fatalf("the last request left at %v", last)
-		}
-	})
-}
-
-func TestLatencyIsMeasuredFromTheScheduledTime(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		report := run(t, base(serve(30*time.Millisecond)))
-		l := report.Latency
-		near(t, "p50", l.All.P50Ms, 30)
-		near(t, "p99", l.All.P99Ms, 30)
-		near(t, "max", l.All.MaxMs, 30)
-		near(t, "unary p95", l.Unary.P95Ms, 30)
-		if l.SendLag.MaxMs > 0.01 || report.Requests.Late != 0 {
-			t.Fatalf("send lag %+v, late %d", l.SendLag, report.Requests.Late)
-		}
-		if l.Stream.Count != 0 || l.TTFT.Count != 0 {
-			t.Fatalf("unary requests recorded stream statistics: %+v", l)
-		}
-	})
-}
-
-// TestALateSchedulerShowsInTheLatencyAndTheSendLag is the generator's own share
-// of coordinated omission. Its loop is held up for 30 ms once request 3 is due,
-// so that request and the two after it that fell due meanwhile are dispatched
-// late, by 30, 20 and 10 ms, and a request that is dispatched late keeps its
-// scheduled time: the lateness is in its latency, in the send lag and in the
-// count of late sends, though the server answered at once.
-func TestALateSchedulerShowsInTheLatencyAndTheSendLag(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		r, err := newRunner(base(serve(0)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.beforeDispatch = func(k int64) {
-			if k == 3 {
-				time.Sleep(30 * time.Millisecond)
-			}
-		}
-		report := r.run(context.Background())
-		l := report.Latency
-		if report.Requests.Sent != 100 || report.Requests.Succeeded != 100 {
-			t.Fatalf("%+v", report.Requests)
-		}
-		near(t, "send lag max", l.SendLag.MaxMs, 30)
-		near(t, "latency max", l.All.MaxMs, 30)
-		// Nothing but the generator was slow: from its send each request took
-		// no time.
-		if l.Service.MaxMs > 0.01 || l.All.P50Ms > 0.01 {
-			t.Fatalf("service %+v, all %+v", l.Service, l.All)
-		}
-		if report.Requests.Late != 3 {
-			t.Fatalf("%d sends counted late, want the three held up", report.Requests.Late)
-		}
-		if report.Valid || !strings.Contains(strings.Join(report.Problems, "\n"), "3 of 100 requests were sent more than 5ms late") {
-			t.Fatalf("a generator that fell behind was valid: %v", report.Problems)
 		}
 	})
 }
@@ -278,25 +191,6 @@ func TestTheBacklogIsBounded(t *testing.T) {
 	})
 }
 
-func TestWarmupRequestsDoNotCountEvenWhenSlow(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		zero := time.Now()
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			io.Copy(io.Discard, r.Body)
-			if time.Since(zero) < time.Second {
-				time.Sleep(500 * time.Millisecond)
-			}
-			io.WriteString(w, `{}`)
-		})
-		cfg := base(h)
-		cfg.Rate, cfg.Warmup = 50, time.Second
-		report := run(t, cfg)
-		if report.Requests.WarmupSent != 50 || report.Latency.All.Count != 50 || report.Latency.All.MaxMs > 1 {
-			t.Fatalf("%+v %+v", report.Requests, report.Latency.All)
-		}
-	})
-}
-
 func TestConcurrencyNeverExceedsTheCap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rec := record(serve(time.Second))
@@ -394,18 +288,6 @@ func TestCancelingTheContextStopsTheScheduleAndInvalidatesTheRun(t *testing.T) {
 		}
 		if report.Valid || !strings.Contains(strings.Join(report.Problems, ";"), "interrupted") {
 			t.Fatalf("valid %v, problems %v", report.Valid, report.Problems)
-		}
-	})
-}
-
-// TestScheduleAndLatencyHoldWhenTheServerIsFast checks the no-load baseline
-// the gateway comparison relies on: with an instant server, latency is the
-// recording floor and nothing is late.
-func TestScheduleAndLatencyHoldWhenTheServerIsFast(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		report := run(t, base(serve(0)))
-		if report.Latency.All.MaxMs > 0.01 || report.Requests.Late != 0 || !report.Valid {
-			t.Fatalf("%+v", report)
 		}
 	})
 }

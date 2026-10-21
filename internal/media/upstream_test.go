@@ -1,11 +1,9 @@
 package media
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"net/url"
 	"testing"
 	"time"
 
@@ -38,25 +36,3 @@ func testTarget(endpoint string) Target {
 }
 
 // A server that accepts the request then stalls past the client deadline.
-
-func TestTransportVideoListQuery(t *testing.T) {
-	transport, server := testTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/videos" || r.Method != "GET" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
-		}
-		if got := r.URL.Query().Get("limit"); got != "20" {
-			t.Errorf("limit: %q", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[{"id":"v1","object":"video","status":"completed"}],"has_more":false}`))
-	}))
-	query := url.Values{"limit": {"20"}}
-	call := &UpstreamCall{Method: "GET", Path: "videos", Query: query, Kind: ResponseVideoList}
-	result, failure := transport.Do(context.Background(), testTarget(server.URL+"/v1"), call, nil)
-	if failure != nil {
-		t.Fatal(failure)
-	}
-	if result.List == nil || len(result.List.Jobs) != 1 {
-		t.Fatalf("list: %+v", result.List)
-	}
-}

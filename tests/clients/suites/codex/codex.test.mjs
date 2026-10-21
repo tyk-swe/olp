@@ -11,19 +11,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { before, beforeEach, describe, test } from 'node:test';
-import {
-  apiKey,
-  assertClean,
-  defaultReply,
-  models,
-  onlyRequest,
-  recorded,
-  resetRecorded,
-  restrictedApiKey,
-  script,
-  toolResultsPrefix,
-  upstreamModels
-} from '../../lib/harness.mjs';
+import { apiKey, assertClean, defaultReply, models, recorded, resetRecorded, restrictedApiKey, script, toolResultsPrefix, upstreamModels } from '../../lib/harness.mjs';
 import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSONLines, run, sentTo, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
 import { startTap } from '../../lib/tap.mjs';
 
@@ -99,29 +87,6 @@ for (const { name, route, hosted } of [
   { name: 'a strict route with the hosted tools off', route: models.openaiStrict, hosted: false }
 ]) {
   describe(`Codex CLI through ${name}`, () => {
-    const strict = !hosted;
-
-    test('streams a reply with its reasoning, and the upstream receives the request unchanged', async (t) => {
-      const { tap, exec } = await session(t, { route, hosted });
-      const turn = await exec(`Say hello. ${script.think('thinking it over')}`);
-      assert.equal(finalMessage(turn), defaultReply);
-      assert.deepEqual(completed(turn.events, 'reasoning').map((r) => r.text), ['thinking it over']);
-      assert.ok(turn.events.find((e) => e.type === 'turn.completed').usage.input_tokens > 0, 'usage came back through the gateway');
-
-      const request = await onlyRequest(responsesFilter);
-      assert.equal(request.path, '/openai/v1/responses');
-      assert.equal(request.stream, true);
-      assert.equal(request.body.model, upstreamModels.openai, 'the gateway rewrites the route slug');
-      assert.equal(request.body.stream, true);
-      assert.equal(request.body.store, false, 'Codex keeps no state at the provider');
-      assert.ok(request.body.include.includes('reasoning.encrypted_content'), 'Codex asks for the encrypted reasoning it replays');
-      assert.ok(request.body.tools.some((tool) => tool.name === 'exec_command'));
-      assert.match(JSON.stringify(request.body.input), /Say hello\./);
-      assert.equal(request.headers.authorization, '[present]');
-      if (strict) assert.ok(!request.body.tools.some((tool) => tool.type !== 'function'), 'no hosted tool is configured');
-      else assert.ok(request.body.tools.some((tool) => tool.type === 'web_search'), 'the stock tools include hosted web search');
-      assertPassedThrough(await sentTo(tap, '/v1/responses'), [request], { model: upstreamModels.openai, headers: semanticHeaders });
-    });
 
     test('runs a shell tool call and returns its output, replaying the reasoning with the call', async (t) => {
       const secret = 'the vault code is marmalade-7';

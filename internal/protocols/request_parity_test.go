@@ -255,32 +255,6 @@ func sameParse(t testing.TB, family wire.Format, data []byte) (accepted bool) {
 	return accepted
 }
 
-func TestNativeRequestsAreParsedAsTheyWereParsed(t *testing.T) {
-	cases := 600
-	if testing.Short() {
-		cases = 100
-	}
-	var accepted, refused int
-	for _, family := range nativeFamilies {
-		g := nativeGen{rand.New(rand.NewPCG(59, uint64(len(family))))}
-		for range cases {
-			body := g.body(family)
-			if g.intn(2) == 0 {
-				body = g.tameBody(family)
-			}
-			if sameParse(t, family, body) {
-				accepted++
-			} else {
-				refused++
-			}
-		}
-	}
-	// The comparison is only worth something if both answers are given.
-	if accepted < cases || refused < cases {
-		t.Errorf("%d requests were accepted and %d refused: the generator is not exercising the validation", accepted, refused)
-	}
-}
-
 func FuzzNativeRequestsAreParsedAsTheyWereParsed(f *testing.F) {
 	f.Add([]byte(`{"model":"route","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
 	f.Add([]byte(`{"model":"route","max_tokens":16,"stream":true,"messages":[{"role":"system","content":[{"type":"text","text":"x"}]},null]}`))

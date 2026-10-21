@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -115,75 +114,6 @@ func kbKey(t *testing.T, h *accessHarness, owner *browser, daily, monthly string
 	return id
 }
 
-func kbExec(t *testing.T, h *accessHarness, query string, args ...any) {
-	t.Helper()
-	if _, err := h.Pool.Exec(t.Context(), query, args...); err != nil {
-		t.Fatalf("seed accounting: %v", err)
-	}
-}
-
-// kbProvider records the provider every seeded attempt is attributed to.
-func kbProvider(t *testing.T, h *accessHarness) string {
-	t.Helper()
-	var owner string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.users ORDER BY created_at LIMIT 1").Scan(&owner); err != nil {
-		t.Fatalf("read owner: %v", err)
-	}
-	id := access.NewID()
-	kbExec(t, h, `INSERT INTO olp.providers (id, name, kind, state, configuration, etag, slots_etag, created_by)
-	    VALUES ($1, 'Budget vendor', 'openai', 'active', '{}'::jsonb, $2, $3, $4)`,
-		id, access.NewID(), access.NewID(), owner)
-	return id
-}
-
-// kbFact records one attempt usage fact for the key, with the request anchor
-// its foreign key requires. A priced attempt carries a cost and a currency; an
-// unpriced one carries neither and is what unpriced_attempts counts.
-func kbFact(t *testing.T, h *accessHarness, key, provider string, observed time.Time, charge string, cost *string, unpriced bool) {
-	t.Helper()
-	request := access.NewID()
-	kbExec(t, h, `INSERT INTO olp.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2)`, request, observed)
-	billable := charge != "not_billable"
-	var tokens *int64
-	var currency *string
-	if billable {
-		tokens = kbCount(10)
-	}
-	if cost != nil {
-		currency = kbText("USD")
-	}
-	kbExec(t, h, `INSERT INTO olp.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
-	        attempt_ordinal, api_key_id, provider_id, route_slug, upstream_model, operation, surface,
-	        observed_at, charge_status, usage_observed, usage_complete, input_tokens, output_tokens,
-	        cached_input_tokens, media_units, estimated_cost, unpriced, pricing_revision_id, currency,
-	        request_counted, provider_request_counted, model_request_counted, target_request_counted,
-	        request_unpriced_counted, provider_unpriced_counted, model_unpriced_counted,
-	        target_unpriced_counted, request_incomplete_counted, provider_incomplete_counted,
-	        model_incomplete_counted, target_incomplete_counted)
-	    VALUES ($1, $2, $3, $4, 1, $5, $6, 'budget', 'gpt-4o-mini', 'generation', 'openai', $4, $7, $8,
-	        true, $9, $9, NULL, NULL, $10::text::numeric, $11, NULL, $12,
-	        true, true, true, true, $11, $11, $11, $11, false, false, false, false)`,
-		access.NewID(), access.NewID(), request, observed, key, provider, charge, billable,
-		tokens, cost, unpriced, currency)
-}
-
-// kbHourly records one retained rollup bucket for the key.
-func kbHourly(t *testing.T, h *accessHarness, key, provider string, bucket time.Time, cost string, unpricedAttempts int64) {
-	t.Helper()
-	kbExec(t, h, `INSERT INTO olp.attempt_usage_hourly (bucket, route_slug, provider_id, upstream_model,
-	        operation, surface, api_key_id, request_count, provider_request_count, model_request_count,
-	        target_request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
-	        estimated_cost, request_unpriced_count, provider_unpriced_count, model_unpriced_count,
-	        target_unpriced_count, request_incomplete_count, provider_incomplete_count,
-	        model_incomplete_count, target_incomplete_count, currency, unpriced_attempt_count)
-	    VALUES ($1, 'budget', $2, 'gpt-4o-mini', 'generation', 'openai', $3, 1, 1, 1, 1, 10, 10, 0, 0,
-	        $4::text::numeric, $5, $5, $5, $5, 0, 0, 0, 0, 'USD', $5)`,
-		bucket, provider, key, cost, unpricedAttempts)
-}
-
-func kbText(value string) *string { return &value }
-func kbCount(value int64) *int64  { return &value }
-
 // The fixture model is priced at 100 per million input tokens and 1000 per
 // million output tokens. The fixture upstream reports 4 input and 6 output
 // tokens, so a request costs 0.0064. A prompt of "hi" is one token: bounded to
@@ -243,30 +173,6 @@ func kbWaitReserved(t *testing.T, f *glFixture, owner, want string) {
 	if got != want {
 		t.Fatalf("reserved %q, want %q", got, want)
 	}
-}
-
-// kbMessage is the message a request was refused with, which is where the API
-// tells a spent budget from a request that does not fit in one with room left.
-func kbMessage(t *testing.T, f *glFixture, secret string, fields map[string]any) string {
-	t.Helper()
-	body := map[string]any{"model": routeSlug, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
-	for name, value := range fields {
-		body[name] = value
-	}
-	f.h.refresh()
-	status, reply, _ := f.h.gateway("POST", "/v1/chat/completions", secret, body)
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("request: %d, want a refusal", status)
-	}
-	message, _ := reply["error"].(map[string]any)["message"].(string)
-	return message
-}
-
-// kbAccrued reads the spend admission measures a key against.
-func kbAccrued(t *testing.T, f *glFixture, owner string) string {
-	t.Helper()
-	day, _ := limCostKeys(f.namespace, owner)
-	return limHashOrNone(t, f.valkey, day)["accrued"]
 }
 
 // With no reply bound the request may produce 4096 tokens, which could cost

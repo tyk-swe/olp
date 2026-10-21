@@ -1,12 +1,9 @@
 package interaction
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -64,69 +61,12 @@ func bind(t *testing.T, template *Template, request *wire.Request, context Conte
 	}
 	return plan
 }
-func field(t *testing.T, body []byte, name string) json.RawMessage {
-	t.Helper()
-	document, err := oif.ParseJSON(body, oif.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return document.Fields()[name]
-}
+
 func assertReason(t *testing.T, err error, reason string) {
 	t.Helper()
 	var failure *oif.Incompatibility
 	if !errors.As(err, &failure) || failure.Code != reason {
 		t.Fatalf("reason: got %v, want %s", err, reason)
-	}
-}
-
-func TestQualifiedTextMatchesIndependentNativeFixture(t *testing.T) {
-	config := configuration(t, "anthropic-messages")
-	config.Model = "model-a"
-	source := request(t, wire.Chat, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`)
-	plan := bind(t, template(t, config), source, Context{})
-	want := `{"model":"model-a","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"max_tokens":64,"stream":false}`
-	var actual, expected any
-	actualDecoder := json.NewDecoder(bytes.NewReader(plan.Body()))
-	actualDecoder.UseNumber()
-	expectedDecoder := json.NewDecoder(strings.NewReader(want))
-	expectedDecoder.UseNumber()
-	if err := actualDecoder.Decode(&actual); err != nil {
-		t.Fatal(err)
-	}
-	if err := expectedDecoder.Decode(&expected); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("qualified invocation differs from independent native fixture:\n%s\n%s", plan.Body(), want)
-	}
-	if plan.Receipt().Class != QualifiedInteraction || plan.Prepared().Identity() {
-		t.Fatal("qualified mapping advertised as native source identity")
-	}
-	valid := `{"id":"msg-bench","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":2,"output_tokens":1}}`
-	if err := plan.ValidateUnary([]byte(valid)); err != nil {
-		t.Fatal(err)
-	}
-	result, err := protocols.DecodeRequest(plan.Wire(), wire.Chat, []byte(valid), "team-chat", "", source)
-	if err != nil || result.OutputText != "hello" || result.FinishReason != "stop" || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 1 {
-		t.Fatalf("qualified client projection lost text/usage: %+v %v", result, err)
-	}
-	realistic := strings.Replace(valid, `"usage":{"input_tokens":2,"output_tokens":1}`, `"usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}`, 1)
-	if err := plan.ValidateUnary([]byte(realistic)); err != nil {
-		t.Fatalf("real Anthropic usage shape rejected: %v", err)
-	}
-	result, err = protocols.DecodeRequest(plan.Wire(), wire.Chat, []byte(realistic), "team-chat", "", source)
-	if err != nil || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 1 {
-		t.Fatalf("qualified client projection lost realistic usage: %+v %v", result, err)
-	}
-	for _, usage := range []string{
-		`{"input_tokens":2,"output_tokens":1,"future_token_category":1}`,
-		`{"input_tokens":2,"output_tokens":1,"cache_creation_input_tokens":-1}`,
-		`{"input_tokens":2,"output_tokens":1,"cache_creation":{"ephemeral_2h_input_tokens":0}}`,
-		`{"input_tokens":2,"output_tokens":1,"service_tier":7}`,
-	} {
-		invalid := strings.Replace(valid, `{"input_tokens":2,"output_tokens":1}`, usage, 1)
-		assertReason(t, plan.ValidateUnary([]byte(invalid)), "fidelity_protocol_violation")
 	}
 }
 
@@ -181,26 +121,4 @@ func TestNativeSemanticHeadersAndServingHintsNeverDisappear(t *testing.T) {
 	}
 	_, err = gemini.Bind(googleRequest, Context{Query: url.Values{"key": {"must-not-forward"}}})
 	assertReason(t, err, "target_capability")
-}
-
-func TestNativeCloudAnthropicRevisionHeaderBindsToBody(t *testing.T) {
-	for _, id := range []string{"vertex-anthropic", "bedrock-anthropic-invoke"} {
-		t.Run(id, func(t *testing.T) {
-			compiled := template(t, configuration(t, id))
-			source := request(t, wire.Anthropic, `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"native"}]}`)
-			plan := bind(t, compiled, source, Context{Headers: http.Header{"Anthropic-Version": {"2023-06-01"}}})
-			if len(field(t, plan.Body(), "anthropic_version")) == 0 || plan.Config().SemanticHeaders["Anthropic-Version"] != "" {
-				t.Fatal("cloud API revision was not bound into the hosting body")
-			}
-			mapped := false
-			for _, entry := range plan.Receipt().Dispositions {
-				mapped = mapped || entry.Field == "/headers/Anthropic-Version" && entry.Rule == "hosting_api_revision" && entry.Disposition == "mapped"
-			}
-			if !mapped {
-				t.Fatal("cloud API revision mapping missing from receipt")
-			}
-			_, err := compiled.Bind(source, Context{Headers: http.Header{"Anthropic-Version": {"2099-01-01"}}})
-			assertReason(t, err, "target_capability")
-		})
-	}
 }

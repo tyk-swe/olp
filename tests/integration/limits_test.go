@@ -24,10 +24,6 @@ import (
 // only, where the cost keys are never touched.
 const limNilUUID = "00000000-0000-0000-0000-000000000000"
 
-// limMaximum is the largest integer Lua represents exactly, which is the
-// ceiling every counter in the scripts saturates at.
-const limMaximum = int64(9007199254740991)
-
 func limClient(t *testing.T) *coordination.Client {
 	t.Helper()
 	return client(t, required(t, "OLP_TEST_VALKEY_URL"), 5*time.Second)

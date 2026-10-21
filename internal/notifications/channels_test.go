@@ -32,25 +32,6 @@ func testPolicy() *egress.Policy {
 	}
 }
 
-func postCollector(t *testing.T) (*httptest.Server, func() [][]byte) {
-	t.Helper()
-	var mu sync.Mutex
-	var got [][]byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buf, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		got = append(got, buf)
-		mu.Unlock()
-		w.WriteHeader(204)
-	}))
-	t.Cleanup(server.Close)
-	return server, func() [][]byte {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([][]byte(nil), got...)
-	}
-}
-
 func testBody() []byte {
 	return []byte(`{"event":"budget.threshold","rule_id":"r1","rule_name":"Spend","subject_kind":"api_key","window_kind":"day","window_id":"42","threshold_percent":80,"accrued":"8.0","limit":"10","currency":"usd","delivery_id":"d1"}`)
 }
@@ -226,16 +207,6 @@ func (f *smtpFake) handle(conn net.Conn, cert *tls.Certificate) {
 			write("502 unsupported\r\n")
 		}
 	}
-}
-
-func emailDestination(url, caPEM string) Destination {
-	config, _ := json.Marshal(map[string]any{
-		"from":           "alerts@olp.test",
-		"to":             []string{"ops@example.test", "dev@example.test"},
-		"subject_prefix": "[OLP]",
-		"ca_certificate": caPEM,
-	})
-	return Destination{Type: "email", URL: url, Configuration: config}
 }
 
 func TestSendEveryEventToAllChannels(t *testing.T) {

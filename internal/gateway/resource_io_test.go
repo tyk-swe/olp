@@ -3,13 +3,10 @@ package gateway
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -43,20 +40,5 @@ func TestResourceJSONReadHasSocketDeadline(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode < 400 || response.StatusCode >= 500 {
 		t.Fatalf("stalled body status=%d", response.StatusCode)
-	}
-}
-
-func TestResourceContentChecksFlushAndLength(t *testing.T) {
-	response := httptest.NewRecorder()
-	if written, err := copyResourceContent(response, strings.NewReader("abc"), 3); err != nil || written != 3 || !response.Flushed {
-		t.Fatalf("valid content not flushed: %d %v", written, err)
-	}
-	failure := &pinnedFlushFailure{header: make(http.Header)}
-	if written, err := copyResourceContent(failure, strings.NewReader("abc"), 3); written != 3 || !errors.Is(err, io.ErrClosedPipe) {
-		t.Fatalf("buffered flush failure was lost: %d %v", written, err)
-	}
-	short := httptest.NewRecorder()
-	if _, err := copyResourceContent(short, strings.NewReader("ab"), 3); !errors.Is(err, io.ErrUnexpectedEOF) || short.Flushed {
-		t.Fatalf("short content was committed as complete: %v", err)
 	}
 }

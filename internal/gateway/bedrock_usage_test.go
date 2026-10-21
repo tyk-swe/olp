@@ -5,11 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
-
-	"github.com/tyk-swe/olp/internal/protocols"
 )
 
 func bedrockEvent(t *testing.T, kind string, payload any) *eventstream.Message {
@@ -29,22 +25,6 @@ func bedrockChunk(t *testing.T, inner string) *eventstream.Message {
 	return bedrockEvent(t, "chunk", map[string]string{"bytes": base64.StdEncoding.EncodeToString([]byte(inner))})
 }
 
-func foldBedrockUsage(t *testing.T, messages ...*eventstream.Message) *wire.Usage {
-	t.Helper()
-	var usage *wire.Usage
-	for _, message := range messages {
-		observation, err := protocols.ObserveBedrockEvent(message, 1<<20)
-		if err != nil {
-			t.Fatal(err)
-		}
-		usage, err = observation.Usage.Merge(usage)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	return usage
-}
-
 func TestBedrockTitanImageSettlesEstimate(t *testing.T) {
 	image := []byte(`{"images":["aW1hZ2U="]}`)
 	recorded := AttemptFact{Class: classSuccess, Committed: true}
@@ -61,14 +41,4 @@ func TestBedrockTitanImageSettlesEstimate(t *testing.T) {
 			t.Fatalf("%s: Titan image invoke settled %v tokens, want the 900-token estimate", name, got)
 		}
 	}
-}
-
-// bedrockTestUsage exercises the operation-owned projection, not a second
-// gateway parser.
-func bedrockTestUsage(message *eventstream.Message) (*wire.Usage, bool) {
-	observation, err := protocols.ObserveBedrockEvent(message, 1<<20)
-	if err != nil {
-		return nil, false
-	}
-	return observation.Usage.Value, observation.Usage.Authoritative
 }

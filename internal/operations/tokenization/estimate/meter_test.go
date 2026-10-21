@@ -17,27 +17,6 @@ import (
 
 // 10.5 rounded up
 
-// longProse is English-like text well past ExactBytes, with exact counts to
-// compare an estimate with.
-func longProse(t *testing.T, e *Encoding, minBytes int) (text string, tokens int) {
-	t.Helper()
-	var doc string
-	for _, f := range loadFixtures(t, "o200k_base.json") {
-		if f.Name == "document-52k" {
-			doc = f.Text
-		}
-	}
-	if doc == "" {
-		t.Fatal("no document-52k fixture")
-	}
-	text = strings.Repeat(doc+"\n", minBytes/len(doc)+1)
-	tokens, err := e.Count(text)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return text, tokens
-}
-
 // The exact part is a whole number of pieces within the bound, and the
 // extrapolation is arithmetic on it.
 

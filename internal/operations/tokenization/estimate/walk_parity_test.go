@@ -319,31 +319,9 @@ func (g requestGen) defaults() map[string]json.RawMessage {
 	return out
 }
 
-func sameBound(a, b *int64) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
-}
-
-// walkerReadsMore are the members of a request the walker reads and the old walker
-// did not: the schema of a structured output, a model's reasoning and thinking, a
-// document block, and Bedrock's tool catalogue. A request that has one is charged
-// more than it was, so the requests generated here, which are compared with the
-// old walker, must have none; TestWalkerReadsTheStructuredOutputsReasoningAndDocumentsOfEveryDialect
-// holds what they cost.
-var walkerReadsMore = []string{
-	"response_format", `"text":{"format"`, "output_config", "output_format", "outputConfig", "toolConfig",
-	"responseSchema", "responseJsonSchema", `"reasoning"`, `"thinking"`, `"redacted_thinking"`, `"document"`, `"summary"`,
-}
-
 // The comparison is only worth something if the requests charge something.
 
 // One walk answers every provider's defaults.
-
-func deref(p *int64) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
 
 // Output:
 // gpt-4o openai-o200k tokenizer 8 18

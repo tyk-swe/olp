@@ -123,16 +123,6 @@ func resetPeakRSS(pid int) bool {
 	return os.WriteFile(fmt.Sprintf("/proc/%d/clear_refs", pid), []byte("5"), 0) == nil
 }
 
-// processGone reports whether pid no longer names a live process.
-func processGone(pid int) bool {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return true
-	}
-	end := strings.LastIndexByte(string(data), ')')
-	return end >= 0 && strings.HasPrefix(strings.TrimSpace(string(data[end+1:])), "Z")
-}
-
 // loadAverage is the first field of /proc/loadavg, recorded with a result so a
 // run on a busy machine is recognisable as one.
 func loadAverage() float64 {

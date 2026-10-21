@@ -3,51 +3,14 @@
 package loadgen
 
 import (
-	"context"
-	"net"
-	"net/http"
 	"slices"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/tyk-swe/olp/tests/bench/mockupstream"
 )
 
 // These tests use real sockets and real time, so they assert counts and
 // generous bounds, never exact timing: the exact schedule is covered on the
 // fake clock.
-
-// startMock serves a mock over TCP behind a handler that notes each arrival.
-func startMock(t *testing.T, cfg mockupstream.Config) (origin string, server *mockupstream.Server, arrivals func() []time.Time) {
-	t.Helper()
-	server, err := mockupstream.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var mu sync.Mutex
-	var seen []time.Time
-	noting := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		seen = append(seen, time.Now())
-		mu.Unlock()
-		server.ServeHTTP(w, r)
-	})
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- mockupstream.Serve(ctx, ln, noting) }()
-	t.Cleanup(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Errorf("Serve: %v", err)
-		}
-	})
-	return "http://" + ln.Addr().String(), server, func() []time.Time { mu.Lock(); defer mu.Unlock(); return append([]time.Time(nil), seen...) }
-}
 
 // A busy machine may run the scheduler late; lateness is not what is tested.
 

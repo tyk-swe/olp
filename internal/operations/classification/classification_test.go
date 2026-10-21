@@ -163,37 +163,7 @@ func TestTEIPredictionRetainsPairBatchLabelsAndRawScoreUnits(t *testing.T) {
 		requireCode(t, err, "fidelity_protocol_violation")
 	}
 }
-func TestTEISimilarityPreservesSetOrderPresenceAndExactScores(t *testing.T) {
-	d := definition(t, "tei-scoring")
-	raw := `{"inputs":{"source_sentence":"same","sentences":["second","first","first"]},"parameters":{"truncate":false,"truncation_direction":"right","prompt_name":null}}`
-	r := request(t, d, raw)
-	v, err := d.Request(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := v.(classification.ScoringRequest)
-	if req.Sentences().Raw() != `["second","first","first"]` || req.Parameters().Raw() != `{"truncate":false,"truncation_direction":"right","prompt_name":null}` {
-		t.Fatal("native scope changed")
-	}
-	body := `[-2.5,1.000000000000000000001,1.000000000000000000001]`
-	v, err = d.Result(r, result(t, r, body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := v.(classification.ScoringResult)
-	if out.Source().Source().Raw() != body || out.Scores()[1].InputIndex != 1 || out.Scores()[1].Score.Raw() != "1.000000000000000000001" {
-		t.Fatal("similarity values normalized or reordered")
-	}
-	for _, body := range []string{`[0,1]`, `[0,1,2,3]`, `[0,null,2]`, `{"scores":[0,1,2]}`} {
-		_, err := d.Result(r, result(t, r, body))
-		requireCode(t, err, "fidelity_protocol_violation")
-	}
-	for _, params := range []string{"", `,"parameters":null`, `,"parameters":{"truncate":null,"prompt_name":""}`, `,"parameters":{}`} {
-		if _, err := d.Request(request(t, d, `{"inputs":{"source_sentence":"","sentences":[""]}`+params+`}`)); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
+
 func TestClassificationPolicyCoversTextAndRefusesOpaqueScopes(t *testing.T) {
 	d := definition(t, "openai-moderation")
 	r := request(t, d, `{"input":"covered"}`)

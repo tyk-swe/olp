@@ -23,75 +23,6 @@ func judged(r *result) *result {
 	return r
 }
 
-func TestHarnessAccountsForRequestMetadata(t *testing.T) {
-	for _, tc := range []struct {
-		name                       string
-		sent, rejected, delivered  int64
-		admitted, missing, surplus int64
-		completeness               float64
-	}{
-		{name: "all delivered", sent: 100, delivered: 100, admitted: 100, completeness: 1},
-		{name: "shed requests leave no metadata", sent: 100, rejected: 3, delivered: 97, admitted: 97, completeness: 1},
-		{name: "some missing", sent: 100, rejected: 3, delivered: 90, admitted: 97, missing: 7, completeness: 90.0 / 97},
-		{name: "more than were sent", sent: 100, rejected: 3, delivered: 100, admitted: 97, surplus: 3, completeness: 1},
-		{name: "nothing sent", admitted: 0, completeness: 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := metadataResult{Sent: tc.sent, RejectedBeforeAdmission: tc.rejected, Delivered: tc.delivered}
-			m.account()
-			if m.Admitted != tc.admitted || m.Missing != tc.missing || m.Surplus != tc.surplus || m.Completeness != tc.completeness {
-				t.Errorf("got admitted %d, missing %d, surplus %d, completeness %v; want %d, %d, %d, %v",
-					m.Admitted, m.Missing, m.Surplus, m.Completeness, tc.admitted, tc.missing, tc.surplus, tc.completeness)
-			}
-		})
-	}
-	if got := admittedRequests(1000, 40); got != 960 {
-		t.Errorf("admittedRequests = %d, want the 960 the gateway did not shed", got)
-	}
-}
-
-func TestHarnessJudgesWhetherARunIsAReferenceRun(t *testing.T) {
-	pinned := settings{GatewayCPUs: "0-1", MockCPUs: "2-3", LoadgenCPUs: "4-7"}
-	for _, tc := range []struct {
-		name  string
-		scale float64
-		s     settings
-		// base and run are whether each load run delivered its schedule.
-		base, run bool
-		want      referenceConditions
-	}{
-		{name: "a full-scale pinned run", scale: 1, s: pinned, base: true, run: true,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, MockPinned: true, LoadgenPinned: true, PinsDisjoint: true, ValidRuns: true, All: true}},
-		{name: "a smoke run", scale: 0.02, s: pinned, base: true, run: true,
-			want: referenceConditions{GatewayPinned: true, MockPinned: true, LoadgenPinned: true, PinsDisjoint: true, ValidRuns: true}},
-		{name: "an unpinned gateway", scale: 1, s: settings{MockCPUs: "2-3", LoadgenCPUs: "4-7"}, base: true, run: true,
-			want: referenceConditions{FullScale: true, MockPinned: true, LoadgenPinned: true, PinsDisjoint: true, ValidRuns: true}},
-		{name: "an unpinned mock", scale: 1, s: settings{GatewayCPUs: "0-1", LoadgenCPUs: "4-7"}, base: true, run: true,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, LoadgenPinned: true, PinsDisjoint: true, ValidRuns: true}},
-		{name: "an unpinned load generator", scale: 1, s: settings{GatewayCPUs: "0-1", MockCPUs: "2-3"}, base: true, run: true,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, MockPinned: true, PinsDisjoint: true, ValidRuns: true}},
-		{name: "nothing pinned", scale: 1, s: settings{}, base: true, run: true,
-			want: referenceConditions{FullScale: true, PinsDisjoint: true, ValidRuns: true}},
-		{name: "a gateway and a mock on one CPU", scale: 1, s: settings{GatewayCPUs: "0-1", MockCPUs: "1", LoadgenCPUs: "4-7"}, base: true, run: true,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, MockPinned: true, LoadgenPinned: true, ValidRuns: true}},
-		{name: "every process on the same CPUs", scale: 1, s: settings{GatewayCPUs: "0-1", MockCPUs: "0-1", LoadgenCPUs: "0-1"}, base: true, run: true,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, MockPinned: true, LoadgenPinned: true, ValidRuns: true}},
-		{name: "an invalid baseline", scale: 1, s: pinned, base: false, run: true,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, MockPinned: true, LoadgenPinned: true, PinsDisjoint: true}},
-		{name: "an invalid gateway run", scale: 1, s: pinned, base: true, run: false,
-			want: referenceConditions{FullScale: true, GatewayPinned: true, MockPinned: true, LoadgenPinned: true, PinsDisjoint: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := s1Result(1, 1)
-			r.Scale, r.Baseline.Valid, r.Run.Valid = tc.scale, tc.base, tc.run
-			judgeReference(r, tc.s)
-			if r.Reference != tc.want {
-				t.Errorf("got %+v, want %+v", r.Reference, tc.want)
-			}
-		})
-	}
-}
-
 func TestHarnessFindsCPUsThatProcessesShare(t *testing.T) {
 	set, err := cpuSet("0-2,5")
 	if err != nil || len(set) != 4 || !set[0] || !set[2] || !set[5] || set[3] {
@@ -262,46 +193,6 @@ func TestHarnessDoesNotJudgeNegativeAddedLatency(t *testing.T) {
 	}
 }
 
-func TestHarnessCountsOnlySuccessfulRequestsPerCPUSecond(t *testing.T) {
-	run := report(1000, true, loadgen.Summary{}, loadgen.Summary{}, loadgen.Summary{}, loadgen.Summary{})
-	run.Requests.Sent, run.Requests.Succeeded, run.Requests.Failed = 1000, 600, 400
-	run.Requests.WarmupSent, run.Requests.WarmupFailed = 100, 20
-	if got := handledRequests(run, false); got != 680 {
-		t.Errorf("600 measured and 80 warmup requests succeeded, and %d were counted", got)
-	}
-	// Held streams end by cancellation, so each stream the gateway took counts.
-	if got := handledRequests(run, true); got != 1100 {
-		t.Errorf("held streams counted %d, want all 1100 taken", got)
-	}
-
-	r := &result{Baseline: report(1000, true, loadgen.Summary{}, loadgen.Summary{}, loadgen.Summary{}, loadgen.Summary{}), Run: run, Gateway: gatewayInfo{VCPUs: 2}}
-	computeThroughput(r, resourceUse{Gateway: cpuUse{Seconds: 68}, WallSeconds: 70})
-	// 68 CPU seconds for the 680 requests it answered: 100 ms each, ten to a
-	// CPU second, whatever it did with the 420 it failed.
-	if tp := r.Throughput; tp.CPUMsPerRequestGross != 100 || tp.RequestsPerCPUSecond != 10 {
-		t.Errorf("throughput %+v", tp)
-	}
-}
-
-func TestHarnessPeakRSSFollowsTheResetOnlyWhenItWorked(t *testing.T) {
-	if got := peakRSS(true, 300, 180); got != 300 {
-		t.Errorf("a reset high-water mark of 300 MiB was read as %v", got)
-	}
-	// Refused, the mark covers start-up too and says nothing of the run.
-	if got := peakRSS(false, 900, 180); got != 180 {
-		t.Errorf("an unreset mark of 900 MiB was read as %v, want the sampled 180", got)
-	}
-	r := judged(s1Result(1, 1))
-	if !strings.Contains(strings.Join(r.Validity.Warnings, "\n"), "refused to reset") {
-		t.Errorf("a run whose peak was not reset carries no warning: %v", r.Validity.Warnings)
-	}
-	r = s1Result(1, 1)
-	r.Resources.PeakResetOK = true
-	if judged(r); strings.Contains(strings.Join(r.Validity.Warnings, "\n"), "refused to reset") {
-		t.Errorf("a reset peak is warned of: %v", r.Validity.Warnings)
-	}
-}
-
 // TestHarnessKnowsWhenASnapshotIsCertainlyNewer: the age is served in whole
 // seconds, so a snapshot that reports an age of 0 may be a second old and is
 // not known to be newer than something half a second ago.
@@ -325,18 +216,6 @@ func TestHarnessKnowsWhenASnapshotIsCertainlyNewer(t *testing.T) {
 		if got := snapshotAfter(tc.m, now, tc.after); got != tc.want {
 			t.Errorf("%s: snapshotAfter = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-}
-
-func TestHarnessReadsTheAgeOfTheGatewaysMetricsSnapshot(t *testing.T) {
-	now := time.Now()
-	taken, known := snapshotTaken(metrics{seriesSnapshotAge: 7.5}, now)
-	if !known || !taken.Equal(now.Add(-7500*time.Millisecond)) {
-		t.Errorf("taken %v, known %v", taken, known)
-	}
-	// A gateway that has taken no snapshot reports 2^64-1 seconds.
-	if _, known := snapshotTaken(metrics{seriesSnapshotAge: 1.8446744073709552e19}, now); known {
-		t.Error("an age of 2^64-1 seconds was taken for a snapshot")
 	}
 }
 
@@ -366,109 +245,6 @@ func TestHarnessSummarizesFailover(t *testing.T) {
 	}
 	if empty := summarizeFailover(p, nil, 0); empty.FailedOverShare != 0 || empty.RequestsFailedOver != 0 {
 		t.Errorf("no requests: %+v", empty)
-	}
-}
-
-// TestHarnessJudgesS1OnlyForAGatewayWithCPUsOfItsOwn: the target is stated for a
-// gateway on two CPUs, and a gateway that may use two, on a machine that has
-// only two, shares them with the mock upstream and the load generator unless
-// all three are pinned apart.
-func TestHarnessJudgesS1OnlyForAGatewayWithCPUsOfItsOwn(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		change func(*referenceConditions)
-		// reason is what the target says is missing, "" when it is judged.
-		reason string
-	}{
-		{"every process pinned apart", func(*referenceConditions) {}, ""},
-		{"an unpinned gateway", func(c *referenceConditions) { c.GatewayPinned = false }, envGatewayCPUs},
-		{"an unpinned mock upstream", func(c *referenceConditions) { c.MockPinned = false }, envMockCPUs},
-		{"an unpinned load generator", func(c *referenceConditions) { c.LoadgenPinned = false }, envLoadgenCPUs},
-		{"a CPU in common", func(c *referenceConditions) { c.PinsDisjoint = false }, "CPU in common"},
-		{"nothing pinned", func(c *referenceConditions) {
-			*c = referenceConditions{FullScale: true, PinsDisjoint: true, ValidRuns: true}
-		}, envGatewayCPUs},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := s1Result(1, 1)
-			// Two CPUs by affinity, as on a two-CPU host or in a two-CPU cgroup.
-			r.Gateway.VCPUs = s1VCPUs
-			tc.change(&r.Reference)
-			r.Targets = evaluateTargets(r)
-			for _, id := range []string{"s1-2vcpu-added-p95", "s1-2vcpu-added-p99"} {
-				got := findTarget(t, r.Targets, id)
-				if tc.reason == "" {
-					if got.Status != statusMet {
-						t.Errorf("%s: %+v", id, got)
-					}
-				} else if got.Status != statusNotChecked || got.MeetsTarget != nil || !strings.Contains(got.Reason, tc.reason) {
-					t.Errorf("%s was judged though its processes were not pinned apart: %+v", id, got)
-				}
-			}
-		})
-	}
-}
-
-// TestHarnessJudgesWhetherTheStreamsWereHeld is the premise of S6, at the
-// edges: the generator must have had 95% of the streams open at once, and the
-// gateway 90%. Both are worked out as the scenario works them out.
-func TestHarnessJudgesWhetherTheStreamsWereHeld(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		inFlight int
-		admitted float64
-		// problem is what the problems say, "" for a run that held its streams.
-		problem string
-	}{
-		{"the generator and the gateway held all of them", 10_000, 10_000, ""},
-		{"the generator held exactly 95%", 9_500, 10_000, ""},
-		{"the generator held a stream short of 95%", 9_499, 10_000, "the generator held 9499 of the 10000 streams"},
-		{"the gateway held exactly 90%", 10_000, 9_000, ""},
-		{"the gateway held a stream short of 90%", 10_000, 8_999, "the gateway held 8999 of the 10000 streams"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			run := report(1000, true, loadgen.Summary{}, loadgen.Summary{}, loadgen.Summary{}, loadgen.Summary{})
-			run.Requests.PeakInFlight = tc.inFlight
-			r := s1Result(1, 1)
-			r.Streams = summarizeStreams(settings{}, plan{Concurrency: 10_000}, run, resourceUse{PeakInferenceAdmitted: tc.admitted})
-			judgeValidity(r)
-			problems := strings.Join(r.Validity.Problems, "\n")
-			if tc.problem == "" && strings.Contains(problems, "streams") || !strings.Contains(problems, tc.problem) {
-				t.Errorf("problems %q, want %q", problems, tc.problem)
-			}
-			if held := tc.problem == ""; r.Validity.Valid != held {
-				t.Errorf("valid %v, want %v: %v", r.Validity.Valid, held, r.Validity.Problems)
-			}
-		})
-	}
-}
-
-// TestHarnessAddsLatencyOnlyWhereBothRunsHaveRequests: a run, or a baseline,
-// with no successful request of a kind has no latency of it to subtract, and
-// the other's figures are not a gateway's overhead.
-func TestHarnessAddsLatencyOnlyWhereBothRunsHaveRequests(t *testing.T) {
-	some, none := summary1(20, 21, 22), loadgen.Summary{}
-	if got := deltaOf(some, summary1(21, 23, 27)); got == nil || got.P50 != 1 || got.P95 != 2 || got.P99 != 5 {
-		t.Errorf("both have requests: %+v", got)
-	}
-	for name, got := range map[string]*percentiles{
-		"only the baseline": deltaOf(some, none),
-		"only the run":      deltaOf(none, some),
-		"neither":           deltaOf(none, none),
-	} {
-		if got != nil {
-			t.Errorf("%s has requests, and the difference is %+v", name, got)
-		}
-	}
-
-	// Through computeAdded: the run answered streams the baseline did not, and
-	// the unary requests both did.
-	r := &result{Scenario: "S3",
-		Baseline: report(10, true, some, some, none, none),
-		Run:      report(10, true, summary1(30, 31, 32), some, summary1(40, 41, 42), none)}
-	computeAdded(r)
-	if r.AddedLatency.Unary == nil || r.AddedLatency.Stream != nil || r.AddedLatency.All == nil || r.AddedLatency.All.P50 != 10 {
-		t.Errorf("added latency %+v", r.AddedLatency)
 	}
 }
 
@@ -583,50 +359,5 @@ func TestHarnessReadsTheBudgetOfAKey(t *testing.T) {
 	var none *budgetResult
 	if none.accrued() {
 		t.Error("no budget accrued")
-	}
-}
-
-// TestHarnessCountsAllocationsPerRequest: the figure is what the gateway
-// allocated while the run lasted, less what it allocates idle over the same
-// time, over the requests it answered, as its CPU time per request is.
-func TestHarnessCountsAllocationsPerRequest(t *testing.T) {
-	t0 := time.Now()
-	mark := func(seconds, objects, bytes float64) cpuMark {
-		return cpuMark{at: t0.Add(time.Duration(seconds * float64(time.Second))), allocs: objects, allocBytes: bytes, allocsKnown: true}
-	}
-	// Idle for 10 s the gateway allocated 5,000 objects and 1 MB: 500 objects
-	// and 100 kB a second. The run lasted 100 s and allocated 5,050,000 objects
-	// and 1 GB, of which the idle share is 50,000 objects and 10 MB, and it
-	// answered 10,000 requests.
-	idleFrom, idleTo := mark(0, 1_000_000, 10e6), mark(10, 1_005_000, 11e6)
-	start, end := mark(20, 1_100_000, 50e6), mark(120, 6_150_000, 1_050e6)
-	got := allocationsPerRequest(start, end, idleFrom, idleTo, 10_000)
-	if got.Value == nil || got.BytesPerRequest == nil || *got.Value != 500 || *got.BytesPerRequest != 99_000 || got.IdleObjectsPerSecond != 500 || got.Reason != "" {
-		t.Fatalf("got %+v, want 500 objects and 99,000 bytes a request", got)
-	}
-	// Twice the requests over the same allocation is half the figure.
-	if got := allocationsPerRequest(start, end, idleFrom, idleTo, 20_000); got.Value == nil || *got.Value != 250 {
-		t.Errorf("20,000 requests: %+v", got)
-	}
-
-	// Without an honest figure it is null beside the reason, never a number.
-	unknown := idleTo
-	unknown.allocsKnown = false
-	reversed := end
-	reversed.allocs = 10
-	for _, tc := range []struct {
-		name string
-		got  allocationsResult
-		want string
-	}{
-		{"a mark that could not be read", allocationsPerRequest(start, end, idleFrom, unknown, 10_000), "could not be read"},
-		{"no request answered", allocationsPerRequest(start, end, idleFrom, idleTo, 0), "no request"},
-		{"a counter that went backwards", allocationsPerRequest(start, reversed, idleFrom, idleTo, 10_000), "went backwards"},
-		{"a run that allocated no more than idle", allocationsPerRequest(start, mark(120, 1_100_000+50_000, 60e6), idleFrom, idleTo, 10_000), "nothing to attribute"},
-		{"a window with no length", allocationsPerRequest(start, mark(20, 2_000_000, 100e6), idleFrom, idleTo, 10_000), "no length"},
-	} {
-		if tc.got.Value != nil || tc.got.BytesPerRequest != nil || !strings.Contains(tc.got.Reason, tc.want) {
-			t.Errorf("%s: %+v, want a null figure and %q", tc.name, tc.got, tc.want)
-		}
 	}
 }

@@ -4,7 +4,6 @@ package integration_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"math/rand/v2"
@@ -12,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,20 +130,6 @@ func limMoney(t *testing.T, text string) *big.Rat {
 		t.Fatalf("%q is not a decimal", text)
 	}
 	return value
-}
-
-// limHas reports whether a hash holds a field.
-func limHas(t *testing.T, c *coordination.Client, key, field string) bool {
-	t.Helper()
-	switch found := do(t, c, "HEXISTS", key, field).(type) {
-	case bool:
-		return found
-	case int64:
-		return found == 1
-	default:
-		t.Fatalf("HEXISTS %s %s = %#v", key, field, found)
-		return false
-	}
 }
 
 // A cost-only request never asks the rate script for anything.
@@ -463,20 +447,6 @@ func TestLimitsRetryHintWaitsForEveryRefusingWindow(t *testing.T) {
 	}
 }
 
-// limRefused is limExceeded for a test that also needs to know which kind of
-// refusal it was.
-func limRefused(t *testing.T, err error, dimension limits.Dimension) *limits.ExceededError {
-	t.Helper()
-	var exceeded *limits.ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("error = %v, want an ExceededError", err)
-	}
-	if exceeded.Dimension != dimension {
-		t.Fatalf("dimension = %q, want %q", exceeded.Dimension, dimension)
-	}
-	return exceeded
-}
-
 // seed puts one reservation of amount for each id into the owner's pending state
 // as if it had been granted, expiring at the given Valkey time, and counts them
 // in the total. It is how a state that admission could not have produced, or a
@@ -552,10 +522,6 @@ func (f *limCostFixture) wantConsistent(t *testing.T) {
 	}
 }
 
-// limBacklog is large enough that no sensible bound on one call reaches the end
-// of it.
-const limBacklog = 3000
-
 // Retired, the backlog leaves room for 0.6 beside the 0.2 in flight; counted,
 // it does not. The refusal is the transient kind: this request would fit.
 
@@ -608,33 +574,6 @@ type limFaulty struct {
 func (f limFaulty) Do(ctx context.Context, args ...string) (any, error) {
 	value, err := f.Commander.Do(ctx, args...)
 	return f.after(args, value, err)
-}
-
-// limScriptKeys is the keys a script call names, whether it sent the script or
-// its digest, and nil for a command that is not a script call.
-func limScriptKeys(args []string) []string {
-	if len(args) < 3 || (args[0] != "EVAL" && args[0] != "EVALSHA") {
-		return nil
-	}
-	count, err := strconv.Atoi(args[2])
-	if err != nil || len(args) < 3+count {
-		return nil
-	}
-	return args[3 : 3+count]
-}
-
-// limLostReply makes the reply of the first script call that match accepts the one
-// the test chooses, once the call has run. A call that did not run, such as one
-// the server did not know the script of, is not touched. ran reports whether the
-// script did run, so that a test knows it did not lose a reply to nothing.
-func limLostReply(match func(keys []string) bool, lost func(value any) (any, error)) (faulty limFaulty, ran *atomic.Bool) {
-	ran = new(atomic.Bool)
-	return limFaulty{after: func(args []string, value any, err error) (any, error) {
-		if err != nil || !match(limScriptKeys(args)) || ran.Swap(true) {
-			return value, err
-		}
-		return lost(value)
-	}}, ran
 }
 
 // limSlow answers every command after latency, and gives up on one whose

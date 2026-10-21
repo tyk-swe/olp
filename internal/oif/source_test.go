@@ -9,15 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-func source(t *testing.T, raw string) oif.Document {
-	t.Helper()
-	d, err := oif.ParseJSON([]byte(raw), oif.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return d
-}
-
 func FuzzSourceRetainsValidNativeLexemes(f *testing.F) {
 	for _, s := range []string{`{"n":9007199254740993}`, `{"x":"\ud83d\ude00"}`, `[]`, `null`, `{"a":[false,0,""]}`} {
 		f.Add([]byte(s))

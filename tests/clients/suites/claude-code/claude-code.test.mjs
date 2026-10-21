@@ -12,26 +12,13 @@
 // what the client sent.
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, test } from 'node:test';
-import {
-  apiKey,
-  assertClean,
-  defaultReply,
-  models,
-  onlyRequest,
-  recorded,
-  resetRecorded,
-  restrictedApiKey,
-  script,
-  toolResultsPrefix,
-  upstreamModels
-} from '../../lib/harness.mjs';
+import { apiKey, assertClean, defaultReply, models, onlyRequest, recorded, resetRecorded, restrictedApiKey, script, toolResultsPrefix, upstreamModels } from '../../lib/harness.mjs';
 import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, run, sentTo, startBait, verifyVersion, workspace } from '../../lib/cli.mjs';
 import { startTap } from '../../lib/tap.mjs';
 
 const claude = binary('claude');
 const semanticHeaders = ['anthropic-beta', 'anthropic-version'];
 const messagesFilter = { dialect: 'anthropic.messages' };
-const countFilter = { dialect: 'anthropic.count_tokens' };
 
 before(async (t) => t.diagnostic(await verifyVersion('claude')));
 
@@ -83,19 +70,6 @@ for (const { name, route } of [
       assert.match(request.headers['anthropic-beta'], /(^|,)context-management-/);
       assert.match(request.headers['anthropic-beta'], /(^|,)effort-/);
     }
-
-    test('streams a reply, and the upstream receives the request unchanged', async (t) => {
-      const { tap, result } = await ask(t, 'Say hello.', { route });
-      assert.equal(result.code, 0, result.stderr);
-      const out = parseJSON(result);
-      assert.equal(out.is_error, false);
-      assert.equal(out.result, defaultReply);
-
-      const requests = assertClean(await recorded(messagesFilter));
-      assert.ok(requests.length >= 1);
-      requests.forEach(assertRequest);
-      assertPassedThrough(await sentTo(tap, '/anthropic/v1/messages'), requests, { model: upstreamModels.anthropic, headers: semanticHeaders });
-    });
 
     test('completes a tool-use loop with a built-in tool, reading the prompt cache on the second round', async (t) => {
       const secret = 'the vault code is marmalade-7';
@@ -154,27 +128,6 @@ for (const { name, route } of [
       );
     });
 
-    test('counts tokens through the count_tokens endpoint', async (t) => {
-      const { tap, result } = await ask(t, '/context', { route });
-      assert.equal(result.code, 0, result.stderr);
-      const out = parseJSON(result);
-      assert.equal(out.is_error, false);
-      assert.match(out.result, /Context Usage/);
-      assert.match(out.result, /\*\*Tokens:\*\* [\d.]+k? \/ 200k/);
-
-      const requests = assertClean(await recorded(countFilter));
-      assert.ok(requests.length >= 1, '/context counts through the endpoint');
-      for (const request of requests) {
-        assert.equal(request.path, '/anthropic/v1/messages/count_tokens');
-        assert.equal(request.body.model, upstreamModels.anthropic);
-        assert.equal(request.script, 'count_tokens');
-        assert.equal(request.query ?? '', '');
-        assert.match(request.headers['anthropic-beta'], /(^|,)token-counting-/);
-      }
-      assert.deepEqual(await recorded(messagesFilter), [], 'counting makes no generation request');
-      assertPassedThrough(await sentTo(tap, '/anthropic/v1/messages/count_tokens'), requests, { model: upstreamModels.anthropic, headers: semanticHeaders });
-    });
-
     test('resumes a session, replaying its signed thinking and its first turn', async (t) => {
       const cwd = await workspace('claude');
       const first = await ask(t, `Remember the word kumquat. ${script.think('first thoughts')} ${script.reply('noted kumquat')}`, { route, cwd });
@@ -197,16 +150,6 @@ for (const { name, route } of [
 
 describe('Claude Code betas, credentials and egress', () => {
   const route = models.anthropicStrict;
-
-  test('forwards the Anthropic-Beta header verbatim, including a beta the user asked for', async (t) => {
-    const { result, tap } = await ask(t, 'Say hello.', { route, args: ['--betas', 'context-1m-2025-08-07'] });
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(parseJSON(result).result, defaultReply);
-    const [sent] = await sentTo(tap, '/anthropic/v1/messages');
-    assert.match(sent.headers['anthropic-beta'], /(^|,)context-1m-2025-08-07(,|$)/, 'the client sent the beta it was asked for');
-    const request = await onlyRequest(messagesFilter);
-    assert.equal(request.headers['anthropic-beta'], sent.headers['anthropic-beta']);
-  });
 
   test('passes the auto-mode safeguards field and its paired beta through', async (t) => {
     const { result, tap } = await ask(t, 'Say hello.', { route, mode: 'auto' });

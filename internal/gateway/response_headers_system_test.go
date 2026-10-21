@@ -179,8 +179,6 @@ type headerFixture struct {
 	window *window
 }
 
-const headerFixtureTokens = 5 // what both providers report for a request
-
 // newHeaderFixture serves a, which fails over to b, on the OpenAI, Anthropic and
 // Gemini surfaces, unary and streaming.
 func newHeaderFixture(t *testing.T) *headerFixture {
@@ -281,25 +279,6 @@ func wantHeaders(t *testing.T, resp *http.Response, prefix string, want map[stri
 	}
 }
 
-// resetOf parses a reset as OpenAI writes one: the notation of a Go duration, in
-// whole milliseconds, as the script measured the minute.
-func resetOf(t *testing.T, header, value string) time.Duration {
-	t.Helper()
-	d, err := time.ParseDuration(value)
-	if err != nil || d.String() != value || d%time.Millisecond != 0 {
-		t.Fatalf("%s = %q, which is not a whole number of milliseconds in a duration as OpenAI writes one: %v", header, value, err)
-	}
-	return d
-}
-
-// resetWithin checks that a reset is a duration inside the minute that is left.
-func resetWithin(t *testing.T, header, value string) {
-	t.Helper()
-	if d := resetOf(t, header, value); d > minuteReset || d < minuteReset-10*time.Second {
-		t.Fatalf("%s = %s, want what is left of the %s the script measured", header, d, minuteReset)
-	}
-}
-
 // The tokens the window holds are what earlier requests settled at and
 // what this one reserved: the headers state exactly that.
 
@@ -338,16 +317,6 @@ func TestNoLeaseMeansNoRateLimitHeaders(t *testing.T) {
 	if resp.Header.Get("X-Olp-Attempts") != "1" {
 		t.Fatalf("headers %v", resp.Header)
 	}
-}
-
-func metadataOf(resp *http.Response) map[string]string {
-	got := map[string]string{}
-	for name, values := range resp.Header {
-		if strings.HasPrefix(strings.ToLower(name), "x-olp-") && name != "X-Olp-Delivery-Replay" {
-			got[name] = strings.Join(values, ",")
-		}
-	}
-	return got
 }
 
 // Two input tokens at one unit per million and three output tokens at ten.

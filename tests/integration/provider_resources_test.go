@@ -542,14 +542,6 @@ func provisionOpenAIInProject(t *testing.T, h *accessHarness, owner *browser, pr
 	return owner, detail, slug, key["secret"].(string)
 }
 
-// activeAzureProvider creates, certifies and activates an Azure OpenAI
-// connection to endpoint serving vendorModel with capabilities, and returns its
-// detail.
-func activeAzureProvider(t *testing.T, h *accessHarness, owner *browser, name, endpoint string, capabilities []any, providerFields ...map[string]any) map[string]any {
-	t.Helper()
-	return activeAzureProviderInProject(t, h, owner, name, endpoint, nil, capabilities, providerFields...)
-}
-
 func activeAzureProviderInProject(t *testing.T, h *accessHarness, owner *browser, name, endpoint string, projectID *string, capabilities []any, providerFields ...map[string]any) map[string]any {
 	t.Helper()
 	configuration := map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}

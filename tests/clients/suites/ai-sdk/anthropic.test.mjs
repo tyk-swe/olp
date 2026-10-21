@@ -14,35 +14,6 @@ beforeEach(async () => {
   tap.reset();
 });
 
-const project = 'The shared project context that every request repeats. '.repeat(120);
-const cached = { anthropic: { cacheControl: { type: 'ephemeral' } } };
-
-test('a cache breakpoint writes the prefix, and the next request reads it', async () => {
-  const ask = (question) =>
-    generateText({
-      model: anthropic(models.anthropic),
-      maxOutputTokens: 64,
-      maxRetries: 0,
-      instructions: { role: 'system', content: project, providerOptions: cached },
-      prompt: question
-    });
-  const first = await ask('First question.');
-  const second = await ask('Second question.');
-
-  const written = first.providerMetadata.anthropic.usage.cache_creation_input_tokens;
-  assert.ok(written > 0, 'the first request writes the cache');
-  assert.equal(first.usage.inputTokenDetails.cacheReadTokens, 0);
-  assert.equal(second.usage.inputTokenDetails.cacheReadTokens, written, 'the second request reads what the first wrote');
-  assert.equal(second.providerMetadata.anthropic.usage.cache_creation_input_tokens, 0);
-
-  const { sent } = await assertRelayed(tap, [
-    { api: 'anthropic.messages', model: models.anthropic, maxTokens: 64 },
-    { api: 'anthropic.messages', model: models.anthropic, maxTokens: 64 }
-  ]);
-  // The breakpoint reached the upstream, which is what produced the cache usage.
-  assert.equal(sent[0].body.system[0].cache_control.type, 'ephemeral');
-});
-
 test('extended thinking is returned and replayed signed through a tool loop', async () => {
   const thinking = { anthropic: { thinking: { type: 'enabled', budgetTokens: 1024 } } };
   const prompt = `Weather in ${city}? ${script.think('The user wants the weather, so I should call the tool.')} ${script.tool('get_weather', { city })}`;

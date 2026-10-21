@@ -72,25 +72,6 @@ func (h harness) afterTools(results ...string) string {
 	return h.toolPrefix + strings.Join(results, " | ")
 }
 
-// The directives that script the upstream from inside a prompt; the grammar is
-// in tests/clientfixture/scripted/script.go.
-func tool(name string, args map[string]any) string { return directive("tool", name, args) }
-
-func also(name string, args map[string]any) string { return directive("also", name, args) }
-
-func directive(keyword, name string, args map[string]any) string {
-	encoded, err := json.Marshal(args)
-	if err != nil {
-		panic(err)
-	}
-	return fmt.Sprintf("[[olp:%s %s %s]]", keyword, name, encoded)
-}
-
-func think(text string) string {
-	encoded, _ := json.Marshal(text)
-	return "[[olp:think " + string(encoded) + "]]"
-}
-
 func fail(status int) string { return fmt.Sprintf("[[olp:fail %d]]", status) }
 
 // record is one request the upstream received.
@@ -242,15 +223,6 @@ func get(v any, keys ...any) any {
 		}
 	}
 	return v
-}
-
-// expect fails the test unless the value at the path equals want. Numbers and
-// strings compare after JSON decoding, so want is a string, a float64 or a bool.
-func expect(t *testing.T, v any, want any, keys ...any) {
-	t.Helper()
-	if got := get(v, keys...); got != want {
-		t.Fatalf("%v is %#v, want %#v", keys, got, want)
-	}
 }
 
 // A request to anywhere but the gateway fails the test instead of leaving the

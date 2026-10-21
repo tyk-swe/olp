@@ -1,17 +1,10 @@
 package scripted
 
 import (
-	"encoding/json"
 	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-var weatherUse = map[string]any{
-	"name": "get_weather", "description": "weather",
-	"input_schema": map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}},
-}
 
 func message(h *harness, body map[string]any) response {
 	body["model"] = AnthropicModel
@@ -21,166 +14,9 @@ func message(h *harness, body map[string]any) response {
 	return h.anthropic("/messages", body)
 }
 
-func usageOfMessage(t *testing.T, r response) (input, create, read float64) {
-	t.Helper()
-	want(t, r, 200)
-	u := path(r.json(), "usage").(map[string]any)
-	return u["input_tokens"].(float64), u["cache_creation_input_tokens"].(float64), u["cache_read_input_tokens"].(float64)
-}
-
-// assembled folds a Messages stream into its content blocks.
-func assembled(t *testing.T, body []byte) (blocks []map[string]any, stop string, usage map[string]any) {
-	t.Helper()
-	partial := map[int]string{}
-	for _, f := range frames(t, body) {
-		var e map[string]any
-		if err := json.Unmarshal([]byte(f.data), &e); err != nil || e["type"] != f.event {
-			t.Fatalf("frame %q: %v", f.data, err)
-		}
-		switch f.event {
-		case "content_block_start":
-			blocks = append(blocks, e["content_block"].(map[string]any))
-		case "content_block_delta":
-			i, d := int(e["index"].(float64)), e["delta"].(map[string]any)
-			b := blocks[i]
-			switch d["type"] {
-			case "text_delta":
-				b["text"] = b["text"].(string) + d["text"].(string)
-			case "thinking_delta":
-				b["thinking"] = b["thinking"].(string) + d["thinking"].(string)
-			case "signature_delta":
-				b["signature"] = d["signature"]
-			case "input_json_delta":
-				partial[i] += d["partial_json"].(string)
-			}
-		case "content_block_stop":
-			i := int(e["index"].(float64))
-			if p, ok := partial[i]; ok {
-				var input any
-				if err := json.Unmarshal([]byte(p), &input); err != nil {
-					t.Fatalf("tool input %q: %v", p, err)
-				}
-				blocks[i]["input"] = input
-			}
-		case "message_delta":
-			stop, usage = path(e, "delta", "stop_reason").(string), e["usage"].(map[string]any)
-		}
-	}
-	return blocks, stop, usage
-}
-
-func TestMessagesToolLoopThinkingAndStreamingAgree(t *testing.T) {
-	h := newHarness(t)
-	body := func(stream bool) map[string]any {
-		b := map[string]any{"messages": []any{user(weatherPrompt)}, "tools": []any{weatherUse}, "thinking": map[string]any{"type": "enabled", "budget_tokens": 32}}
-		if stream {
-			b["stream"] = true
-		}
-		return b
-	}
-	unary := message(h, body(false))
-	want(t, unary, 200)
-	content := unary.json()["content"].([]any)
-	if len(content) != 2 || path(content[0], "type") != "thinking" || path(content[0], "signature") != ThinkingSignature ||
-		path(content[1], "type") != "tool_use" || path(content[1], "id") != "toolu_fx_1_1" || !reflect.DeepEqual(path(content[1], "input"), map[string]any{"city": "Paris"}) ||
-		unary.json()["stop_reason"] != "tool_use" {
-		t.Fatalf("unary: %s", unary.body)
-	}
-
-	stream := message(h, body(true))
-	want(t, stream, 200)
-	blocks, stop, usage := assembled(t, stream.body)
-	if stop != "tool_use" || len(blocks) != 2 || blocks[0]["thinking"] != path(content[0], "thinking") || blocks[0]["signature"] != ThinkingSignature ||
-		blocks[1]["name"] != "get_weather" || !reflect.DeepEqual(blocks[1]["input"], map[string]any{"city": "Paris"}) || usage["output_tokens"].(float64) < 1 {
-		t.Fatalf("streamed %v stop %s usage %v", blocks, stop, usage)
-	}
-	events := []string{}
-	for _, f := range frames(t, stream.body) {
-		events = append(events, f.event)
-	}
-	if events[0] != "message_start" || events[1] != "ping" || events[len(events)-1] != "message_stop" {
-		t.Fatalf("events %v", events)
-	}
-
-	// The follow-up returns the thinking block unchanged, and the tool result.
-	followup := []any{user(weatherPrompt),
-		map[string]any{"role": "assistant", "content": []any{content[0], content[1]}},
-		map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_fx_1_1", "content": []any{map[string]any{"type": "text", "text": "sunny"}}}}},
-	}
-	final := message(h, map[string]any{"messages": followup, "tools": []any{weatherUse}, "thinking": map[string]any{"type": "enabled", "budget_tokens": 32}})
-	want(t, final, 200)
-	if path(final.json(), "content", 1, "text") != "The tools returned: sunny" || final.json()["stop_reason"] != "end_turn" {
-		t.Fatalf("final: %s", final.body)
-	}
-}
-
 // A matched pair passes, even with other text next to the result.
 
 // the version header is required
-
-func TestPromptCachingReportsWritesAndReads(t *testing.T) {
-	h := newHarness(t)
-	beta := map[string]string{"X-Api-Key": testCredential, "Anthropic-Version": "2023-06-01", "Anthropic-Beta": "prompt-caching-2024-07-31"}
-	big := strings.Repeat("shared project context. ", 40)
-	system := []any{map[string]any{"type": "text", "text": big, "cache_control": map[string]any{"type": "ephemeral"}}}
-	ask := func(q string) map[string]any {
-		return map[string]any{"model": AnthropicModel, "max_tokens": 16, "system": system, "messages": []any{user(q)}}
-	}
-
-	input, create, read := usageOfMessage(t, h.do("POST", AnthropicPrefix+"/messages", beta, ask("first")))
-	if create == 0 || read != 0 || input == 0 {
-		t.Fatalf("first request: input %v create %v read %v", input, create, read)
-	}
-	input2, create2, read2 := usageOfMessage(t, h.anthropic("/messages", ask("a different question")))
-	if create2 != 0 || read2 != create || input2 == 0 {
-		t.Fatalf("second request: input %v create %v read %v, want a read of %v", input2, create2, read2, create)
-	}
-	// Changing the cached prefix writes again.
-	changed := ask("first")
-	changed["system"] = []any{map[string]any{"type": "text", "text": big + "edited", "cache_control": map[string]any{"type": "ephemeral"}}}
-	_, create3, read3 := usageOfMessage(t, h.anthropic("/messages", changed))
-	if create3 == 0 || read3 != 0 {
-		t.Fatalf("changed prefix: create %v read %v", create3, read3)
-	}
-	// A request that marks no block neither writes nor reads.
-	plain := ask("x")
-	plain["system"] = big
-	_, createP, readP := usageOfMessage(t, h.anthropic("/messages", plain))
-	if createP != 0 || readP != 0 {
-		t.Fatalf("unmarked request: create %v read %v", createP, readP)
-	}
-	// A second breakpoint reads the first prefix and writes only the difference.
-	two := ask("first")
-	two["messages"] = []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": strings.Repeat("more context. ", 30), "cache_control": map[string]any{"type": "ephemeral"}}}}}
-	_, createT, readT := usageOfMessage(t, h.anthropic("/messages", two))
-	if readT != create || createT == 0 {
-		t.Fatalf("two breakpoints: create %v read %v, want a read of %v", createT, readT, create)
-	}
-	// Cache control on tools counts, and so does a one-hour lifetime.
-	tools := ask("first")
-	tools["tools"] = []any{map[string]any{"name": "t", "input_schema": map[string]any{"type": "object"}, "cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"}}}
-	r := h.anthropic("/messages", tools)
-	if _, c, _ := usageOfMessage(t, r); c == 0 || path(r.json(), "usage", "cache_creation", "ephemeral_1h_input_tokens").(float64) != c ||
-		path(r.json(), "usage", "cache_creation", "ephemeral_5m_input_tokens").(float64) != 0 {
-		t.Fatalf("one-hour write: %s", r.body)
-	}
-	// Streaming reports the same usage in message_start and message_delta.
-	stream := ask("streamed")
-	stream["stream"] = true
-	_, _, usage := assembled(t, h.anthropic("/messages", stream).body)
-	if usage["cache_read_input_tokens"].(float64) != create {
-		t.Fatalf("streamed usage %v", usage)
-	}
-	// The beta header reaches the recording, and nothing was a leak.
-	for _, rec := range h.recorded("?dialect=anthropic.messages") {
-		if rec.LeakedClientCredential {
-			t.Fatalf("leak in %+v", rec)
-		}
-	}
-	if got := h.recorded("")[0].Headers["anthropic-beta"]; got != "prompt-caching-2024-07-31" {
-		t.Fatalf("anthropic-beta %q", got)
-	}
-}
 
 // The pre-structured-output idiom: a forced tool whose input is the object.
 

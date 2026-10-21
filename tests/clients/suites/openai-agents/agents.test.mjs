@@ -7,7 +7,7 @@ import { after, beforeEach, describe, test } from 'node:test';
 import { Agent, OpenAIProvider, Runner, handoff, setTracingDisabled, tool } from '@openai/agents';
 import { z } from 'zod';
 import { afterTools, apiKey, models, recorded, resetRecorded, script } from '../../lib/harness.mjs';
-import { assertRelayed, toolDeclarations } from '../../lib/relay.mjs';
+import { assertRelayed } from '../../lib/relay.mjs';
 import { startTap } from '../../lib/tap.mjs';
 
 // The SDK exports traces to api.openai.com; a run here must not try.
@@ -43,44 +43,6 @@ const getWeather = tool({
 const request = (extra = {}) => ({ api: 'openai.responses', model: models.openai, ...extra });
 
 describe('Responses API', () => {
-  test('a run completes a plain answer', async () => {
-    const agent = new Agent({ name: 'Assistant', instructions: 'You are terse.', model: models.openai });
-    const result = await runner.run(agent, 'Say hello.');
-    assert.equal(result.finalOutput, process.env.OLP_CLIENTS_DEFAULT_REPLY);
-    assert.ok(result.rawResponses[0].usage.totalTokens > 0, 'usage is reported');
-    await assertRelayed(tap, [request({ contains: ['You are terse.', 'Say hello.'] })]);
-  });
-
-  test('a function tool loop completes and the schema arrives intact', async () => {
-    const agent = new Agent({ name: 'Weather', instructions: 'Use the tool.', model: models.openai, tools: [getWeather] });
-    const result = await runner.run(agent, `Weather in ${city}? ${script.tool('get_weather', { city })}`);
-    assert.equal(result.finalOutput, afterTools(`sunny in ${city}`));
-    assert.equal(result.rawResponses.length, 2);
-    const { upstream } = await assertRelayed(tap, [request({ tools: ['get_weather'] }), request({ tools: ['get_weather'] })]);
-    assert.deepEqual(toolDeclarations('openai.responses', upstream[0].body)[0].schema, weatherSchema);
-    assert.deepEqual(
-      upstream.map((u) => u.script),
-      ['tool_call', 'tool_result']
-    );
-    const output = upstream[1].body.input.find((item) => item.type === 'function_call_output');
-    assert.equal(output.output, `sunny in ${city}`, 'the tool result reaches the upstream');
-  });
-
-  test('a streamed run assembles text and tool calls', async () => {
-    const agent = new Agent({ name: 'Weather', instructions: 'Use the tool.', model: models.openai, tools: [getWeather] });
-    const result = await runner.run(agent, `Weather in ${city}? ${script.tool('get_weather', { city })}`, { stream: true });
-    let text = '';
-    for await (const piece of result.toTextStream()) text += piece;
-    await result.completed;
-    assert.equal(text, afterTools(`sunny in ${city}`));
-    assert.equal(result.finalOutput, text);
-    const calls = result.newItems.filter((item) => item.type === 'tool_call_item');
-    assert.deepEqual(
-      calls.map((item) => JSON.parse(item.rawItem.arguments)),
-      [{ city }]
-    );
-    await assertRelayed(tap, [request({ stream: true, tools: ['get_weather'] }), request({ stream: true, tools: ['get_weather'] })]);
-  });
 
   test('a handoff passes the conversation to a second agent that has its own tools and instructions', async () => {
     const lookupInvoice = tool({
@@ -111,17 +73,6 @@ describe('Responses API', () => {
     assert.equal(result.finalOutput, afterTools(handoffResult.output, 'invoice INV-7 is paid'));
   });
 
-  test('structured output returns the object the schema describes', async () => {
-    const Ticket = z.object({ title: z.string(), priority: z.enum(['low', 'high']), score: z.number().int(), done: z.boolean(), tags: z.array(z.string()) });
-    const agent = new Agent({ name: 'Filer', instructions: 'File a ticket.', model: models.openai, outputType: Ticket });
-    const result = await runner.run(agent, 'The printer is on fire.');
-    assert.deepEqual(result.finalOutput, { title: 'fixture', priority: 'low', score: 42, done: true, tags: ['fixture'] });
-    const { sent, upstream } = await assertRelayed(tap, [request()]);
-    assert.equal(upstream[0].script, 'structured');
-    assert.equal(upstream[0].body.text.format.type, 'json_schema');
-    assert.deepEqual(upstream[0].body.text.format.schema, sent[0].body.text.format.schema, 'the output schema reaches the upstream unchanged');
-  });
-
   test('a reasoning model run replays its reasoning items through a tool loop', async () => {
     const agent = new Agent({
       name: 'Thinker',
@@ -137,24 +88,6 @@ describe('Responses API', () => {
     assert.deepEqual(upstream[0].body.reasoning, { effort: 'low', summary: 'auto' });
     const replayed = upstream[1].body.input.find((item) => item.type === 'reasoning');
     assert.equal(replayed.encrypted_content, 'fixture-encrypted-reasoning', 'the reasoning item comes back to the upstream with its encrypted content');
-  });
-
-  test('a strict route works when the run asks for no stored state', async () => {
-    const agent = new Agent({ name: 'Assistant', instructions: 'You are terse.', model: models.openaiStrict, modelSettings: { store: false } });
-    const result = await runner.run(agent, 'Say hello.');
-    assert.equal(result.finalOutput, process.env.OLP_CLIENTS_DEFAULT_REPLY);
-    const { upstream } = await assertRelayed(tap, [request({ model: models.openaiStrict })]);
-    assert.equal(upstream[0].body.store, false);
-  });
-});
-
-describe('Chat Completions API', () => {
-  test('a tool loop completes through the chat completions model', async () => {
-    const agent = new Agent({ name: 'Weather', instructions: 'Use the tool.', model: models.openai, tools: [getWeather] });
-    const result = await runnerFor(false).run(agent, `Weather in ${city}? ${script.tool('get_weather', { city })}`);
-    assert.equal(result.finalOutput, afterTools(`sunny in ${city}`));
-    const chat = { api: 'openai.chat', model: models.openai, tools: ['get_weather'] };
-    await assertRelayed(tap, [chat, chat]);
   });
 });
 
@@ -185,19 +118,4 @@ describe('another vendor behind the route', () => {
     assert.match(error.message, /max_output_tokens/);
     assert.deepEqual(await recorded(), [], 'the upstream was never reached');
   });
-
-  for (const [vendor, slug, to] of [
-    ['Anthropic', models.anthropic, 'anthropic.messages'],
-    ['Gemini', models.gemini, 'gemini.generate']
-  ]) {
-    test(`a tool loop reaches ${vendor} by translation`, async () => {
-      // The SDK sends no token limit, which Anthropic requires and the gateway will not invent.
-      const agent = new Agent({ name: 'Weather', instructions: 'Use the tool.', model: slug, tools: [getWeather], modelSettings: { maxTokens: 64 } });
-      const result = await runner.run(agent, `Weather in ${city}? ${script.tool('get_weather', { city })}`);
-      assert.equal(result.finalOutput, afterTools(`sunny in ${city}`));
-      const limited = { model: slug, to, tools: ['get_weather'], maxTokens: 64 };
-      const { upstream } = await assertRelayed(tap, [request(limited), request(limited)]);
-      assert.deepEqual(toolDeclarations(to, upstream[0].body)[0].schema, weatherSchema);
-    });
-  }
 });

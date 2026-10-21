@@ -3,20 +3,16 @@
 package integration_test
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -257,37 +253,6 @@ func fleetChat(t *testing.T, origin, secret string) (int, string, http.Header) {
 	return resp.StatusCode, problem.Error.Code, resp.Header
 }
 
-// fleetStream runs one streaming request against a replica to completion. Errors
-// are returned rather than failed on: the caller runs it in its own goroutine.
-func fleetStream(ctx context.Context, origin, secret string) (int, error) {
-	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}],"stream":true}`
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		origin+"/v1/chat/completions", strings.NewReader(body))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+secret)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 40 * time.Second}).Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	_, err = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode, err
-}
-
-// fleetRetryAfter reads the whole number of seconds a refusal advertised.
-func fleetRetryAfter(t *testing.T, header http.Header) int {
-	t.Helper()
-	raw := header.Get("Retry-After")
-	seconds, err := strconv.Atoi(raw)
-	if err != nil {
-		t.Fatalf("Retry-After %q is not a whole number of seconds: %v", raw, err)
-	}
-	return seconds
-}
-
 // fleetPurge removes everything this installation left in the shared Valkey. The
 // stream and the limiter counters outlive the database that named them, so a
 // scenario that does not clean up leaks keys into every later run.
@@ -408,61 +373,6 @@ func fleetScalar(value any) string {
 	}
 }
 
-// fleetPayloads reads the event payloads currently queued on the request metadata
-// stream, oldest first. Acknowledged deliveries are deleted from the stream, so
-// this is what no consumer has retired yet.
-func fleetPayloads(t *testing.T, c *coordination.Client, stream string) []string {
-	t.Helper()
-	entries := map[string]string{}
-	reply := do(t, c, "XRANGE", stream, "-", "+")
-	if mapped, ok := reply.(map[string]any); ok {
-		for id, fields := range mapped {
-			entries[id] = fleetEvent(t, id, fields)
-		}
-	} else {
-		for _, item := range fleetList(t, reply, "XRANGE "+stream) {
-			tuple, ok := item.([]any)
-			if !ok || len(tuple) != 2 {
-				t.Fatalf("stream entry %#v is not an identifier and a field list", item)
-			}
-			id := fleetText(t, tuple[0])
-			entries[id] = fleetEvent(t, id, tuple[1])
-		}
-	}
-	// A map reply loses the server's order, so the entries are sorted by the
-	// stream identifier they were appended under, which is that order.
-	ids := slices.SortedFunc(maps.Keys(entries), fleetCompareStreamIDs)
-	payloads := make([]string, 0, len(ids))
-	for _, id := range ids {
-		payloads = append(payloads, entries[id])
-	}
-	return payloads
-}
-
-// fleetEvent reads the event payload one stream entry carries.
-func fleetEvent(t *testing.T, id string, fields any) string {
-	t.Helper()
-	payload, ok := fleetFields(t, fields)["event"]
-	if !ok {
-		t.Fatalf("stream entry %s carries no event field", id)
-	}
-	return payload
-}
-
-// fleetCompareStreamIDs orders stream identifiers by their milliseconds and
-// sequence rather than as text, so entry 10-0 follows entry 9-0.
-func fleetCompareStreamIDs(a, b string) int {
-	firstMillis, firstSequence, errA := usage.ParseStreamID(a)
-	secondMillis, secondSequence, errB := usage.ParseStreamID(b)
-	if errA != nil || errB != nil {
-		return strings.Compare(a, b)
-	}
-	if firstMillis != secondMillis {
-		return cmp.Compare(firstMillis, secondMillis)
-	}
-	return cmp.Compare(firstSequence, secondSequence)
-}
-
 // fleetConsumers names every consumer registered in the installation's persistence
 // group.
 func fleetConsumers(t *testing.T, c *coordination.Client, stream string) []string {
@@ -478,22 +388,6 @@ func fleetConsumers(t *testing.T, c *coordination.Client, stream string) []strin
 		names = append(names, name)
 	}
 	return names
-}
-
-// fleetWindow is the fixed minute the shared limiter is counting in and how much of
-// it is left, measured on Valkey's clock because that is the only clock the
-// admission scripts consult.
-func fleetWindow(t *testing.T, c *coordination.Client) (int64, time.Duration) {
-	t.Helper()
-	parts, ok := do(t, c, "TIME").([]any)
-	if !ok || len(parts) != 2 {
-		t.Fatalf("TIME = %#v", parts)
-	}
-	seconds, err := strconv.ParseInt(fleetText(t, parts[0]), 10, 64)
-	if err != nil {
-		t.Fatalf("TIME seconds: %v", err)
-	}
-	return seconds / 60, time.Duration(60-seconds%60) * time.Second
 }
 
 // fleetCounters reads the durable worker counters of one installation.

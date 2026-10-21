@@ -259,16 +259,6 @@ func focusRowMaps(t *testing.T, store *objectStore, day time.Time) []map[string]
 	return rows
 }
 
-func sumColumn(rows []map[string]string, column string) decimal.Decimal {
-	total := decimal.Zero
-	for _, row := range rows {
-		if v := row[column]; v != "" {
-			total = total.Add(decimal.RequireFromString(v))
-		}
-	}
-	return total
-}
-
 func sumFacts(t *testing.T, pool *pgxpool.Pool, day time.Time) decimal.Decimal {
 	t.Helper()
 	var sum *string

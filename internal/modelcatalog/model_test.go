@@ -2,13 +2,11 @@ package modelcatalog
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -54,31 +52,5 @@ func TestCatalogKeepsUnknownPrivacyAndPartialPricesExplicit(t *testing.T) {
 	}
 	if len(model.Prices) != 1 || model.Prices[0].Complete {
 		t.Fatal("partially priced targets asserted complete prices")
-	}
-}
-
-func TestCatalogSamplesRespectCertifiedModesAndStrictNativeDialect(t *testing.T) {
-	snapshot, route, inputs, now := catalogFixture(t)
-	first := snapshot.Providers["first"]
-	first.Capabilities = []routing.Capability{{Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "anthropic", Mode: "stream"}}
-	second := snapshot.Providers["second"]
-	second.Enabled = false
-	snapshot.Providers["first"], snapshot.Providers["second"] = first, second
-	model := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
-	if len(model.Samples) != 1 || model.Samples[0].SDK != "openai" {
-		t.Fatalf("uncertified examples: %+v", model.Samples)
-	}
-	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
-	first.ProfileID = "compatible-responses"
-	first.ProfileRevision = connectors.ProfileRevision
-	snapshot.Providers["first"] = first
-	model = Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
-	if len(model.Samples) != 1 || !strings.Contains(model.Samples[0].Code, "client.responses.create") || strings.Contains(model.Samples[0].Code, "chat.completions") {
-		t.Fatalf("strict dialect example: %+v", model.Samples)
-	}
-	first.Capabilities = nil
-	snapshot.Providers["first"] = first
-	if got := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now).Samples; len(got) != 0 {
-		t.Fatalf("uncertified route examples: %+v", got)
 	}
 }

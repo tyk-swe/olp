@@ -114,43 +114,6 @@ func seedParityCardPrice(t *testing.T, pool *pgxpool.Pool, revisionID string, pr
 	}
 }
 
-type chargedFact struct {
-	cost      *string
-	charge    *string
-	discount  *string
-	cardRev   *string
-	uncharged bool
-}
-
-// persistCharge accounts for an event and reads each fact's cost and charge.
-func persistCharge(t *testing.T, pool *pgxpool.Pool, event *Event) (Persisted, []chargedFact) {
-	t.Helper()
-	payload, err := Encode(event)
-	if err != nil {
-		t.Fatalf("encode event: %v", err)
-	}
-	result, err := PersistEvent(t.Context(), pool, event, payload)
-	if err != nil {
-		t.Fatalf("persist event: %v", err)
-	}
-	rows, err := pool.Query(t.Context(), `SELECT estimated_cost::text, charge::text,
-	    discount_id::text, rate_card_revision_id::text
-	    FROM olp.attempt_usage_facts WHERE request_id = $1::uuid ORDER BY attempt_ordinal`, event.RequestID)
-	if err != nil {
-		t.Fatalf("read facts: %v", err)
-	}
-	defer rows.Close()
-	var facts []chargedFact
-	for rows.Next() {
-		var fact chargedFact
-		if err = rows.Scan(&fact.cost, &fact.charge, &fact.discount, &fact.cardRev); err != nil {
-			t.Fatalf("scan fact: %v", err)
-		}
-		facts = append(facts, fact)
-	}
-	return result, facts
-}
-
 // Seed specific scopes first and the general one last so insertion order
 // cannot decide the answer.
 

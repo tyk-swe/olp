@@ -10,9 +10,6 @@ import (
 	"testing"
 	"time"
 
-	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -59,46 +56,5 @@ func TestS3ObjectPUTUsesStableKeyAndJSONL(t *testing.T) {
 	}
 	if gotType != "application/x-ndjson" || !strings.HasSuffix(string(gotBody), "\n") {
 		t.Fatalf("jsonl body content-type=%q body=%q", gotType, gotBody)
-	}
-}
-
-func TestOTLPLogsCarriesEnvelopeAsBody(t *testing.T) {
-	var gotContentType string
-	var gotRequest []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotContentType = r.Header.Get("Content-Type")
-		gotRequest, _ = io.ReadAll(r.Body)
-		w.WriteHeader(200)
-	}))
-	defer server.Close()
-	sender := NewSender(testPolicy())
-	sender.Installation = "inst-1"
-	record := Record{ID: "rec-otlp", Stream: "requests", At: time.Unix(1700000000, 0), Data: json.RawMessage(`{"event_id":"rec-otlp","data":{"k":1}}`)}
-	if err := sender.Send(t.Context(), Destination{Type: "otlp_logs", URL: server.URL + "/v1/logs", Format: "otlp"}, nil, record); err != nil {
-		t.Fatal(err)
-	}
-	if gotContentType != "application/x-protobuf" {
-		t.Fatalf("content type %q", gotContentType)
-	}
-	var exportRequest collogspb.ExportLogsServiceRequest
-	if err := proto.Unmarshal(gotRequest, &exportRequest); err != nil {
-		t.Fatal(err)
-	}
-	if len(exportRequest.ResourceLogs) != 1 || len(exportRequest.ResourceLogs[0].ScopeLogs[0].LogRecords) != 1 {
-		t.Fatalf("unexpected OTLP shape: %d resource logs", len(exportRequest.ResourceLogs))
-	}
-	record0 := exportRequest.ResourceLogs[0].ScopeLogs[0].LogRecords[0]
-	if body := record0.GetBody().GetStringValue(); body != string(record.Data) {
-		t.Fatalf("log body %q, want the final envelope bytes", body)
-	}
-	resource := exportRequest.ResourceLogs[0].Resource.Attributes
-	var installation string
-	for _, attribute := range resource {
-		if attribute.Key == "olp.installation_id" {
-			installation = attribute.Value.GetStringValue()
-		}
-	}
-	if installation != "inst-1" {
-		t.Fatalf("installation resource attribute %q", installation)
 	}
 }

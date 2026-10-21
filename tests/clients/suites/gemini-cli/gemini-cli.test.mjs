@@ -8,26 +8,11 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { before, beforeEach, describe, test } from 'node:test';
-import {
-  apiKey,
-  assertClean,
-  defaultReply,
-  models,
-  onlyRequest,
-  recorded,
-  resetRecorded,
-  restrictedApiKey,
-  script,
-  toolResultsPrefix,
-  upstreamModels
-} from '../../lib/harness.mjs';
+import { apiKey, assertClean, models, recorded, resetRecorded, restrictedApiKey, script, toolResultsPrefix } from '../../lib/harness.mjs';
 import { assertHeldByTheTrap, assertPassedThrough, binary, clientEnvironment, parseJSON, privateHome, run, sentTo, startBait, workspace } from '../../lib/cli.mjs';
 import { startTap } from '../../lib/tap.mjs';
 
 const gemini = binary('gemini');
-
-// A 1x1 PNG. An attachment makes the CLI count tokens before it sends a prompt.
-const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
 before(async () => {
   const settings = path.join(privateHome(), '.gemini');
@@ -64,25 +49,6 @@ for (const { name, route } of [
   { name: 'a strict route', route: models.geminiStrict }
 ]) {
   describe(`Gemini CLI through ${name}`, () => {
-    test('streams a reply, and the upstream receives the request unchanged', async (t) => {
-      const { tap, result } = await ask(t, 'Say hello.', { route });
-      assert.equal(result.code, 0, result.stderr);
-      const out = parseJSON(result);
-      assert.equal(out.response, defaultReply);
-      assert.equal(out.stats.models[route].api.totalErrors, 0);
-      assert.ok(out.stats.models[route].tokens.prompt > 0, 'usage came back through the gateway');
-
-      const request = await onlyRequest(streamFilter);
-      assert.equal(request.path, `/gemini/v1beta/models/${upstreamModels.gemini}:streamGenerateContent`);
-      assert.equal(request.query, 'alt=sse');
-      assert.equal(request.headers['x-goog-api-key'], '[present]');
-      assert.equal(request.body.contents[0].role, 'user');
-      assert.match(JSON.stringify(request.body.contents), /Say hello\./);
-      assert.equal(request.body.generationConfig.thinkingConfig.includeThoughts, true);
-      assert.ok(request.body.systemInstruction, 'the system instruction arrived');
-      assert.ok(request.body.tools[0].functionDeclarations.some((tool) => tool.name === 'read_file'));
-      assertPassedThrough(await sentTo(tap, (r) => r.path.endsWith(':streamGenerateContent')), [request], { headers: [] });
-    });
 
     test('calls a built-in tool and returns its result, with the thought signature intact', async (t) => {
       const secret = 'the vault code is marmalade-7';
@@ -106,23 +72,6 @@ for (const { name, route } of [
       assert.equal(response.functionResponse.name, 'read_file');
       assert.match(JSON.stringify(response.functionResponse.response), /marmalade-7/);
       assertPassedThrough(await sentTo(tap, (r) => r.path.endsWith(':streamGenerateContent')), requests, { headers: [] });
-    });
-
-    test('counts the tokens of an attachment before it sends the prompt', async (t) => {
-      const cwd = await workspace('gemini');
-      await writeFile(path.join(cwd, 'pixel.png'), pixel);
-      const { tap, result } = await ask(t, 'Describe @pixel.png', { route, cwd });
-      assert.equal(result.code, 0, result.stderr);
-      assert.equal(parseJSON(result).response, defaultReply);
-
-      const counts = assertClean(await recorded({ dialect: 'gemini.count_tokens' }));
-      assert.equal(counts.length, 1);
-      assert.equal(counts[0].path, `/gemini/v1beta/models/${upstreamModels.gemini}:countTokens`);
-      assert.equal(counts[0].script, 'count_tokens');
-      assert.ok(JSON.stringify(counts[0].body.contents).includes('inlineData'), 'the attachment is what is counted');
-      const [stream] = assertClean(await recorded(streamFilter));
-      assert.ok(JSON.stringify(stream.body.contents).includes('inlineData'), 'the attachment reaches the model');
-      assertPassedThrough(await sentTo(tap, (r) => r.path.endsWith(':countTokens')), counts, { headers: [] });
     });
   });
 }

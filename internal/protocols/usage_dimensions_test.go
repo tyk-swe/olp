@@ -7,7 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-var openaiEmit = func([]byte) error { return nil }
 var _ = wire.Chat
 
 func TestGeminiUsageModalityAndGrounding(t *testing.T) {

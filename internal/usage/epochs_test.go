@@ -4,12 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 )
-
-func ingestSnapshot(epoch string) Snapshot {
-	return Snapshot{ProcessEpoch: epoch, StartedAt: time.Unix(1700000000, 0).UTC()}
-}
 
 func TestAttemptRoutingReadsThePricingPin(t *testing.T) {
 	t.Parallel()

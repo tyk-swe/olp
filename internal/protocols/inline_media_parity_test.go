@@ -219,33 +219,6 @@ func sameMediaAnswer(t testing.TB, request *wire.Request, limits InlineMediaLimi
 	return got == nil
 }
 
-func TestInlineMediaIsValidatedAsTheLegacyValidationDid(t *testing.T) {
-	cases := 400
-	if testing.Short() {
-		cases = 80
-	}
-	var accepted, refused int
-	for _, family := range inlineMediaFamilies {
-		g := mediaGen{rand.New(rand.NewPCG(41, uint64(len(family))))}
-		for range cases {
-			fields := g.fields()
-			request, err := wire.FromFields(family, "route", false, fields)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if sameMediaAnswer(t, request, g.limits(), fields) {
-				accepted++
-			} else {
-				refused++
-			}
-		}
-	}
-	// The comparison is only worth something if both answers are given.
-	if accepted < cases || refused < cases {
-		t.Errorf("%d requests were accepted and %d refused: the generator is not exercising the validation", accepted, refused)
-	}
-}
-
 func FuzzInlineMediaIsValidatedAsTheLegacyValidationDid(f *testing.F) {
 	f.Add([]byte(`{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YWI="}},{"type":"input_audio","input_audio":{"data":"YWJj"}}]}]}`), uint8(2))
 	f.Add([]byte(`{"input":[{"role":"user","content":[{"type":"input_file","file_data":"data:application/pdf;base64,YWI="},"bare"]}]}`), uint8(5))

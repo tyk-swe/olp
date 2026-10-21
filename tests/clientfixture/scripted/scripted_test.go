@@ -120,48 +120,6 @@ func want(t *testing.T, r response, status int) {
 	}
 }
 
-type frame struct{ event, data string }
-
-// frames splits a server-sent event body into its frames.
-func frames(t *testing.T, body []byte) []frame {
-	t.Helper()
-	var out []frame
-	for _, raw := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n\n") {
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		var f frame
-		for _, line := range strings.Split(raw, "\n") {
-			switch {
-			case strings.HasPrefix(line, "event: "):
-				f.event = strings.TrimPrefix(line, "event: ")
-			case strings.HasPrefix(line, "data: "):
-				f.data = strings.TrimPrefix(line, "data: ")
-			default:
-				t.Fatalf("unexpected SSE line %q", line)
-			}
-		}
-		out = append(out, f)
-	}
-	return out
-}
-
-func decodeFrames(t *testing.T, body []byte) []map[string]any {
-	t.Helper()
-	var out []map[string]any
-	for _, f := range frames(t, body) {
-		if f.data == "[DONE]" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(f.data), &m); err != nil {
-			t.Fatalf("frame %q is not JSON: %v", f.data, err)
-		}
-		out = append(out, m)
-	}
-	return out
-}
-
 func path(v any, keys ...any) any {
 	for _, k := range keys {
 		switch key := k.(type) {
