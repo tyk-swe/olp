@@ -508,12 +508,14 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, notFoundError("not_found", "No cloud batch job with this ID exists for this dialect."))
 		return
 	}
-	candidate, exists := x.request.release.Snapshot.Routes[res.RouteSlug]
-	if !exists {
-		s.cloudBatchFail(x, w, notFoundError("not_found", "The cloud batch route is unavailable."))
-		return
+	if !cancel {
+		candidate, exists := x.request.release.Snapshot.Routes[res.RouteSlug]
+		if !exists {
+			s.cloudBatchFail(x, w, notFoundError("not_found", "The cloud batch route is unavailable."))
+			return
+		}
+		x.route = &candidate
 	}
-	x.route = &candidate
 	use := retainedRetrieval
 	if cancel {
 		use = retainedHousekeeping

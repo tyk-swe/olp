@@ -202,6 +202,14 @@ func TestCloudBatchCreateRefreshCancelFixturesCompile(t *testing.T) {
 		if status != http.StatusOK {
 			t.Fatalf("%s cloud batch get: status=%d response=%s", tc.profile, status, response)
 		}
+		var routeID string
+		if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.routes WHERE slug=$1`, slug).Scan(&routeID); err != nil {
+			t.Fatal(err)
+		}
+		routePath := "/api/v1/routes/" + routeID
+		route := h.want(owner, http.MethodGet, routePath, nil, nil, http.StatusOK)
+		h.want(owner, http.MethodPost, routePath+"/retire", nil, withMatch(route, idem(uuid.NewString())), http.StatusOK)
+		h.refresh()
 		status, response, _ = h.gatewayRaw(http.MethodPost, path+"/"+id+"/cancel", key, nil, nil)
 		if status != http.StatusOK {
 			t.Fatalf("%s cloud batch cancel: status=%d response=%s", tc.profile, status, response)

@@ -455,16 +455,20 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		TargetID: settlement.TargetID, SlotID: settlement.SlotID, CredentialID: settlement.CredentialID,
 		UpstreamID: snapshot.ID, State: state, Metadata: metadata,
 	}
+	var payload []byte
+	if settlement.Kind == resources.KindStrictBatch {
+		var err error
+		payload, err = w.Resources.ReadStagedDurableContract(ctx, settlement.ResourceID)
+		if err != nil {
+			return err
+		}
+	}
 	tx, err := w.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	if settlement.Kind == resources.KindStrictBatch {
-		payload, readErr := w.Resources.ReadStagedDurableContract(ctx, settlement.ResourceID)
-		if readErr != nil {
-			return readErr
-		}
 		var document stagedDurableDocument
 		if json.Unmarshal(payload, &document) != nil || !strictAdoptionMatches(snapshot.Body, document.Effective, inputFileID) {
 			return errors.New("strict batch reconciliation evidence is invalid")

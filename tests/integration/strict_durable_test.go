@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -50,7 +51,21 @@ func TestStrictBatchUnknownRecoveryAfterCallerRevocation(t *testing.T) {
 	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+authority.ID+"/revoke", nil,
 		withMatch(apiKey, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "recovered-output", "", batchChatLine("recovered", "ok"), "")
-	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+	poolConfig, err := database.Configuration(h.DBURL, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	singlePool, err := database.Open(t.Context(), poolConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer singlePool.Close()
+	worker := batchWorker(h, nil)
+	worker.Pool, worker.Store = singlePool, batches.NewStore(singlePool)
+	worker.Resources = resources.NewEncrypted(singlePool, h.Media.Installation, h.Media.Keys)
+	recoveryCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stop()
+	if _, err := worker.ReconcileOnce(recoveryCtx, batches.WorkerBatchSize); err != nil {
 		t.Fatal(err)
 	}
 	assertBatchSettlement(t, h, resourceID, "settled", 1, 0)
