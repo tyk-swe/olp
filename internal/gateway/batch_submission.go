@@ -232,8 +232,11 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 	attemptCount, attemptVendor, routingInputs := x.attemptCount, x.attemptVendor, x.routingInputs
 	fact := s.newFact(x, p.attempt, p.slot, 1, &p.provider)
 	x.attemptCount, x.attemptVendor, x.routingInputs = attemptCount, attemptVendor, routingInputs
-	pricingCall := *x
-	pricingCall.routingInputs = inputs
+	pricingCall := call{
+		request: request{release: x.request.release}, authority: x.authority,
+		cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs,
+		routeLeg: routeLeg{route: x.route},
+	}
 	fact.cardRev = pricingCall.attemptCardRevision(p.provider.ID, now)
 	fact.StartedAt = now
 	fact.Status = http.StatusOK
