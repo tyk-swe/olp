@@ -3,6 +3,7 @@ package batches
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -58,7 +59,15 @@ func (s *Store) BeginSubmission(ctx context.Context, settlement *Settlement) err
 	if len(cursor) == 0 {
 		cursor = []byte(`{}`)
 	}
-	_, err = s.Pool.Exec(ctx, `INSERT INTO olp.batch_settlements
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockSubmissionSourceTx(ctx, tx, *settlement); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO olp.batch_settlements
 		(resource_id,kind,adapter,api_key_id,route_slug,route_revision_id,provider_id,provider_revision_id,
 		 target_id,slot_id,credential_id,upstream_id,surface,submission_digest,line_operation,template,state,
 		 expected_results,settled_results,uncertain_results,cursor,close_after)
@@ -75,7 +84,45 @@ func (s *Store) BeginSubmission(ctx context.Context, settlement *Settlement) err
 		}
 		return fmt.Errorf("insert batch submission intent: %w", err)
 	}
-	return nil
+	return tx.Commit(ctx)
+}
+
+func submissionInputFile(settlement Settlement) (string, error) {
+	if len(settlement.Cursor) == 0 {
+		return "", nil
+	}
+	input, _, _, err := submissionFiles(settlement.Cursor)
+	return input, err
+}
+
+// Intent creation and adoption serialize within the upstream credential/file
+// namespace, including callers and route revisions sharing that source.
+func lockSubmissionSourceTx(ctx context.Context, tx pgx.Tx, settlement Settlement) error {
+	input, err := submissionInputFile(settlement)
+	if err != nil || input == "" {
+		return err
+	}
+	key, _ := json.Marshal([]any{"batch-source", settlement.ProviderID, settlement.SlotID, settlement.CredentialID, input})
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, string(key))
+	return err
+}
+
+func competingSubmissionTx(ctx context.Context, tx pgx.Tx, settlement Settlement, upstreamID string) (bool, error) {
+	input, err := submissionInputFile(settlement)
+	if err != nil || input == "" {
+		return false, err
+	}
+	var competing bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM olp.batch_settlements WHERE provider_id=$1 AND slot_id=$2
+		AND credential_id IS NOT DISTINCT FROM $3::uuid AND resource_id<>$4
+		AND upstream_id IS NULL AND state IN ('submitting','submission_unknown','conflict','uncertain')
+		AND COALESCE(NULLIF(cursor#>>'{submission,gemini_file}',''),NULLIF(cursor#>>'{submission,input_file_id}',''))=$5
+	) OR EXISTS(
+		SELECT 1 FROM olp.batch_settlements WHERE provider_id=$1 AND slot_id=$2
+		AND credential_id IS NOT DISTINCT FROM $3::uuid AND resource_id<>$4 AND upstream_id=$6
+	)`, settlement.ProviderID, settlement.SlotID, settlement.CredentialID, settlement.ResourceID, input, upstreamID).Scan(&competing)
+	return competing, err
 }
 
 func (s *Store) DeleteSubmission(ctx context.Context, resourceID uuid.UUID) error {

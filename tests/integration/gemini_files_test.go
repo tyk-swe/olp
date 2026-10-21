@@ -3,11 +3,14 @@
 package integration_test
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -267,7 +270,7 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 	slug := "gemini-files-" + uuid.NewString()[:8]
 	activateRoute := func(name, mode string) {
 		draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
-			"slug": name, "operations": []string{"generation", "batch"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+			"slug": name, "operations": []string{"generation", "batch"}, "overall_timeout_ms": 1000, "max_attempts": 1,
 			"fidelity": map[string]any{"mode": mode},
 			"targets":  []any{map[string]any{"provider_id": provider["id"], "provider_model": "gemini-files-test", "priority": 0, "weight": 1, "timeout_ms": 5000}},
 		}, idem(uuid.NewString()), http.StatusCreated)
@@ -299,6 +302,24 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 		t.Fatalf("Gemini upload proxy URL=%q", headers.Get("X-Goog-Upload-URL"))
 	}
 	sessionPath := sessionURL.Path
+	connection, dialErr := net.DialTimeout("tcp", h.HTTP.Listener.Addr().String(), time.Second)
+	if dialErr != nil {
+		t.Fatal(dialErr)
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nX-Goog-Upload-Command: upload\r\nX-Goog-Upload-Offset: 0\r\nContent-Length: 10\r\nConnection: close\r\n\r\nx", sessionPath, h.HTTP.Listener.Addr().String(), key); err != nil {
+		t.Fatal(err)
+	}
+	stalled, readErr := http.ReadResponse(bufio.NewReader(connection), &http.Request{Method: http.MethodPost})
+	if readErr != nil {
+		t.Fatalf("stalled chunk outlived its route deadline: %v", readErr)
+	}
+	_ = stalled.Body.Close()
+	_ = connection.Close()
+	if stalled.StatusCode != http.StatusBadRequest && stalled.StatusCode != http.StatusRequestTimeout {
+		t.Fatalf("stalled chunk status=%d", stalled.StatusCode)
+	}
 	fixture.mu.Lock()
 	sessionCalls := fixture.sessionCalls
 	fixture.mu.Unlock()

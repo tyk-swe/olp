@@ -222,6 +222,9 @@ reservation and fix the settlement boundary:
   `file_name`, Vertex's `olp_submission` label, or Bedrock's
   `clientRequestToken`. Anthropic and Gemini inline submissions remain unknown
   until `close_after`, then become uncertain.
+  File-based adoption refuses competing unresolved intents sharing an upstream
+  credential and input file, and rechecks already-owned jobs transactionally.
+  It preserves a conflict when the provider evidence cannot identify one source.
 
 ### M9.3 Fine-tuning
 

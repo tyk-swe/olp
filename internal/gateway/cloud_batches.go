@@ -290,7 +290,20 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
-	p, e := s.selectPinSurface(r.Context(), x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
+		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The cloud batch request read could not be bounded."))
+		return
+	}
+	body, e := s.readBody(r)
+	if e != nil {
+		s.cloudBatchFail(x, w, e)
+		return
+	}
+	_ = controller.SetReadDeadline(time.Time{})
+	ctx, cancel := s.stateDeadline(r.Context(), &route)
+	defer cancel()
+	p, e := s.selectPinSurface(ctx, x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
 		cfg := provider.Connector()
 		return provider.ProfileID == dialect && cfg.Supports("batch", "native", "unary") && cfg.BatchStorage != nil
 	})
@@ -306,12 +319,6 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	if x.strict() {
 		s.releaseHold(r.Context(), p.hold)
 		s.cloudBatchFail(x, w, policyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
-		return
-	}
-	body, e := s.readBody(r)
-	if e != nil {
-		s.releaseHold(r.Context(), p.hold)
-		s.cloudBatchFail(x, w, e)
 		return
 	}
 	input, failure := validateCloudBatchRequest(body, dialect, p.provider.BatchStorage)
@@ -330,8 +337,6 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
-	ctx, cancel := s.stateDeadline(r.Context(), &route)
-	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if err := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
 		s.cloudBatchFail(x, w, err)

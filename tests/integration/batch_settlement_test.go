@@ -33,6 +33,49 @@ func (r *oversizedPollingBatchReader) Poll(context.Context, batches.Settlement, 
 	return batches.BatchSnapshot{}, batches.ErrBatchTooLarge
 }
 
+func TestBatchRecoveryPreservesAmbiguousSharedInput(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	_, _, slug, key := provisionOpenAI(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"})
+	status, uploaded := h.uploadTestFile(slug, key, nativeBatchInput("shared-input"))
+	if status != http.StatusOK {
+		t.Fatalf("upload: %d %v", status, uploaded)
+	}
+	fixture.batchCreateStatus.Store(http.StatusBadGateway)
+	status, body, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key, bytes.NewReader(batchCreateBody(uploaded["id"].(string))), map[string]string{"Content-Type": "application/json", "X-OLP-Route": slug})
+	if status != http.StatusBadGateway || !bytes.Contains(body, []byte(`"code":"submission_unknown"`)) {
+		t.Fatalf("lost acknowledgement: %d %s", status, body)
+	}
+	store := batches.NewStore(h.Pool)
+	claims, err := store.Claim(t.Context(), time.Now().Add(time.Minute), 1)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim: %+v %v", claims, err)
+	}
+	first := claims[0]
+	second := first
+	second.ResourceID, second.State, second.ClaimID = uuid.New(), batches.StateSubmitting, nil
+	second.SubmissionDigest = bytes.Repeat([]byte{1}, 32)
+	if err := store.BeginSubmission(t.Context(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkUnknown(t.Context(), second.ResourceID, "submission_unknown", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Finish(t.Context(), first, batches.StateSubmissionUnknown, time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, first.ResourceID, "conflict", 0, 0)
+	assertBatchSettlement(t, h, second.ResourceID, "conflict", 0, 0)
+	var mappings int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE id=ANY($1::uuid[])`, []uuid.UUID{first.ResourceID, second.ResourceID}).Scan(&mappings); err != nil || mappings != 0 {
+		t.Fatalf("ambiguous job acquired an owner: %d err=%v", mappings, err)
+	}
+}
+
 func (r *interruptedBatchReader) Poll(ctx context.Context, settlement batches.Settlement, target *batches.PinnedTarget) (batches.BatchSnapshot, error) {
 	return r.inner.Poll(ctx, settlement, target)
 }

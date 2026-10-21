@@ -27,7 +27,8 @@ const (
 )
 
 var (
-	errResultConflict = errors.New("batch result conflict")
+	errResultConflict      = errors.New("batch result conflict")
+	errSubmissionAmbiguous = errors.New("batch submission source is ambiguous")
 )
 
 type Reader interface {
@@ -290,6 +291,9 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 	case 1:
 		snapshot := reconciliation.Matches[0]
 		if err := w.adopt(ctx, settlement, snapshot); err != nil {
+			if errors.Is(err, errSubmissionAmbiguous) {
+				return w.finishSubmissionConflict(ctx, settlement)
+			}
 			return w.failOrClose(ctx, settlement, "submission_adoption_unavailable")
 		}
 		settlement.UpstreamID = &snapshot.ID
@@ -299,11 +303,7 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 		settlement.State = StateActive
 		return w.reconcileActive(ctx, settlement, target, &snapshot)
 	default:
-		if err := w.Store.Finish(ctx, settlement, StateConflict, settlement.CloseAfter, "submission_conflict"); err != nil {
-			w.logFailure(settlement, "submission_conflict", err)
-			return outcomeFailed
-		}
-		return outcomeProgress
+		return w.finishSubmissionConflict(ctx, settlement)
 	}
 }
 
@@ -484,6 +484,16 @@ func (w *Worker) adopt(ctx context.Context, settlement Settlement, snapshot Batc
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockSubmissionSourceTx(ctx, tx, settlement); err != nil {
+		return err
+	}
+	competing, err := competingSubmissionTx(ctx, tx, settlement, snapshot.ID)
+	if err != nil {
+		return err
+	}
+	if competing {
+		return errSubmissionAmbiguous
+	}
 	if settlement.Kind == resources.KindStrictBatch {
 		var document stagedDurableDocument
 		if json.Unmarshal(payload, &document) != nil || !strictAdoptionMatches(snapshot.Body, document.Effective, inputFileID) {
@@ -738,6 +748,14 @@ func (w *Worker) finishConflict(ctx context.Context, settlement Settlement) reco
 	}
 	if err := w.Store.Finish(ctx, settlement, StateConflict, settlement.CloseAfter, "result_conflict"); err != nil {
 		w.logFailure(settlement, "result_conflict", err)
+		return outcomeFailed
+	}
+	return outcomeProgress
+}
+
+func (w *Worker) finishSubmissionConflict(ctx context.Context, settlement Settlement) reconcileOutcome {
+	if err := w.Store.Finish(ctx, settlement, StateConflict, settlement.CloseAfter, "submission_conflict"); err != nil {
+		w.logFailure(settlement, "submission_conflict", err)
 		return outcomeFailed
 	}
 	return outcomeProgress

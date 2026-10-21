@@ -631,6 +631,15 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 	var chunk io.Reader = bytes.NewReader(nil)
 	var chunkLength int64
 	if r.ContentLength > 0 {
+		deadline := time.Now().Add(requestBodyTimeout)
+		if routeDeadline, ok := ctx.Deadline(); ok && routeDeadline.Before(deadline) {
+			deadline = routeDeadline
+		}
+		controller := http.NewResponseController(w)
+		if err := controller.SetReadDeadline(deadline); err != nil {
+			s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The Gemini chunk read could not be bounded."), x.family)
+			return
+		}
 		artifact, err := s.transport().Spool.Put(ctx, media.Upload{
 			Filename: "gemini-upload-chunk", ContentType: contentType, MaximumLength: min(remaining, s.cfg.MaxMediaBodyBytes), Body: r.Body,
 		})
@@ -638,6 +647,8 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, serverError(http.StatusBadRequest, "invalid_request", "The Gemini upload chunk could not be staged."), x.family)
 			return
 		}
+		// Keep failed reads bounded while HTTP/1 drains their remaining body.
+		_ = controller.SetReadDeadline(time.Time{})
 		defer s.transport().Spool.Remove(artifact.Handle)
 		opened, err := s.transport().Spool.Open(artifact.Handle)
 		if err != nil {
