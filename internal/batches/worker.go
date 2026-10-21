@@ -292,7 +292,7 @@ func (w *Worker) reconcileSubmission(ctx context.Context, settlement Settlement,
 		snapshot := reconciliation.Matches[0]
 		if err := w.adopt(ctx, settlement, snapshot); err != nil {
 			if errors.Is(err, errSubmissionAmbiguous) {
-				return w.finishSubmissionConflict(ctx, settlement)
+				return w.failOrClose(ctx, settlement, "submission_ambiguous")
 			}
 			return w.failOrClose(ctx, settlement, "submission_adoption_unavailable")
 		}

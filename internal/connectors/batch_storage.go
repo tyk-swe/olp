@@ -16,6 +16,7 @@ type BatchStorage struct {
 
 var (
 	batchStorageBucket = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+	gcsStorageBucket   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$`)
 	batchStorageRole   = regexp.MustCompile(`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$`)
 )
 
@@ -87,7 +88,14 @@ func parseBatchStorageURI(uri string) (scheme, bucket, object string, ok bool) {
 	if !found {
 		object = ""
 	}
-	if !batchStorageBucket.MatchString(bucket) || strings.Contains(bucket, "..") || net.ParseIP(bucket) != nil {
+	validBucket := batchStorageBucket.MatchString(bucket)
+	if scheme == "gs" {
+		validBucket = gcsStorageBucket.MatchString(bucket)
+		for _, component := range strings.Split(bucket, ".") {
+			validBucket = validBucket && len(component) <= 63
+		}
+	}
+	if !validBucket || strings.Contains(bucket, "..") || net.ParseIP(bucket) != nil {
 		return "", "", "", false
 	}
 	if object == "" {

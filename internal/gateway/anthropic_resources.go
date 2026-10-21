@@ -1154,7 +1154,7 @@ func sameAnthropicAffinity(resources []*resources.Resource) bool {
 	}
 	first := resources[0]
 	for _, file := range resources[1:] {
-		if file.ProviderID != first.ProviderID || file.TargetID != first.TargetID || file.SlotID != first.SlotID ||
+		if file.ProviderID != first.ProviderID || file.ProviderRevisionID != first.ProviderRevisionID || file.TargetID != first.TargetID || file.SlotID != first.SlotID ||
 			!equalCredentialID(file.CredentialID, first.CredentialID) {
 			return false
 		}

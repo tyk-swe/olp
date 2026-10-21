@@ -224,7 +224,8 @@ reservation and fix the settlement boundary:
   until `close_after`, then become uncertain.
   File-based adoption refuses competing unresolved intents sharing an upstream
   credential and input file, and rechecks already-owned jobs transactionally.
-  It preserves a conflict when the provider evidence cannot identify one source.
+  Outcomes stay unknown and retry while the provider evidence cannot identify
+  one source; the retention deadline bounds those retries.
 
 ### M9.3 Fine-tuning
 

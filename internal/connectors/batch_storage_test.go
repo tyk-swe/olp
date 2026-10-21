@@ -1,6 +1,26 @@
 package connectors
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestBatchStorageUsesSchemeSpecificBucketNames(t *testing.T) {
+	for _, bucket := range []string{"batch_input", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + ".example"} {
+		storage, err := NormalizeBatchStorage("vertex_ai", "vertex-batch-prediction", &BatchStorage{InputURIPrefix: "gs://" + bucket + "/input/", OutputURIPrefix: "gs://" + bucket + "/output/"})
+		if err != nil || !storage.Contains(storage.InputURIPrefix, "gs://"+bucket+"/input/lines.jsonl") {
+			t.Fatalf("valid GCS bucket refused: %s %v", bucket, err)
+		}
+		if _, _, _, ok := parseBatchStorageURI("s3://" + bucket + "/input/"); ok {
+			t.Fatalf("GCS naming rule escaped into S3: %s", bucket)
+		}
+	}
+	for _, bucket := range []string{strings.Repeat("a", 64), "1.2.3.4", "Uppercase"} {
+		if _, _, _, ok := parseBatchStorageURI("gs://" + bucket + "/input/"); ok {
+			t.Fatalf("invalid GCS bucket accepted: %s", bucket)
+		}
+	}
+}
 
 func TestBatchStorageValidationAndContainment(t *testing.T) {
 	for _, scheme := range []string{"gs", "s3"} {

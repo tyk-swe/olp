@@ -164,6 +164,12 @@ func TestAnthropicFileReferencesAndAffinity(t *testing.T) {
 	}
 	credential := "credential"
 	if sameAnthropicAffinity([]*resources.Resource{
+		{ProviderID: "p", ProviderRevisionID: "before-endpoint-change", TargetID: "t", SlotID: "s"},
+		{ProviderID: "p", ProviderRevisionID: "after-endpoint-change", TargetID: "t", SlotID: "s"},
+	}) {
+		t.Fatal("files pinned to different provider revisions were combined")
+	}
+	if sameAnthropicAffinity([]*resources.Resource{
 		{ProviderID: "p", TargetID: "t", SlotID: "s", CredentialID: &credential},
 		{ProviderID: "p", TargetID: "t", SlotID: "s"},
 	}) {

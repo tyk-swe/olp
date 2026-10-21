@@ -56,10 +56,15 @@ func TestBatchRecoveryPreservesAmbiguousSharedInput(t *testing.T) {
 	second := first
 	second.ResourceID, second.State, second.ClaimID = uuid.New(), batches.StateSubmitting, nil
 	second.SubmissionDigest = bytes.Repeat([]byte{1}, 32)
-	if err := store.BeginSubmission(t.Context(), &second); err != nil {
+	var peerCursor struct {
+		Submission map[string]json.RawMessage `json:"submission"`
+	}
+	if err := json.Unmarshal(second.Cursor, &peerCursor); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MarkUnknown(t.Context(), second.ResourceID, "submission_unknown", time.Now()); err != nil {
+	peerCursor.Submission["creator_deadline"], _ = json.Marshal(time.Now().Add(time.Minute))
+	second.Cursor, _ = json.Marshal(peerCursor)
+	if err := store.BeginSubmission(t.Context(), &second); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Finish(t.Context(), first, batches.StateSubmissionUnknown, time.Now(), ""); err != nil {
@@ -68,12 +73,36 @@ func TestBatchRecoveryPreservesAmbiguousSharedInput(t *testing.T) {
 	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
 		t.Fatal(err)
 	}
-	assertBatchSettlement(t, h, first.ResourceID, "conflict", 0, 0)
-	assertBatchSettlement(t, h, second.ResourceID, "conflict", 0, 0)
+	assertBatchSettlement(t, h, first.ResourceID, "submission_unknown", 0, 0)
+	assertBatchSettlement(t, h, second.ResourceID, "submitting", 0, 0)
+	if err := store.MarkUnknown(t.Context(), second.ResourceID, "submission_unknown", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, first.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, first.ResourceID, "submission_unknown", 0, 0)
+	assertBatchSettlement(t, h, second.ResourceID, "submission_unknown", 0, 0)
 	var mappings int
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE id=ANY($1::uuid[])`, []uuid.UUID{first.ResourceID, second.ResourceID}).Scan(&mappings); err != nil || mappings != 0 {
 		t.Fatalf("ambiguous job acquired an owner: %d err=%v", mappings, err)
 	}
+	// The second intent never dispatched; once its definitive failure removes
+	// it, the remaining provider job has exactly one possible gateway source.
+	if err := store.DeleteSubmission(t.Context(), second.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	setBatchFixtureResults(t, fixture, "batch-up-1", "completed", 1, "shared-result", "", batchChatLine("shared-input", "ok"), "")
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.batch_settlements SET next_attempt_at=now() WHERE resource_id=$1`, first.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := batchWorker(h, nil).ReconcileOnce(t.Context(), batches.WorkerBatchSize); err != nil {
+		t.Fatal(err)
+	}
+	assertBatchSettlement(t, h, first.ResourceID, "settled", 1, 0)
 }
 
 func (r *interruptedBatchReader) Poll(ctx context.Context, settlement batches.Settlement, target *batches.PinnedTarget) (batches.BatchSnapshot, error) {
