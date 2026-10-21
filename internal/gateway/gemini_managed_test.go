@@ -51,7 +51,7 @@ func TestGeminiManagedUploadCompletesStartAttempt(t *testing.T) {
 	}
 }
 
-func translateGeminiManagedFixture(t *testing.T, input string) ([]byte, batchManifest, error) {
+func translateGeminiManagedFixture(t *testing.T, input string, configure ...func(*routing.Provider)) ([]byte, batchManifest, error) {
 	t.Helper()
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
@@ -59,6 +59,9 @@ func translateGeminiManagedFixture(t *testing.T, input string) ([]byte, batchMan
 	provider := routing.Provider{
 		Kind: "gemini", VendorID: "google", Endpoint: "https://provider.example/v1beta",
 		AuthMode: "api_key", ProfileID: "gemini-generation", ProfileRevision: "1",
+	}
+	for _, change := range configure {
+		change(&provider)
 	}
 	go func() {
 		done <- translateManagedBatchLines(writer, strings.NewReader(input), func(value string) ([]byte, bool) {
@@ -73,6 +76,27 @@ func translateGeminiManagedFixture(t *testing.T, input string) ([]byte, batchMan
 		translateErr = readErr
 	}
 	return output.Bytes(), manifest, translateErr
+}
+
+func TestGeminiManagedAutomaticDefaults(t *testing.T) {
+	input := `{"custom_id":"task","method":"POST","url":"/v1/chat/completions","body":{"model":"route-slug","messages":[{"role":"user","content":"hello"}]}}` + "\n"
+	translated, _, err := translateGeminiManagedFixture(t, input, func(provider *routing.Provider) {
+		provider.ProfileID, provider.ProfileRevision = "", ""
+		provider.ParameterDefaults = map[string]json.RawMessage{"generationConfig": json.RawMessage(`{"temperature":0.25}`)}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var line struct {
+		Request struct {
+			GenerationConfig struct {
+				Temperature float64 `json:"temperature"`
+			} `json:"generationConfig"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(translated), &line); err != nil || line.Request.GenerationConfig.Temperature != 0.25 {
+		t.Fatalf("Automatic Gemini defaults were not applied: %s err=%v", translated, err)
+	}
 }
 
 func TestGeminiManagedBatchLineTranslationAndRefusals(t *testing.T) {

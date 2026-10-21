@@ -253,10 +253,13 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 			param := "file"
 			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
 		}
-		defaults, _, err := p.provider.Connector().DefaultsFor(operation, p.model)
-		if err != nil {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
+		defaults := protocols.Object(p.provider.ParameterDefaults)
+		if p.provider.ProfileID != "" {
+			defaults, _, err = p.provider.Connector().DefaultsFor(operation, p.model)
+			if err != nil {
+				param := "file"
+				return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
+			}
 		}
 		var encoded []byte
 		if adapter == "gemini_managed" {
