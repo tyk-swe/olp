@@ -118,12 +118,21 @@ func parseGeminiUploadStartBody(body []byte) (string, bool, *Error) {
 		return "", false, nil
 	}
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
-	if err != nil || doc.Root().Kind() != oif.Object || len(doc.Root().Members()) != 1 || doc.Root().Members()[0].Name != "file" {
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return "", false, invalidRequest("invalid_request", "The start body must be empty or contain only file.displayName.", nil)
+	}
+	if len(doc.Root().Members()) == 0 {
+		return "", false, nil
+	}
+	if len(doc.Root().Members()) != 1 || doc.Root().Members()[0].Name != "file" {
 		return "", false, invalidRequest("invalid_request", "The start body must be empty or contain only file.displayName.", nil)
 	}
 	file, present := doc.Root().Lookup("file")
-	if !present || file.Kind() != oif.Object || len(file.Members()) != 1 {
+	if !present || file.Kind() != oif.Object || len(file.Members()) > 1 {
 		return "", false, invalidRequest("invalid_request", "The start body must contain one file display name.", nil)
+	}
+	if len(file.Members()) == 0 {
+		return "", false, nil
 	}
 	member := file.Members()[0]
 	if member.Name != "displayName" && member.Name != "display_name" {
@@ -314,6 +323,7 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, p
 		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
 	}
 	_ = start.Body.Close()
+	x.completePinned()
 	opened, err := s.transport().Spool.Open(part.Handle)
 	if err != nil {
 		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)

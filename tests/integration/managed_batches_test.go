@@ -64,8 +64,12 @@ func newManagedBatchFixture(t *testing.T, adapter string) *managedBatchFixture {
 	mux.HandleFunc("POST /v1/files/upload", fileUpload)
 	mux.HandleFunc("POST /v1/files", fileUpload)
 	mux.HandleFunc("GET /v1/files/{id}", func(w http.ResponseWriter, r *http.Request) {
+		purpose := "batch"
+		if adapter == "together" {
+			purpose = "batch-api"
+		}
 		writeJSON(w, map[string]any{"id": r.PathValue("id"), "object": "file", "bytes": 128,
-			"created_at": time.Now().Unix(), "filename": r.PathValue("id") + ".jsonl", "purpose": "batch"})
+			"created_at": time.Now().Unix(), "filename": r.PathValue("id") + ".jsonl", "purpose": purpose, "provider_only": true})
 	})
 	mux.HandleFunc("DELETE /v1/files/{id}", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"id": r.PathValue("id"), "object": "file", "deleted": true})
@@ -222,6 +226,10 @@ func TestManagedBatchSubmissionAndSettlement(t *testing.T) {
 			uploadStatus, uploaded := h.uploadTestFile(slug, key, input)
 			if uploadStatus != http.StatusOK {
 				t.Fatalf("managed upload: %d %v", uploadStatus, uploaded)
+			}
+			fileStatus, retrieved, _ := h.gateway(http.MethodGet, "/v1/files/"+uploaded["id"].(string), key, nil)
+			if fileStatus != http.StatusOK || retrieved["purpose"] != "batch" || retrieved["provider_only"] != nil {
+				t.Fatalf("managed file retrieval lost normalized projection: %d %v", fileStatus, retrieved)
 			}
 			fixture.mu.Lock()
 			translated := fixture.files["file-input"]

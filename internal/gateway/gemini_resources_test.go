@@ -37,8 +37,10 @@ func TestGeminiUploadStartValidation(t *testing.T) {
 			t.Fatalf("accepted invalid start headers %v", header)
 		}
 	}
-	if name, present, err := parseGeminiUploadStartBody(nil); err != nil || present || name != "" {
-		t.Fatalf("empty start body name=%q present=%v err=%v", name, present, err)
+	for _, body := range []string{"", "{}", `{"file":{}}`} {
+		if name, present, err := parseGeminiUploadStartBody([]byte(body)); err != nil || present || name != "" {
+			t.Fatalf("empty start body %q name=%q present=%v err=%v", body, name, present, err)
+		}
 	}
 	for _, body := range []string{
 		`{"displayName":"name"}`,

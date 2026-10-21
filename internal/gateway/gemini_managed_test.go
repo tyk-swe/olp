@@ -5,12 +5,51 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestGeminiManagedUploadCompletesStartAttempt(t *testing.T) {
+	h, x, p := pinnedExchangeFixture(t)
+	x.family, x.actor = wire.File, "api_key_resource"
+	var upstream *httptest.Server
+	upstream = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Goog-Upload-Command") == "start" {
+			w.Header().Set("X-Goog-Upload-URL", upstream.URL+"/upload/session")
+			return
+		}
+		w.Header().Set("X-Goog-Upload-Status", "final")
+		_, _ = io.WriteString(w, `{"file":{"name":"files/input"}}`)
+	}))
+	defer upstream.Close()
+	p.provider.Kind, p.provider.Endpoint, p.provider.AuthMode = "gemini", upstream.URL+"/v1beta", "api_key"
+	h.gateway.client = upstream.Client()
+	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	h.gateway.Media = &MediaDeps{Jobs: &media.Service{Transport: &media.Transport{Spool: spool}}}
+	artifact, err := spool.Put(t.Context(), media.Upload{Filename: "input.jsonl", MaximumLength: 128, Body: strings.NewReader("{}\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Remove(artifact.Handle)
+	_, _, failure := h.gateway.uploadGeminiManagedFile(t.Context(), x, p, &media.Part{Handle: artifact.Handle, Filename: "input.jsonl", Size: artifact.ContentLength})
+	if failure != nil {
+		t.Fatalf("managed upload failed: %+v", failure)
+	}
+	x.completePinned()
+	if len(x.facts) != 2 || x.facts[0].Class != classSuccess || x.facts[1].Class != classSuccess {
+		t.Fatalf("successful upload exchanges recorded failures: %+v", x.facts)
+	}
+}
 
 func translateGeminiManagedFixture(t *testing.T, input string) ([]byte, batchManifest, error) {
 	t.Helper()

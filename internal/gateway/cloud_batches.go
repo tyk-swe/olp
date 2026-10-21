@@ -572,6 +572,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 			return
 		}
 		_ = response.Body.Close()
+		x.completePinned()
 	}
 	endpoint, urlErr := cloudBatchControlURL(p.provider.Connector(), dialect, res.UpstreamID, "")
 	if urlErr != nil {

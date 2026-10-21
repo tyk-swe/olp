@@ -1214,7 +1214,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 				return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
 			}
 			res.State, res.Metadata, res.ExpiresAt = state, metadata, expires
-			if adapter == "gemini_managed" {
+			if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
 				out, err = s.fileObject(ctx, res)
 			} else {
 				out, err = rewriteID(body, "id", res.ID)
@@ -2031,6 +2031,7 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = response.Body.Close()
 			x.dispatched = true
+			x.completePinned()
 			return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
 		}
 		if res.Kind == resources.KindStrictBatch {

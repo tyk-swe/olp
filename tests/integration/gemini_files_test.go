@@ -38,6 +38,7 @@ type geminiFileFixture struct {
 func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 	t.Helper()
 	fixture := &geminiFileFixture{batches: map[string]map[string]any{}, deletedFiles: map[string]bool{}}
+	fileCreatedAt := time.Now().UTC()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1beta/files", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{})
@@ -102,7 +103,7 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 		w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(fixture.offset, 10))
 		if command == "upload, finalize" {
 			w.Header().Set("X-Goog-Upload-Status", "final")
-			writeJSON(w, map[string]any{"file": geminiFileObject()})
+			writeJSON(w, map[string]any{"file": geminiFileObject(fileCreatedAt)})
 			return
 		}
 		w.Header().Set("X-Goog-Upload-Status", "active")
@@ -115,7 +116,7 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 			_, _ = w.Write(fixture.uploadBytes)
 			return
 		}
-		writeJSON(w, geminiFileObject())
+		writeJSON(w, geminiFileObject(fileCreatedAt))
 	})
 	mux.HandleFunc("GET /download/v1beta/files/upstream-gemini-file:download", func(w http.ResponseWriter, _ *http.Request) {
 		fixture.mu.Lock()
@@ -223,11 +224,11 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 	return fixture
 }
 
-func geminiFileObject() map[string]any {
+func geminiFileObject(now time.Time) map[string]any {
 	return map[string]any{
 		"name": "files/upstream-gemini-file", "displayName": "sample.txt", "mimeType": "text/plain",
-		"sizeBytes": "10", "createTime": "2026-10-21T10:00:00Z", "updateTime": "2026-10-21T10:00:00Z",
-		"expirationTime": "2026-10-23T10:00:00Z", "sha256Hash": "aGVsbG93b3JsZA==",
+		"sizeBytes": "10", "createTime": now.Format(time.RFC3339Nano), "updateTime": now.Format(time.RFC3339Nano),
+		"expirationTime": now.Add(48 * time.Hour).Format(time.RFC3339Nano), "sha256Hash": "aGVsbG93b3JsZA==",
 		"uri":         "https://generativelanguage.googleapis.com/v1beta/files/upstream-gemini-file",
 		"downloadUri": "https://generativelanguage.googleapis.com/v1beta/files/upstream-gemini-file:download?alt=media",
 		"state":       "ACTIVE", "source": "UPLOADED",
