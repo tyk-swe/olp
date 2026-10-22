@@ -73,6 +73,10 @@ func TestAgentPublicationsManagementAndConfiguration(t *testing.T) {
 	h.want(owner, http.MethodGet, "/api/v1/prompts/"+second["id"].(string)+"/revisions/"+revision, nil, nil, 404)
 	h.want(owner, http.MethodDelete, path, nil, headers(saved["etag"].(string), "rm4-retire"), 204)
 	h.want(owner, http.MethodPost, path+"/publish", nil, headers(saved["etag"].(string), "rm4-retired-write"), 412)
+	var events, unscoped int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE project_id IS DISTINCT FROM $2::uuid) FROM olp.audit WHERE resource_id=$1`, created["id"], project).Scan(&events, &unscoped); err != nil || events != 5 || unscoped != 0 {
+		t.Fatalf("publication audits lost project ownership or included replays/failures: events=%d unscoped=%d error=%v", events, unscoped, err)
+	}
 }
 
 func TestAgentPromptLabelWithoutCurrentRevision(t *testing.T) {

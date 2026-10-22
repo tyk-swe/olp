@@ -197,7 +197,7 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 			}
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), kind+"."+action, kind, next.ID, "success"); err != nil {
+	if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), kind+"."+action, kind, next.ID, "success", &next.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	reply := access.Detail(next, next.ETag)

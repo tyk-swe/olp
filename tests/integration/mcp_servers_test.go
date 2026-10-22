@@ -13,8 +13,65 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
+
+func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "MCP authority")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(204)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(202)
+			return
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{}}
+		default:
+			t.Errorf("unexpected certification method %s", request.Method)
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+	created := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{"name": "Authority server", "project_id": project, "transport": "streamable_http", "endpoint": upstream.URL, "enabled": true}, idem("mcp-authority-create"), 201)
+	document := map[string]any{"api_version": configuration.APIVersion, "mcp_servers": []any{map[string]any{"name": "Authority server", "project": "MCP authority", "transport": "streamable_http", "endpoint": upstream.URL, "enabled": false, "catalog_digest": created["catalog"].(map[string]any)["digest"]}}}
+	authority := func() int64 {
+		t.Helper()
+		var sequence int64
+		if err := h.Pool.QueryRow(t.Context(), "SELECT authority_sequence FROM olp.installation WHERE singleton").Scan(&sequence); err != nil {
+			t.Fatal(err)
+		}
+		return sequence
+	}
+	before := authority()
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("mcp-authority-disable"), 200)
+	if after := authority(); after != before+1 {
+		t.Fatalf("MCP-only configuration did not invalidate cached authority: %d -> %d", before, after)
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("mcp-authority-reuse"), 200)
+	if after := authority(); after != before+1 {
+		t.Fatal("reusing unchanged MCP configuration advanced authority")
+	}
+}
 
 func TestMCPServerCertificationPinsCatalogsAndRechecksAuthorityWithoutLocks(t *testing.T) {
 	h := newAccessHarness(t)

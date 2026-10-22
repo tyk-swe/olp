@@ -233,6 +233,7 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 	return out, nil
 }
 func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings bindingSet, prepared map[[2]string]preparedMCP) error {
+	changed := false
 	for _, e := range doc.MCPServers {
 		var project string
 		if err := tx.QueryRow(ctx, "SELECT id::text FROM olp.projects WHERE lower(name)=lower($1)", e.Project).Scan(&project); err != nil {
@@ -270,11 +271,16 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 		if err = mcpservers.Save(ctx, tx, p.UserID(), current, next); err != nil {
 			return err
 		}
+		changed = true
 		if current != nil && current.CredentialID != nil && (next.CredentialID == nil || *current.CredentialID != *next.CredentialID) {
 			if _, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.CredentialID, secrets.MCPCredential); err != nil {
 				return err
 			}
 		}
+	}
+	if changed {
+		_, err := access.AdvanceAuthority(ctx, tx)
+		return err
 	}
 	return nil
 }
