@@ -693,6 +693,13 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationGuardrailAttachment"
               }
+            },
+            "agent_publications": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "$ref": "#/$defs/ConfigurationAgentPublication"
+              }
             }
           },
           "required": [
@@ -3507,7 +3514,7 @@
             },
             "route_groups": {
               "type": "array",
-              "minItems": 1,
+              "minItems": 0,
               "maxItems": 64,
               "uniqueItems": true,
               "items": {
@@ -3519,14 +3526,18 @@
             "scopes": {
               "type": "array",
               "minItems": 1,
-              "maxItems": 2,
+              "maxItems": 7,
               "uniqueItems": true,
               "items": {
                 "type": "string",
                 "enum": [
                   "inference",
                   "models_read",
-                  "guardrails"
+                  "guardrails",
+                  "tools",
+                  "agents",
+                  "traces_write",
+                  "delegate"
                 ]
               }
             },
@@ -3547,6 +3558,22 @@
               "minLength": 1,
               "maxLength": 100,
               "description": "Project name in the document or destination."
+            },
+            "allowed_toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "allowed_agents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -3954,6 +3981,205 @@
             "order"
           ]
         },
+        "ConfigurationAgentPublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "toolset",
+                "agent",
+                "prompt"
+              ]
+            },
+            "draft": {
+              "$ref": "#/$defs/ConfigurationAgentDraft"
+            },
+            "published": {
+              "$ref": "#/$defs/ConfigurationAgentDraft"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationAgentDraft"
+              },
+              "maxProperties": 2
+            },
+            "credential_ref": {
+              "type": "string"
+            },
+            "published_credential_ref": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Independent published-agent credential binding; never inherit a draft credential across endpoints."
+            }
+          },
+          "required": [
+            "project",
+            "kind",
+            "draft"
+          ]
+        },
+        "ConfigurationAgentDraft": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Optional source identity; promotion resolves the owning project by name."
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -4263,6 +4489,216 @@
     }
   },
   {
+    "name": "create_agent",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/agents",
+    "description": "create agent",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/AgentPublicationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "AgentPublicationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "Bearer credential; absent preserves, null removes. Never returned."
+            }
+          },
+          "required": [
+            "project_id",
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "create_api_key",
     "group": "api-keys",
     "method": "POST",
@@ -4386,7 +4822,10 @@
               "items": {
                 "type": "string"
               },
-              "type": "array"
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "uniqueItems": true
             },
             "tokens_per_minute": {
               "format": "int64",
@@ -4552,6 +4991,22 @@
             "forbid_response_cache": {
               "type": "boolean",
               "description": "Forbid response cache lookup and storage for this key."
+            },
+            "allowed_toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "allowed_agents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
             }
           },
           "required": [
@@ -7242,6 +7697,216 @@
             "name"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_prompt",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/prompts",
+    "description": "create prompt",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/AgentPublicationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "AgentPublicationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "Bearer credential; absent preserves, null removes. Never returned."
+            }
+          },
+          "required": [
+            "project_id",
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
         }
       }
     }
@@ -10748,6 +11413,216 @@
     }
   },
   {
+    "name": "create_toolset",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/toolsets",
+    "description": "create toolset",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/AgentPublicationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "AgentPublicationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "Bearer credential; absent preserves, null removes. Never returned."
+            }
+          },
+          "required": [
+            "project_id",
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "credential_slots",
     "group": "providers",
     "method": "GET",
@@ -12982,6 +13857,111 @@
     }
   },
   {
+    "name": "get_agent",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agents/{publication_id}",
+    "description": "get agent",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_agent_revision",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agents/{publication_id}/revisions/{revision_id}",
+    "description": "get agent revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id",
+            "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_api_key",
     "group": "api-keys",
     "method": "GET",
@@ -14522,6 +15502,111 @@
     }
   },
   {
+    "name": "get_prompt",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/prompts/{publication_id}",
+    "description": "get prompt",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_prompt_revision",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/prompts/{publication_id}/revisions/{revision_id}",
+    "description": "get prompt revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id",
+            "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_provider",
     "group": "providers",
     "method": "GET",
@@ -15254,6 +16339,111 @@
     }
   },
   {
+    "name": "get_toolset",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/toolsets/{publication_id}",
+    "description": "get toolset",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_toolset_revision",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/toolsets/{publication_id}/revisions/{revision_id}",
+    "description": "get toolset revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id",
+            "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_usage_reconciliation",
     "group": "usage",
     "method": "GET",
@@ -15515,6 +16705,58 @@
           ]
         }
       }
+    }
+  },
+  {
+    "name": "list_agents",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agents",
+    "description": "list agents",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   {
@@ -16526,6 +17768,68 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_execution_debits",
+    "group": "budgets",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/execution-debits",
+    "description": "list execution debits",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "api_key_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
@@ -17761,6 +19065,58 @@
       [
         "manage_projects",
         "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_prompts",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/prompts",
+    "description": "list prompts",
+    "scopes": [
+      [
+        "read"
       ]
     ],
     "parameters": [
@@ -19447,6 +20803,58 @@
     }
   },
   {
+    "name": "list_toolsets",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/toolsets",
+    "description": "list toolsets",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_users",
     "group": "users",
     "method": "GET",
@@ -20427,6 +21835,13 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/ConfigurationGuardrailAttachment"
+              }
+            },
+            "agent_publications": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "$ref": "#/$defs/ConfigurationAgentPublication"
               }
             }
           },
@@ -23242,7 +24657,7 @@
             },
             "route_groups": {
               "type": "array",
-              "minItems": 1,
+              "minItems": 0,
               "maxItems": 64,
               "uniqueItems": true,
               "items": {
@@ -23254,14 +24669,18 @@
             "scopes": {
               "type": "array",
               "minItems": 1,
-              "maxItems": 2,
+              "maxItems": 7,
               "uniqueItems": true,
               "items": {
                 "type": "string",
                 "enum": [
                   "inference",
                   "models_read",
-                  "guardrails"
+                  "guardrails",
+                  "tools",
+                  "agents",
+                  "traces_write",
+                  "delegate"
                 ]
               }
             },
@@ -23282,6 +24701,22 @@
               "minLength": 1,
               "maxLength": 100,
               "description": "Project name in the document or destination."
+            },
+            "allowed_toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "allowed_agents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -23689,6 +25124,205 @@
             "order"
           ]
         },
+        "ConfigurationAgentPublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "toolset",
+                "agent",
+                "prompt"
+              ]
+            },
+            "draft": {
+              "$ref": "#/$defs/ConfigurationAgentDraft"
+            },
+            "published": {
+              "$ref": "#/$defs/ConfigurationAgentDraft"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationAgentDraft"
+              },
+              "maxProperties": 2
+            },
+            "credential_ref": {
+              "type": "string"
+            },
+            "published_credential_ref": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Independent published-agent credential binding; never inherit a draft credential across endpoints."
+            }
+          },
+          "required": [
+            "project",
+            "kind",
+            "draft"
+          ]
+        },
+        "ConfigurationAgentDraft": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Optional source identity; promotion resolves the owning project by name."
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -23958,7 +25592,7 @@
             },
             "route_groups": {
               "type": "array",
-              "minItems": 1,
+              "minItems": 0,
               "maxItems": 64,
               "uniqueItems": true,
               "items": {
@@ -23970,14 +25604,18 @@
             "scopes": {
               "type": "array",
               "minItems": 1,
-              "maxItems": 2,
+              "maxItems": 7,
               "uniqueItems": true,
               "items": {
                 "type": "string",
                 "enum": [
                   "inference",
                   "models_read",
-                  "guardrails"
+                  "guardrails",
+                  "tools",
+                  "agents",
+                  "traces_write",
+                  "delegate"
                 ]
               }
             },
@@ -23992,6 +25630,22 @@
             "allow_provider_state": {
               "type": "boolean",
               "default": false
+            },
+            "allowed_toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "allowed_agents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -24396,6 +26050,77 @@
           "type": "object"
         }
       }
+    }
+  },
+  {
+    "name": "publish_agent",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/agents/{publication_id}/publish",
+    "description": "publish agent",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
     }
   },
   {
@@ -24921,6 +26646,148 @@
           "type": "object"
         }
       }
+    }
+  },
+  {
+    "name": "publish_prompt",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/prompts/{publication_id}/publish",
+    "description": "publish prompt",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "publish_toolset",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/toolsets/{publication_id}/publish",
+    "description": "publish toolset",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
     }
   },
   {
@@ -27542,7 +29409,7 @@
             },
             "route_groups": {
               "type": "array",
-              "minItems": 1,
+              "minItems": 0,
               "maxItems": 64,
               "uniqueItems": true,
               "items": {
@@ -27554,14 +29421,18 @@
             "scopes": {
               "type": "array",
               "minItems": 1,
-              "maxItems": 2,
+              "maxItems": 7,
               "uniqueItems": true,
               "items": {
                 "type": "string",
                 "enum": [
                   "inference",
                   "models_read",
-                  "guardrails"
+                  "guardrails",
+                  "tools",
+                  "agents",
+                  "traces_write",
+                  "delegate"
                 ]
               }
             },
@@ -27576,6 +29447,22 @@
             "allow_provider_state": {
               "type": "boolean",
               "default": false
+            },
+            "allowed_toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "allowed_agents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -29656,6 +31543,77 @@
     }
   },
   {
+    "name": "retire_agent",
+    "group": "agents",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/agents/{publication_id}",
+    "description": "retire agent",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "retire_code_binding",
     "group": "code-mode",
     "method": "POST",
@@ -29715,6 +31673,77 @@
     }
   },
   {
+    "name": "retire_prompt",
+    "group": "agents",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/prompts/{publication_id}",
+    "description": "retire prompt",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "retire_route",
     "group": "routes",
     "method": "POST",
@@ -29764,6 +31793,77 @@
           "additionalProperties": false,
           "required": [
             "route_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "retire_toolset",
+    "group": "agents",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/toolsets/{publication_id}",
+    "description": "retire toolset",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
           ]
         },
         "if_match": {
@@ -32358,6 +34458,110 @@
     }
   },
   {
+    "name": "set_prompt_label",
+    "group": "agents",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/prompts/{publication_id}/labels/{label}",
+    "description": "set prompt label",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "label",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "label": {
+              "type": "string",
+              "enum": [
+                "production",
+                "staging"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id",
+            "label"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/PromptLabelWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "PromptLabelWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "revision_id"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "set_provider_model",
     "group": "providers",
     "method": "PATCH",
@@ -33348,6 +35552,248 @@
     }
   },
   {
+    "name": "update_agent",
+    "group": "agents",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/agents/{publication_id}",
+    "description": "update agent",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/AgentPublicationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "AgentPublicationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "Bearer credential; absent preserves, null removes. Never returned."
+            }
+          },
+          "required": [
+            "project_id",
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "update_api_key",
     "group": "api-keys",
     "method": "PATCH",
@@ -33485,7 +35931,10 @@
               "items": {
                 "type": "string"
               },
-              "type": "array"
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "uniqueItems": true
             },
             "tokens_per_minute": {
               "format": "int64",
@@ -33651,6 +36100,22 @@
             "forbid_response_cache": {
               "type": "boolean",
               "description": "Forbid response cache lookup and storage for this key."
+            },
+            "allowed_toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "allowed_agents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
             }
           },
           "type": "object"
@@ -35214,6 +37679,248 @@
             "name"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_prompt",
+    "group": "agents",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/prompts/{publication_id}",
+    "description": "update prompt",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/AgentPublicationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "AgentPublicationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "Bearer credential; absent preserves, null removes. Never returned."
+            }
+          },
+          "required": [
+            "project_id",
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
         }
       }
     }
@@ -37030,6 +39737,248 @@
               "description": "HMAC signing credential; omitted updates retain it and null removes it."
             }
           }
+        }
+      }
+    }
+  },
+  {
+    "name": "update_toolset",
+    "group": "agents",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/toolsets/{publication_id}",
+    "description": "update toolset",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "publication_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "publication_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/AgentPublicationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "AgentPublicationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "toolset": {
+              "$ref": "#/$defs/ToolsetDefinition"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentDefinition"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptDefinition"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "Bearer credential; absent preserves, null removes. Never returned."
+            }
+          },
+          "required": [
+            "project_id",
+            "name"
+          ]
+        },
+        "ToolsetDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentToolPin"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "tools"
+          ]
+        },
+        "AgentToolPin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "alias": {
+              "type": "string",
+              "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            }
+          },
+          "required": [
+            "server_id",
+            "revision_id",
+            "catalog_digest",
+            "name",
+            "alias"
+          ]
+        },
+        "AgentDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "a2a-0.3.0",
+                "a2a-1.0.0"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "card_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "route_revisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            },
+            "pricing_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          },
+          "required": [
+            "protocol",
+            "endpoint",
+            "card_digest",
+            "toolset_revisions",
+            "route_revisions",
+            "pricing_revision_id",
+            "max_cost"
+          ]
+        },
+        "PromptDefinition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "type": "string",
+              "maxLength": 65536
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "template",
+            "variables"
+          ]
         }
       }
     }

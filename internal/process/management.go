@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
@@ -75,6 +76,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	}, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, in)
 	}}).Register(mux)
+	(&agents.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)

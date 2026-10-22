@@ -416,6 +416,35 @@ when Valkey is unreachable, incrementing `olp_limits_fail_open_total`.
 Unconfigured Valkey never fails open. Settings refresh every 15 seconds;
 unreadable target quotas skip dispatch.
 
+### Durable provisional exposure
+
+Finite asynchronous and agent work shares `limits.DebitStore`; feature owners
+retain their lifecycle and provider evidence. Each intent records every
+applicable accounting boundary, including currently uncapped boundaries, in
+both cost and charge bases. Dispatch is fenced once after admission. Ordinary
+lease expiry, request/resource retention and calendar resets cannot release it.
+Unknown acceptance is reconciled from evidence and never automatically resent.
+API intents preserve the exact project or installation namespace; tools and
+agents require an owning project. An unresolved bound violation blocks monetary
+admission even when observed spend has consumed the original finite bound.
+
+The PostgreSQL ledger is authoritative. Valkey holds a separate nonexpiring,
+versioned exposure projection, checked in ordinary monetary admission and supply
+selection. The existing pending-accounting read also checks the ledger generation,
+so a region refreshes stale exposure without an additional database round trip.
+A missing projection fails closed and is rebuilt. Projection updates install accrued spend and exposure atomically, and
+stale versions cannot reduce holds. `usage.PersistDebitResultTx` joins existing
+observed-fact persistence with idempotent result settlement. Run totals and
+reservations are never additional usage charges.
+
+Pure `agentcontract` and `prompts` definitions are distinct from management in
+`agents` and executable operation codecs. Published contracts join immutable
+runtime snapshots; live authority independently checks keys, project/resource
+allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
+prompts, transcripts and results are never persisted by these foundations.
+Prompt templates remain explicit operator configuration. New execution families
+stay disabled pending their own implementation and qualification.
+
 ## Diagnostics
 
 One content-free terminal envelope records request/actor/route/release,

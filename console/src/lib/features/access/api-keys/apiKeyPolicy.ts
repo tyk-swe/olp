@@ -26,6 +26,8 @@ export type ApiKeyFormState = {
   budgetGroupId: string;
   scopes: string[];
   allowedRoutes: string[];
+  allowedToolsets: string;
+  allowedAgents: string;
   allowedRouteGroups: string;
   rotationIntervalDays: string;
   allowedCIDRs: string;
@@ -68,6 +70,8 @@ export function createApiKeyFormState(
     budgetGroupId: editing?.budget_group_id ?? '',
     scopes: editing ? [...editing.scopes] : ['inference'],
     allowedRoutes: editing ? [...editing.allowed_routes] : [],
+    allowedToolsets: (editing?.allowed_toolsets ?? []).join(', '),
+    allowedAgents: (editing?.allowed_agents ?? []).join(', '),
     allowedRouteGroups: (editing?.allowed_route_groups ?? []).join(', '),
     rotationIntervalDays: editing?.rotation_interval_days?.toString() ?? '',
     allowedCIDRs: editing?.allowed_cidrs?.join('\n') ?? '',
@@ -139,6 +143,8 @@ export function buildApiKeyPolicyInput(
     budget_group_id: state.budgetGroupId || null,
     scopes: state.scopes,
     allowed_routes: state.allowedRoutes,
+    allowed_toolsets: groupNames(state.allowedToolsets),
+    allowed_agents: groupNames(state.allowedAgents),
     allowed_route_groups: groupNames(state.allowedRouteGroups),
     rotation_interval_days: state.rotationIntervalDays.trim()
       ? Number(state.rotationIntervalDays)

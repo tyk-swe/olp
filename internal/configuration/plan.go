@@ -373,6 +373,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, err
 	}
 	normalizeDocument(doc)
+	if err := s.validateAgentPublications(doc); err != nil {
+		return nil, err
+	}
 	if err := s.validateMCPServers(doc); err != nil {
 		return nil, err
 	}
@@ -887,6 +890,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 	}
 	state, err := loadState(ctx, q)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.planAgentPublications(ctx, q, doc, bindings, state, result); err != nil {
 		return nil, err
 	}
 	if err = s.planMCPServers(ctx, q, doc, bindings, state, result); err != nil {

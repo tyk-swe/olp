@@ -104,6 +104,7 @@ func BudgetWindows(now time.Time) Windows {
 // CostSnapshot is the durable spend PostgreSQL holds for one API key in the
 // windows it names. Accrued totals are canonical decimal strings.
 type CostSnapshot struct {
+	durable *debitProjection
 	// Basis names the amount the snapshot carries: cost accrued with unpriced
 	// attempts, or charge accrued with uncharged attempts. Accounting installs
 	// both, and the empty basis is cost.
@@ -273,12 +274,21 @@ func (l *Limiter) ApplyCostSnapshot(ctx context.Context, s CostSnapshot) (bool, 
 		requestID = canonicalUUID(s.RequestID)
 	}
 	args := []string{strconv.FormatInt(s.DailyWindowID, 10), s.DailyAccrued, strconv.FormatInt(s.MonthlyWindowID, 10), s.MonthlyAccrued, strconv.FormatInt(s.UnpricedAttempts, 10), "0", requestID, strconv.FormatInt(s.WeeklyWindowID, 10), s.WeeklyAccrued}
-	if !s.DailyStart.IsZero() && (s.DailyWindowID == s.DailyStart.Unix() || s.MonthlyWindowID == s.MonthlyStart.Unix() || s.WeeklyWindowID == s.WeeklyStart.Unix()) {
+	if !s.DailyStart.IsZero() && (s.durable != nil || s.DailyWindowID == s.DailyStart.Unix() || s.MonthlyWindowID == s.MonthlyStart.Unix() || s.WeeklyWindowID == s.WeeklyStart.Unix()) {
 		for _, instant := range []time.Time{s.DailyStart, s.DailyEnd, s.MonthlyStart, s.MonthlyEnd, s.WeeklyStart, s.WeeklyEnd} {
 			args = append(args, strconv.FormatInt(instant.UnixMilli(), 10))
 		}
 	}
-	value, err := l.eval(ctx, reconcileCostScript, []string{daily, monthly, pending, expiry, l.costPrefixFor(s.CostOwnerID, s.Basis) + ":week"}, args...)
+	scriptKeys := []string{daily, monthly, pending, expiry, l.costPrefixFor(s.CostOwnerID, s.Basis) + ":week"}
+	if s.durable != nil {
+		var err error
+		args, err = appendDebitProjection(args, s.durable)
+		if err != nil {
+			return false, false, err
+		}
+		scriptKeys = append(scriptKeys, l.costPrefixFor(s.CostOwnerID, s.Basis)+":durable")
+	}
+	value, err := l.eval(ctx, reconcileCostScript, scriptKeys, args...)
 	if err != nil {
 		return false, false, err
 	}

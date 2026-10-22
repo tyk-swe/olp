@@ -20,6 +20,8 @@ import (
 )
 
 type KeyPolicy struct {
+	AllowedToolsets         []string          `json:"allowed_toolsets,omitempty"`
+	AllowedAgents           []string          `json:"allowed_agents,omitempty"`
 	ForbidResponseCache     bool              `json:"forbid_response_cache"`
 	LimitTemplate           *string           `json:"limit_template"`
 	RouteLimits             RouteLimits       `json:"route_limits"`
@@ -123,15 +125,20 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	if len(input.Scopes) < 1 || len(input.Scopes) > 3 {
+	if len(input.Scopes) < 1 || len(input.Scopes) > len(ConsumerScopes()) {
 		return Invalid("scopes", "Select at least one unique scope.")
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
-		if (scope != "inference" && scope != "models_read" && scope != "guardrails") || seen[scope] {
-			return Invalid("scopes", "Use unique inference, models_read and guardrails scopes.")
+		if !slices.Contains(ConsumerScopes(), scope) || seen[scope] {
+			return Invalid("scopes", "Use unique supported consumer scopes.")
 		}
 		seen[scope] = true
+	}
+	for field, ids := range map[string][]string{"allowed_toolsets": input.AllowedToolsets, "allowed_agents": input.AllowedAgents} {
+		if err := validateResourceAllowlist(field, ids); err != nil {
+			return err
+		}
 	}
 	if input.AllowedRoutes == nil {
 		return Invalid("allowed_routes", "This field cannot be null.")
@@ -318,6 +325,9 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
+	if err = checkKeyAgentResources(r.Context(), tx, input.KeyPolicy, input.ProjectID); err != nil {
+		return Reply{}, err
+	}
 	if err = checkKeyRoutes(r, tx, input.AllowedRoutes, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
@@ -354,7 +364,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if patch == nil {
 		return Reply{}, Invalid("policy", "Send a policy object.")
 	}
-	allowed := []string{"regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
+	allowed := []string{"allowed_toolsets", "allowed_agents", "regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown policy field.")
@@ -438,6 +448,9 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, projectID); err != nil {
+		return Reply{}, err
+	}
+	if err = checkKeyAgentResources(r.Context(), tx, input.KeyPolicy, projectID); err != nil {
 		return Reply{}, err
 	}
 	if err = checkKeyRoutes(r, tx, input.AllowedRoutes, projectID); err != nil {

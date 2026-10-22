@@ -18,7 +18,7 @@ function database(name: string) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/{access,basics,gateway,code-mode}/**/*.spec.ts',
+  testMatch: '**/{access,basics,gateway,code-mode,agents}/**/*.spec.ts',
   timeout: 90_000,
   outputDir: 'test-results/access',
   workers: 1,

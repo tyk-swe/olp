@@ -16,6 +16,7 @@ import (
 func NewID() string { return uuid.Must(uuid.NewV7()).String() }
 
 func (s *Server) Register(mux *http.ServeMux) {
+	s.Route(mux, "GET /api/v1/execution-debits", s.executionDebits)
 	s.registerCodeMode(mux)
 	s.registerSCIM(mux)
 	s.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)

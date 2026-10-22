@@ -67,9 +67,12 @@ func (l *Limiter) Supply(ctx context.Context, quotas []QuotaProbe, caps []CapPro
 	for _, cap := range caps {
 		prefix := l.costPrefix(cap.OwnerID)
 		// Availability includes pending spend without changing balances or leases.
-		calls = append(calls, scriptCall{reserveCostScript,
-			[]string{prefix + ":day", prefix + ":month", prefix + ":pending", prefix + ":expiry"},
-			[]string{optionalCost(cap.DailyCostLimit), optionalCost(cap.MonthlyCostLimit), "0", "check", "", "0"}})
+		call := scriptCall{reserveCostScript, []string{prefix + ":day", prefix + ":month", prefix + ":pending", prefix + ":expiry"}, []string{optionalCost(cap.DailyCostLimit), optionalCost(cap.MonthlyCostLimit), "0", "check", "", "0"}}
+		if l.syncDurable != nil {
+			call.keys = append(call.keys, prefix+":week", prefix+":durable")
+			call.args = append(call.args, "", "")
+		}
+		calls = append(calls, call)
 	}
 	replies := l.evalAll(ctx, calls)
 	headroom := make([]Headroom, len(quotas))
@@ -81,6 +84,14 @@ func (l *Limiter) Supply(ctx context.Context, quotas []QuotaProbe, caps []CapPro
 	states := make([]CapState, len(caps))
 	for index := range caps {
 		result, err := parseCostReservation(replies[len(quotas)+index])
+		if err == nil && result.durableMissing && l.syncDurable != nil {
+			call := calls[len(quotas)+index]
+			value, repairErr := l.evalDurableCost(ctx, caps[index].OwnerID, call.keys, call.args...)
+			err = repairErr
+			if err == nil {
+				result, err = parseCostReservation(value)
+			}
+		}
 		switch {
 		case err != nil:
 		case result.kind == resultGranted:

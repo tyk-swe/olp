@@ -143,7 +143,7 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 
 func WorkloadKeyPolicy(m workload.Mapping) KeyPolicy {
 	template := m.LimitTemplate
-	return KeyPolicy{Scopes: m.Scopes, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}, AllowedRouteGroups: m.RouteGroups, LimitTemplate: &template, AllowProviderState: m.AllowProviderState}
+	return KeyPolicy{Scopes: m.Scopes, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}, AllowedRouteGroups: m.RouteGroups, LimitTemplate: &template, AllowProviderState: m.AllowProviderState}
 }
 
 // ValidateWorkloadConfig checks declared identity URLs without fetching them.
@@ -179,6 +179,9 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 			continue
 		}
 		if e = checkLimitTemplates(ctx, tx, &project, &mapping.LimitTemplate); e != nil {
+			return "", e
+		}
+		if e = checkKeyAgentResources(ctx, tx, WorkloadKeyPolicy(mapping), &project); e != nil {
 			return "", e
 		}
 		if e = checkRouteGroupNames(ctx, tx, mapping.RouteGroups, &project); e != nil {

@@ -32,13 +32,15 @@ var (
 	MutationDigest        = DigestPurpose{"mutation"}
 	InstallationDigest    = DigestPurpose{"installation"}
 	BatchSubmissionDigest = DigestPurpose{"batch_submission"}
+	ApprovalDigest        = DigestPurpose{"agent_approval"}
+	AgentPrincipalDigest  = DigestPurpose{"agent_principal"}
 	BatchLineDigest       = DigestPurpose{"batch_line"}
 )
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
 	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest}
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest}
 }
 
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed
@@ -66,6 +68,7 @@ var (
 	MFAWebAuthn          = SealPurpose{"mfa_webauthn"}
 	NotificationSecret   = SealPurpose{"notification_secret"}
 	SinkCredential       = SealPurpose{"sink_credential"}
+	AgentCredential      = SealPurpose{"agent_credential"}
 	MCPCredential        = SealPurpose{"mcp_credential"}
 	MutationReplay       = SealPurpose{"mutation_replay"}
 	OIDCClientSecret     = SealPurpose{"oidc_client"}
@@ -86,7 +89,7 @@ var (
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

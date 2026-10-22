@@ -25,6 +25,8 @@ type Mapping struct {
 	ProjectID          string            `json:"project_id"`
 	LimitTemplate      string            `json:"limit_template"`
 	RouteGroups        []string          `json:"route_groups"`
+	AllowedToolsets    []string          `json:"allowed_toolsets,omitempty"`
+	AllowedAgents      []string          `json:"allowed_agents,omitempty"`
 	Scopes             []string          `json:"scopes"`
 	EndUserClaim       *string           `json:"end_user_claim"`
 	AllowProviderState bool              `json:"allow_provider_state"`
@@ -70,7 +72,7 @@ func (c Config) Validate() error {
 		if id, e := uuid.Parse(m.ProjectID); e != nil || id.String() != m.ProjectID {
 			return bad
 		}
-		if !unique(m.RouteGroups, 1, 64, 100) || !unique(m.Scopes, 1, 2, 32) {
+		if !unique(m.RouteGroups, 0, 64, 100) || !unique(m.Scopes, 1, 7, 32) {
 			return bad
 		}
 		for _, group := range m.RouteGroups {
@@ -79,8 +81,19 @@ func (c Config) Validate() error {
 			}
 		}
 		for _, scope := range m.Scopes {
-			if scope != "inference" && scope != "models_read" {
+			if !slices.Contains([]string{"inference", "models_read", "tools", "agents", "traces_write", "delegate"}, scope) {
 				return bad
+			}
+		}
+		for _, ids := range [][]string{m.AllowedToolsets, m.AllowedAgents} {
+			if !unique(ids, 0, 100, 36) {
+				return bad
+			}
+			for _, raw := range ids {
+				id, e := uuid.Parse(raw)
+				if e != nil || id == uuid.Nil || id.String() != raw {
+					return bad
+				}
 			}
 		}
 		for pointer, value := range m.Match {

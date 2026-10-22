@@ -166,6 +166,9 @@ func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return snapshot, err
 	}
+	if snapshot.AgentPublications, err = readAgentPublications(ctx, tx); err != nil {
+		return nil, err
+	}
 	snapshot.Guardrails, err = guardrails.ReadRegistry(ctx, tx)
 	if err != nil {
 		return nil, err

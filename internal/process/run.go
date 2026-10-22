@@ -194,6 +194,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if limiter, err = limits.New(vk, prefix+"limits"); err != nil {
 			return err
 		}
+		limiter.UseDurableDebits(pool)
 		if c.Mode.Inference() {
 			if outage, err = newOutagePolicy(startup, pool, log); err != nil {
 				return err
@@ -388,7 +389,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				if server == nil {
 					continue
 				}
-				server.Admission.PendingCostAccountingReady = resources.New(pool).CheckPendingCostOwner
+				debits := &limits.DebitStore{Pool: pool, Limiter: limiter}
+				server.Admission.PendingCostAccountingReady = debits.CheckOwnerAccounting
 				server.Admission.CostAccountingReady = func(ctx context.Context) error {
 					return usage.CheckBudgetAccounting(ctx, pool, emitter)
 				}

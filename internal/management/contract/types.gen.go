@@ -37,6 +37,105 @@ func (e AdmissionPriority) Valid() bool {
 	}
 }
 
+// Defines values for AgentDefinitionProtocol.
+const (
+	A2a030 AgentDefinitionProtocol = "a2a-0.3.0"
+	A2a100 AgentDefinitionProtocol = "a2a-1.0.0"
+)
+
+// Valid indicates whether the value is a known member of the AgentDefinitionProtocol enum.
+func (e AgentDefinitionProtocol) Valid() bool {
+	switch e {
+	case A2a030:
+		return true
+	case A2a100:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentPublicationKind.
+const (
+	AgentPublicationKindAgent   AgentPublicationKind = "agent"
+	AgentPublicationKindPrompt  AgentPublicationKind = "prompt"
+	AgentPublicationKindToolset AgentPublicationKind = "toolset"
+)
+
+// Valid indicates whether the value is a known member of the AgentPublicationKind enum.
+func (e AgentPublicationKind) Valid() bool {
+	switch e {
+	case AgentPublicationKindAgent:
+		return true
+	case AgentPublicationKindPrompt:
+		return true
+	case AgentPublicationKindToolset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentPublicationRevisionKind.
+const (
+	AgentPublicationRevisionKindAgent   AgentPublicationRevisionKind = "agent"
+	AgentPublicationRevisionKindPrompt  AgentPublicationRevisionKind = "prompt"
+	AgentPublicationRevisionKindToolset AgentPublicationRevisionKind = "toolset"
+)
+
+// Valid indicates whether the value is a known member of the AgentPublicationRevisionKind enum.
+func (e AgentPublicationRevisionKind) Valid() bool {
+	switch e {
+	case AgentPublicationRevisionKindAgent:
+		return true
+	case AgentPublicationRevisionKindPrompt:
+		return true
+	case AgentPublicationRevisionKindToolset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentPublicationRevisionLabels.
+const (
+	AgentPublicationRevisionLabelsProduction AgentPublicationRevisionLabels = "production"
+	AgentPublicationRevisionLabelsStaging    AgentPublicationRevisionLabels = "staging"
+)
+
+// Valid indicates whether the value is a known member of the AgentPublicationRevisionLabels enum.
+func (e AgentPublicationRevisionLabels) Valid() bool {
+	switch e {
+	case AgentPublicationRevisionLabelsProduction:
+		return true
+	case AgentPublicationRevisionLabelsStaging:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentPublicationSummaryKind.
+const (
+	AgentPublicationSummaryKindAgent   AgentPublicationSummaryKind = "agent"
+	AgentPublicationSummaryKindPrompt  AgentPublicationSummaryKind = "prompt"
+	AgentPublicationSummaryKindToolset AgentPublicationSummaryKind = "toolset"
+)
+
+// Valid indicates whether the value is a known member of the AgentPublicationSummaryKind enum.
+func (e AgentPublicationSummaryKind) Valid() bool {
+	switch e {
+	case AgentPublicationSummaryKindAgent:
+		return true
+	case AgentPublicationSummaryKindPrompt:
+		return true
+	case AgentPublicationSummaryKindToolset:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AggregateBudgetUsageCostBasis.
 const (
 	AggregateBudgetUsageCostBasisCharge AggregateBudgetUsageCostBasis = "charge"
@@ -732,25 +831,25 @@ func (e CodeAttemptOutcomeOrigin) Valid() bool {
 
 // Defines values for CodeAttemptState.
 const (
-	Aborted        CodeAttemptState = "aborted"
-	BoundViolation CodeAttemptState = "bound_violation"
-	Prepared       CodeAttemptState = "prepared"
-	Settled        CodeAttemptState = "settled"
-	Uncertain      CodeAttemptState = "uncertain"
+	CodeAttemptStateAborted        CodeAttemptState = "aborted"
+	CodeAttemptStateBoundViolation CodeAttemptState = "bound_violation"
+	CodeAttemptStatePrepared       CodeAttemptState = "prepared"
+	CodeAttemptStateSettled        CodeAttemptState = "settled"
+	CodeAttemptStateUncertain      CodeAttemptState = "uncertain"
 )
 
 // Valid indicates whether the value is a known member of the CodeAttemptState enum.
 func (e CodeAttemptState) Valid() bool {
 	switch e {
-	case Aborted:
+	case CodeAttemptStateAborted:
 		return true
-	case BoundViolation:
+	case CodeAttemptStateBoundViolation:
 		return true
-	case Prepared:
+	case CodeAttemptStatePrepared:
 		return true
-	case Settled:
+	case CodeAttemptStateSettled:
 		return true
-	case Uncertain:
+	case CodeAttemptStateUncertain:
 		return true
 	default:
 		return false
@@ -976,6 +1075,27 @@ func (e CommitmentPeriod) Valid() bool {
 	case CommitmentPeriodHour:
 		return true
 	case CommitmentPeriodMonth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationAgentPublicationKind.
+const (
+	ConfigurationAgentPublicationKindAgent   ConfigurationAgentPublicationKind = "agent"
+	ConfigurationAgentPublicationKindPrompt  ConfigurationAgentPublicationKind = "prompt"
+	ConfigurationAgentPublicationKindToolset ConfigurationAgentPublicationKind = "toolset"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationAgentPublicationKind enum.
+func (e ConfigurationAgentPublicationKind) Valid() bool {
+	switch e {
+	case ConfigurationAgentPublicationKindAgent:
+		return true
+	case ConfigurationAgentPublicationKindPrompt:
+		return true
+	case ConfigurationAgentPublicationKindToolset:
 		return true
 	default:
 		return false
@@ -1425,19 +1545,31 @@ func (e ConfigurationWorkloadIssuerAlgorithms) Valid() bool {
 
 // Defines values for ConfigurationWorkloadMappingScopes.
 const (
-	ConfigurationWorkloadMappingScopesGuardrails ConfigurationWorkloadMappingScopes = "guardrails"
-	ConfigurationWorkloadMappingScopesInference  ConfigurationWorkloadMappingScopes = "inference"
-	ConfigurationWorkloadMappingScopesModelsRead ConfigurationWorkloadMappingScopes = "models_read"
+	ConfigurationWorkloadMappingScopesAgents      ConfigurationWorkloadMappingScopes = "agents"
+	ConfigurationWorkloadMappingScopesDelegate    ConfigurationWorkloadMappingScopes = "delegate"
+	ConfigurationWorkloadMappingScopesGuardrails  ConfigurationWorkloadMappingScopes = "guardrails"
+	ConfigurationWorkloadMappingScopesInference   ConfigurationWorkloadMappingScopes = "inference"
+	ConfigurationWorkloadMappingScopesModelsRead  ConfigurationWorkloadMappingScopes = "models_read"
+	ConfigurationWorkloadMappingScopesTools       ConfigurationWorkloadMappingScopes = "tools"
+	ConfigurationWorkloadMappingScopesTracesWrite ConfigurationWorkloadMappingScopes = "traces_write"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationWorkloadMappingScopes enum.
 func (e ConfigurationWorkloadMappingScopes) Valid() bool {
 	switch e {
+	case ConfigurationWorkloadMappingScopesAgents:
+		return true
+	case ConfigurationWorkloadMappingScopesDelegate:
+		return true
 	case ConfigurationWorkloadMappingScopesGuardrails:
 		return true
 	case ConfigurationWorkloadMappingScopesInference:
 		return true
 	case ConfigurationWorkloadMappingScopesModelsRead:
+		return true
+	case ConfigurationWorkloadMappingScopesTools:
+		return true
+	case ConfigurationWorkloadMappingScopesTracesWrite:
 		return true
 	default:
 		return false
@@ -1885,6 +2017,66 @@ func (e EndUserLimitsCostBasis) Valid() bool {
 	case EndUserLimitsCostBasisCharge:
 		return true
 	case EndUserLimitsCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExecutionDebitKind.
+const (
+	ExecutionDebitKindAgent ExecutionDebitKind = "agent"
+	ExecutionDebitKindApi   ExecutionDebitKind = "api"
+	ExecutionDebitKindModel ExecutionDebitKind = "model"
+	ExecutionDebitKindTool  ExecutionDebitKind = "tool"
+)
+
+// Valid indicates whether the value is a known member of the ExecutionDebitKind enum.
+func (e ExecutionDebitKind) Valid() bool {
+	switch e {
+	case ExecutionDebitKindAgent:
+		return true
+	case ExecutionDebitKindApi:
+		return true
+	case ExecutionDebitKindModel:
+		return true
+	case ExecutionDebitKindTool:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExecutionDebitState.
+const (
+	ExecutionDebitStateConflict       ExecutionDebitState = "conflict"
+	ExecutionDebitStateDispatched     ExecutionDebitState = "dispatched"
+	ExecutionDebitStateNotAccepted    ExecutionDebitState = "not_accepted"
+	ExecutionDebitStateOutcomeUnknown ExecutionDebitState = "outcome_unknown"
+	ExecutionDebitStatePrepared       ExecutionDebitState = "prepared"
+	ExecutionDebitStateReady          ExecutionDebitState = "ready"
+	ExecutionDebitStateReleased       ExecutionDebitState = "released"
+	ExecutionDebitStateSettled        ExecutionDebitState = "settled"
+)
+
+// Valid indicates whether the value is a known member of the ExecutionDebitState enum.
+func (e ExecutionDebitState) Valid() bool {
+	switch e {
+	case ExecutionDebitStateConflict:
+		return true
+	case ExecutionDebitStateDispatched:
+		return true
+	case ExecutionDebitStateNotAccepted:
+		return true
+	case ExecutionDebitStateOutcomeUnknown:
+		return true
+	case ExecutionDebitStatePrepared:
+		return true
+	case ExecutionDebitStateReady:
+		return true
+	case ExecutionDebitStateReleased:
+		return true
+	case ExecutionDebitStateSettled:
 		return true
 	default:
 		return false
@@ -4785,19 +4977,31 @@ func (e WorkloadIssuerWriteAlgorithms) Valid() bool {
 
 // Defines values for WorkloadMappingScopes.
 const (
-	WorkloadMappingScopesGuardrails WorkloadMappingScopes = "guardrails"
-	WorkloadMappingScopesInference  WorkloadMappingScopes = "inference"
-	WorkloadMappingScopesModelsRead WorkloadMappingScopes = "models_read"
+	WorkloadMappingScopesAgents      WorkloadMappingScopes = "agents"
+	WorkloadMappingScopesDelegate    WorkloadMappingScopes = "delegate"
+	WorkloadMappingScopesGuardrails  WorkloadMappingScopes = "guardrails"
+	WorkloadMappingScopesInference   WorkloadMappingScopes = "inference"
+	WorkloadMappingScopesModelsRead  WorkloadMappingScopes = "models_read"
+	WorkloadMappingScopesTools       WorkloadMappingScopes = "tools"
+	WorkloadMappingScopesTracesWrite WorkloadMappingScopes = "traces_write"
 )
 
 // Valid indicates whether the value is a known member of the WorkloadMappingScopes enum.
 func (e WorkloadMappingScopes) Valid() bool {
 	switch e {
+	case WorkloadMappingScopesAgents:
+		return true
+	case WorkloadMappingScopesDelegate:
+		return true
 	case WorkloadMappingScopesGuardrails:
 		return true
 	case WorkloadMappingScopesInference:
 		return true
 	case WorkloadMappingScopesModelsRead:
+		return true
+	case WorkloadMappingScopesTools:
+		return true
+	case WorkloadMappingScopesTracesWrite:
 		return true
 	default:
 		return false
@@ -4876,6 +5080,24 @@ func (e ListNotificationDeliveriesParamsStatus) Valid() bool {
 	case ListNotificationDeliveriesParamsStatusFailed:
 		return true
 	case ListNotificationDeliveriesParamsStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SetPromptLabelParamsLabel.
+const (
+	SetPromptLabelParamsLabelProduction SetPromptLabelParamsLabel = "production"
+	SetPromptLabelParamsLabelStaging    SetPromptLabelParamsLabel = "staging"
+)
+
+// Valid indicates whether the value is a known member of the SetPromptLabelParamsLabel enum.
+func (e SetPromptLabelParamsLabel) Valid() bool {
+	switch e {
+	case SetPromptLabelParamsLabelProduction:
+		return true
+	case SetPromptLabelParamsLabelStaging:
 		return true
 	default:
 		return false
@@ -5043,6 +5265,106 @@ type AcceptInvitationRequest struct {
 // AdmissionPriority Admission class of a request. A saturated gateway dequeues critical, high, normal and low 8:4:2:1, and capacity shares divide provider quotas between them.
 type AdmissionPriority string
 
+// AgentDefinition defines model for AgentDefinition.
+type AgentDefinition struct {
+	CardDigest        string                  `json:"card_digest"`
+	CredentialId      *openapi_types.UUID     `json:"credential_id,omitempty"`
+	Endpoint          string                  `json:"endpoint"`
+	MaxCost           string                  `json:"max_cost"`
+	PricingRevisionId openapi_types.UUID      `json:"pricing_revision_id"`
+	Protocol          AgentDefinitionProtocol `json:"protocol"`
+	RouteRevisions    []openapi_types.UUID    `json:"route_revisions"`
+	ToolsetRevisions  []openapi_types.UUID    `json:"toolset_revisions"`
+}
+
+// AgentDefinitionProtocol defines model for AgentDefinition.Protocol.
+type AgentDefinitionProtocol string
+
+// AgentPublication defines model for AgentPublication.
+type AgentPublication struct {
+	Draft      AgentPublicationDraft                 `json:"draft"`
+	Etag       openapi_types.UUID                    `json:"etag"`
+	Id         openapi_types.UUID                    `json:"id"`
+	Kind       AgentPublicationKind                  `json:"kind"`
+	Name       string                                `json:"name"`
+	ProjectId  openapi_types.UUID                    `json:"project_id"`
+	Retired    bool                                  `json:"retired"`
+	RevisionId nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+}
+
+// AgentPublicationKind defines model for AgentPublication.Kind.
+type AgentPublicationKind string
+
+// AgentPublicationDraft defines model for AgentPublicationDraft.
+type AgentPublicationDraft struct {
+	Agent *AgentDefinition `json:"agent,omitempty"`
+	Name  string           `json:"name"`
+
+	// ProjectId Required owning UUID in management writes. Configuration promotion rebinds this field from its explicit project name.
+	ProjectId openapi_types.UUID `json:"project_id"`
+	Prompt    *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset   *ToolsetDefinition `json:"toolset,omitempty"`
+}
+
+// AgentPublicationList defines model for AgentPublicationList.
+type AgentPublicationList struct {
+	Items      []AgentPublicationSummary `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentPublicationRevision defines model for AgentPublicationRevision.
+type AgentPublicationRevision struct {
+	Current       bool                             `json:"current"`
+	Definition    AgentPublicationDraft            `json:"definition"`
+	Digest        string                           `json:"digest"`
+	Id            openapi_types.UUID               `json:"id"`
+	Kind          AgentPublicationRevisionKind     `json:"kind"`
+	Labels        []AgentPublicationRevisionLabels `json:"labels"`
+	ProjectId     openapi_types.UUID               `json:"project_id"`
+	PublicationId openapi_types.UUID               `json:"publication_id"`
+}
+
+// AgentPublicationRevisionKind defines model for AgentPublicationRevision.Kind.
+type AgentPublicationRevisionKind string
+
+// AgentPublicationRevisionLabels defines model for AgentPublicationRevision.Labels.
+type AgentPublicationRevisionLabels string
+
+// AgentPublicationSummary defines model for AgentPublicationSummary.
+type AgentPublicationSummary struct {
+	Etag       openapi_types.UUID                    `json:"etag"`
+	Id         openapi_types.UUID                    `json:"id"`
+	Kind       AgentPublicationSummaryKind           `json:"kind"`
+	Name       string                                `json:"name"`
+	ProjectId  openapi_types.UUID                    `json:"project_id"`
+	Retired    bool                                  `json:"retired"`
+	RevisionId nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+}
+
+// AgentPublicationSummaryKind defines model for AgentPublicationSummary.Kind.
+type AgentPublicationSummaryKind string
+
+// AgentPublicationWrite defines model for AgentPublicationWrite.
+type AgentPublicationWrite struct {
+	Agent *AgentDefinition `json:"agent,omitempty"`
+
+	// Credential Bearer credential; absent preserves, null removes. Never returned.
+	Credential nullable.Nullable[string] `json:"credential,omitempty"`
+	Name       string                    `json:"name"`
+	ProjectId  openapi_types.UUID        `json:"project_id"`
+	Prompt     *PromptDefinition         `json:"prompt,omitempty"`
+	Toolset    *ToolsetDefinition        `json:"toolset,omitempty"`
+}
+
+// AgentToolPin defines model for AgentToolPin.
+type AgentToolPin struct {
+	Alias         string             `json:"alias"`
+	CatalogDigest string             `json:"catalog_digest"`
+	Name          string             `json:"name"`
+	RevisionId    openapi_types.UUID `json:"revision_id"`
+	ServerId      openapi_types.UUID `json:"server_id"`
+}
+
 // AggregateBudget defines model for AggregateBudget.
 type AggregateBudget struct {
 	Etag   openapi_types.UUID              `json:"etag"`
@@ -5118,7 +5440,8 @@ type ApiKeyDetailResponse struct {
 	// AllowProviderState Permits stateful provider resources (stored responses, background
 	// jobs, previous_response_id chains) under this key. Provider state may
 	// retain user content.
-	AllowProviderState bool `json:"allow_provider_state"`
+	AllowProviderState bool                  `json:"allow_provider_state"`
+	AllowedAgents      *[]openapi_types.UUID `json:"allowed_agents,omitempty"`
 
 	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
 	AllowedAttributionKeys []string `json:"allowed_attribution_keys"`
@@ -5129,6 +5452,7 @@ type ApiKeyDetailResponse struct {
 	// AllowedRouteGroups Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing.
 	AllowedRouteGroups nullable.Nullable[[]string] `json:"allowed_route_groups,omitempty"`
 	AllowedRoutes      []string                    `json:"allowed_routes"`
+	AllowedToolsets    *[]openapi_types.UUID       `json:"allowed_toolsets,omitempty"`
 
 	// AttributionDefaults Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply.
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
@@ -6281,6 +6605,33 @@ type CommitmentTotals struct {
 	UnusedCost    string `json:"unused_cost"`
 }
 
+// ConfigurationAgentDraft defines model for ConfigurationAgentDraft.
+type ConfigurationAgentDraft struct {
+	Agent *AgentDefinition `json:"agent,omitempty"`
+	Name  string           `json:"name"`
+
+	// ProjectId Optional source identity; promotion resolves the owning project by name.
+	ProjectId *openapi_types.UUID `json:"project_id,omitempty"`
+	Prompt    *PromptDefinition   `json:"prompt,omitempty"`
+	Toolset   *ToolsetDefinition  `json:"toolset,omitempty"`
+}
+
+// ConfigurationAgentPublication defines model for ConfigurationAgentPublication.
+type ConfigurationAgentPublication struct {
+	CredentialRef *string                             `json:"credential_ref,omitempty"`
+	Draft         ConfigurationAgentDraft             `json:"draft"`
+	Kind          ConfigurationAgentPublicationKind   `json:"kind"`
+	Labels        *map[string]ConfigurationAgentDraft `json:"labels,omitempty"`
+	Project       string                              `json:"project"`
+	Published     *ConfigurationAgentDraft            `json:"published,omitempty"`
+
+	// PublishedCredentialRef Independent published-agent credential binding; never inherit a draft credential across endpoints.
+	PublishedCredentialRef *string `json:"published_credential_ref,omitempty"`
+}
+
+// ConfigurationAgentPublicationKind defines model for ConfigurationAgentPublication.Kind.
+type ConfigurationAgentPublicationKind string
+
 // ConfigurationBillingImport defines model for ConfigurationBillingImport.
 type ConfigurationBillingImport struct {
 	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
@@ -6301,7 +6652,8 @@ type ConfigurationCapabilityEntryMode string
 
 // ConfigurationDocument Secret-free desired-state artifact identified by natural names, never UUIDs
 type ConfigurationDocument struct {
-	ApiVersion ConfigurationDocumentApiVersion `json:"api_version"`
+	AgentPublications *[]ConfigurationAgentPublication `json:"agent_publications,omitempty"`
+	ApiVersion        ConfigurationDocumentApiVersion  `json:"api_version"`
 
 	// BudgetTimeZone Requested IANA budget time zone. Export includes it. Omission/null preserves the destination. Changes require settings permission and activate independently at the next existing day/week/month boundary; current spend and calendar history remain intact.
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
@@ -6757,6 +7109,8 @@ type ConfigurationWorkloadIssuerAlgorithms string
 // ConfigurationWorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
 type ConfigurationWorkloadMapping struct {
 	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
+	AllowedAgents      *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
+	AllowedToolsets    *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
 	EndUserClaim       nullable.Nullable[string] `json:"end_user_claim,omitempty"`
 	LimitTemplate      string                    `json:"limit_template"`
 
@@ -6856,7 +7210,8 @@ type ContinueGrantEnrollmentRequest struct {
 type CreateApiKeyRequest struct {
 	// AllowProviderState Permits stateful provider resources under this key. Provider state
 	// may retain user content; defaults to false.
-	AllowProviderState *bool `json:"allow_provider_state,omitempty"`
+	AllowProviderState *bool                 `json:"allow_provider_state,omitempty"`
+	AllowedAgents      *[]openapi_types.UUID `json:"allowed_agents,omitempty"`
 
 	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
 	AllowedAttributionKeys *[]string `json:"allowed_attribution_keys,omitempty"`
@@ -6867,6 +7222,7 @@ type CreateApiKeyRequest struct {
 	// AllowedRouteGroups Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing.
 	AllowedRouteGroups nullable.Nullable[[]string] `json:"allowed_route_groups,omitempty"`
 	AllowedRoutes      *[]string                   `json:"allowed_routes,omitempty"`
+	AllowedToolsets    *[]openapi_types.UUID       `json:"allowed_toolsets,omitempty"`
 
 	// AttributionDefaults Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply.
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
@@ -7467,6 +7823,37 @@ type EndUserPolicy struct {
 // EnrollPasswordRequest defines model for EnrollPasswordRequest.
 type EnrollPasswordRequest struct {
 	NewPassword *string `json:"new_password,omitempty"`
+}
+
+// ExecutionDebit defines model for ExecutionDebit.
+type ExecutionDebit struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	BoundViolation  bool                                  `json:"bound_violation"`
+	ChargeBound     string                                `json:"charge_bound"`
+	CostBound       string                                `json:"cost_bound"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Currency        string                                `json:"currency"`
+	Id              openapi_types.UUID                    `json:"id"`
+	Kind            ExecutionDebitKind                    `json:"kind"`
+	ObservedCharge  string                                `json:"observed_charge"`
+	ObservedCost    string                                `json:"observed_cost"`
+	ProjectId       nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	RemainingCharge string                                `json:"remaining_charge"`
+	RemainingCost   string                                `json:"remaining_cost"`
+	RunId           nullable.Nullable[openapi_types.UUID] `json:"run_id"`
+	State           ExecutionDebitState                   `json:"state"`
+}
+
+// ExecutionDebitKind defines model for ExecutionDebit.Kind.
+type ExecutionDebitKind string
+
+// ExecutionDebitState defines model for ExecutionDebit.State.
+type ExecutionDebitState string
+
+// ExecutionDebitList defines model for ExecutionDebitList.
+type ExecutionDebitList struct {
+	Items      []ExecutionDebit          `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
 // ExperimentSide defines model for ExperimentSide.
@@ -9564,6 +9951,17 @@ type PromptCachePolicyPositions string
 
 // PromptCachePolicyTtl defines model for PromptCachePolicy.Ttl.
 type PromptCachePolicyTtl string
+
+// PromptDefinition defines model for PromptDefinition.
+type PromptDefinition struct {
+	Template  string   `json:"template"`
+	Variables []string `json:"variables"`
+}
+
+// PromptLabelWrite defines model for PromptLabelWrite.
+type PromptLabelWrite struct {
+	RevisionId openapi_types.UUID `json:"revision_id"`
+}
 
 // ProviderActivationResponse defines model for ProviderActivationResponse.
 type ProviderActivationResponse struct {
@@ -12010,6 +12408,11 @@ type StartGrantEnrollmentRequest struct {
 // Surface defines model for Surface.
 type Surface string
 
+// ToolsetDefinition defines model for ToolsetDefinition.
+type ToolsetDefinition struct {
+	Tools []AgentToolPin `json:"tools"`
+}
+
 // TransportMode defines model for TransportMode.
 type TransportMode string
 
@@ -12079,7 +12482,8 @@ type UnrepresentablePrice struct {
 type UpdateApiKeyRequest struct {
 	// AllowProviderState Permits stateful provider resources under this key. Provider state
 	// may retain user content.
-	AllowProviderState *bool `json:"allow_provider_state,omitempty"`
+	AllowProviderState *bool                 `json:"allow_provider_state,omitempty"`
+	AllowedAgents      *[]openapi_types.UUID `json:"allowed_agents,omitempty"`
 
 	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
 	AllowedAttributionKeys *[]string `json:"allowed_attribution_keys,omitempty"`
@@ -12092,7 +12496,8 @@ type UpdateApiKeyRequest struct {
 
 	// AllowedRoutes Omit to keep the stored allowlist. Send `[]` to clear it; an empty
 	// allowlist places no route restriction on the key.
-	AllowedRoutes *[]string `json:"allowed_routes,omitempty"`
+	AllowedRoutes   *[]string             `json:"allowed_routes,omitempty"`
+	AllowedToolsets *[]openapi_types.UUID `json:"allowed_toolsets,omitempty"`
 
 	// AttributionDefaults Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply.
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
@@ -12657,6 +13062,8 @@ type WorkloadIssuerWriteAlgorithms string
 // WorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
 type WorkloadMapping struct {
 	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
+	AllowedAgents      *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
+	AllowedToolsets    *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
 	EndUserClaim       nullable.Nullable[string] `json:"end_user_claim,omitempty"`
 	LimitTemplate      string                    `json:"limit_template"`
 
@@ -12670,6 +13077,38 @@ type WorkloadMapping struct {
 
 // WorkloadMappingScopes defines model for WorkloadMapping.Scopes.
 type WorkloadMappingScopes string
+
+// ListAgentsParams defines parameters for ListAgents.
+type ListAgentsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateAgentParams defines parameters for CreateAgent.
+type CreateAgentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RetireAgentParams defines parameters for RetireAgent.
+type RetireAgentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateAgentParams defines parameters for UpdateAgent.
+type UpdateAgentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// PublishAgentParams defines parameters for PublishAgent.
+type PublishAgentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
 
 // ListApiKeysParams defines parameters for ListApiKeys.
 type ListApiKeysParams struct {
@@ -12964,6 +13403,16 @@ type ListCodeTokenWindowsParams struct {
 type ApplyConfigurationParams struct {
 	// IdempotencyKey Unique mutation key
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListExecutionDebitsParams defines parameters for ListExecutionDebits.
+type ListExecutionDebitsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit    *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ApiKeyId *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 }
 
 // CreateGuardrailAttachmentParams defines parameters for CreateGuardrailAttachment.
@@ -13639,6 +14088,47 @@ type PutProjectRouteGroupsParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListPromptsParams defines parameters for ListPrompts.
+type ListPromptsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreatePromptParams defines parameters for CreatePrompt.
+type CreatePromptParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RetirePromptParams defines parameters for RetirePrompt.
+type RetirePromptParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdatePromptParams defines parameters for UpdatePrompt.
+type UpdatePromptParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// SetPromptLabelParams defines parameters for SetPromptLabel.
+type SetPromptLabelParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// SetPromptLabelParamsLabel defines parameters for SetPromptLabel.
+type SetPromptLabelParamsLabel string
+
+// PublishPromptParams defines parameters for PublishPrompt.
+type PublishPromptParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
 // ProviderHealthParams defines parameters for ProviderHealth.
 type ProviderHealthParams struct {
 	WindowMinutes *int32              `form:"window_minutes,omitempty" json:"window_minutes,omitempty"`
@@ -14209,6 +14699,38 @@ type UpdateSinkParams struct {
 	IfMatch        string `json:"If-Match"`
 }
 
+// ListToolsetsParams defines parameters for ListToolsets.
+type ListToolsetsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateToolsetParams defines parameters for CreateToolset.
+type CreateToolsetParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RetireToolsetParams defines parameters for RetireToolset.
+type RetireToolsetParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateToolsetParams defines parameters for UpdateToolset.
+type UpdateToolsetParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// PublishToolsetParams defines parameters for PublishToolset.
+type PublishToolsetParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
 // UsageBreakdownParams defines parameters for UsageBreakdown.
 type UsageBreakdownParams struct {
 	Start      time.Time           `form:"start" json:"start"`
@@ -14508,6 +15030,12 @@ type ProviderGrantLapsedWebhookParams struct {
 	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
 }
 
+// CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
+type CreateAgentJSONRequestBody = AgentPublicationWrite
+
+// UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
+type UpdateAgentJSONRequestBody = AgentPublicationWrite
+
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody = CreateApiKeyRequest
 
@@ -14751,6 +15279,15 @@ type PutProjectMemberJSONRequestBody = PutProjectMemberRequest
 // PutProjectRouteGroupsJSONRequestBody defines body for PutProjectRouteGroups for application/json ContentType.
 type PutProjectRouteGroupsJSONRequestBody PutProjectRouteGroupsJSONBody
 
+// CreatePromptJSONRequestBody defines body for CreatePrompt for application/json ContentType.
+type CreatePromptJSONRequestBody = AgentPublicationWrite
+
+// UpdatePromptJSONRequestBody defines body for UpdatePrompt for application/json ContentType.
+type UpdatePromptJSONRequestBody = AgentPublicationWrite
+
+// SetPromptLabelJSONRequestBody defines body for SetPromptLabel for application/json ContentType.
+type SetPromptLabelJSONRequestBody = PromptLabelWrite
+
 // CreateProviderJSONRequestBody defines body for CreateProvider for application/json ContentType.
 type CreateProviderJSONRequestBody = CreateProviderRequest
 
@@ -14852,6 +15389,12 @@ type CreateSinkJSONRequestBody = CreateSinkRequest
 
 // UpdateSinkJSONRequestBody defines body for UpdateSink for application/json ContentType.
 type UpdateSinkJSONRequestBody = UpdateSinkRequest
+
+// CreateToolsetJSONRequestBody defines body for CreateToolset for application/json ContentType.
+type CreateToolsetJSONRequestBody = AgentPublicationWrite
+
+// UpdateToolsetJSONRequestBody defines body for UpdateToolset for application/json ContentType.
+type UpdateToolsetJSONRequestBody = AgentPublicationWrite
 
 // PermitUnconfinedPluginJSONRequestBody defines body for PermitUnconfinedPlugin for application/json ContentType.
 type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
