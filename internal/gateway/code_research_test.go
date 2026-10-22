@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,47 @@ import (
 
 	"github.com/tyk-swe/olp/internal/coderesearch"
 )
+
+func TestResearchHTTP2StreamSurvivesIdleWriteDeadlines(t *testing.T) {
+	const message = `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":1,"progress":1}}`
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		go func() {
+			defer writer.Close()
+			for range 2 {
+				// Cross the socket write timeout first after the headers, then
+				// again after a frame. Neither idle interval is a stalled write.
+				timer := time.NewTimer(2 * socketTestTimeout)
+				select {
+				case <-timer.C:
+				case <-r.Context().Done():
+					timer.Stop()
+					return
+				}
+				if _, err := fmt.Fprintf(writer, "data: %s\n\n", message); err != nil {
+					return
+				}
+			}
+		}()
+		response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}
+		(&Server{}).copyResearchResponse(socketDeadlineWriter{ResponseWriter: w, t: t}, r, response, researchResponse{service: "search"})
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = 5 * time.Second
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil || response.ProtoMajor != 2 || strings.Count(string(raw), message) != 2 {
+		t.Fatalf("idle HTTP/2 stream: protocol=%s body=%s err=%v", response.Proto, raw, err)
+	}
+}
 
 func TestResearchOriginBoundary(t *testing.T) {
 	for _, origin := range []string{"", "https://olp.example", "https://evil.example", "null", "https://olp.example/path", "https://user@olp.example"} {

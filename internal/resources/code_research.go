@@ -83,6 +83,23 @@ func (s *CodeStore) CreateResearchSession(ctx context.Context, b codemode.Resear
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('code_research_sessions',0))`); err != nil {
 		return "", err
 	}
+	// An older handshake may finish after a publication or credential rotation.
+	// Fence its binding before pruning, and hold these rows through commit so
+	// it cannot remove sessions created under a newer live binding.
+	var route string
+	err = tx.QueryRow(ctx, `SELECT r.id::text FROM olp.code_routes r
+		JOIN olp.code_accounts a ON a.id=$2
+		JOIN olp.provider_credentials c ON c.id=a.credential_id
+		JOIN olp.provider_grants g ON g.credential_id=c.id
+		WHERE r.latest_revision_id=$1 AND a.credential_id=$3 AND g.generation=$4
+		AND a.enabled AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
+		FOR SHARE OF r,a,c,g`, b.RevisionID, b.AccountID, b.CredentialID, b.Generation).Scan(&route)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", codemode.Refuse(409, "code_research_session_invalid")
+	}
+	if err != nil {
+		return "", err
+	}
 	if _, err = tx.Exec(ctx, `DELETE FROM olp.code_research_sessions WHERE expires_at<=now()`); err != nil {
 		return "", err
 	}

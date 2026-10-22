@@ -24,7 +24,7 @@ type researchAttempt struct {
 	dispatched           bool
 }
 
-func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, route codemode.Route, service string, authority access.Authority) (*researchAttempt, error) {
+func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, route codemode.Route, service string, authority access.Authority, cancellation bool) (*researchAttempt, error) {
 	ctx := r.Context()
 	fresh, account, err := s.researchAuthority(r, route, service, authority)
 	if err != nil {
@@ -38,6 +38,9 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 		}
 	}()
 	var failure *Error
+	if cancellation {
+		fresh = researchCancellationAuthority(fresh)
+	}
 	a.lease, failure = s.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
@@ -47,7 +50,13 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	if !found || a.config.ProfileID != codeplans.ZAIProfile {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	a.providerLease, failure = s.Admission.reserveCodeProvider(ctx, account.ProviderID, a.config, 0, researchTimeout+time.Minute)
+	quota := a.config
+	if cancellation && quota.Options.Limits != nil {
+		copy := *quota.Options.Limits
+		copy.MaxConcurrency = nil
+		quota.Options.Limits = &copy
+	}
+	a.providerLease, failure = s.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
@@ -58,6 +67,29 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	a.binding = researchBinding(fresh.ID, route, service, account, a.auth)
 	prepared = true
 	return a, nil
+}
+
+// Cancellation cannot start work. Keep its rate and identity policies, but do
+// not make it wait for the concurrency slots held by the work it must stop.
+func researchCancellationAuthority(authority access.Authority) access.Authority {
+	// This also clones the nested route and end-user policies before editing.
+	authority = withoutCostBudgets(authority)
+	authority.Policy.MaxConcurrency = nil
+	authority.BudgetGroupConcurrency = nil
+	for slug, policy := range authority.Policy.RouteLimits {
+		policy.MaxConcurrency = nil
+		authority.Policy.RouteLimits[slug] = policy
+	}
+	for _, policy := range []*access.EndUserPolicy{authority.Policy.EndUserPolicy, authority.ProjectEndUserPolicy} {
+		if policy != nil {
+			policy.Defaults.MaxConcurrency = nil
+			for digest, limits := range policy.Overrides {
+				limits.MaxConcurrency = nil
+				policy.Overrides[digest] = limits
+			}
+		}
+	}
+	return authority
 }
 
 func (s *Server) researchAuthority(r *http.Request, route codemode.Route, service string, authority access.Authority) (access.Authority, codemode.Account, error) {

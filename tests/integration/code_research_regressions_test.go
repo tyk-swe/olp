@@ -1,0 +1,164 @@
+//go:build integration
+
+package integration_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/resources"
+)
+
+func TestCodeResearchStaleInitializationPreservesCurrentSessions(t *testing.T) {
+	for _, change := range []string{"publication", "generation", "credential"} {
+		t.Run(change, func(t *testing.T) {
+			f := researchFixture(t)
+			account := f.accounts[0]
+			stale := codemode.ResearchSessionBinding{APIKeyID: f.keyID, RevisionID: f.route["revision_id"].(string), Service: "search", AccountID: account["id"].(string), CredentialID: account["credential_id"].(string)}
+			if err := f.h.Pool.QueryRow(t.Context(), `SELECT generation FROM olp.provider_grants WHERE credential_id=$1`, stale.CredentialID).Scan(&stale.Generation); err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "publication":
+				f.publishResearch(t, []string{"search"})
+			case "generation":
+				if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.provider_grants SET generation=generation+1 WHERE credential_id=$1`, stale.CredentialID); err != nil {
+					t.Fatal(err)
+				}
+				f.h.refresh()
+			case "credential":
+				replacement := f.enroll(t, account["provider_id"].(string), "research-vendor-key")
+				path := "/api/v1/code/accounts/" + stale.AccountID
+				f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "provider_id": account["provider_id"], "credential_id": replacement, "name": account["name"], "enabled": true, "models": account["models"]}, etagHeader(account), 200)
+				if replacement == stale.CredentialID {
+					t.Fatal("fixture did not rotate the credential")
+				}
+				f.h.refresh()
+			}
+			response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200)
+			current := response.Header.Get("Mcp-Session-Id")
+			// Complete a handshake using the binding captured before the change.
+			// It must not prune the session that finished with the current binding.
+			_, err := (&resources.CodeStore{Pool: f.h.Pool}).CreateResearchSession(t.Context(), stale, "delayed-native-session")
+			var refusal *codemode.Refusal
+			if !errors.As(err, &refusal) || refusal.Status != 409 {
+				t.Fatalf("stale initialization: %v", err)
+			}
+			researchSessionCount(t, f, 1)
+			f.research(t, "POST", "search", f.key, current, researchList, 200)
+		})
+	}
+}
+
+func TestCodeResearchEligibilityIgnoresInferenceHealthAndAllowance(t *testing.T) {
+	f := researchFixture(t)
+	accountID := f.accounts[0]["id"].(string)
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.code_accounts SET health='unavailable',unavailable_until=now()+interval '1 hour',allowance='{"remaining_tokens":0,"remaining_requests":null,"remaining_percent":null,"resets_at":null,"observed_at":"2026-10-21T10:00:00Z"}' WHERE id=$1`, accountID); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		items := f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)["items"].([]any)
+		for _, item := range items {
+			account := item.(map[string]any)
+			if account["id"] == accountID {
+				if account["eligible"] != false || account["research_eligible"] != want {
+					t.Fatalf("research/inference eligibility: %v", account)
+				}
+				return
+			}
+		}
+		t.Fatal("research account missing")
+	}
+	check(true)
+	f.publishResearch(t, []string{"search"})
+	f.research(t, "POST", "search", f.key, "", researchInit, 200)
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, accountID); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+}
+
+func TestCodeResearchCancellationBypassesWorkConcurrency(t *testing.T) {
+	f := researchFixture(t)
+	_, _, limiter := limSetup(t, "research-cancellation")
+	f.h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
+	// Exercise key, route and provider concurrency together. The frozen provider
+	// connection must enforce the same one-slot limit as the live key policies.
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=policy||'{"max_concurrency":1,"requests_per_minute":100,"route_limits":{"qualification":{"max_concurrency":1}}}' WHERE id=$1`, f.keyID); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/providers/" + f.providers[0]
+	provider := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	configuration := provider["configuration"].(map[string]any)
+	configuration["options"].(map[string]any)["limits"] = map[string]any{"max_concurrency": 1, "requests_per_minute": 100}
+	f.h.want(f.owner, "PATCH", path, map[string]any{"name": provider["name"], "configuration": configuration}, etagHeader(provider), 200)
+	f.publishResearch(t, []string{"search"})
+	response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200)
+	session := response.Header.Get("Mcp-Session-Id")
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	f.peer.mu.Lock()
+	f.peer.respond = func(w http.ResponseWriter, r *http.Request) {
+		var message struct{ Method string }
+		if err := json.NewDecoder(r.Body).Decode(&message); err != nil {
+			t.Error(err)
+			return
+		}
+		if message.Method == "notifications/cancelled" {
+			close(cancelled)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		close(started)
+		select {
+		case <-cancelled:
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"cancelled"}}`)
+		case <-r.Context().Done():
+		}
+	}
+	f.peer.mu.Unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, "POST", f.gateway.URL+"/code/qualification/mcp/search", strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webSearchPrime","arguments":{"query":"slow"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+f.key)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Mcp-Session-Id", session)
+	done := make(chan error, 1)
+	go func() {
+		response, err := http.DefaultClient.Do(request)
+		if err == nil {
+			defer response.Body.Close()
+			_, err = io.ReadAll(response.Body)
+			if err == nil && response.StatusCode != 200 {
+				err = fmt.Errorf("tool call status: %d", response.StatusCode)
+			}
+		}
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("tool call did not reach upstream")
+	}
+	// Work still needs its slot, while session-scoped control can reach it.
+	f.research(t, "POST", "search", f.key, session, researchList, 429)
+	f.research(t, "POST", "search", f.key, session, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`, 202)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

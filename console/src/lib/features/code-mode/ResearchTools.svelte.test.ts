@@ -34,6 +34,7 @@ const route: api.CodeRoute = {
 let host: HTMLDivElement;
 let client: QueryClient;
 let component: ReturnType<typeof mount>;
+let researchAccount: api.CodeAccount;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,26 +60,26 @@ beforeEach(() => {
     ],
     nextCursor: null
   });
+  researchAccount = {
+    id: accountId,
+    project_id: projectId,
+    provider_id: accountId,
+    credential_id: accountId,
+    principal: 'fixture',
+    name: 'Research subscription',
+    adapter: 'zai_coding',
+    enabled: true,
+    eligible: true,
+    research_eligible: true,
+    research_services: ['search', 'reader', 'zread'],
+    models: ['glm-5.3'],
+    health: 'unknown',
+    grant_state: 'current',
+    allowance: null,
+    etag: route.etag
+  };
   vi.mocked(api.listCodeAccounts).mockResolvedValue({
-    items: [
-      {
-        id: accountId,
-        project_id: projectId,
-        provider_id: accountId,
-        credential_id: accountId,
-        principal: 'fixture',
-        name: 'Research subscription',
-        adapter: 'zai_coding',
-        enabled: true,
-        eligible: true,
-        research_services: ['search', 'reader', 'zread'],
-        models: ['glm-5.3'],
-        health: 'unknown',
-        grant_state: 'current',
-        allowance: null,
-        etag: route.etag
-      }
-    ],
+    items: [researchAccount],
     nextCursor: null
   });
 });
@@ -106,40 +107,54 @@ async function click(name: string) {
   await settle();
 }
 
-it('loads pool accounts, preselects the sole eligible research account and saves services independently of models', async () => {
-  component = mount(ResearchConfigurationProbe, {
-    target: host,
-    props: { client, route }
-  });
-  flushSync();
-  await settle();
-  await click('Edit draft');
-  expect(api.listCodeAccounts).toHaveBeenCalledWith(
-    expect.objectContaining({ project_id: projectId }),
-    expect.any(AbortSignal)
-  );
-  host.querySelector<HTMLInputElement>('#code-research-enabled')!.click();
-  flushSync();
-  await settle();
-  expect(
-    host.querySelector<HTMLSelectElement>('#code-research-account')!.value
-  ).toBe(accountId);
-  host.querySelector<HTMLInputElement>('input[value="reader"]')!.click();
-  flushSync();
-  vi.mocked(api.saveCodeRoute).mockResolvedValue(route);
-  host
-    .querySelector('form')!
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await settle();
-  expect(api.saveCodeRoute).toHaveBeenCalledWith(
-    expect.objectContaining({
-      models: route.models,
-      tools: { account_id: accountId, services: ['search', 'zread'] }
-    }),
-    route,
-    expect.any(String)
-  );
-});
+it.each([true, false])(
+  'saves research independently of inference eligibility (%s)',
+  async (inferenceEligible) => {
+    researchAccount.eligible = inferenceEligible;
+    researchAccount.health = inferenceEligible ? 'unknown' : 'unavailable';
+    researchAccount.allowance = inferenceEligible
+      ? null
+      : {
+          remaining_tokens: 0,
+          remaining_requests: null,
+          remaining_percent: null,
+          resets_at: null,
+          observed_at: '2026-10-21T10:00:00Z'
+        };
+    component = mount(ResearchConfigurationProbe, {
+      target: host,
+      props: { client, route }
+    });
+    flushSync();
+    await settle();
+    await click('Edit draft');
+    expect(api.listCodeAccounts).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: projectId }),
+      expect.any(AbortSignal)
+    );
+    host.querySelector<HTMLInputElement>('#code-research-enabled')!.click();
+    flushSync();
+    await settle();
+    expect(
+      host.querySelector<HTMLSelectElement>('#code-research-account')!.value
+    ).toBe(accountId);
+    host.querySelector<HTMLInputElement>('input[value="reader"]')!.click();
+    flushSync();
+    vi.mocked(api.saveCodeRoute).mockResolvedValue(route);
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(api.saveCodeRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        models: route.models,
+        tools: { account_id: accountId, services: ['search', 'zread'] }
+      }),
+      route,
+      expect.any(String)
+    );
+  }
+);
 
 it('shows and copies every companion configuration file', async () => {
   const companion = '{"mcpServers":{"olp_reader":{"type":"http"}}}';

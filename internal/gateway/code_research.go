@@ -56,12 +56,6 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), researchTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
-	attempt, err := s.prepareResearch(r, release, route, service, authority)
-	if err != nil {
-		refuse(err)
-		return
-	}
-	defer attempt.finish(ctx)
 	session := r.Header.Get("Mcp-Session-Id")
 	for _, name := range []string{"Mcp-Session-Id", "Mcp-Protocol-Version"} {
 		if values := r.Header.Values(name); len(values) > 1 || len(values) == 1 && !coderesearch.ValidSession(values[0]) {
@@ -69,27 +63,8 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	lastEvent := ""
-	if values := r.Header.Values("Last-Event-Id"); len(values) != 0 {
-		if len(values) != 1 || r.Method != http.MethodGet || session == "" {
-			refuse(codemode.Refuse(400, "code_research_resume_invalid"))
-			return
-		}
-		lastEvent, err = coderesearch.OpenEventID(session, values[0], attempt.auth.Headers.Get("Authorization"))
-		if err != nil {
-			refuse(codemode.Refuse(400, "code_research_resume_invalid"))
-			return
-		}
-	}
-	upstreamSession := ""
-	if session != "" {
-		upstreamSession, err = s.CodeResearch.ResearchSession(ctx, session, attempt.binding)
-		if err != nil {
-			refuse(err)
-			return
-		}
-	}
 	var body []byte
+	var err error
 	method := ""
 	if r.Method == http.MethodPost {
 		media, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -118,9 +93,35 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	attempt, err := s.prepareResearch(r, release, route, service, authority, method == "notifications/cancelled")
+	if err != nil {
+		refuse(err)
+		return
+	}
+	defer attempt.finish(ctx)
 	if method != "initialize" && session == "" {
 		refuse(codemode.Refuse(400, "code_research_session_required"))
 		return
+	}
+	lastEvent := ""
+	if values := r.Header.Values("Last-Event-Id"); len(values) != 0 {
+		if len(values) != 1 || r.Method != http.MethodGet || session == "" {
+			refuse(codemode.Refuse(400, "code_research_resume_invalid"))
+			return
+		}
+		lastEvent, err = coderesearch.OpenEventID(session, values[0], attempt.auth.Headers.Get("Authorization"))
+		if err != nil {
+			refuse(codemode.Refuse(400, "code_research_resume_invalid"))
+			return
+		}
+	}
+	upstreamSession := ""
+	if session != "" {
+		upstreamSession, err = s.CodeResearch.ResearchSession(ctx, session, attempt.binding)
+		if err != nil {
+			refuse(err)
+			return
+		}
 	}
 	if r.Method == http.MethodDelete && upstreamSession == "" {
 		// Stateless vendors have no session to terminate. Retire the local

@@ -80,6 +80,9 @@ to appear in the route's model list.
 In the existing route editor, enable **Research tools**, select an eligible
 Z.ai global account from the route's pool, and choose **Search**, **Web reader**
 and/or **Repository research**. The sole qualifying account is preselected.
+Inference health cooldowns and exhausted coding allowances do not remove an
+otherwise enrolled research account; management reports `research_eligible`
+separately from inference `eligible`.
 Save and publish, then open **Client configuration**. Existing keys with the
 `inference` scope, route access and pool membership can use the enabled services;
 no model selection, conversation binding or separate MCP registration is needed.
@@ -155,8 +158,11 @@ ID from another key or session cannot resume a stream, including on stateless
 upstreams. OLP translates valid resume IDs back to native upstream IDs.
 Session state is tentative until a valid initialization result for the request
 reaches the client. Failed, malformed or interrupted handshakes release their
-session slots. SSE response headers are flushed immediately, including for idle
-streams that initially contain only heartbeat comments.
+session slots. A delayed handshake cannot retire sessions from a newer
+publication or credential generation. SSE response headers are flushed
+immediately, including for idle streams that initially contain only heartbeat
+comments; write deadlines apply while sending data, without shortening idle
+HTTP/2 streams.
 
 The proxy answers upstream [MCP pings](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/ping)
 locally after rechecking live authorization and the session's credential
@@ -171,6 +177,8 @@ native schemas, structured results, source references and tool errors pass
 through. Each request is bounded to two minutes, 1 MiB of input, 8 MiB of
 upstream output and 1 MiB per SSE event; installation and route body limits can
 lower the input limit. Key and connection request/concurrency limits also apply.
+Session-scoped cancellation notifications retain request-rate limits but do not
+need another concurrency slot while their tool call holds one.
 Research has no inference token usage or hard token reservation.
 
 Dispatched calls are never replayed or moved to another account. Service errors

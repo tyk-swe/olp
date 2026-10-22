@@ -83,6 +83,7 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 	if err := controller.Flush(); err != nil {
 		return false
 	}
+	_ = controller.SetWriteDeadline(time.Time{})
 	session := r.Header.Get("Mcp-Session-Id")
 	if session == "" {
 		session = w.Header().Get("Mcp-Session-Id")
@@ -131,6 +132,7 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 		if err = controller.Flush(); err != nil {
 			return initialized
 		}
+		_ = controller.SetWriteDeadline(time.Time{})
 		if forwarding.method == "initialize" && !frame.Control && coderesearch.Initialized([]byte(frame.Data), forwarding.requestID) {
 			initialized = true
 		}

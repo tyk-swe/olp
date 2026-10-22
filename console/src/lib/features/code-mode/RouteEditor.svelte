@@ -48,7 +48,7 @@
     accounts.filter(
       (account) =>
         account.project_id === projectId &&
-        account.eligible &&
+        account.research_eligible &&
         account.research_services?.length &&
         pools
           .find((pool) => pool.id === poolId)

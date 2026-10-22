@@ -5858,7 +5858,10 @@ type CodeAccount struct {
 	ProjectId    openapi_types.UUID                    `json:"project_id"`
 	ProviderId   openapi_types.UUID                    `json:"provider_id"`
 
-	// ResearchServices Research services supported by the enrolled profile; also requires current eligibility and route pool membership.
+	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
+	ResearchEligible *bool `json:"research_eligible,omitempty"`
+
+	// ResearchServices Research services supported by the enrolled profile; also requires research eligibility and route pool membership.
 	ResearchServices *[]CodeAccountResearchServices `json:"research_services,omitempty"`
 }
 

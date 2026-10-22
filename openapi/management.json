@@ -14897,6 +14897,10 @@
               "null"
             ]
           },
+          "research_eligible": {
+            "type": "boolean",
+            "description": "Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required."
+          },
           "research_services": {
             "type": "array",
             "uniqueItems": true,
@@ -14908,7 +14912,7 @@
                 "zread"
               ]
             },
-            "description": "Research services supported by the enrolled profile; also requires current eligibility and route pool membership."
+            "description": "Research services supported by the enrolled profile; also requires research eligibility and route pool membership."
           }
         },
         "required": [
