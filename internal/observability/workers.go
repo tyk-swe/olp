@@ -28,6 +28,7 @@ var WorkerTasks = []WorkerTask{
 	{Name: string(usage.TaskBatchSettlement), StaleAfter: 180},
 	{Name: string(usage.TaskMaintenance), StaleAfter: 180},
 	{Name: string(usage.TaskCostReconciliation), StaleAfter: 180},
+	{Name: string(usage.TaskExecutionDebits), StaleAfter: 180},
 	{Name: string(usage.TaskNotificationDelivery), StaleAfter: 180},
 	{Name: string(usage.TaskManagedExportDelivery), StaleAfter: 180},
 	{Name: string(usage.TaskGrantRefresh), StaleAfter: 20},
@@ -182,7 +183,7 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 		switch task.Name {
 		case string(usage.TaskRequestMetadataConsumer), string(usage.TaskEpochDetection),
 			string(usage.TaskMediaReconciliation), string(usage.TaskBatchSettlement), string(usage.TaskMaintenance),
-			string(usage.TaskCostReconciliation), string(usage.TaskNotificationDelivery), string(usage.TaskExportDelivery), string(usage.TaskManagedExportDelivery),
+			string(usage.TaskCostReconciliation), string(usage.TaskExecutionDebits), string(usage.TaskNotificationDelivery), string(usage.TaskExportDelivery), string(usage.TaskManagedExportDelivery),
 			string(usage.TaskGrantRefresh), string(usage.TaskHealthProbes), string(usage.TaskBillingImport), string(usage.TaskFocusExport):
 		default:
 			return nil, fmt.Errorf("stored worker task %q is invalid", task.Name)

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,9 @@ import (
 type DebitStore struct {
 	Pool    *pgxpool.Pool
 	Limiter *Limiter
+
+	reconcileMu    sync.Mutex
+	reconcileAfter string
 }
 
 func lockDebitOwners(ctx context.Context, tx pgx.Tx, owners []DebitOwner) error {

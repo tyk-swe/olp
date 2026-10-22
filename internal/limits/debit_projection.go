@@ -184,13 +184,22 @@ func (l *Limiter) verifyDurableCost(ctx context.Context, r Request) error {
 	return ErrUnexpectedResponse
 }
 
-// ReconcileDebits refreshes existing projections and fences abandoned prepared
-// work. It has no remote IO and cannot resume a model/tool/agent step.
+// ReconcileDebits refreshes a bounded batch of existing projections and fences
+// abandoned prepared work. A store retains its cursor between worker passes,
+// including failed attempts, so slow owners cannot starve the rest of the ledger.
+// It cannot resume a model/tool/agent step.
 func (s *DebitStore) ReconcileDebits(ctx context.Context) error {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
 	if _, err := s.RecoverPrepared(ctx, 256); err != nil {
 		return err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT owner_id::text FROM olp.execution_debit_versions ORDER BY owner_id`)
+	after := s.reconcileAfter
+	if after == "" {
+		after = "00000000-0000-0000-0000-000000000000"
+	}
+	const batchSize = 128
+	rows, err := s.Pool.Query(ctx, `SELECT owner_id::text FROM olp.execution_debit_versions WHERE owner_id>$1::uuid ORDER BY owner_id LIMIT $2`, after, batchSize)
 	if err != nil {
 		return err
 	}
@@ -208,9 +217,17 @@ func (s *DebitStore) ReconcileDebits(ctx context.Context) error {
 		return err
 	}
 	for _, owner := range owners {
-		if err = s.SyncOwner(ctx, owner); err != nil && !errors.Is(err, ErrUninitializedCost) {
+		if err = ctx.Err(); err != nil {
 			return err
 		}
+		err = s.SyncOwner(ctx, owner)
+		s.reconcileAfter = owner
+		if err != nil && !errors.Is(err, ErrUninitializedCost) {
+			return err
+		}
+	}
+	if len(owners) < batchSize {
+		s.reconcileAfter = ""
 	}
 	return nil
 }

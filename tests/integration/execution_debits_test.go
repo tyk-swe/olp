@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +15,85 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestExecutionDebitReconciliationContinuesAcrossBatchesAndFailures(t *testing.T) {
+	f, store, _ := debitFixture(t)
+	valkey, prefix, _ := acctKeyspace(t)
+	store.Limiter, _ = limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	acctExec(t, f.Pool, `INSERT INTO olp.execution_debit_versions(owner_id,version)
+ SELECT ('00000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,1 FROM generate_series(1,128) i`)
+	acctExec(t, f.Pool, `INSERT INTO olp.execution_debit_versions(owner_id,version) VALUES($1,1)`, f.Key)
+	projection := prefix + "{" + strings.ReplaceAll(f.Key, "-", "") + "}:cost:durable"
+	exists := func() bool {
+		t.Helper()
+		value, err := valkey.Do(t.Context(), "EXISTS", projection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprint(value) == "1"
+	}
+	if err := store.ReconcileDebits(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if exists() {
+		t.Fatal("reconciliation did not stop at its bounded owner batch")
+	}
+	if err := store.ReconcileDebits(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !exists() {
+		t.Fatal("next pass restarted instead of reaching the later owner")
+	}
+	if _, err := valkey.Do(t.Context(), "DEL", projection); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := f.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(t.Context())
+	if _, err = lock.Exec(t.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('olp:execution-debit:'||$1,0))`, "00000000-0000-4000-8000-000000000001"); err != nil {
+		t.Fatal(err)
+	}
+	pass, cancel := context.WithTimeout(t.Context(), time.Second)
+	err = store.ReconcileDebits(pass)
+	cancel()
+	if err == nil {
+		t.Fatal("blocked owner did not fail the timed reconciliation pass")
+	}
+	if err = lock.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ReconcileDebits(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !exists() {
+		t.Fatal("failed owner starved later owners on the next pass")
+	}
+}
+
+func TestExecutionDebitWorkerHealthIncludesFailures(t *testing.T) {
+	pool := acctPool(t)
+	if err := usage.CheckpointTask(t.Context(), pool, usage.TaskExecutionDebits, usage.OutcomeFailure, false); err != nil {
+		t.Fatal(err)
+	}
+	health, err := observability.ReadWorkerTaskHealth(t.Context(), pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range health.Tasks {
+		if task.Task == string(usage.TaskExecutionDebits) {
+			if task.State != observability.TaskStateStale || task.FailuresTotal != 1 {
+				t.Fatalf("debit failure was hidden from worker health: %+v", task)
+			}
+			return
+		}
+	}
+	t.Fatal("debit reconciliation was absent from worker health")
+}
 
 func debitFixture(t *testing.T) (acctFixture, *limits.DebitStore, string) {
 	t.Helper()
