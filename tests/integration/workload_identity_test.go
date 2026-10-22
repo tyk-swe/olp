@@ -29,7 +29,7 @@ func TestWorkloadConfigurationPublishesBeforeGrantingResources(t *testing.T) {
 	owner := h.owner()
 	project := createProject(h, owner, "Published workloads")
 	workloadProject(t, h, owner, project, map[string]any{})
-	newWorkloadFixture(t, h, owner, project, []string{})
+	fixture := newWorkloadFixture(t, h, owner, project, []string{})
 	created := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "workflow", "toolset": map[string]any{"tools": []any{}}}, idem("workload-toolset"), 201)
 	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	document := exported["document"].(map[string]any)
@@ -48,6 +48,42 @@ func TestWorkloadConfigurationPublishesBeforeGrantingResources(t *testing.T) {
 	read := h.want(owner, "GET", "/api/v1/toolsets/"+created["id"].(string), nil, nil, 200)
 	if read["revision_id"] == nil {
 		t.Fatal("workload grant committed without its publication")
+	}
+	h.want(owner, "DELETE", "/api/v1/toolsets/"+created["id"].(string), nil, withMatch(read, idem("retire-workload-toolset")), 204)
+	currentIssuer := h.want(owner, "GET", "/api/v1/workload-issuers/"+fixture.issuer["id"].(string), nil, nil, 200)
+	inputMapping := fixture.input["mappings"].([]any)[0].(map[string]any)
+	inputMapping["scopes"] = []string{"tools"}
+	inputMapping["allowed_toolsets"] = []string{created["id"].(string)}
+	fixture.input["disabled_key_ids"] = []string{"current"}
+	fixture.endpoint.Close()
+	updated := h.want(owner, "PUT", "/api/v1/workload-issuers/"+fixture.issuer["id"].(string), fixture.input, etagHeader(currentIssuer), 200)
+	inputMapping["allowed_toolsets"] = []string{}
+	updated = h.want(owner, "PUT", "/api/v1/workload-issuers/"+fixture.issuer["id"].(string), fixture.input, etagHeader(updated), 200)
+	inputMapping["allowed_toolsets"] = []string{created["id"].(string)}
+	h.want(owner, "PUT", "/api/v1/workload-issuers/"+fixture.issuer["id"].(string), fixture.input, etagHeader(updated), 422)
+}
+
+func TestWorkloadConfigurationValidatesFinalTemplateReferences(t *testing.T) {
+	for _, mode := range []string{"disable", "migrate"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAccessHarness(t)
+			owner := h.owner()
+			project := createProject(h, owner, "Workload template promotion")
+			workloadProject(t, h, owner, project, map[string]any{})
+			newWorkloadFixture(t, h, owner, project, []string{})
+			exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+			document := exported["document"].(map[string]any)
+			projectEntry := document["projects"].([]any)[0].(map[string]any)
+			issuer := document["workload_issuers"].([]any)[0].(map[string]any)
+			if mode == "disable" {
+				issuer["enabled"] = false
+				projectEntry["limit_templates"] = map[string]any{}
+			} else {
+				issuer["mappings"].([]any)[0].(map[string]any)["limit_template"] = "replacement"
+				projectEntry["limit_templates"] = map[string]any{"replacement": map[string]any{"requests_per_minute": 100}}
+			}
+			h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("workload-template-"+mode), 200)
+		})
 	}
 }
 

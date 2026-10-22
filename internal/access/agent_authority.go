@@ -8,6 +8,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func addedKeyAgentResources(policy, previous KeyPolicy) KeyPolicy {
+	policy.AllowedToolsets = slices.DeleteFunc(slices.Clone(policy.AllowedToolsets), func(id string) bool { return slices.Contains(previous.AllowedToolsets, id) })
+	policy.AllowedAgents = slices.DeleteFunc(slices.Clone(policy.AllowedAgents), func(id string) bool { return slices.Contains(previous.AllowedAgents, id) })
+	return policy
+}
+
 func checkKeyAgentResources(ctx context.Context, q Queryer, policy KeyPolicy, project *string) error {
 	for field, ids := range map[string][]string{"allowed_toolsets": policy.AllowedToolsets, "allowed_agents": policy.AllowedAgents} {
 		if len(ids) == 0 {

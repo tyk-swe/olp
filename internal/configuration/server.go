@@ -222,6 +222,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err = s.applyWorkloadIssuers(r.Context(), tx, p, doc); err != nil {
 		return access.Reply{}, err
 	}
+	if err = validateAppliedTemplateReferences(r.Context(), tx, doc); err != nil {
+		return access.Reply{}, err
+	}
 	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {
 		return access.Reply{}, err
 	}

@@ -456,9 +456,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, projectID); err != nil {
 		return Reply{}, err
 	}
-	resources := input.KeyPolicy
-	resources.AllowedToolsets = slices.DeleteFunc(slices.Clone(input.AllowedToolsets), func(id string) bool { return slices.Contains(previous.AllowedToolsets, id) })
-	resources.AllowedAgents = slices.DeleteFunc(slices.Clone(input.AllowedAgents), func(id string) bool { return slices.Contains(previous.AllowedAgents, id) })
+	resources := addedKeyAgentResources(input.KeyPolicy, previous)
 	if err = checkKeyAgentResources(r.Context(), tx, resources, projectID); err != nil {
 		return Reply{}, err
 	}
