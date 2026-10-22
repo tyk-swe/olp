@@ -183,8 +183,9 @@ lower the input limit. Key and connection request/concurrency limits also apply.
 GET notification streams use separate concurrency counters per service at the
 key, group, route, end-user and provider boundaries. They do not occupy tool-call
 slots, and request-rate counters remain shared with other research requests.
-Session-scoped cancellation notifications retain request-rate limits but do not
-need another concurrency slot while their tool call holds one.
+Session-scoped lifecycle and progress notifications retain request-rate limits
+without needing another work slot. This lets initialized notifications complete
+an open SSE handshake and cancellation stop an active tool call.
 Research has no inference token usage, token-rate reservation or hard token
 reservation.
 

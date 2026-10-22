@@ -25,7 +25,7 @@ type researchAttempt struct {
 	dispatched           bool
 }
 
-func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, route codemode.Route, service string, authority access.Authority, cancellation bool) (*researchAttempt, error) {
+func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, route codemode.Route, service string, authority access.Authority, notification bool) (*researchAttempt, error) {
 	ctx := r.Context()
 	fresh, account, err := s.researchAuthority(r, route, service, authority)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	}()
 	var failure *Error
 	streamAuthority := fresh
-	control := cancellation || r.Method == http.MethodGet
+	control := notification || r.Method == http.MethodGet
 	fresh = researchRateAuthority(fresh, control)
 	a.lease, failure = s.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
 	if failure != nil {
@@ -79,8 +79,8 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	return a, nil
 }
 
-// Research consumes requests, without inference tokens. Cancellation bypasses
-// work concurrency; GET streams reserve separate concurrency below.
+// Research consumes requests, without inference tokens. Lifecycle notifications
+// bypass work concurrency; GET streams reserve separate concurrency below.
 func researchRateAuthority(authority access.Authority, control bool) access.Authority {
 	// This also clones the nested route and end-user policies before editing.
 	authority = withoutCostBudgets(authority)

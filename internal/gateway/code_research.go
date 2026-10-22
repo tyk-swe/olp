@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
@@ -93,7 +94,9 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	attempt, err := s.prepareResearch(r, release, route, service, authority, method == "notifications/cancelled")
+	// Request has already restricted notifications to the supported lifecycle
+	// and progress methods. They cannot start tool work.
+	attempt, err := s.prepareResearch(r, release, route, service, authority, strings.HasPrefix(method, "notifications/"))
 	if err != nil {
 		refuse(err)
 		return
