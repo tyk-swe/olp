@@ -274,7 +274,7 @@ func (l *Limiter) ApplyCostSnapshot(ctx context.Context, s CostSnapshot) (bool, 
 		requestID = canonicalUUID(s.RequestID)
 	}
 	args := []string{strconv.FormatInt(s.DailyWindowID, 10), s.DailyAccrued, strconv.FormatInt(s.MonthlyWindowID, 10), s.MonthlyAccrued, strconv.FormatInt(s.UnpricedAttempts, 10), "0", requestID, strconv.FormatInt(s.WeeklyWindowID, 10), s.WeeklyAccrued}
-	if !s.DailyStart.IsZero() && (s.durable != nil || s.DailyWindowID == s.DailyStart.Unix() || s.MonthlyWindowID == s.MonthlyStart.Unix() || s.WeeklyWindowID == s.WeeklyStart.Unix()) {
+	if !s.DailyStart.IsZero() {
 		for _, instant := range []time.Time{s.DailyStart, s.DailyEnd, s.MonthlyStart, s.MonthlyEnd, s.WeeklyStart, s.WeeklyEnd} {
 			args = append(args, strconv.FormatInt(instant.UnixMilli(), 10))
 		}

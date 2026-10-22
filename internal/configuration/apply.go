@@ -118,9 +118,6 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	if err := s.applySCIMMappings(ctx, tx, p, doc, projectIDs); err != nil {
 		return err
 	}
-	if err := s.applyWorkloadIssuers(ctx, tx, p, doc, projectIDs); err != nil {
-		return err
-	}
 	for _, project := range doc.Projects {
 		var templates access.LimitTemplates
 		id := projectIDs[strings.ToLower(project.Name)]

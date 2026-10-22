@@ -224,7 +224,27 @@ func (s *Server) prepareWorkloadIssuers(ctx context.Context, p access.Principal,
 	}
 	return nil
 }
-func (s *Server) applyWorkloadIssuers(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, projects map[string]string) error {
+func (s *Server) applyWorkloadIssuers(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document) error {
+	if len(doc.WorkloadIssuers) == 0 {
+		return nil
+	}
+	projects := map[string]string{}
+	rows, err := tx.Query(ctx, "SELECT id::text,name FROM olp.projects")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, name string
+		if err = rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return err
+		}
+		projects[strings.ToLower(name)] = id
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
 	for _, e := range doc.WorkloadIssuers {
 		c, err := e.config(projects)
 		if err != nil {

@@ -102,6 +102,36 @@ func TestAgentPromptLabelWithoutCurrentRevision(t *testing.T) {
 	}
 }
 
+func TestAgentPublicationKeyGrantsRemainVisible(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Key grants")
+	created := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "empty", "toolset": map[string]any{"tools": []any{}}}, idem("grants-toolset"), 201)
+	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+created["id"].(string)+"/publish", nil, withMatch(created, idem("grants-publish")), 200)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Tool caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{created["id"].(string)}}, idem("grants-key"), 201)
+	path := "/api/v1/api-keys/" + key["id"].(string)
+	check := func(read map[string]any) {
+		t.Helper()
+		tools, toolsOK := read["allowed_toolsets"].([]any)
+		agents, agentsOK := read["allowed_agents"].([]any)
+		if !toolsOK || len(tools) != 1 || tools[0] != created["id"] || !agentsOK || len(agents) != 0 {
+			t.Fatalf("resource grants missing from key response: %v", read)
+		}
+	}
+	read := h.want(owner, http.MethodGet, path, nil, nil, 200)
+	check(read)
+	h.want(owner, http.MethodPatch, path, map[string]any{"name": "Renamed caller"}, withMatch(read, idem("grants-rename")), 200)
+	check(h.want(owner, http.MethodGet, path, nil, nil, 200))
+	for _, item := range h.want(owner, http.MethodGet, "/api/v1/api-keys", nil, nil, 200)["items"].([]any) {
+		read := item.(map[string]any)
+		if read["id"] == key["id"] {
+			check(read)
+			return
+		}
+	}
+	t.Fatal("created key missing from list")
+}
+
 func TestAgentApprovalConsumptionCommitsWithDispatch(t *testing.T) {
 	f, store, project := debitFixture(t)
 	server, serverRevision := acctID(t), acctID(t)

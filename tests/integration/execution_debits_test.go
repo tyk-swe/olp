@@ -61,6 +61,43 @@ func prepareDebit(t *testing.T, f acctFixture, s *limits.DebitStore, i limits.De
 	}
 }
 
+func TestExecutionDebitOrdinaryUTCSnapshot(t *testing.T) {
+	f, store, _ := debitFixture(t)
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter.UseDurableDebits(f.Pool)
+	store.Limiter = limiter
+	if err = store.SyncOwner(t.Context(), f.Key); err != nil {
+		t.Fatal(err)
+	}
+	cap, requestID := "1", acctID(t)
+	if _, err = limiter.Reserve(t.Context(), limits.Request{LookupID: f.Key, CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.4", RequestID: requestID, LeaseTTL: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	w := limits.BudgetWindows(time.Now())
+	snapshot := limits.CostSnapshot{
+		CostOwnerID: f.Key, RequestID: requestID,
+		DailyWindowID: w.DailyID, DailyStart: w.DailyStart, DailyEnd: w.DailyEnd, DailyAccrued: "0.75",
+		MonthlyWindowID: w.MonthlyID, MonthlyStart: w.MonthlyStart, MonthlyEnd: w.MonthlyEnd, MonthlyAccrued: "0.75",
+		WeeklyWindowID: w.WeeklyID, WeeklyStart: w.WeeklyStart, WeeklyEnd: w.WeeklyEnd, WeeklyAccrued: "0.75",
+	}
+	day, month, err := limiter.ApplyCostSnapshot(t.Context(), snapshot)
+	if err != nil || !day || !month {
+		t.Fatalf("ordinary UTC spend did not update durable-initialized balances: day=%v month=%v error=%v", day, month, err)
+	}
+	if reserved, err := limiter.Reserved(t.Context(), f.Key); err != nil || reserved != "0" {
+		t.Fatalf("settled reservation remains: %s %v", reserved, err)
+	}
+	_, err = limiter.Reserve(t.Context(), limits.Request{LookupID: f.Key, CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.3", RequestID: acctID(t), LeaseTTL: time.Minute})
+	var exceeded *limits.ExceededError
+	if !errors.As(err, &exceeded) {
+		t.Fatalf("ordinary spend was omitted from admission: %v", err)
+	}
+}
+
 func TestExecutionDebitFencesRecoveryAndDurableProjection(t *testing.T) {
 	f, s, project := debitFixture(t)
 	valkey, prefix, _ := acctKeyspace(t)

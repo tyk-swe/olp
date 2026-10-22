@@ -218,6 +218,10 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err = s.applyAgentPublications(r.Context(), tx, p, doc, bindings); err != nil {
 		return access.Reply{}, err
 	}
+	// Workload grants may reference resources published by this same apply.
+	if err = s.applyWorkloadIssuers(r.Context(), tx, p, doc); err != nil {
+		return access.Reply{}, err
+	}
 	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {
 		return access.Reply{}, err
 	}

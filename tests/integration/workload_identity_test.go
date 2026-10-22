@@ -24,6 +24,33 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 )
 
+func TestWorkloadConfigurationPublishesBeforeGrantingResources(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Published workloads")
+	workloadProject(t, h, owner, project, map[string]any{})
+	newWorkloadFixture(t, h, owner, project, []string{})
+	created := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "workflow", "toolset": map[string]any{"tools": []any{}}}, idem("workload-toolset"), 201)
+	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	document := exported["document"].(map[string]any)
+	publication := document["agent_publications"].([]any)[0].(map[string]any)
+	publication["published"] = publication["draft"]
+	issuer := document["workload_issuers"].([]any)[0].(map[string]any)
+	mapping := issuer["mappings"].([]any)[0].(map[string]any)
+	mapping["scopes"] = []string{"tools"}
+	mapping["allowed_toolsets"] = []string{created["id"].(string)}
+	body := map[string]any{"document": document}
+	plan := h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	if len(plan["blockers"].([]any)) != 0 || len(plan["conflicts"].([]any)) != 0 {
+		t.Fatalf("combined publication and workload promotion cannot be planned: %v", plan)
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("workload-publication-apply"), 200)
+	read := h.want(owner, "GET", "/api/v1/toolsets/"+created["id"].(string), nil, nil, 200)
+	if read["revision_id"] == nil {
+		t.Fatal("workload grant committed without its publication")
+	}
+}
+
 func TestWorkloadIdentityMapsAndAccountsWithoutRetainingCredentials(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
