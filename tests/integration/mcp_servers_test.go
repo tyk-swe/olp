@@ -79,7 +79,8 @@ func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
 	server["enabled"] = true
 	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("mcp-authority-enable"), 200)
 	serverID := created["id"].(string)
-	tool := agentcontract.Tool{ServerID: serverID, RevisionID: created["revision_id"].(string), CatalogDigest: created["catalog"].(map[string]any)["digest"].(string), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	current := h.want(owner, "GET", "/api/v1/mcp-servers/"+serverID, nil, nil, 200)
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: current["revision_id"].(string), CatalogDigest: current["catalog"].(map[string]any)["digest"].(string), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
 	draft := map[string]any{"project_id": project, "name": "Retained toolset", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}
 	toolset := h.want(owner, "POST", "/api/v1/toolsets", draft, idem("mcp-history-toolset"), 201)
 	path := "/api/v1/toolsets/" + toolset["id"].(string)
