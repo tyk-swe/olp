@@ -102,7 +102,7 @@ func (f *codingPlanFixture) publishResearch(t *testing.T, services []string) {
 	f.h.refresh()
 }
 
-func (f *codingPlanFixture) research(t *testing.T, verb, service, key, session, body string, status int) (*http.Response, string) {
+func (f *codingPlanFixture) research(t *testing.T, verb, service, key, session, body string, status int, endUser ...string) (*http.Response, string) {
 	t.Helper()
 	r, err := http.NewRequestWithContext(t.Context(), verb, f.gateway.URL+"/code/qualification/mcp/"+service, strings.NewReader(body))
 	if err != nil {
@@ -111,6 +111,9 @@ func (f *codingPlanFixture) research(t *testing.T, verb, service, key, session, 
 	r.Header.Set("Authorization", "Bearer "+key)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Mcp-Protocol-Version", "2025-11-25")
+	if len(endUser) > 0 {
+		r.Header.Set("X-OLP-End-User", endUser[0])
+	}
 	if session != "" {
 		r.Header.Set("Mcp-Session-Id", session)
 	}

@@ -11,14 +11,118 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/resources"
 )
+
+func TestCodeResearchIgnoresInferenceTokenRates(t *testing.T) {
+	f := researchFixture(t)
+	_, _, limiter := limSetup(t, "research-token-rates")
+	f.h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
+	digest := access.DigestEndUser(f.h.Server.Auth, &f.project, "research-user")
+	endUsers := map[string]any{"defaults": map[string]any{"tokens_per_minute": 1000}, "overrides": map[string]any{digest: map[string]any{"tokens_per_minute": 2000}}}
+	policy, _ := json.Marshal(map[string]any{"tokens_per_minute": 1000, "requests_per_minute": 100, "route_limits": map[string]any{"qualification": map[string]any{"tokens_per_minute": 1000}}, "end_user_source": "header", "end_user_policy": endUsers})
+	group := f.h.want(f.owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "Research token group", "project_id": f.project, "tokens_per_minute": 1000}, idem("research-token-group"), 201)
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET budget_group_id=$2,policy=policy||$3::jsonb WHERE id=$1`, f.keyID, group["id"], policy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.projects SET end_user_policy=$2 WHERE id=$1`, f.project, endUsers); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/providers/" + f.providers[0]
+	provider := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	configuration := provider["configuration"].(map[string]any)
+	configuration["options"].(map[string]any)["limits"] = map[string]any{"tokens_per_minute": 1000}
+	f.h.want(f.owner, "PATCH", path, map[string]any{"name": provider["name"], "configuration": configuration}, etagHeader(provider), 200)
+	f.publishResearch(t, []string{"search"})
+	response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200, "research-user")
+	session := response.Header.Get("Mcp-Session-Id")
+	for _, user := range []string{"research-user", "default-user"} {
+		// Cover end-user overrides as well as defaults at both boundaries.
+		f.research(t, "POST", "search", f.key, session, researchList, 200, user)
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{requests_per_minute}','1') WHERE id=$1`, f.keyID); err != nil {
+		t.Fatal(err)
+	}
+	f.research(t, "POST", "search", f.key, session, researchList, 429, "research-user")
+}
+
+func TestCodeResearchServerPingsRespectLiveEndUserBlocks(t *testing.T) {
+	for _, boundary := range []string{"key", "project"} {
+		t.Run(boundary, func(t *testing.T) {
+			f := researchFixture(t)
+			digest := access.DigestEndUser(f.h.Server.Auth, &f.project, "research-user")
+			policy := map[string]any{"defaults": map[string]any{"tokens_per_minute": 1000}}
+			if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=policy||'{"end_user_source":"header"}' WHERE id=$1`, f.keyID); err != nil {
+				t.Fatal(err)
+			}
+			setPolicy := func() {
+				t.Helper()
+				var err error
+				if boundary == "key" {
+					_, err = f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{end_user_policy}',$2) WHERE id=$1`, f.keyID, policy)
+				} else {
+					_, err = f.h.Pool.Exec(t.Context(), `UPDATE olp.projects SET end_user_policy=$2 WHERE id=$1`, f.project, policy)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			setPolicy()
+			response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200, "research-user")
+			session := response.Header.Get("Mcp-Session-Id")
+			trigger := make(chan struct{})
+			var answered atomic.Int32
+			f.peer.mu.Lock()
+			f.peer.respond = func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					answered.Add(1)
+					w.WriteHeader(http.StatusAccepted)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, ": heartbeat\n\n")
+				w.(http.Flusher).Flush()
+				select {
+				case <-trigger:
+				case <-r.Context().Done():
+					return
+				}
+				fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":\"blocked-user-ping\",\"method\":\"ping\"}\n\n")
+				w.(http.Flusher).Flush()
+			}
+			f.peer.mu.Unlock()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			request, err := http.NewRequestWithContext(ctx, "GET", f.gateway.URL+"/code/qualification/mcp/search", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+f.key)
+			request.Header.Set("Mcp-Session-Id", session)
+			request.Header.Set("X-OLP-End-User", "research-user")
+			stream, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Body.Close()
+			policy["blocked"] = []string{digest}
+			setPolicy()
+			close(trigger)
+			body, err := io.ReadAll(stream.Body)
+			if err != nil || answered.Load() != 0 || strings.Contains(string(body), "blocked-user-ping") {
+				t.Fatalf("ping bypassed %s end-user block: replies=%d body=%s err=%v", boundary, answered.Load(), body, err)
+			}
+		})
+	}
+}
 
 func TestCodeResearchStaleInitializationPreservesCurrentSessions(t *testing.T) {
 	for _, change := range []string{"publication", "generation", "credential"} {
@@ -96,13 +200,13 @@ func TestCodeResearchCancellationBypassesWorkConcurrency(t *testing.T) {
 	f.h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	// Exercise key, route and provider concurrency together. The frozen provider
 	// connection must enforce the same one-slot limit as the live key policies.
-	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=policy||'{"max_concurrency":1,"requests_per_minute":100,"route_limits":{"qualification":{"max_concurrency":1}}}' WHERE id=$1`, f.keyID); err != nil {
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=policy||'{"max_concurrency":1,"requests_per_minute":100,"tokens_per_minute":1000,"route_limits":{"qualification":{"max_concurrency":1,"tokens_per_minute":1000}}}' WHERE id=$1`, f.keyID); err != nil {
 		t.Fatal(err)
 	}
 	path := "/api/v1/providers/" + f.providers[0]
 	provider := f.h.want(f.owner, "GET", path, nil, nil, 200)
 	configuration := provider["configuration"].(map[string]any)
-	configuration["options"].(map[string]any)["limits"] = map[string]any{"max_concurrency": 1, "requests_per_minute": 100}
+	configuration["options"].(map[string]any)["limits"] = map[string]any{"max_concurrency": 1, "requests_per_minute": 100, "tokens_per_minute": 1000}
 	f.h.want(f.owner, "PATCH", path, map[string]any{"name": provider["name"], "configuration": configuration}, etagHeader(provider), 200)
 	f.publishResearch(t, []string{"search"})
 	response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200)

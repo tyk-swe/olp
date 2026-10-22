@@ -38,9 +38,7 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 		}
 	}()
 	var failure *Error
-	if cancellation {
-		fresh = researchCancellationAuthority(fresh)
-	}
+	fresh = researchRateAuthority(fresh, cancellation)
 	a.lease, failure = s.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
@@ -51,9 +49,12 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	quota := a.config
-	if cancellation && quota.Options.Limits != nil {
+	if quota.Options.Limits != nil {
 		copy := *quota.Options.Limits
-		copy.MaxConcurrency = nil
+		copy.TokensPerMinute = nil
+		if cancellation {
+			copy.MaxConcurrency = nil
+		}
 		quota.Options.Limits = &copy
 	}
 	a.providerLease, failure = s.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
@@ -69,22 +70,35 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	return a, nil
 }
 
-// Cancellation cannot start work. Keep its rate and identity policies, but do
-// not make it wait for the concurrency slots held by the work it must stop.
-func researchCancellationAuthority(authority access.Authority) access.Authority {
+// Research consumes requests, without inference tokens. Cancellation also
+// bypasses the concurrency slots held by the work it must stop.
+func researchRateAuthority(authority access.Authority, cancellation bool) access.Authority {
 	// This also clones the nested route and end-user policies before editing.
 	authority = withoutCostBudgets(authority)
-	authority.Policy.MaxConcurrency = nil
-	authority.BudgetGroupConcurrency = nil
+	authority.Policy.TokensPerMinute = nil
+	authority.BudgetGroupTPM = nil
+	if cancellation {
+		authority.Policy.MaxConcurrency = nil
+		authority.BudgetGroupConcurrency = nil
+	}
 	for slug, policy := range authority.Policy.RouteLimits {
-		policy.MaxConcurrency = nil
+		policy.TokensPerMinute = nil
+		if cancellation {
+			policy.MaxConcurrency = nil
+		}
 		authority.Policy.RouteLimits[slug] = policy
 	}
 	for _, policy := range []*access.EndUserPolicy{authority.Policy.EndUserPolicy, authority.ProjectEndUserPolicy} {
 		if policy != nil {
-			policy.Defaults.MaxConcurrency = nil
+			policy.Defaults.TokensPerMinute = nil
+			if cancellation {
+				policy.Defaults.MaxConcurrency = nil
+			}
 			for digest, limits := range policy.Overrides {
-				limits.MaxConcurrency = nil
+				limits.TokensPerMinute = nil
+				if cancellation {
+					limits.MaxConcurrency = nil
+				}
 				policy.Overrides[digest] = limits
 			}
 		}
@@ -110,6 +124,9 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	}
 	if failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_permission_denied")
+	}
+	if !fresh.AllowsEndUser(fresh.EndUserDigest) {
+		return fresh, account, codemode.Refuse(403, "code_permission_denied")
 	}
 	if _, failure = s.parseAttribution(r, fresh); failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_invalid_attribution")

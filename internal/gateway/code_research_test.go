@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,31 @@ import (
 
 	"github.com/tyk-swe/olp/internal/coderesearch"
 )
+
+func TestResearchSSEKeepalivesReachIdleClients(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		go func() {
+			defer writer.Close()
+			io.WriteString(writer, ": heartbeat\n\n")
+			<-r.Context().Done()
+		}()
+		response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}
+		(&Server{}).copyResearchResponse(w, r, response, researchResponse{service: "search"})
+	}))
+	defer server.Close()
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	line, err := bufio.NewReader(response.Body).ReadString('\n')
+	if err != nil || line != ": heartbeat\n" {
+		t.Fatalf("idle keepalive: %q %v", line, err)
+	}
+}
 
 func TestResearchHTTP2StreamSurvivesIdleWriteDeadlines(t *testing.T) {
 	const message = `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":1,"progress":1}}`

@@ -50,9 +50,13 @@ func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
 
 // A Decoder reads the events of a stream one at a time, as Decode does.
 type Decoder struct {
-	scanner *bufio.Scanner
-	id      *string
-	err     error
+	// OnComment, when set, receives each bounded comment line including its
+	// leading colon. Returning an error stops decoding. Other consumers ignore
+	// comments by default, while transports can forward keepalives promptly.
+	OnComment func(string) error
+	scanner   *bufio.Scanner
+	id        *string
+	err       error
 }
 
 // NewDecoder reads events from r, each within maxEventBytes of the wire.
@@ -107,6 +111,12 @@ func (d *Decoder) NextFrame() (Frame, error) {
 			continue
 		}
 		if strings.HasPrefix(line, ":") {
+			if d.OnComment != nil {
+				if err := d.OnComment(line); err != nil {
+					d.err = err
+					return Frame{}, err
+				}
+			}
 			continue
 		}
 		name, value, _ := strings.Cut(line, ":")

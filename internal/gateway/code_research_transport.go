@@ -84,6 +84,17 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 		return false
 	}
 	_ = controller.SetWriteDeadline(time.Time{})
+	write := func(raw []byte) error {
+		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		defer controller.SetWriteDeadline(time.Time{})
+		if n, err := w.Write(raw); err != nil {
+			return err
+		} else if n != len(raw) {
+			return io.ErrShortWrite
+		}
+		return controller.Flush()
+	}
+	decoder.OnComment = func(line string) error { return write([]byte(line + "\n")) }
 	session := r.Header.Get("Mcp-Session-Id")
 	if session == "" {
 		session = w.Header().Get("Mcp-Session-Id")
@@ -124,15 +135,9 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 			}
 			frame.ID = &sealed
 		}
-		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-		encoded := frame.Encode()
-		if n, err := w.Write(encoded); err != nil || n != len(encoded) {
+		if err = write(frame.Encode()); err != nil {
 			return initialized
 		}
-		if err = controller.Flush(); err != nil {
-			return initialized
-		}
-		_ = controller.SetWriteDeadline(time.Time{})
 		if forwarding.method == "initialize" && !frame.Control && coderesearch.Initialized([]byte(frame.Data), forwarding.requestID) {
 			initialized = true
 		}

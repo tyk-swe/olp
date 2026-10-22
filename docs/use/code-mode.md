@@ -143,9 +143,9 @@ Vendor credentials stay on the gateway.
 
 ### Authorization and transport
 
-Every POST, GET stream and DELETE checks the live key, route publication, pool
-membership, account and grant. OLP translates upstream session IDs to opaque
-IDs bound to the key, route revision, service, account, credential and grant
+Every POST, GET stream and DELETE checks the live key, end-user policies, route
+publication, pool membership, account and grant. OLP translates upstream session
+IDs to opaque IDs bound to the key, route revision, service, account, credential and grant
 generation. Stateless upstreams also receive an OLP session fence, without
 forwarding an invented session ID to the vendor. Initialize first and send the
 returned OLP session ID on subsequent requests. Republishing or rotating
@@ -161,13 +161,15 @@ reaches the client. Failed, malformed or interrupted handshakes release their
 session slots. A delayed handshake cannot retire sessions from a newer
 publication or credential generation. SSE response headers are flushed
 immediately, including for idle streams that initially contain only heartbeat
-comments; write deadlines apply while sending data, without shortening idle
+comments. Upstream heartbeat comments also reach the client while waiting for
+data; write deadlines apply while sending data, without shortening idle
 HTTP/2 streams.
 
 The proxy answers upstream [MCP pings](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/ping)
 locally after rechecking live authorization and the session's credential
-generation. Ping replies use the stream's existing admission, with at most 32
-replies per stream and five seconds per reply. Other server callbacks remain
+generation, including end-user blocks added while the stream is open. Ping
+replies use the stream's existing admission, with at most 32 replies per stream
+and five seconds per reply. Other server callbacks remain
 disabled.
 
 The proxy supports [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports):
@@ -179,7 +181,8 @@ upstream output and 1 MiB per SSE event; installation and route body limits can
 lower the input limit. Key and connection request/concurrency limits also apply.
 Session-scoped cancellation notifications retain request-rate limits but do not
 need another concurrency slot while their tool call holds one.
-Research has no inference token usage or hard token reservation.
+Research has no inference token usage, token-rate reservation or hard token
+reservation.
 
 Dispatched calls are never replayed or moved to another account. Service errors
 and tool allowance errors do not change inference account health or affect other
