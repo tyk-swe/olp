@@ -29,7 +29,9 @@ type PublicationEntry struct {
 }
 
 func publicationKey(e PublicationEntry) string {
-	return strings.ToLower(e.Project) + "/" + e.Kind + "/" + strings.ToLower(e.Draft.Name)
+	// Names may contain delimiters; encode the complete identity as a tuple.
+	key, _ := json.Marshal([3]string{strings.ToLower(e.Project), e.Kind, strings.ToLower(e.Draft.Name)})
+	return string(key)
 }
 func publicationCredentialRef(e PublicationEntry) string {
 	sum := sha256.Sum256([]byte(publicationKey(e)))

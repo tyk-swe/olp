@@ -21,6 +21,18 @@ func fixtureConfig() Config {
 	claim := "/customer"
 	return Config{Name: "test", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys", Enabled: true, DisabledKeyIDs: []string{}, Audiences: []string{"gateway"}, Algorithms: []string{"RS256", "ES256", "EdDSA"}, MaxLifetimeSeconds: 600, Mappings: []Mapping{{Name: "build", Match: map[string]string{"/repository": "example/repo"}, ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: "build", RouteGroups: []string{"generation"}, Scopes: []string{"inference"}, EndUserClaim: &claim}}}
 }
+
+func TestMappingConsumerScopes(t *testing.T) {
+	c := fixtureConfig()
+	c.Mappings[0].Scopes = []string{"inference", "models_read", "guardrails", "tools", "agents", "traces_write", "delegate"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("advertised consumer scopes refused: %v", err)
+	}
+	c.Mappings[0].Scopes = []string{"unknown"}
+	if c.Validate() == nil {
+		t.Fatal("unknown consumer scope accepted")
+	}
+}
 func fixtureClaims(now time.Time) map[string]any {
 	return map[string]any{"iss": "https://issuer.example", "sub": "private-service-account", "aud": []string{"gateway"}, "iat": now.Unix() - 1, "exp": now.Unix() + 120, "nbf": now.Unix() - 1, "repository": "example/repo", "customer": "customer-1"}
 }

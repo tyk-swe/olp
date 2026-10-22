@@ -71,6 +71,26 @@ func TestAgentCredentialReuseCannotCrossDestinations(t *testing.T) {
 	}
 }
 
+func TestAgentConfigurationIdentitySeparatesNames(t *testing.T) {
+	left := PublicationEntry{Project: "a", Kind: "prompt", Draft: agentcontract.Draft{
+		Name: "b/prompt/c", Prompt: &prompts.Definition{Template: "Hello", Variables: []string{}},
+	}}
+	right := PublicationEntry{Project: "a/prompt/b", Kind: "prompt", Draft: agentcontract.Draft{
+		Name: "c", Prompt: &prompts.Definition{Template: "Hello", Variables: []string{}},
+	}}
+	if publicationKey(left) == publicationKey(right) || publicationCredentialRef(left) == publicationCredentialRef(right) {
+		t.Fatal("distinct owning project/name identities collide")
+	}
+	doc := &Document{AgentPublications: []PublicationEntry{left, right}}
+	if err := (&Server{}).validateAgentPublications(doc); err != nil {
+		t.Fatalf("distinct slash-containing identities refused: %v", err)
+	}
+	doc.AgentPublications = append(doc.AgentPublications, left)
+	if (&Server{}).validateAgentPublications(doc) == nil {
+		t.Fatal("duplicate publication accepted")
+	}
+}
+
 func TestAgentCredentialBindings(t *testing.T) {
 	draft, published := "agent/draft", "agent/draft/published"
 	doc := &Document{AgentPublications: []PublicationEntry{{CredentialRef: &draft, PublishedCredentialRef: &published}}}

@@ -60,6 +60,15 @@ test('publishes configuration, preserves historical prompt labels and retires wi
   await expect(
     page.getByRole('button', { name: 'Publish saved draft', exact: true })
   ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Set staging', exact: true })
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Set production', exact: true })
+  ).toBeDisabled();
+  await expect(page.getByLabel('Template', { exact: true })).toHaveValue(
+    'Unsaved {{name}}'
+  );
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText(
     'Draft saved. Publication is a separate action.'

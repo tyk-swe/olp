@@ -446,11 +446,11 @@
         <pre>{JSON.stringify(inspected.definition, null, 2)}</pre>{/if}
       {#if kind === 'prompts'}<button
           type="button"
-          disabled={busy || !canManage || !revisionID}
+          disabled={busy || !canManage || !revisionID || unsaved}
           onclick={() => write('staging')}>Set staging</button
         ><button
           type="button"
-          disabled={busy || !canManage || !revisionID}
+          disabled={busy || !canManage || !revisionID || unsaved}
           onclick={() => write('production')}>Set production</button
         >{/if}
       <label

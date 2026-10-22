@@ -81,7 +81,7 @@ func (c Config) Validate() error {
 			}
 		}
 		for _, scope := range m.Scopes {
-			if !slices.Contains([]string{"inference", "models_read", "tools", "agents", "traces_write", "delegate"}, scope) {
+			if !slices.Contains([]string{"inference", "models_read", "guardrails", "tools", "agents", "traces_write", "delegate"}, scope) {
 				return bad
 			}
 		}
