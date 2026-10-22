@@ -22,7 +22,15 @@ func PersistDebitResultTx(ctx context.Context, tx pgx.Tx, event *Event, payload 
 	if event.APIKeyID != key || event.RuntimeGenerationID != affinity.ReleaseID || len(event.Attempts) == 0 {
 		return Persisted{}, limits.ErrDebitConflict
 	}
+	if duplicate, err := limits.DebitResultReplayTx(ctx, tx, result); err != nil {
+		return Persisted{}, err
+	} else if duplicate {
+		return Persisted{Outcome: PersistOutcomeDuplicate}, nil
+	}
 	for _, attempt := range event.Attempts {
+		if attempt.Routing != nil && attempt.Routing.BudgetExempt {
+			return Persisted{}, limits.ErrDebitConflict
+		}
 		ref := attempt.Execution
 		if ref == nil || ref.Validate() != nil || ref.DispatchID != result.DispatchID || ref.RunID != run || ref.StepID != step || ref.TargetID != affinity.TargetID || ref.RouteRevisionID != affinity.RouteRevisionID {
 			return Persisted{}, limits.ErrDebitConflict
@@ -47,11 +55,28 @@ func PersistDebitResultTx(ctx context.Context, tx pgx.Tx, event *Event, payload 
 			}
 		}
 	}
-	persisted, err := PersistEventTx(ctx, tx, event, payload)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT owner_id::text FROM olp.execution_debit_owners WHERE dispatch_id=$1 AND owner_kind='supply' ORDER BY owner_id::text`, result.DispatchID)
 	if err != nil {
 		return Persisted{}, err
 	}
-	if err = limits.SettleDebitTx(ctx, tx, result); err != nil {
+	var supplyOwners []string
+	for rows.Next() {
+		var owner string
+		if err = rows.Scan(&owner); err != nil {
+			rows.Close()
+			return Persisted{}, err
+		}
+		supplyOwners = append(supplyOwners, owner)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return Persisted{}, err
+	}
+	persisted, err := persistEventTx(ctx, tx, event, payload, supplyOwners)
+	if err != nil {
+		return Persisted{}, err
+	}
+	if err = limits.SettleDebitTx(ctx, tx, result, persisted.CostSnapshots); err != nil {
 		return Persisted{}, err
 	}
 	return persisted, nil

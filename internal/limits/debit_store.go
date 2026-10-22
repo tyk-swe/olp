@@ -279,20 +279,15 @@ type DebitResult struct {
 	ResolvesResultDigests [][]byte
 }
 
-// SettleDebitTx shares the usage persistence transaction. The caller must have
-// persisted the matching event first; the FK-like check below also prevents a
-// receipt from releasing exposure for rejected/out-of-window usage.
-func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
+// DebitResultReplayTx recognizes immutable settlement evidence independently
+// of ordinary usage retention. The caller holds the dispatch row lock.
+func DebitResultReplayTx(ctx context.Context, tx pgx.Tx, r DebitResult) (bool, error) {
 	if !canonicalID(r.DispatchID) || !canonicalID(r.EventID) || len(r.ResultDigest) != 32 || len(r.EvidenceDigest) != 32 || !validDebitAmount(r.Cost) || !validDebitAmount(r.Charge) {
-		return ErrDebitConflict
+		return false, ErrDebitConflict
 	}
 	resolutionDigest, err := debitResolutionDigest(r.ResolvesResultDigests)
 	if err != nil || (!r.Complete && len(r.ResolvesResultDigests) > 0) {
-		return ErrDebitConflict
-	}
-	var state DebitState
-	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&state); err != nil {
-		return err
+		return false, ErrDebitConflict
 	}
 	var evidence, resolutions []byte
 	var event, cost, charge string
@@ -300,18 +295,34 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
 	err = tx.QueryRow(ctx, `SELECT evidence_digest,resolution_digest,event_id::text,cost::text,charge::text,final,complete FROM olp.execution_debit_results WHERE dispatch_id=$1 AND result_digest=$2`, r.DispatchID, r.ResultDigest).Scan(&evidence, &resolutions, &event, &cost, &charge, &final, &complete)
 	if err == nil {
 		if !bytes.Equal(evidence, r.EvidenceDigest) || !bytes.Equal(resolutions, resolutionDigest) || event != r.EventID || !equalDebitAmount(cost, r.Cost) || !equalDebitAmount(charge, r.Charge) || final != r.Final || complete != r.Complete {
-			return ErrDebitConflict
+			return false, ErrDebitConflict
 		}
-		return nil
+		return true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	return false, nil
+}
+
+// SettleDebitTx shares the usage persistence transaction. Accounting contains
+// the balances returned by that event's persistence, covering every owner.
+func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []CostSnapshot) error {
+	var state DebitState
+	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&state); err != nil {
 		return err
 	}
+	if duplicate, err := DebitResultReplayTx(ctx, tx, r); err != nil {
+		return err
+	} else if duplicate {
+		return nil
+	}
+	resolutionDigest, _ := debitResolutionDigest(r.ResolvesResultDigests)
 	if state != DebitDispatched && state != DebitUnknown {
 		return ErrDebitState
 	}
 	var persisted bool
-	if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL)) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL)) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
 		return err
 	}
 	if !persisted {
@@ -320,6 +331,9 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
 	owners, err := debitOwnersTx(ctx, tx, r.DispatchID)
 	if err != nil {
 		return err
+	}
+	if !debitOwnersAccounted(owners, accounting) {
+		return ErrDebitState
 	}
 	if err = lockDebitOwners(ctx, tx, owners); err != nil {
 		return err
@@ -349,6 +363,22 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
 		return err
 	}
 	return bumpDebitOwners(ctx, tx, owners)
+}
+
+func debitOwnersAccounted(owners []DebitOwner, accounting []CostSnapshot) bool {
+	for _, owner := range owners {
+		basis := owner.Basis
+		// Supply budgets measure provider cost under either policy basis.
+		if owner.Kind == "supply" {
+			basis = BasisCost
+		}
+		if !slices.ContainsFunc(accounting, func(s CostSnapshot) bool {
+			return s.CostOwnerID == owner.ID && s.Basis.normalized() == basis
+		}) {
+			return false
+		}
+	}
+	return true
 }
 
 func debitResolutionDigest(values [][]byte) ([]byte, error) {

@@ -257,6 +257,22 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 		}
 		return nil
 	}
+	// Ordinary key accounting alone cannot release an unaccounted supply hold.
+	checkTx, err := f.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkTx.Rollback(t.Context())
+	ordinary, err := usage.PersistEventTx(t.Context(), checkTx, event, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = limits.SettleDebitTx(t.Context(), checkTx, result, ordinary.CostSnapshots); !errors.Is(err, limits.ErrDebitState) {
+		t.Fatalf("settlement released unaccounted supply exposure: %v", err)
+	}
+	if err = checkTx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	if err = persist(result, false); err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +303,34 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 	if err = f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=$1`, i.ID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("duplicate settlement receipt: %d %v", count, err)
 	}
+	if err = f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.supply_cost_windows WHERE owner_id=$1 AND accrued=1`, f.Provider).Scan(&count); err != nil || count != 3 {
+		t.Fatalf("uncapped supply owner was not accounted exactly once: %d %v", count, err)
+	}
+	// Retain debit evidence while ordinary receipts and facts expire.
+	acctExec(t, f.Pool, `DELETE FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID)
+	acctExec(t, f.Pool, `DELETE FROM olp.request_metadata_event_receipts WHERE event_id=$1`, event.EventID)
+	shift := -time.Duration(usage.ReplayHorizonDays+1) * 24 * time.Hour
+	event.ObservedAt = event.ObservedAt.Add(shift)
+	event.RequestStartedAt = event.RequestStartedAt.Add(shift)
+	event.RequestCompletedAt = event.RequestCompletedAt.Add(shift)
+	for n := range event.Attempts {
+		event.Attempts[n].StartedAt = event.Attempts[n].StartedAt.Add(shift)
+		event.Attempts[n].CompletedAt = event.Attempts[n].CompletedAt.Add(shift)
+	}
+	if _, err = usage.Validate(event); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ = json.Marshal(event)
+	var gaps int
+	if err = f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_ingestion_gaps`).Scan(&gaps); err != nil {
+		t.Fatal(err)
+	}
+	if err = persist(result, true); err != nil {
+		t.Fatalf("retained settlement replay: %v", err)
+	}
+	if err = f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_ingestion_gaps`).Scan(&count); err != nil || count != gaps {
+		t.Fatalf("settlement replay created an ingestion gap: %d -> %d %v", gaps, count, err)
+	}
 }
 
 func TestExecutionDebitNonAcceptanceRequiresImmutableProof(t *testing.T) {
@@ -299,6 +343,23 @@ func TestExecutionDebitNonAcceptanceRequiresImmutableProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.MarkDispatched(t.Context(), i.ID, i.ClaimID); err != nil {
+		t.Fatal(err)
+	}
+	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 0, "debit-model", 500, acctUncertain())}})
+	event.RuntimeGenerationID = i.Affinity.ReleaseID
+	event.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: i.Affinity.ProviderRevisionID}
+	event.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: i.ID}
+	payload, _ := json.Marshal(event)
+	receipt := limits.DebitResult{DispatchID: i.ID, EventID: event.EventID, ResultDigest: bytes.Repeat([]byte{1}, 32), EvidenceDigest: bytes.Repeat([]byte{2}, 32), Cost: "0", Charge: "0", Final: true}
+	tx, err := f.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = usage.PersistDebitResultTx(t.Context(), tx, event, payload, receipt); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	proof := limits.NonAcceptanceProof{DispatchID: i.ID, ActorID: f.User, EvidenceDigest: bytes.Repeat([]byte{1}, 32)}
@@ -315,6 +376,10 @@ func TestExecutionDebitNonAcceptanceRequiresImmutableProof(t *testing.T) {
 	}
 	if err := resolve(proof); err != nil {
 		t.Fatal(err)
+	}
+	var retained int
+	if err = f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=$1`, i.ID).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("resolution erased uncertain evidence: %d %v", retained, err)
 	}
 	if err := resolve(proof); err != nil {
 		t.Fatal(err)

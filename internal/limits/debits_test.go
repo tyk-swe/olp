@@ -30,6 +30,21 @@ func TestDurableResolutionEvidenceIdentity(t *testing.T) {
 
 const debitTestID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 
+func TestDurableSettlementRequiresEveryOwnerBasis(t *testing.T) {
+	owners := []DebitOwner{{ID: debitTestID, Kind: "key", Basis: BasisCost}, {ID: debitTestID, Kind: "key", Basis: BasisCharge}, {ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608", Kind: "supply", Basis: BasisCost}, {ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608", Kind: "supply", Basis: BasisCharge}}
+	accounting := []CostSnapshot{{CostOwnerID: debitTestID, Basis: BasisCost}, {CostOwnerID: debitTestID, Basis: BasisCharge}, {CostOwnerID: owners[2].ID}}
+	if !debitOwnersAccounted(owners, accounting) {
+		t.Fatal("complete accounting refused")
+	}
+	if debitOwnersAccounted(owners, accounting[:2]) {
+		t.Fatal("unaccounted supply exposure released")
+	}
+	accounting[1].Basis = BasisCost
+	if debitOwnersAccounted(owners, accounting) {
+		t.Fatal("consumer charge exposure released with cost-only accounting")
+	}
+}
+
 func TestDurableDebitIdentityAndOwners(t *testing.T) {
 	i := DebitIntent{ID: debitTestID, APIKeyID: debitTestID, ProjectID: debitTestID, ClaimID: debitTestID, Kind: "api", Currency: "USD", CostBound: "0.125", ChargeBound: "0.25", PreparedUntil: time.Now().Add(time.Minute), Affinity: ExecutionAffinity{ReleaseID: debitTestID, RevisionID: debitTestID}}
 	if err := i.validate(); err != nil {

@@ -41,7 +41,7 @@ func ResolveNotAcceptedTx(ctx context.Context, tx pgx.Tx, p NonAcceptanceProof) 
 		return ErrDebitState
 	}
 	var clean bool
-	if err = tx.QueryRow(ctx, `SELECT observed_cost=0 AND observed_charge=0 AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results WHERE dispatch_id=$1) FROM olp.execution_debits WHERE id=$1`, p.DispatchID).Scan(&clean); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT observed_cost=0 AND observed_charge=0 AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results WHERE dispatch_id=$1 AND (cost<>0 OR charge<>0 OR complete)) FROM olp.execution_debits WHERE id=$1`, p.DispatchID).Scan(&clean); err != nil {
 		return err
 	}
 	if !clean {

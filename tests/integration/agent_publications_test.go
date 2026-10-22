@@ -107,7 +107,7 @@ func TestAgentPublicationKeyGrantsRemainVisible(t *testing.T) {
 	owner := h.owner()
 	project := createProject(h, owner, "Key grants")
 	created := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "empty", "toolset": map[string]any{"tools": []any{}}}, idem("grants-toolset"), 201)
-	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+created["id"].(string)+"/publish", nil, withMatch(created, idem("grants-publish")), 200)
+	published := h.want(owner, http.MethodPost, "/api/v1/toolsets/"+created["id"].(string)+"/publish", nil, withMatch(created, idem("grants-publish")), 200)
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Tool caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{created["id"].(string)}}, idem("grants-key"), 201)
 	path := "/api/v1/api-keys/" + key["id"].(string)
 	check := func(read map[string]any) {
@@ -122,10 +122,16 @@ func TestAgentPublicationKeyGrantsRemainVisible(t *testing.T) {
 	check(read)
 	h.want(owner, http.MethodPatch, path, map[string]any{"name": "Renamed caller"}, withMatch(read, idem("grants-rename")), 200)
 	check(h.want(owner, http.MethodGet, path, nil, nil, 200))
+	h.want(owner, http.MethodDelete, "/api/v1/toolsets/"+created["id"].(string), nil, withMatch(published, idem("grants-retire")), 204)
+	read = h.want(owner, http.MethodGet, path, nil, nil, 200)
+	h.want(owner, http.MethodPatch, path, map[string]any{"name": "Historical grants", "allowed_toolsets": read["allowed_toolsets"]}, withMatch(read, idem("grants-retired-rename")), 200)
+	check(h.want(owner, http.MethodGet, path, nil, nil, 200))
 	for _, item := range h.want(owner, http.MethodGet, "/api/v1/api-keys", nil, nil, 200)["items"].([]any) {
 		read := item.(map[string]any)
 		if read["id"] == key["id"] {
 			check(read)
+			removed := h.want(owner, http.MethodPatch, path, map[string]any{"allowed_toolsets": []string{}}, withMatch(read, idem("grants-remove")), 200)
+			h.want(owner, http.MethodPatch, path, map[string]any{"allowed_toolsets": []string{created["id"].(string)}}, withMatch(removed, idem("grants-readd-retired")), 422)
 			return
 		}
 	}
