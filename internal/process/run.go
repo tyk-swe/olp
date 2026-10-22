@@ -370,6 +370,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			if pool != nil {
 				gw.CodeLedger = &resources.CodeStore{Pool: pool}
 				gw.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				gw.CodeResearch = &resources.CodeStore{Pool: pool}
+				gw.ResearchAuth = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
 				gw.Resources = resources.NewEncrypted(pool, installation, keys)
 				gw.Resolver = resources.NewResolver(pool)
 			}

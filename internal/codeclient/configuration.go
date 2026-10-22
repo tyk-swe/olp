@@ -136,6 +136,9 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		out.ClientVersion, out.Format, out.File = codeadapter.OpenCodeVersion, "json", new("opencode.json")
 		out.Configuration, err = openCodeConfiguration(adapters, offers, through, native, out.BaseURL, model, *plan, *small)
 	}
+	if err == nil {
+		err = addResearchConfiguration(&out, route.Tools)
+	}
 	return out, err
 }
 

@@ -192,6 +192,10 @@
       Use your authorized OLP key. No upstream subscription credential belongs
       on the client machine.
     </p>
+    <p>
+      Merge generated entries into your existing files, preserving other tools
+      and settings. Choose which tools to use in your client.
+    </p>
     {#if config.qualification_gaps.length}<h4>Qualification gaps</h4>
       <ul>
         {#each config.qualification_gaps as gap (gap)}<li>{gap}</li>{/each}
@@ -221,6 +225,31 @@
           : 'Clipboard unavailable; select and copy the configuration.')}
       >Copy configuration</button
     >
+    {#each config.additional_files ?? [] as file, index (file.file)}
+      <div class="form-field">
+        <label for="{ids.configuration}-additional-{index}">
+          {file.file} · {file.format.toUpperCase()}
+        </label>
+        <textarea
+          id="{ids.configuration}-additional-{index}"
+          readonly
+          value={file.configuration}
+          rows="10"></textarea>
+        <small
+          >Merge these entries into {file.file}. Keep OLP_API_KEY in your
+          environment.</small
+        >
+      </div>
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={async () =>
+          (copied = (await copyText(file.configuration))
+            ? `${file.file} copied.`
+            : 'Clipboard unavailable; select and copy the configuration.')}
+        >Copy {file.file}</button
+      >
+    {/each}
     <p role="status">{copied}</p>
   {/if}
 </section>

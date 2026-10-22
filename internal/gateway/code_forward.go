@@ -20,6 +20,7 @@ import (
 // invokes ordinary request preparation, credential failover, response
 // transformation or retries.
 func (s *Server) RegisterCode(mux *http.ServeMux) {
+	mux.HandleFunc("/code/{slug}/mcp/{service}", s.serveCodeResearch)
 	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
 }
 

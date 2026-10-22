@@ -15,7 +15,7 @@ GOFMT_PATHS = \
 	cmd internal openapi plugins sdk \
 	tests/bench tests/clientfixture tests/clients/gosdk tests/codecli \
 	tests/fidelity tests/fixtures/*.go tests/fixtures/codex-qualified \
-	tests/fixtures/fidelity tests/integration tests/samlfixture tests/sdkfixture
+	tests/fixtures/fidelity tests/fixtures/research-migration tests/integration tests/samlfixture tests/sdkfixture
 
 .PHONY: \
 	help setup dev check \

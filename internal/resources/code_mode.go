@@ -215,6 +215,11 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 }
 
 func codeAuthority(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority) error {
+	return codeAuthorityFor(ctx, tx, in, a, true)
+}
+
+// Research shares live key and pool authority without a model or conversation.
+func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority, inference bool) error {
 	var policy, document []byte
 	var groups access.RouteGroups
 	var templates access.LimitTemplates
@@ -245,8 +250,12 @@ func codeAuthority(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.A
 		!a.Allows("inference", in.Route.Slug, &in.Route.ProjectID, time.Now()) {
 		return codemode.Refuse(403, "code_permission_denied")
 	}
-	if !slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model) {
+	if inference && (!slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model)) {
 		return codemode.Refuse(403, "code_model_denied")
+	}
+	if !inference && (current.RevisionID != in.Route.RevisionID || current.Tools == nil || in.Route.Tools == nil ||
+		current.Tools.AccountID != in.Route.Tools.AccountID || !slices.Equal(current.Tools.Services, in.Route.Tools.Services)) {
+		return codemode.Refuse(409, "code_research_revision_changed")
 	}
 	var assigned bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pool_keys pk JOIN olp.code_pools p ON p.id=pk.pool_id JOIN olp.api_keys k ON k.id=pk.api_key_id

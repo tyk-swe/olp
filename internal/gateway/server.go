@@ -104,6 +104,8 @@ type Server struct {
 	// mounts the code routes only when both are set.
 	CodeLedger     CodeLedger
 	CodeAuthorizer CodeAuthorizer
+	CodeResearch   ResearchLedger
+	ResearchAuth   ResearchAuthorizer
 	Runtime        Runtime
 	Sink           Sink
 	// Admission enforces the budgets shared by every replica. A nil Admission

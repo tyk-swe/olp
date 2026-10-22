@@ -628,6 +628,27 @@ func (e CodeAccountHealth) Valid() bool {
 	}
 }
 
+// Defines values for CodeAccountResearchServices.
+const (
+	CodeAccountResearchServicesReader CodeAccountResearchServices = "reader"
+	CodeAccountResearchServicesSearch CodeAccountResearchServices = "search"
+	CodeAccountResearchServicesZread  CodeAccountResearchServices = "zread"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountResearchServices enum.
+func (e CodeAccountResearchServices) Valid() bool {
+	switch e {
+	case CodeAccountResearchServicesReader:
+		return true
+	case CodeAccountResearchServicesSearch:
+		return true
+	case CodeAccountResearchServicesZread:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAllowanceWindowWindow.
 const (
 	Primary   CodeAllowanceWindowWindow = "primary"
@@ -820,6 +841,27 @@ func (e CodeClientConfigurationSupportedClients) Valid() bool {
 	}
 }
 
+// Defines values for CodeConfigurationFileFormat.
+const (
+	CodeConfigurationFileFormatJson  CodeConfigurationFileFormat = "json"
+	CodeConfigurationFileFormatShell CodeConfigurationFileFormat = "shell"
+	CodeConfigurationFileFormatToml  CodeConfigurationFileFormat = "toml"
+)
+
+// Valid indicates whether the value is a known member of the CodeConfigurationFileFormat enum.
+func (e CodeConfigurationFileFormat) Valid() bool {
+	switch e {
+	case CodeConfigurationFileFormatJson:
+		return true
+	case CodeConfigurationFileFormatShell:
+		return true
+	case CodeConfigurationFileFormatToml:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodePoolKind.
 const (
 	CodePoolKindPersonal CodePoolKind = "personal"
@@ -850,6 +892,27 @@ func (e CodePoolWriteKind) Valid() bool {
 	case CodePoolWriteKindPersonal:
 		return true
 	case CodePoolWriteKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeResearchToolsServices.
+const (
+	CodeResearchToolsServicesReader CodeResearchToolsServices = "reader"
+	CodeResearchToolsServicesSearch CodeResearchToolsServices = "search"
+	CodeResearchToolsServicesZread  CodeResearchToolsServices = "zread"
+)
+
+// Valid indicates whether the value is a known member of the CodeResearchToolsServices enum.
+func (e CodeResearchToolsServices) Valid() bool {
+	switch e {
+	case CodeResearchToolsServicesReader:
+		return true
+	case CodeResearchToolsServicesSearch:
+		return true
+	case CodeResearchToolsServicesZread:
 		return true
 	default:
 		return false
@@ -5794,6 +5857,12 @@ type CodeAccount struct {
 	Principal    string                                `json:"principal"`
 	ProjectId    openapi_types.UUID                    `json:"project_id"`
 	ProviderId   openapi_types.UUID                    `json:"provider_id"`
+
+	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
+	ResearchEligible *bool `json:"research_eligible,omitempty"`
+
+	// ResearchServices Research services supported by the enrolled profile; also requires research eligibility and route pool membership.
+	ResearchServices *[]CodeAccountResearchServices `json:"research_services,omitempty"`
 }
 
 // CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
@@ -5804,6 +5873,9 @@ type CodeAccountGrantState string
 
 // CodeAccountHealth defines model for CodeAccount.Health.
 type CodeAccountHealth string
+
+// CodeAccountResearchServices defines model for CodeAccount.ResearchServices.
+type CodeAccountResearchServices string
 
 // CodeAccountList defines model for CodeAccountList.
 type CodeAccountList struct {
@@ -5964,7 +6036,10 @@ type CodeBudgetWrite struct {
 type CodeClientConfiguration struct {
 	// Adapters The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.
 	Adapters []CodeClientConfigurationAdapters `json:"adapters"`
-	BaseUrl  string                            `json:"base_url"`
+
+	// AdditionalFiles Companion configuration files required by this setup. Merge entries with existing client settings and MCP servers.
+	AdditionalFiles *[]CodeConfigurationFile `json:"additional_files,omitempty"`
+	BaseUrl         string                   `json:"base_url"`
 
 	// Client The client the configuration is for.
 	Client        CodeClientConfigurationClient `json:"client"`
@@ -6006,6 +6081,16 @@ type CodeClientConfigurationFormat string
 
 // CodeClientConfigurationSupportedClients defines model for CodeClientConfiguration.SupportedClients.
 type CodeClientConfigurationSupportedClients string
+
+// CodeConfigurationFile defines model for CodeConfigurationFile.
+type CodeConfigurationFile struct {
+	Configuration string                      `json:"configuration"`
+	File          string                      `json:"file"`
+	Format        CodeConfigurationFileFormat `json:"format"`
+}
+
+// CodeConfigurationFileFormat defines model for CodeConfigurationFile.Format.
+type CodeConfigurationFileFormat string
 
 // CodeCountObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
 type CodeCountObservation struct {
@@ -6082,6 +6167,15 @@ type CodeRefusalList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// CodeResearchTools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
+type CodeResearchTools struct {
+	AccountId openapi_types.UUID          `json:"account_id"`
+	Services  []CodeResearchToolsServices `json:"services"`
+}
+
+// CodeResearchToolsServices defines model for CodeResearchTools.Services.
+type CodeResearchToolsServices string
+
 // CodeRevision defines model for CodeRevision.
 type CodeRevision struct {
 	Id openapi_types.UUID `json:"id"`
@@ -6113,6 +6207,9 @@ type CodeRoute struct {
 	Revision     int32                        `json:"revision"`
 	RevisionId   string                       `json:"revision_id"`
 	Slug         string                       `json:"slug"`
+
+	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
+	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
 }
 
 // CodeRouteAdapters defines model for CodeRoute.Adapters.
@@ -6134,6 +6231,9 @@ type CodeRouteWrite struct {
 	PoolId       openapi_types.UUID     `json:"pool_id"`
 	ProjectId    openapi_types.UUID     `json:"project_id"`
 	Slug         string                 `json:"slug"`
+
+	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
+	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
 }
 
 // CodeTokenWindow defines model for CodeTokenWindow.

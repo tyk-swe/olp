@@ -382,9 +382,23 @@ mode's classifier needs a real model.
 
 Not qualified: Codex-path or WebSocket traffic on these adapters, which refuses;
 a live vendor accepting a conversation another vendor's model contributed to;
-`count_tokens`; Z.ai's MCP servers; vendor allowance windows; hard token
+`count_tokens`; live Z.ai research MCP servers; vendor allowance windows; hard token
 budgets; agent teams; shells other than POSIX `sh`-compatible ones; Linux
 arm64 execution.
+
+Research proxy behavior is covered separately by focused `TestCodeResearch*`
+integration fixtures: a GPT-only route uses its enrolled global Z.ai account
+for all three services through fixed-host TLS peers. The fixtures cover native
+JSON and SSE discovery/results, cancellation, session isolation and termination,
+live pool/key revocation, credential generations, disabled services and no replay
+after a disconnected dispatch. Generator and console tests cover the three
+client formats, account selection and Claude's companion `.mcp.json`. These
+checks do not establish live-vendor or real-client research interoperability.
+
+Focused lifecycle regressions additionally cover immediate idle SSE headers,
+failed-handshake session reclamation past the per-key capacity, malformed and
+interrupted initialization, and server pings during initialization and on GET
+streams. Revocation during an open stream blocks its subsequent ping reply.
 
 #### Reproduction
 
