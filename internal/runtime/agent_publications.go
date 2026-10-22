@@ -10,7 +10,7 @@ import (
 )
 
 func readAgentPublications(ctx context.Context, tx pgx.Tx) ([]agentcontract.Revision, error) {
-	rows, err := tx.Query(ctx, `SELECT v.id::text,v.publication_id::text,v.project_id::text,v.kind,v.digest,v.definition,(p.latest_revision_id=v.id),COALESCE((SELECT array_agg(label ORDER BY label) FROM olp.prompt_labels WHERE publication_id=p.id AND revision_id=v.id),'{}'::text[]) FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE NOT p.retired ORDER BY v.id LIMIT 8193`)
+	rows, err := tx.Query(ctx, `SELECT v.id::text,v.publication_id::text,v.project_id::text,v.kind,v.digest,v.definition,COALESCE(p.latest_revision_id=v.id,false),COALESCE((SELECT array_agg(label ORDER BY label) FROM olp.prompt_labels WHERE publication_id=p.id AND revision_id=v.id),'{}'::text[]) FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE NOT p.retired ORDER BY v.id LIMIT 8193`)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,24 @@ func (m *Manager) AuthorizeAgentResource(a access.Authority, scope, id, revision
 	}
 	current, ok := m.authority.agentPrincipals[a.ID]
 	if a.WorkloadDigest != "" {
-		current, ok = m.authority.workloadPrincipals[a.WorkloadDigest]
+		principal, known := m.authority.workloadPrincipals[a.WorkloadDigest]
+		if !known || principal.ID != a.ID || principal.WorkloadIssuerID == nil || a.WorkloadIssuerID == nil || *principal.WorkloadIssuerID != *a.WorkloadIssuerID || principal.WorkloadMapping != a.WorkloadMapping || principal.ProjectID == nil || *principal.ProjectID != project {
+			return access.Forbidden()
+		}
+		ok = false
+		for _, issuer := range m.authority.workloadIssuers {
+			if issuer.ID != *principal.WorkloadIssuerID {
+				continue
+			}
+			// Verified claims stay valid only for the issuer revision that
+			// authenticated them, as with durable code-mode continuations.
+			if issuer.Config.Enabled && issuer.Revision == a.WorkloadRevision {
+				current, ok = issuer.bindings[principal.WorkloadMapping]
+				current.ID = principal.ID
+				current.RevokedAt = principal.RevokedAt
+			}
+			break
+		}
 	}
 	if !ok || current.ID != a.ID || !current.AllowsResource(scope, id, project, now) {
 		return access.Forbidden()

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 func TestAgentLiveAuthority(t *testing.T) {
@@ -30,5 +31,55 @@ func TestAgentLiveAuthority(t *testing.T) {
 	m.authority.readAt = time.Now().Add(-AuthorityStaleAfter - time.Second)
 	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {
 		t.Fatal("stale live authority accepted")
+	}
+}
+
+func TestAgentWorkloadLiveAuthority(t *testing.T) {
+	project, resource, issuerID := "project", "resource", "issuer"
+	for _, scope := range []string{"tools", "agents"} {
+		t.Run(scope, func(t *testing.T) {
+			a := access.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker", WorkloadRevision: "revision", Policy: access.KeyPolicy{Scopes: []string{scope}, AllowedToolsets: []string{resource}, AllowedAgents: []string{resource}}}
+			kind := "toolset"
+			if scope == "agents" {
+				kind = "agent"
+			}
+			for _, scenario := range []string{"allowed", "new principal", "disabled issuer", "removed issuer", "changed revision", "removed mapping", "reduced permissions", "revoked principal", "changed project"} {
+				t.Run(scenario, func(t *testing.T) {
+					principal := a
+					issuer := workloadIssuer{ID: issuerID, Revision: a.WorkloadRevision, Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{a.WorkloadMapping: a}}
+					switch scenario {
+					case "new principal":
+						principal.Policy = access.KeyPolicy{} // Enrollment caches revocation metadata only.
+					case "disabled issuer":
+						issuer.Config.Enabled = false
+					case "changed revision":
+						issuer.Revision = "new revision"
+					case "removed mapping":
+						delete(issuer.bindings, a.WorkloadMapping)
+					case "reduced permissions":
+						live := a
+						live.Policy = access.KeyPolicy{Scopes: []string{scope}}
+						issuer.bindings[a.WorkloadMapping] = live
+					case "revoked principal":
+						now := time.Now()
+						principal.RevokedAt = &now
+					case "changed project":
+						other := "other project"
+						live := a
+						live.ProjectID = &other
+						issuer.bindings[a.WorkloadMapping] = live
+					}
+					m := Manager{authority: authorityState{loaded: true, readAt: time.Now(), workloadPrincipals: map[string]access.Authority{a.WorkloadDigest: principal}, workloadIssuers: map[string]workloadIssuer{"issuer": issuer}, agentResources: map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: kind, Revisions: map[string]bool{resource: true}}}}}
+					if scenario == "removed issuer" {
+						delete(m.authority.workloadIssuers, "issuer")
+					}
+					err := m.AuthorizeAgentResource(a, scope, resource, resource, project)
+					wantAllowed := scenario == "allowed" || scenario == "new principal"
+					if (err == nil) != wantAllowed {
+						t.Fatalf("allowed=%t, want %t: %v", err == nil, wantAllowed, err)
+					}
+				})
+			}
+		})
 	}
 }

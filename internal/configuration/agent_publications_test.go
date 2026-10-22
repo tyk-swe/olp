@@ -3,10 +3,12 @@ package configuration
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/prompts"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 func TestAgentConfigurationRoundTripAndOwnership(t *testing.T) {
@@ -66,5 +68,32 @@ func TestAgentCredentialReuseCannotCrossDestinations(t *testing.T) {
 	e.PublishedCredentialRef = &base
 	if (&Server{}).validateAgentPublications(&Document{AgentPublications: []PublicationEntry{e}}) == nil {
 		t.Fatal("one credential reference was accepted for different endpoints")
+	}
+}
+
+func TestAgentCredentialBindings(t *testing.T) {
+	draft, published := "agent/draft", "agent/draft/published"
+	doc := &Document{AgentPublications: []PublicationEntry{{CredentialRef: &draft, PublishedCredentialRef: &published}}}
+	for _, ref := range []string{draft, published} {
+		t.Run(ref, func(t *testing.T) {
+			if err := validateBindings(doc, plainBindings(map[string]string{ref: "bearer-token"})); err != nil {
+				t.Fatalf("declared agent credential refused: %v", err)
+			}
+			for _, value := range []string{"", "bad\rheader", "bad\nheader", "bad\x00header", strings.Repeat("a", 4097)} {
+				if validateBindings(doc, plainBindings(map[string]string{ref: value})) == nil {
+					t.Fatal("invalid static bearer material accepted")
+				}
+			}
+			external := &secretstore.Reference{Store: "gcp", SecretID: "projects/team/secrets/agent", Version: "1"}
+			if validateBindings(doc, bindingSet{ref: {reference: external}}) == nil {
+				t.Fatal("external agent credential accepted instead of sealed binding")
+			}
+		})
+	}
+	if err := validateBindings(doc, plainBindings(map[string]string{draft: "draft-token", published: "published-token"})); err != nil {
+		t.Fatal(err)
+	}
+	if validateBindings(doc, plainBindings(map[string]string{"agent/undeclared": "token"})) == nil {
+		t.Fatal("unreferenced binding accepted")
 	}
 }

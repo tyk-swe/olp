@@ -75,6 +75,29 @@ func TestAgentPublicationsManagementAndConfiguration(t *testing.T) {
 	h.want(owner, http.MethodPost, path+"/publish", nil, headers(saved["etag"].(string), "rm4-retired-write"), 412)
 }
 
+func TestAgentPromptLabelWithoutCurrentRevision(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := h.want(owner, http.MethodPost, "/api/v1/projects", map[string]any{"name": "Label history"}, idem("label-project"), 201)["id"].(string)
+	created := h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{"project_id": project, "name": "greeting", "prompt": map[string]any{"template": "Hello", "variables": []any{}}}, idem("label-create"), 201)
+	path := "/api/v1/prompts/" + created["id"].(string)
+	published := h.want(owner, http.MethodPost, path+"/publish", nil, withMatch(created, idem("label-publish")), 200)
+	revision := published["revision_id"].(string)
+	h.want(owner, http.MethodPut, path+"/labels/production", map[string]any{"revision_id": revision}, withMatch(published, idem("label-production")), 200)
+	exported := h.want(owner, http.MethodGet, "/api/v1/configuration/export", nil, nil, 200)
+	document := exported["document"].(map[string]any)
+	entry := document["agent_publications"].([]any)[0].(map[string]any)
+	delete(entry, "published") // Keep immutable label history without a default publication.
+	h.want(owner, http.MethodPost, "/api/v1/configuration/apply", map[string]any{"document": document}, idem("label-only-apply"), 200)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	read := h.want(owner, http.MethodGet, path+"/revisions/"+revision, nil, nil, 200)
+	if read["current"] != false || len(read["labels"].([]any)) != 1 {
+		t.Fatal("retained prompt revision lost its label or became current")
+	}
+}
+
 func TestAgentApprovalConsumptionCommitsWithDispatch(t *testing.T) {
 	f, store, project := debitFixture(t)
 	server, serverRevision := acctID(t), acctID(t)

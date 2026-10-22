@@ -83,7 +83,7 @@ func ValidateReferences(ctx context.Context, tx access.Queryer, kind string, d D
 		for _, tool := range d.Toolset.Tools {
 			var tools []mcpservers.Tool
 			var digest string
-			err := tx.QueryRow(ctx, `SELECT v.tools,v.digest FROM olp.mcp_server_revisions v JOIN olp.mcp_servers s ON s.id=v.server_id WHERE v.id=$1 AND s.id=$2 AND s.project_id=$3 AND s.enabled AND s.retired_at IS NULL AND s.latest_revision_id=r.id FOR SHARE OF s`, tool.RevisionID, tool.ServerID, d.ProjectID).Scan(&tools, &digest)
+			err := tx.QueryRow(ctx, `SELECT v.tools,v.digest FROM olp.mcp_server_revisions v JOIN olp.mcp_servers s ON s.id=v.server_id WHERE v.id=$1 AND s.id=$2 AND s.project_id=$3 AND s.enabled AND s.retired_at IS NULL AND s.latest_revision_id=v.id FOR SHARE OF s`, tool.RevisionID, tool.ServerID, d.ProjectID).Scan(&tools, &digest)
 			if err != nil || digest != tool.CatalogDigest {
 				return access.Invalid("toolset", "A pinned server revision is unavailable in this project.")
 			}
@@ -183,7 +183,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string, p *Publication) error
 
 func LoadRevision(ctx context.Context, q access.Queryer, publication, id string) (Revision, error) {
 	var v Revision
-	err := q.QueryRow(ctx, `SELECT v.id::text,v.publication_id::text,v.project_id::text,v.kind,v.digest,v.definition,(p.latest_revision_id=v.id),COALESCE((SELECT array_agg(label ORDER BY label) FROM olp.prompt_labels WHERE publication_id=p.id AND revision_id=v.id),'{}'::text[]) FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE v.publication_id=$1 AND v.id=$2`, publication, id).Scan(&v.ID, &v.PublicationID, &v.ProjectID, &v.Kind, &v.Digest, &v.Definition, &v.Current, &v.Labels)
+	err := q.QueryRow(ctx, `SELECT v.id::text,v.publication_id::text,v.project_id::text,v.kind,v.digest,v.definition,COALESCE(p.latest_revision_id=v.id,false),COALESCE((SELECT array_agg(label ORDER BY label) FROM olp.prompt_labels WHERE publication_id=p.id AND revision_id=v.id),'{}'::text[]) FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE v.publication_id=$1 AND v.id=$2`, publication, id).Scan(&v.ID, &v.PublicationID, &v.ProjectID, &v.Kind, &v.Digest, &v.Definition, &v.Current, &v.Labels)
 	return v, err
 }
 

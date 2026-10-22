@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { publicationForm, publicationInput, toolPin } from './form';
-import type { MCPServer } from './api';
+import type { MCPServer, Publication } from './api';
 
 const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
 const server: MCPServer = {
@@ -71,5 +71,29 @@ describe('publication configuration', () => {
       toolPin({ ...server, retired_at: '2026-10-22T00:00:00Z' }, 'lookup')
     ).rejects.toThrow();
     await expect(toolPin(server, 'unknown')).rejects.toThrow();
+  });
+
+  it('copies reactive tool proxies into independent editor and request values', async () => {
+    const pin = await toolPin(server, 'lookup');
+    const tools = new Proxy([new Proxy(pin, {})], {});
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'toolset',
+      name: 'Tools',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: { project_id: id, name: 'Tools', toolset: { tools } }
+    };
+    const form = publicationForm(current);
+    form.tools[0].name = 'edited';
+    expect(pin.name).toBe('lookup');
+    form.tools = new Proxy([new Proxy(form.tools[0], {})], {});
+    const input = publicationInput('toolsets', form);
+    expect(input.toolset?.tools[0].name).toBe('edited');
+    input.toolset!.tools[0].name = 'request';
+    expect(form.tools[0].name).toBe('edited');
+    expect(structuredClone(input)).toEqual(input);
   });
 });

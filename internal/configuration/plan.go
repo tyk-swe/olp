@@ -766,11 +766,18 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			refs[name], guardrailRefs[name], guardrailNetworkRefs[name] = true, true, true
 		}
 	}
-	mcpRefs := map[string]bool{}
+	bearerRefs := map[string]bool{}
 	for _, e := range doc.MCPServers {
 		if e.CredentialRef != nil {
 			refs[*e.CredentialRef] = true
-			mcpRefs[*e.CredentialRef] = true
+			bearerRefs[*e.CredentialRef] = true
+		}
+	}
+	for _, e := range doc.AgentPublications {
+		for _, ref := range []*string{e.CredentialRef, e.PublishedCredentialRef} {
+			if ref != nil {
+				refs[*ref], bearerRefs[*ref] = true, true
+			}
 		}
 	}
 	sinkRefs := map[string]bool{}
@@ -809,9 +816,9 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			}
 			continue
 		}
-		if mcpRefs[name] {
+		if bearerRefs[name] {
 			if secret.reference != nil {
-				return access.Invalid("external_credential_bindings", "MCP static bearer material uses sealed bindings.")
+				return access.Invalid("external_credential_bindings", "Static bearer material uses sealed bindings.")
 			}
 			encoded, _ := json.Marshal(secret.secret)
 			if _, err := mcpservers.Credential(encoded); err != nil {

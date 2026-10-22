@@ -22,7 +22,7 @@ export function publicationForm(
   return {
     project: d?.project_id ?? '',
     name: d?.name ?? '',
-    tools: structuredClone(d?.toolset?.tools ?? []),
+    tools: (d?.toolset?.tools ?? []).map((tool) => ({ ...tool })),
     template: d?.prompt?.template ?? '',
     variables: d?.prompt?.variables.join(', ') ?? '',
     protocol: d?.agent?.protocol ?? 'a2a-1.0.0',
@@ -36,7 +36,8 @@ export function publicationForm(
 }
 export function publicationInput(kind: Kind, form: PublicationForm): Draft {
   const d: Draft = { project_id: form.project, name: form.name.trim() };
-  if (kind === 'toolsets') d.toolset = { tools: structuredClone(form.tools) };
+  if (kind === 'toolsets')
+    d.toolset = { tools: form.tools.map((tool) => ({ ...tool })) };
   if (kind === 'prompts')
     d.prompt = {
       template: form.template,
