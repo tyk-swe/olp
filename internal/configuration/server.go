@@ -125,6 +125,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err := validateWorkloadEntries(input.Document); err != nil {
 		return access.Reply{}, err
 	}
+	if err := s.validateAgentPublications(input.Document); err != nil {
+		return access.Reply{}, err
+	}
 	if err := s.validateMCPServers(input.Document); err != nil {
 		return access.Reply{}, err
 	}
@@ -210,6 +213,16 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if err = s.applyMCPServers(r.Context(), tx, p, doc, bindings, preparedServers); err != nil {
+		return access.Reply{}, err
+	}
+	if err = s.applyAgentPublications(r.Context(), tx, p, doc, bindings); err != nil {
+		return access.Reply{}, err
+	}
+	// Workload grants may reference resources published by this same apply.
+	if err = s.applyWorkloadIssuers(r.Context(), tx, p, doc); err != nil {
+		return access.Reply{}, err
+	}
+	if err = validateAppliedTemplateReferences(r.Context(), tx, doc); err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {

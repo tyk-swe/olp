@@ -80,6 +80,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		usage.RunNotificationDelivery(ctx, pool, keys, installation, policy, log,
 			usage.NotificationDependencies{Limiter: limiter, Catalog: reference})
 	})
+	wg.Go(func() { runDebitReconciliation(ctx, pool, limiter, log) })
 	if limiter == nil {
 		return wg.Wait
 	}

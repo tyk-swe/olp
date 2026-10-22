@@ -20,6 +20,8 @@ import (
 )
 
 type KeyPolicy struct {
+	AllowedToolsets         []string          `json:"allowed_toolsets,omitempty"`
+	AllowedAgents           []string          `json:"allowed_agents,omitempty"`
 	ForbidResponseCache     bool              `json:"forbid_response_cache"`
 	LimitTemplate           *string           `json:"limit_template"`
 	RouteLimits             RouteLimits       `json:"route_limits"`
@@ -123,15 +125,20 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	if len(input.Scopes) < 1 || len(input.Scopes) > 3 {
+	if len(input.Scopes) < 1 || len(input.Scopes) > len(ConsumerScopes()) {
 		return Invalid("scopes", "Select at least one unique scope.")
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
-		if (scope != "inference" && scope != "models_read" && scope != "guardrails") || seen[scope] {
-			return Invalid("scopes", "Use unique inference, models_read and guardrails scopes.")
+		if !slices.Contains(ConsumerScopes(), scope) || seen[scope] {
+			return Invalid("scopes", "Use unique supported consumer scopes.")
 		}
 		seen[scope] = true
+	}
+	for field, ids := range map[string][]string{"allowed_toolsets": input.AllowedToolsets, "allowed_agents": input.AllowedAgents} {
+		if err := validateResourceAllowlist(field, ids); err != nil {
+			return err
+		}
 	}
 	if input.AllowedRoutes == nil {
 		return Invalid("allowed_routes", "This field cannot be null.")
@@ -206,7 +213,9 @@ func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (any, error) {
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
-const keyFields = `'workload_issuer_id',k.workload_issuer_id,'workload_digest',k.workload_digest,'workload_mapping',k.workload_mapping,'rotation_interval_days',k.policy->'rotation_interval_days',
+const keyFields = `'allowed_toolsets',COALESCE(NULLIF(k.policy->'allowed_toolsets','null'::jsonb),'[]'::jsonb),
+ 'allowed_agents',COALESCE(NULLIF(k.policy->'allowed_agents','null'::jsonb),'[]'::jsonb),
+ 'workload_issuer_id',k.workload_issuer_id,'workload_digest',k.workload_digest,'workload_mapping',k.workload_mapping,'rotation_interval_days',k.policy->'rotation_interval_days',
  'rotation_due_at',CASE WHEN k.policy->>'rotation_interval_days' IS NOT NULL THEN COALESCE(k.rotated_at,k.created_at)+make_interval(secs=>86400.0*(k.policy->>'rotation_interval_days')::int) END,
  'active_overlaps',COALESCE((SELECT jsonb_agg(jsonb_build_object('lookup_id',o.lookup_id,'expires_at',LEAST(o.expires_at,k.expires_at)) ORDER BY o.expires_at) FROM olp.api_key_overlaps o WHERE o.api_key_id=k.id AND LEAST(o.expires_at,k.expires_at)>now() AND k.revoked_at IS NULL),'[]'::jsonb),
  'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes',
@@ -318,6 +327,9 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
+	if err = checkKeyAgentResources(r.Context(), tx, input.KeyPolicy, input.ProjectID); err != nil {
+		return Reply{}, err
+	}
 	if err = checkKeyRoutes(r, tx, input.AllowedRoutes, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
@@ -354,7 +366,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if patch == nil {
 		return Reply{}, Invalid("policy", "Send a policy object.")
 	}
-	allowed := []string{"regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
+	allowed := []string{"allowed_toolsets", "allowed_agents", "regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown policy field.")
@@ -406,6 +418,10 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err = json.Unmarshal(data, &merged); err != nil {
 		return Reply{}, err
 	}
+	var previous KeyPolicy
+	if err = json.Unmarshal(data, &previous); err != nil {
+		return Reply{}, err
+	}
 	maps.Copy(merged, patch)
 	data, err = json.Marshal(merged)
 	if err != nil {
@@ -438,6 +454,10 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, projectID); err != nil {
+		return Reply{}, err
+	}
+	resources := addedKeyAgentResources(input.KeyPolicy, previous)
+	if err = checkKeyAgentResources(r.Context(), tx, resources, projectID); err != nil {
 		return Reply{}, err
 	}
 	if err = checkKeyRoutes(r, tx, input.AllowedRoutes, projectID); err != nil {

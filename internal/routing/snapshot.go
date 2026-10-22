@@ -13,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codemode"
 
 	"github.com/google/uuid"
@@ -191,8 +192,9 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
-	Commitments        map[string][]Commitment `json:"commitments,omitempty"`
-	Guardrails         *guardrails.Registry    `json:"guardrails,omitempty"`
+	AgentPublications  []agentcontract.Revision `json:"agent_publications,omitempty"`
+	Commitments        map[string][]Commitment  `json:"commitments,omitempty"`
+	Guardrails         *guardrails.Registry     `json:"guardrails,omitempty"`
 	guardrailEngines   map[string]*guardrails.Engine
 	hasBodyLimits      bool
 	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
@@ -215,6 +217,7 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
+		AgentPublications  []agentcontract.Revision  `json:"agent_publications,omitempty"`
 		Commitments        map[string][]Commitment   `json:"commitments,omitempty"`
 		Guardrails         *guardrails.Registry      `json:"guardrails,omitempty"`
 		CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
@@ -223,7 +226,7 @@ func (s *Snapshot) Digest() (string, error) {
 		Routes             map[string]Route          `json:"routes"`
 		InstallationPolicy *Policy                   `json:"installation_policy,omitempty"`
 		KeyPolicies        map[string]*Policy        `json:"key_policies,omitempty"`
-	}{s.Commitments, s.Guardrails, s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
+	}{s.AgentPublications, s.Commitments, s.Guardrails, s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err
 	}
@@ -244,6 +247,9 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) validate() error {
+	if err := agentcontract.ValidateRevisions(s.AgentPublications); err != nil {
+		return err
+	}
 	if err := s.Guardrails.Validate(); err != nil {
 		return err
 	}

@@ -112,6 +112,7 @@ type Event struct {
 // usage are omitted entirely when absent: a pre-attempt event carries neither,
 // and the event contract does not require routing.
 type Attempt struct {
+	Execution          *ExecutionReference   `json:"execution,omitempty"`
 	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
 	Routing            *Routing              `json:"routing,omitempty"`
 	ID                 string                `json:"id"`
@@ -377,6 +378,7 @@ type wireEvent struct {
 }
 
 type wireAttempt struct {
+	Execution          *ExecutionReference   `json:"execution,omitempty"`
 	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions"`
 	Routing            *wireRouting          `json:"routing"`
 	ID                 *string               `json:"id"`
@@ -616,7 +618,10 @@ func (w wireEvent) decode() (*Event, error) {
 }
 
 func (w wireAttempt) decode() (*Attempt, error) {
-	attempt := &Attempt{GuardrailDecisions: w.GuardrailDecisions}
+	attempt := &Attempt{GuardrailDecisions: w.GuardrailDecisions, Execution: w.Execution}
+	if err := attempt.Execution.Validate(); err != nil {
+		return nil, err
+	}
 	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
 		return nil, err
 	}
@@ -1048,6 +1053,9 @@ func Validate(e *Event) (*Validated, error) {
 }
 
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
+	if err := attempt.Execution.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
+	}
 	if attempt.Routing != nil {
 		if err := attempt.Routing.validateCredentialSource(); err != nil {
 			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)

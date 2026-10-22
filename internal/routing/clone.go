@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 )
@@ -17,6 +18,10 @@ func (s *Snapshot) Clone() *Snapshot {
 		return nil
 	}
 	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out.AgentPublications = slices.Clone(s.AgentPublications)
+	for i, v := range out.AgentPublications {
+		out.AgentPublications[i] = agentcontract.CloneRevision(v)
+	}
 	for id, values := range out.Commitments {
 		values = slices.Clone(values)
 		for i := range values {

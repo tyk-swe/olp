@@ -37,19 +37,25 @@ func TestReadinessMediaReconciliationReflectsDegradation(t *testing.T) {
 	}
 }
 
-func TestReadinessDetectsStaleBatchSettlement(t *testing.T) {
-	health := &WorkerTaskHealth{}
-	for _, task := range WorkerTasks {
-		state := TaskStateHealthy
-		if task.Name == string(usage.TaskBatchSettlement) {
-			state = TaskStateStale
-			if notifications.WorkerStaleAfter(task.Name) == 0 {
-				t.Fatal("batch settlement staleness cannot trigger notifications")
+func TestReadinessDetectsStaleFinancialWorkers(t *testing.T) {
+	for _, stopped := range []usage.Task{usage.TaskBatchSettlement, usage.TaskExecutionDebits} {
+		t.Run(string(stopped), func(t *testing.T) {
+			health := &WorkerTaskHealth{}
+			for _, task := range WorkerTasks {
+				state := TaskStateHealthy
+				if task.Name == string(stopped) {
+					state = TaskStateStale
+					if notifications.WorkerStaleAfter(task.Name) != task.StaleAfter {
+						t.Fatal("worker staleness notification threshold differs from readiness")
+					}
+				}
+				health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: task.Name, State: state})
 			}
-		}
-		health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: task.Name, State: state})
-	}
-	if health.CurrentFor(WorkerTasks) || health.StaleFor(WorkerTasks) != 1 {
-		t.Fatal("stopped batch settlement worker was considered healthy")
+			for _, configured := range []bool{false, true} {
+				if health.CurrentFor(expectedTasks(configured)) || health.StaleFor(expectedTasks(configured)) != 1 {
+					t.Fatal("stopped financial worker was considered healthy")
+				}
+			}
+		})
 	}
 }

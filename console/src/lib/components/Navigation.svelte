@@ -49,6 +49,18 @@
       label: 'Gateway',
       items: [
         {
+          label: 'Agent publications',
+          href: resolve('/agents'),
+          icon: 'route',
+          route: 'GET /api/v1/toolsets'
+        },
+        {
+          label: 'Provisional exposure',
+          href: resolve('/execution-debits'),
+          icon: 'route',
+          route: 'GET /api/v1/execution-debits'
+        },
+        {
           label: 'Guardrails',
           href: resolve('/guardrails'),
           icon: 'route',

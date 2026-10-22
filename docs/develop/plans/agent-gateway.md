@@ -281,10 +281,33 @@ code and management MCP are starting points, not completed consumer milestones.
 
 ### RM4.4: Agent contracts
 
-**State:** Planned. **Accountable:** access/agent maintainers, with runtime,
+**State:** In progress: contracts and console implemented; service-backed
+qualification remains open. **Accountable:** access/agent maintainers, with runtime,
 accounting and observability owners. **Entry:** existing access, pricing,
 observability and operator automation registries. This work can proceed beside
 API RM4.1–RM4.3, but no agent dispatch is enabled before durable accounting passes.
+
+The management API and Agent publications console support project drafts,
+immutable revisions, exact certified MCP tool pins, and production/staging prompt
+labels. New key/workload scopes use explicit toolset/agent UUID allowlists;
+empty lists deny and route groups grant no resource authority. Installed
+revisions are immutable, while live key withdrawal, publication retirement and
+MCP catalog/enablement changes revoke execution eligibility independently.
+Agent destination/card/credential changes also require installation access.
+
+Configuration export/plan/apply preserves draft, current publication and labels
+separately. Destination revision pins require explicit rebinding; draft and
+published credentials have independent sealed bindings and cannot follow a
+changed endpoint. Run/step references and one-use approvals contain only IDs,
+digests and allowances. Approval consumption commits with the matching fenced
+dispatch. Neither publication nor approval creates a consumer execution endpoint.
+
+Focused contract/deny/revocation/round-trip tests and console form checks pass.
+Management, immutable-row, live-revocation and atomic approval/dispatch integration
+scenarios compile but await the service-backed CI gate; the checklist remains
+open until that qualification passes.
+The packaged-console browser gate also includes a real prompt save/publish,
+draft-versus-label, retirement and exposure-view journey. It has not run locally.
 
 - [ ] **RM4.4 — Establish agent authority and publication:** add forward
   migrations, declared scopes/allowlists, immutable toolset/agent/prompt

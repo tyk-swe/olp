@@ -30,6 +30,21 @@ type resolvedSlot struct {
 	allowedAPIKeys []string
 }
 
+// Check references against the final project and workload state in this apply.
+func validateAppliedTemplateReferences(ctx context.Context, q access.Queryer, doc *Document) error {
+	for _, project := range doc.Projects {
+		var id string
+		var templates access.LimitTemplates
+		if err := q.QueryRow(ctx, "SELECT id::text,limit_templates FROM olp.projects WHERE lower(name)=lower($1)", project.Name).Scan(&id, &templates); err != nil {
+			return err
+		}
+		if err := access.ValidateTemplateReferences(ctx, q, id, templates); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings bindingSet) error {
 	if err := applyMFAPolicy(ctx, tx, p, doc.RequireLocalMFA); err != nil {
 		return err
@@ -117,19 +132,6 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	}
 	if err := s.applySCIMMappings(ctx, tx, p, doc, projectIDs); err != nil {
 		return err
-	}
-	if err := s.applyWorkloadIssuers(ctx, tx, p, doc, projectIDs); err != nil {
-		return err
-	}
-	for _, project := range doc.Projects {
-		var templates access.LimitTemplates
-		id := projectIDs[strings.ToLower(project.Name)]
-		if err := tx.QueryRow(ctx, "SELECT limit_templates FROM olp.projects WHERE id=$1", id).Scan(&templates); err != nil {
-			return err
-		}
-		if err := access.ValidateTemplateReferences(ctx, tx, id, templates); err != nil {
-			return err
-		}
 	}
 	if projectPoliciesChanged {
 		if _, err := access.AdvanceAuthority(ctx, tx); err != nil {

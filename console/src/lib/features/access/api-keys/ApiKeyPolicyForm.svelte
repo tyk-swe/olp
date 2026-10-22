@@ -288,7 +288,7 @@
     <h2 id="scope-heading">Scopes and route allowlist</h2>
     <fieldset class="checks">
       <legend>Scopes</legend
-      >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation']] as scope (scope[0])}<label
+      >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation'], ['tools', 'Toolset access'], ['agents', 'Agent access'], ['traces_write', 'Trace ingestion'], ['delegate', 'Delegation consent']] as scope (scope[0])}<label
           ><input
             type="checkbox"
             checked={form.scopes.includes(scope[0])}
@@ -303,6 +303,23 @@
           {scope[1]}</label
         >{/each}
     </fieldset>
+    <div class="form-field">
+      <label for="key-toolsets">Allowed published toolset UUIDs</label><input
+        id="key-toolsets"
+        bind:value={form.allowedToolsets}
+        disabled={!canManage}
+      /><small
+        >Comma-separated; an empty list denies all toolsets. Route groups grant
+        no tool access.</small
+      >
+    </div>
+    <div class="form-field">
+      <label for="key-agents">Allowed published agent UUIDs</label><input
+        id="key-agents"
+        bind:value={form.allowedAgents}
+        disabled={!canManage}
+      /><small>Comma-separated; an empty list denies all agents.</small>
+    </div>
     <fieldset class="checks">
       <legend>Provider state</legend>
       <label

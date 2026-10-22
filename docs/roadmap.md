@@ -41,7 +41,7 @@ Use their IDs in changes and evidence records.
 | [RM1: Existing gateway qualification](#rm1-existing-gateway-qualification) | In progress: qualification and scope decisions open | Candidate-specific performance, integration, billing and code-mode evidence |
 | [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | In progress: local code exists; live acceptance and vendor backlog open | Capture/policy acceptance, six live adapters, reference workloads and inventory review |
 | [RM3: Implemented API qualification](#rm3-implemented-api-qualification) | Implemented: qualification open | SDK, database, browser, live-provider and performance gates for current tuples |
-| [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Planned: new contracts and durable debits | Restart-safe reservation/settlement and independently verified agent contracts |
+| [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | In progress: foundations implemented; service and restore qualification open | Restart-safe reservation/settlement and independently verified agent contracts |
 | [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Planned | Priced, owner-isolated lifecycle/query operations and per-tuple qualification |
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Planned: remaining breadth only | OCR/search fidelity, live realtime control/usage and governed pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution and all declared transports/auth modes qualified |
@@ -107,6 +107,14 @@ pass database-backed SDK, console, live-provider and release-performance gates.
 Current managed-batch and text-only limits remain explicit.
 
 ### RM4: Shared execution foundations
+
+The implementation includes operation admission declarations, the shared
+provisional-debit ledger, fenced recovery, agent publications and approvals,
+configuration promotion, and operator console controls. Focused unit checks
+cover these contracts. Database/Valkey, management, recovery, and replacement
+restore scenarios are added to the existing CI integration suite; they have not
+been executed as local acceptance evidence. RM4.3 and the overall completion gate
+remain open until those checks pass. Existing async budget refusals remain.
 
 **Accountable:** gateway/SDK maintainers for RM4.1, resource/accounting maintainers
 for RM4.2–RM4.3 and access/agent maintainers for RM4.4.

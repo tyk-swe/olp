@@ -44,6 +44,12 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Durable obligations and allocation evidence survive a full replacement restore.
+	debitID, debitKey, debitProject := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	acctExec(t, h.Pool, `INSERT INTO olp.projects(id,name,etag,created_by) SELECT $1,'Outstanding execution',$2,id FROM olp.users ORDER BY id LIMIT 1`, debitProject, uuid.NewString())
+	acctExec(t, h.Pool, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id) SELECT $1,$2,$3,'Outstanding execution',id,'{}',$4,$5 FROM olp.users ORDER BY id LIMIT 1`, debitKey, strings.ReplaceAll(debitKey, "-", "")[:16], make([]byte, 32), uuid.NewString(), debitProject)
+	acctExec(t, h.Pool, `INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until,dispatched_at) VALUES($1,$2,$3,'api',jsonb_build_object('release_id',$4::text,'revision_id',$5::text),$6,$7,'USD',2,3,'outcome_unknown',now()-interval '1 day',now()-interval '1 day')`, debitID, debitKey, debitProject, uuid.NewString(), uuid.NewString(), make([]byte, 32), uuid.NewString())
+	acctExec(t, h.Pool, `INSERT INTO olp.execution_debit_owners(dispatch_id,owner_id,owner_kind,basis,bound,daily_window_id,weekly_window_id,monthly_window_id) VALUES($1,$2,'key','cost',2,0,0,0),($1,$2,'key','charge',3,0,0,0)`, debitID, debitKey)
+	acctExec(t, h.Pool, `INSERT INTO olp.execution_debit_versions(owner_id,version) VALUES($1,1)`, debitKey)
 	commitmentID, periodID := uuid.NewString(), uuid.NewString()
 	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules(id,provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at)
  VALUES($1,$2,$3,'Retained commitment','openai',12.345678901234,'USD','month','2026-01-01')`, commitmentID, uuid.NewString(), uuid.NewString()); err != nil {
@@ -178,6 +184,10 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 				process := testutil.StartProcess(t, required(t, "OLP_TEST_BINARY"), "all", restartEnv)
 				if err := process.Stop(5 * time.Second); err != nil {
 					t.Fatal(err)
+				}
+				var exposure string
+				if err := target.QueryRow(t.Context(), `SELECT state||':'||cost_bound::text||':'||charge_bound::text FROM olp.execution_debits WHERE id=$1 AND closed_at IS NULL`, debitID).Scan(&exposure); err != nil || exposure != "outcome_unknown:2.000000000000:3.000000000000" {
+					t.Fatalf("outstanding exposure lost through restore/restart: %s %v", exposure, err)
 				}
 				return
 			}

@@ -116,6 +116,8 @@ type keyRecord struct {
 }
 
 type authorityState struct {
+	agentPrincipals           map[string]access.Authority
+	agentResources            map[string]agentResourceAuthority
 	workloadIssuers           map[string]workloadIssuer
 	workloadPrincipals        map[string]access.Authority
 	budgetIncreases           map[string]string
@@ -489,6 +491,13 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	}
 	if state.ineligible, err = ReadIneligible(ctx, tx, nil); err != nil {
 		return fmt.Errorf("authority: %w", err)
+	}
+	state.agentPrincipals = map[string]access.Authority{}
+	for _, record := range state.keys {
+		state.agentPrincipals[record.authority.ID] = record.authority
+	}
+	if state.agentResources, err = loadAgentResourceAuthority(ctx, tx); err != nil {
+		return err
 	}
 	m.mu.Lock()
 	m.authority = state

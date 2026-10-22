@@ -235,6 +235,10 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 // PersistEventTx records accounting in the caller's transaction, allowing a
 // resource's reconciliation marker and its usage to commit atomically.
 func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (Persisted, error) {
+	return persistEventTx(ctx, tx, ev, payload, nil)
+}
+
+func persistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte, supplyOwners []string) (Persisted, error) {
 	validated, err := Validate(ev)
 	if err != nil {
 		return Persisted{}, err
@@ -279,7 +283,7 @@ func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (
 		if err != nil {
 			return Persisted{}, err
 		}
-		if err = chargeSupply(ctx, tx, ev, attempt, charge, supply); err != nil {
+		if err = chargeSupply(ctx, tx, ev, attempt, charge, supply, supplyOwners); err != nil {
 			return Persisted{}, err
 		}
 	}
@@ -489,12 +493,12 @@ type factCharge struct {
 	unpriced bool
 }
 
-// chargeSupply folds a billable attempt's charge into the spend windows of
-// every capped route, connection and slot it was dispatched against, keeping
+// chargeSupply folds an attempt's cost into the spend windows of every capped
+// or durably recorded owner it was dispatched against, keeping
 // each owner's latest balance. The balances name the request, so installing
 // them also removes what the gateway reserved against those caps.
-func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt, charge factCharge, balances map[string]limits.CostSnapshot) error {
-	if !charge.billable || attempt.Attempt.Routing == nil {
+func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt, charge factCharge, balances map[string]limits.CostSnapshot, recordedOwners []string) error {
+	if (!charge.billable || attempt.Attempt.Routing == nil) && len(recordedOwners) == 0 {
 		return nil
 	}
 	cost, unpriced := "0", int64(0)
@@ -504,7 +508,14 @@ func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAt
 	if charge.unpriced {
 		unpriced = 1
 	}
-	for _, owner := range attempt.Attempt.Routing.Budgets {
+	// Durable intents include uncapped owners. Their accounting cannot depend
+	// on the optional list of currently capped owners in routing provenance.
+	owners := slices.Clone(recordedOwners)
+	if attempt.Attempt.Routing != nil {
+		owners = append(owners, attempt.Attempt.Routing.Budgets...)
+	}
+	slices.Sort(owners)
+	for _, owner := range slices.Compact(owners) {
 		snapshot, err := limits.AddSupplyCostDelta(ctx, tx, owner, ev.ObservedAt, cost, unpriced)
 		if err != nil {
 			return fmt.Errorf("apply supply cost delta: %w", err)

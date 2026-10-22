@@ -21,6 +21,7 @@ const (
 // has been spent. rate is the allowance a granted or rejected rate reservation
 // answered with, when it was asked to state one.
 type scriptResult struct {
+	durableMissing   bool
 	kind             resultKind
 	dimension        Dimension
 	retryAfterMS     int64
@@ -215,10 +216,10 @@ func parseCostReservation(value any) (scriptResult, error) {
 			estimate: detail == "monthly_cost_estimate",
 		}, nil
 	case status == -1 && retry == 0 &&
-		(detail == "uninitialized_daily_cost_state" || detail == "uninitialized_monthly_cost_state" || detail == "uninitialized_weekly_cost_state"):
-		return scriptResult{kind: resultUninitialized}, nil
+		(detail == "unsettled_durable_cost_state" || detail == "uninitialized_durable_cost_state" || detail == "uninitialized_daily_cost_state" || detail == "uninitialized_monthly_cost_state" || detail == "uninitialized_weekly_cost_state"):
+		return scriptResult{kind: resultUninitialized, durableMissing: detail == "uninitialized_durable_cost_state"}, nil
 	case status == -1 && retry == 0 &&
-		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state" || detail == "malformed_weekly_cost_state"):
+		(detail == "malformed_durable_cost_state" || detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state" || detail == "malformed_weekly_cost_state"):
 		return scriptResult{kind: resultMalformed}, nil
 	default:
 		return scriptResult{}, ErrUnexpectedResponse
@@ -246,7 +247,7 @@ func parseReconciliation(value any) (bool, bool, error) {
 		(daily == 0 || daily == 1) && (monthly == 0 || monthly == 1):
 		return daily == 1, monthly == 1, nil
 	case status == -1 && daily == 0 && monthly == 0 &&
-		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state" || detail == "malformed_weekly_cost_state"):
+		(detail == "malformed_durable_cost_state" || detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state" || detail == "malformed_weekly_cost_state"):
 		return false, false, ErrMalformedState
 	default:
 		return false, false, ErrUnexpectedResponse

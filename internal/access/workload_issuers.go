@@ -143,7 +143,7 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 
 func WorkloadKeyPolicy(m workload.Mapping) KeyPolicy {
 	template := m.LimitTemplate
-	return KeyPolicy{Scopes: m.Scopes, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}, AllowedRouteGroups: m.RouteGroups, LimitTemplate: &template, AllowProviderState: m.AllowProviderState}
+	return KeyPolicy{Scopes: m.Scopes, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}, AllowedRouteGroups: m.RouteGroups, LimitTemplate: &template, AllowProviderState: m.AllowProviderState}
 }
 
 // ValidateWorkloadConfig checks declared identity URLs without fetching them.
@@ -169,6 +169,16 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 	if err := ValidateWorkloadConfig(input); err != nil {
 		return "", err
 	}
+	var previous workload.Config
+	if !create {
+		var issuer string
+		if err := tx.QueryRow(ctx, "SELECT issuer,document FROM olp.workload_issuers WHERE id=$1 FOR UPDATE", id).Scan(&issuer, &previous); err != nil {
+			return "", err
+		}
+		if issuer != input.Issuer {
+			return "", Invalid("issuer", "The issuer URL is immutable.")
+		}
+	}
 	var e error
 	for _, mapping := range input.Mappings {
 		project := mapping.ProjectID
@@ -181,6 +191,18 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 		if e = checkLimitTemplates(ctx, tx, &project, &mapping.LimitTemplate); e != nil {
 			return "", e
 		}
+		resources := WorkloadKeyPolicy(mapping)
+		if previous.Enabled {
+			for _, old := range previous.Mappings {
+				if old.Name == mapping.Name && old.ProjectID == mapping.ProjectID {
+					resources = addedKeyAgentResources(resources, WorkloadKeyPolicy(old))
+					break
+				}
+			}
+		}
+		if e = checkKeyAgentResources(ctx, tx, resources, &project); e != nil {
+			return "", e
+		}
 		if e = checkRouteGroupNames(ctx, tx, mapping.RouteGroups, &project); e != nil {
 			return "", e
 		}
@@ -188,13 +210,6 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 	// Existing subjects keep one project and mapping. Updating that mapping's
 	// permissions changes all of them through the same authority generation.
 	if !create {
-		var issuer string
-		if err := tx.QueryRow(ctx, "SELECT issuer FROM olp.workload_issuers WHERE id=$1 FOR UPDATE", id).Scan(&issuer); err != nil {
-			return "", err
-		}
-		if issuer != input.Issuer {
-			return "", Invalid("issuer", "The issuer URL is immutable.")
-		}
 		if err := ValidateWorkloadBindings(ctx, tx, id, input); err != nil {
 			return "", err
 		}

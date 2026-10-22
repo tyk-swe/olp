@@ -282,11 +282,28 @@ qualification matrix; missing live accounts or hardware remain open gates.
 
 ### RM4: Shared execution foundations
 
-**State:** Planned additions to existing resource infrastructure.
+**State:** In progress: implementation and focused unit checks exist; service,
+crash/recovery and restore qualification remain open.
 **Accountable:** gateway/SDK maintainers for RM4.1; resource/accounting maintainers
 for RM4.2–RM4.3. **Entry:** the binding ownership, pricing and runtime contracts
 above. RM4.1 and RM4.2 may proceed in parallel; RM4.3 verifies RM4.2 before new
 bounded asynchronous work is enabled.
+
+Operation declarations use `execution-foundations-1` in the endpoint ledger;
+they do not register codecs or enable pending tuples. The `limits` owner holds
+the shared PostgreSQL intent/allocation/evidence ledger and nonexpiring,
+versioned Valkey projection. `usage.PersistDebitResultTx` commits observed facts
+and settlement together, checking dispatch/release/provider/credential/price
+affinity. Incomplete receipts retain exposure until verified coverage resolves
+them; coverage events contain only new accounting deltas. Recovery reclaims only
+undispatched, fenced preparations. Accepted uncertainty never expires or resends.
+
+Focused tests cover declaration isolation, authority, evidence identity,
+projection commands and metadata references. Integration scenarios cover
+competing dispatchers, projection loss, uncertain acknowledgements, transaction
+rollback, duplicate/conflicting evidence, approval fencing, and replacement
+restore. These scenarios compile; they have not run locally. The checklist stays
+open until the database/Valkey and process acceptance gates pass in CI.
 
 - [ ] **RM4.1 — Extend API contracts per operation:** before each new codec,
   extend the existing endpoint ledger, operation authorization and declared

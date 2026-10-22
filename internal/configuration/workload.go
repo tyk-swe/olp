@@ -23,6 +23,8 @@ type WorkloadMappingEntry struct {
 	Project            string            `json:"project"`
 	LimitTemplate      string            `json:"limit_template"`
 	RouteGroups        []string          `json:"route_groups"`
+	AllowedToolsets    []string          `json:"allowed_toolsets,omitempty"`
+	AllowedAgents      []string          `json:"allowed_agents,omitempty"`
 	Scopes             []string          `json:"scopes"`
 	EndUserClaim       *string           `json:"end_user_claim"`
 	AllowProviderState bool              `json:"allow_provider_state"`
@@ -36,7 +38,7 @@ func (e WorkloadIssuerEntry) config(projects map[string]string) (workload.Config
 		if !ok {
 			return c, access.Invalid("workload_issuers", "Every mapping must reference a declared or existing project.")
 		}
-		c.Mappings = append(c.Mappings, workload.Mapping{Name: m.Name, Match: m.Match, ProjectID: id, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
+		c.Mappings = append(c.Mappings, workload.Mapping{Name: m.Name, Match: m.Match, ProjectID: id, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
 	}
 	return c, access.ValidateWorkloadConfig(c)
 }
@@ -97,7 +99,7 @@ func exportWorkloadIssuers(ctx context.Context, q access.Queryer) ([]WorkloadIss
 			if !ok {
 				return nil, access.Invalid("workload_issuers", "A workload mapping project is no longer available.")
 			}
-			e.Mappings = append(e.Mappings, WorkloadMappingEntry{Name: m.Name, Match: m.Match, Project: project, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
+			e.Mappings = append(e.Mappings, WorkloadMappingEntry{Name: m.Name, Match: m.Match, Project: project, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
 		}
 		result = append(result, e)
 	}
@@ -222,7 +224,27 @@ func (s *Server) prepareWorkloadIssuers(ctx context.Context, p access.Principal,
 	}
 	return nil
 }
-func (s *Server) applyWorkloadIssuers(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, projects map[string]string) error {
+func (s *Server) applyWorkloadIssuers(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document) error {
+	if len(doc.WorkloadIssuers) == 0 {
+		return nil
+	}
+	projects := map[string]string{}
+	rows, err := tx.Query(ctx, "SELECT id::text,name FROM olp.projects")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, name string
+		if err = rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return err
+		}
+		projects[strings.ToLower(name)] = id
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
 	for _, e := range doc.WorkloadIssuers {
 		c, err := e.config(projects)
 		if err != nil {

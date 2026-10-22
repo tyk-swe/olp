@@ -23,6 +23,7 @@ const APIVersion = "openllmproxy.dev/config/v2"
 const LegacyAPIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
+	AgentPublications    []PublicationEntry         `json:"agent_publications,omitempty"`
 	GuardrailPolicies    []GuardrailPolicyEntry     `json:"guardrail_policies,omitempty"`
 	GuardrailAttachments []GuardrailAttachmentEntry `json:"guardrail_attachments,omitempty"`
 	MCPServers           []MCPServerEntry           `json:"mcp_servers,omitempty"`
@@ -365,6 +366,7 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	slices.SortFunc(d.AgentPublications, func(a, b PublicationEntry) int { return strings.Compare(publicationKey(a), publicationKey(b)) })
 	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {
 		ka, kb := mcpKey(a), mcpKey(b)
 		if c := strings.Compare(ka[0], kb[0]); c != 0 {

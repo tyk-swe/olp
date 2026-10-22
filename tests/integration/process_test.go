@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/openapi"
 )
@@ -183,8 +184,11 @@ func awaitWorkerPlane(t *testing.T, since time.Time) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	wanted := []string{"billing_import", "cost_reconciliation", "export_delivery", "focus_export", "grant_refresh", "health_probes", "maintenance", "managed_export_delivery", "media_reconciliation", "notification_delivery",
-		"request_metadata_consumer", "request_metadata_gateway_epoch_detection"}
+	var wanted []string
+	for _, task := range observability.WorkerTasks {
+		wanted = append(wanted, task.Name)
+	}
+	slices.Sort(wanted)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		rows, err := pool.Query(t.Context(),

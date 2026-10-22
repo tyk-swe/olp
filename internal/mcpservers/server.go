@@ -372,6 +372,9 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 			reply.Location = "/api/v1/mcp-servers/" + id
 		}
 	}
+	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+		return access.Reply{}, err
+	}
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}

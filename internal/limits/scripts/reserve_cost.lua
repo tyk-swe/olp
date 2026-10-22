@@ -351,7 +351,7 @@ end
 --       of 0 is a request nothing could price, which is judged on accrued spend
 --       alone and leaves nothing pending. "check" reads availability including
 --       pending spend without modifying any key.
-if not ((#KEYS == 4 and #ARGV == 6) or (#KEYS == 5 and (#ARGV == 7 or #ARGV == 8))) then
+if not ((#KEYS == 4 and #ARGV == 6) or ((#KEYS == 5 or #KEYS == 6) and (#ARGV == 7 or #ARGV == 8))) then
   return failure("invalid_arguments")
 end
 
@@ -375,7 +375,8 @@ if ARGV[2] ~= "" then
 end
 if weekly_limit ~= "" then weekly_hi, weekly_lo = parse_limit(weekly_limit) end
 local override = parse_safe_unsigned_integer(ARGV[3])
-local read_only = ARGV[4] == "check"
+local verify = ARGV[4] == "verify"
+local read_only = ARGV[4] == "check" or verify
 local amount_hi, amount_lo = 0, 0
 if not read_only then
   amount_hi, amount_lo = parse_amount(ARGV[4])
@@ -430,7 +431,7 @@ end
 
 -- Optional grants are immutable authority evidence, not caller input. They
 -- add to an existing cap only during their original period and server-time span.
-if ARGV[8] ~= nil then
+if ARGV[8] ~= nil and ARGV[8] ~= "" then
   local ok, grants = pcall(cjson.decode, ARGV[8])
   if not ok or type(grants) ~= "table" or #grants > 24 then return failure("invalid_arguments") end
   for _, grant in ipairs(grants) do
@@ -452,13 +453,28 @@ if ARGV[8] ~= nil then
   end
 end
 
-if daily_hi ~= nil and compare_amount(daily_spent_hi, daily_spent_lo, daily_hi, daily_lo) >= 0 then
+-- Provisional exposure never shares the expiring pending hash. It is added
+-- to each current window, so moving to a new calendar window cannot free it.
+if #KEYS == 6 then
+  local durable = redis.pcall("HMGET",KEYS[6],"version","amount","blocked")
+  if durable.err ~= nil or parse_safe_unsigned_integer(durable[1]) == nil then
+    return {RESPONSE_VERSION,-1,"uninitialized_durable_cost_state",0,day_window,month_window}
+  end
+  local hi,lo = parse_amount(durable[2])
+  if hi == nil or (durable[3]~="0" and durable[3]~="1") then return {RESPONSE_VERSION,-1,"malformed_durable_cost_state",0,day_window,month_window} end
+  if durable[3]=="1" then return {RESPONSE_VERSION,-1,"unsettled_durable_cost_state",0,day_window,month_window} end
+  daily_spent_hi,daily_spent_lo=add_amount(daily_spent_hi,daily_spent_lo,hi,lo)
+  weekly_spent_hi,weekly_spent_lo=add_amount(weekly_spent_hi,weekly_spent_lo,hi,lo)
+  monthly_spent_hi,monthly_spent_lo=add_amount(monthly_spent_hi,monthly_spent_lo,hi,lo)
+end
+
+if daily_hi ~= nil and compare_amount(daily_spent_hi, daily_spent_lo, daily_hi, daily_lo) > (verify and 0 or -1) then
   return {RESPONSE_VERSION, 0, "daily_cost", day_ttl, day_window, month_window}
 end
-if monthly_hi ~= nil and compare_amount(monthly_spent_hi, monthly_spent_lo, monthly_hi, monthly_lo) >= 0 then
+if monthly_hi ~= nil and compare_amount(monthly_spent_hi, monthly_spent_lo, monthly_hi, monthly_lo) > (verify and 0 or -1) then
   return {RESPONSE_VERSION, 0, "monthly_cost", month_ttl, day_window, month_window}
 end
-if weekly_hi ~= nil and compare_amount(weekly_spent_hi, weekly_spent_lo, weekly_hi, weekly_lo) >= 0 then
+if weekly_hi ~= nil and compare_amount(weekly_spent_hi, weekly_spent_lo, weekly_hi, weekly_lo) > (verify and 0 or -1) then
   return {RESPONSE_VERSION, 0, "weekly_cost", week_ttl, day_window, month_window}
 end
 
@@ -477,15 +493,15 @@ end
 if read_only then
   local held_hi, held_lo = pending_total(KEYS[3], KEYS[4], now_ms, true)
   local daily_total_hi, daily_total_lo = add_amount(daily_spent_hi, daily_spent_lo, held_hi, held_lo)
-  if daily_hi ~= nil and compare_amount(daily_total_hi, daily_total_lo, daily_hi, daily_lo) >= 0 then
+  if daily_hi ~= nil and compare_amount(daily_total_hi, daily_total_lo, daily_hi, daily_lo) > (verify and 0 or -1) then
     return {RESPONSE_VERSION, 0, "daily_cost", math.min(day_ttl, PENDING_RETRY_MS), day_window, month_window}
   end
   local monthly_total_hi, monthly_total_lo = add_amount(monthly_spent_hi, monthly_spent_lo, held_hi, held_lo)
-  if monthly_hi ~= nil and compare_amount(monthly_total_hi, monthly_total_lo, monthly_hi, monthly_lo) >= 0 then
+  if monthly_hi ~= nil and compare_amount(monthly_total_hi, monthly_total_lo, monthly_hi, monthly_lo) > (verify and 0 or -1) then
     return {RESPONSE_VERSION, 0, "monthly_cost", math.min(month_ttl, PENDING_RETRY_MS), day_window, month_window}
   end
   local weekly_total_hi, weekly_total_lo = add_amount(weekly_spent_hi, weekly_spent_lo, held_hi, held_lo)
-  if weekly_hi ~= nil and compare_amount(weekly_total_hi, weekly_total_lo, weekly_hi, weekly_lo) >= 0 then
+  if weekly_hi ~= nil and compare_amount(weekly_total_hi, weekly_total_lo, weekly_hi, weekly_lo) > (verify and 0 or -1) then
     return {RESPONSE_VERSION, 0, "weekly_cost", math.min(week_ttl, PENDING_RETRY_MS), day_window, month_window}
   end
   return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}

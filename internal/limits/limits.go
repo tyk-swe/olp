@@ -28,6 +28,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -469,8 +470,11 @@ type Commander interface {
 
 // Limiter reserves shared budgets through one Valkey connection.
 type Limiter struct {
-	client    Commander
-	namespace string
+	debitVersionMu sync.Mutex
+	debitVersions  map[string]int64
+	syncDurable    func(context.Context, string) error
+	client         Commander
+	namespace      string
 }
 
 // New builds a limiter over client. The namespace prefixes every key and must
@@ -741,7 +745,13 @@ func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) (
 	}
 	var value any
 	var err error
-	if r.CostIncreases != "" {
+	if l.syncDurable != nil {
+		weekly := ""
+		if r.WeeklyCostLimit != nil {
+			weekly = *r.WeeklyCostLimit
+		}
+		value, err = l.evalDurableCost(ctx, r.CostOwnerID, []string{scriptKeys.dailyCost, scriptKeys.monthlyCost, scriptKeys.pending, scriptKeys.expiry, scriptKeys.weeklyCost, l.costPrefixFor(r.CostOwnerID, r.CostBasis) + ":durable"}, daily, monthly, "0", amount, leaseID, ttl, weekly, r.CostIncreases)
+	} else if r.CostIncreases != "" {
 		weekly := ""
 		if r.WeeklyCostLimit != nil {
 			weekly = *r.WeeklyCostLimit
