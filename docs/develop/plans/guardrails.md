@@ -4,7 +4,9 @@ Status: **In progress**. The engine and capture-redaction implementation exist;
 release acceptance, live adapters and broader vendor coverage remain open.
 [Guardrails](../../use/guardrails.md) owns the current engine contract;
 [Observability](../../operate/observability.md#payload-capture) owns capture.
-This plan covers remaining outcomes and support decisions.
+This plan owns [roadmap RM2](../../roadmap.md#rm2-guardrails-capture-and-caching),
+including the related cache qualification gate. It covers remaining outcomes
+and support decisions; unchecked items below are not new evidence.
 
 ## Dependencies and boundaries
 
@@ -17,13 +19,49 @@ custom guardrails run as confined WASM or signed webhooks.
 
 ## Remaining work and acceptance
 
-| Order | Owner | Acceptance |
-| --- | --- | --- |
-| 1 | Export / gateway maintainers | Execute capture service fixtures: publication isolation, migration, immutable pins, unary/split-stream/tool sink readback, unchanged caller output, stale-ETag suppression and no durable payload staging |
-| 2 | Gateway / guardrail maintainers | Run the surface/action matrix, cancellation, evaluator budgets, accounting, logprobs and retained-response exclusions through protocol, authorization/isolation and integration gates |
-| 3 | Connector / plugin maintainers | Record live authentication, API version, supported actions, valid replacement spans, both failure policies, deadlines/circuits and WASM conformance; local fakes do not establish live support |
-| 4 | Performance maintainers | Qualify 100K-token built-ins, streaming and capture at full S3 load on the frozen reference hardware; record latency, throughput, allocations and memory against unconfigured controls |
-| 5 | Guardrail / connector maintainers | Review every row below, prioritize named adapter work and record explicit support/exclusion decisions with rationale and evidence |
+**Entry:** implemented engine/capture contracts and a recorded candidate.
+RM2.1–RM2.2 need disposable services; RM2.3 needs authorized vendor accounts.
+RM2.4 follows the local correctness checks and needs frozen reference hardware.
+RM2.5 and RM2.6 can proceed independently; cache qualification depends on the
+implemented revision/execution contracts, not completion of RM2.3 or RM2.5.
+
+- [ ] **RM2.1 — Execute capture acceptance** (export/gateway): run the actual
+  `TestCapture` service fixtures, the prescribed browser checks and manual
+  Settings capture workflow. Verify
+  publication isolation, migration, immutable pins, unary/split-stream/tool
+  sink readback, unchanged caller output, stale-ETag suppression and no durable
+  payload staging. Retain results from the [qualification commands](../qualification.md#guardrail-and-capture-qualification);
+  compile-only runs and missing-service skips cannot close this item.
+- [ ] **RM2.2 — Close engine regression gates** (gateway/guardrail): run the
+  surface/action matrix, cancellation, evaluator budgets/accounting, logprobs
+  and retained-response exclusions through protocol, authorization/isolation,
+  integration and race checks. Retain accessible console evidence and resolve
+  failures before advancing the candidate.
+- [ ] **RM2.3 — Qualify all six live adapters** (connector/plugin): record each
+  adapter's authentication, API version, phases/actions, valid replacement
+  spans, both failure policies and actual deadline/circuit behavior. Execute
+  positive, negative and malformed/timeout cases using the qualification guide;
+  retain separate WASM conformance evidence. Local fakes cannot close live gates.
+- [ ] **RM2.4 — Measure configured workloads** (performance): after RM2.1–RM2.2,
+  qualify 100K-token built-ins, streaming and capture at full S3 load. Configure
+  these workloads explicitly; stock S3 alone does not exercise them. Record
+  latency, throughput, allocations and memory against unconfigured controls
+  on frozen reference hardware.
+- [ ] **RM2.5 — Review the 60-entry inventory** (guardrail/connector): review
+  every row below, prioritize named adapter work and record each support or
+  exclusion decision with rationale, owner and evidence. Give newly accepted
+  adapter work its own contract/fixture/live tasks; reviewing a row does not
+  implement the adapter or remove the coverage gap.
+- [ ] **RM2.6 — Qualify response and prompt caching** (cache/performance): use
+  a dedicated cache instance and paired hit/bypass S1 runs to establish
+  incremental p95 ≤1 ms. Verify guarded replay, isolation, purge, eviction,
+  outage and rotation under [cache qualification](../qualification.md#performance-and-routing).
+  Record provider prompt-cache control and savings evidence separately;
+  fixture token savings are not live savings.
+
+**Exit:** all items and the criteria below have candidate-specific evidence.
+Use the [roadmap evidence rules](../../roadmap.md#updating-progress-and-evidence)
+to record blockers and update status without conflating local and live checks.
 
 The six existing external adapters are Bedrock, Azure Content Safety, Azure
 Prompt Shields, Model Armor, Lakera v2 and Presidio. A generic webhook or WASM
@@ -42,6 +80,8 @@ integration and rationale; absence of credentials or hardware is not an exclusio
 - [ ] Release review records the pinned 60-entry inventory, each support or
   exclusion decision and an owned backlog. Coverage remains **Partial** while
   unsupported entries remain; no overall vendor parity claim is made.
+- [ ] The related RM2.6 cache gate has paired reference measurements and
+  isolation/replay/failure evidence; any live prompt-cache claim has its own proof.
 
 ## Vendor inventory
 

@@ -6,6 +6,8 @@ Existing [upstream registration](../../use/mcp-servers.md) and
 [management MCP](../../operate/automation.md#management-mcp) have separate contracts.
 This plan depends on existing access, accounting, pricing, observability and
 guardrail owners; it extends them rather than creating parallel registries.
+It owns roadmap RM4.4, RM7 and RM8. The [delivery checklists](#ordered-delivery-and-verification)
+name the dependencies and evidence needed for each step; all remain planned.
 
 ## Shared implementation contract
 
@@ -43,7 +45,8 @@ These are implementation decisions, not claims about current behavior.
    cannot promise exactly-once upstream side effects. An ambiguous response is
    `outcome_unknown`, retains its accounting evidence and requires explicit
    caller reconciliation. Restart cannot silently replay it. Before dispatch,
-   write a durable provisional-budget ledger entry with dispatch ID, run/step,
+   use the shared [RM4.2–RM4.3 accounting foundation](api-surface.md#rm4-shared-execution-foundations)
+   to write a durable provisional-budget ledger entry with dispatch ID, run/step,
    immutable accounting owner/window, cost/charge basis, installation pricing
    currency and declared upper bound. Unknown outcomes retain that debit across
    restart and ordinary retention; no lease or TTL automatically releases it.
@@ -143,7 +146,7 @@ unpriced tool can satisfy a finite run ceiling. Each model and tool step remains
 a separate attempt, including refused or uncertain continuations.
 
 Operators classify tools as read-only or approval-required; upstream annotations
-are untrusted hints. Unclassified tools require approval. guardrail deny rules override
+are untrusted hints. Unclassified tools require approval. Guardrail deny rules override
 approval. Responses emits `mcp_list_tools`, `mcp_call` and
 `mcp_approval_request` where its certified contract supports them. Chat
 Completions, Anthropic and Gemini expose only the final answer; when approval
@@ -240,7 +243,7 @@ Ingestion IDs deduplicate telemetry only. Investigations save typed filters
 (time range, run, duration, error and tool), at most 100 evidence references and
 an operator-authored summary. Reads/export recheck project authority. No
 automatic narrative stores source payloads or treats client-supplied spans as
-verified execution. observability exports expose this origin distinction.
+verified execution. Observability exports expose this origin distinction.
 
 ### Agent identities
 
@@ -271,15 +274,101 @@ is Entra agent identity; generic configured workload issuers remain supported.
 
 ## Ordered delivery and verification
 
-| Slice | Prerequisites | Concrete exit |
-| --- | --- | --- |
-| 1. Shared contracts | Existing access/observability/pricing owners and operator automation registry | Forward migrations, scopes, attempt/run types, one-use approvals, resource publication and promotion; no second MCP or identity owner; deny-matrix and privacy fixtures pass |
-| 2. Direct MCP calls | Slice 1 and tool governance | Streamable HTTP toolsets, pinned-schema validation, static credentials, limits and priced attempts through both consumer endpoints; drift/timeout/restart/ambiguous-dispatch tests pass |
-| 3. MCP interoperability | Slice 2 | OAuth/per-user grants, legacy SSE and experimental stdio; versioned conformance and credential-isolation tests pass |
-| 4. Tool loops and prompts | Slice 2; guardrail input/output execution | Three native dialects plus Responses, bounded continuations/approvals, prompt API/playground/import equivalence and no cache replay of effects |
-| 5. Delegation and A2A | Slices 1–3 | Both A2A adapters, owner-bound retained tasks, authenticated callbacks, pair budgets and kill-switch behavior under a lost upstream connection |
-| 6. Traces and operator views | Slices 1, 4–5; observability export | Bounded OTLP ingestion, project-safe evidence links, origin-labelled exports and accessible console workflows |
-| 7. Release qualification | All prior slices | Full gates below, pinned external reference implementations, runbooks and support review |
+The [roadmap](../../roadmap.md#remaining-outcomes) owns status and cross-plan
+order. Shared accounting is implemented once in the API foundation; this plan
+adds agent authority and execution contracts. Existing registration/discovery
+code and management MCP are starting points, not completed consumer milestones.
+
+### RM4.4: Agent contracts
+
+**State:** Planned. **Accountable:** access/agent maintainers, with runtime,
+accounting and observability owners. **Entry:** existing access, pricing,
+observability and operator automation registries. This work can proceed beside
+API RM4.1–RM4.3, but no agent dispatch is enabled before durable accounting passes.
+
+- [ ] **RM4.4 — Establish agent authority and publication:** add forward
+  migrations, declared scopes/allowlists, immutable toolset/agent/prompt
+  publication and configuration promotion, run/attempt references and one-use
+  approval metadata. Reuse existing MCP, grant and workload-identity owners.
+  Verify the deny matrix, revision pinning, revocation, configuration round trips
+  and content-free storage; link dispatch references to the shared ledger.
+
+**Exit:** the [shared contract](#shared-implementation-contract) has focused
+authorization, isolation and privacy evidence. API families do not depend on
+RM4.4; direct agent/tool execution depends on both RM4.4 and accounting RM4.3.
+
+### RM7: Consumer MCP
+
+**State:** Planned. **Accountable:** MCP/access maintainers.
+**Entry:** RM4.3, RM4.4 and existing guardrail argument/result execution.
+RM7.1 comes first; RM7.2–RM7.4 may follow independently, then RM7.5 verifies their
+combined scope. Live vendor qualification in RM2 is not a prerequisite.
+
+- [ ] **RM7.1 — Serve direct Streamable HTTP calls:** publish pinned toolsets,
+  static credentials, bounded sessions and compiled schemas; serve `/mcp` and
+  the JSON tool endpoints through one authorized call path. Verify aliases,
+  catalog drift, argument/result policies, limits, priced attempts, timeout,
+  restart and ambiguous dispatch. Repeated call IDs must not repeat effects.
+- [ ] **RM7.2 — Add OAuth and per-user grants:** use existing enrollment and
+  grant machinery. Test binding to server/client/audience/scopes/project/user,
+  single-flight refresh, expiry/revocation and concurrent credential isolation;
+  missing grants never fall back to a service credential.
+- [ ] **RM7.3 — Add legacy HTTP+SSE:** implement the explicit `2024-11-05`
+  transport and its fixtures without silently downgrading modern sessions.
+- [ ] **RM7.4 — Add experimental stdio:** allow only operator-installed
+  executables under the existing unconfined-plugin contract. Verify caller
+  rejection of command/path/environment/working-directory selection and the
+  same call, isolation and effect-accounting limits as HTTP.
+- [ ] **RM7.5 — Qualify MCP interoperability:** run pinned reference conformance
+  for every declared version/transport and auth mode. Retain credential,
+  malicious-schema, drift, egress and failure evidence with exact versions;
+  update support claims only for the qualified combinations.
+
+**Exit:** all declared transports/auth modes pass the MCP [exit criteria](#exit-criteria)
+and applicable candidate gates. A working HTTP-only slice does not close RM7.
+
+### RM8: Agent workflows
+
+**State:** Planned. **Accountable:** agent maintainers; specialist owners are
+named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1–RM8.2;
+completed RM7 interoperability for RM8.3–RM8.4. RM8.5 follows those workflow
+contracts and existing observability exports; RM8.6 qualifies the combined result.
+Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
+for their selected backend, not completion of every retrieval adapter.
+
+- [ ] **RM8.1 — Execute bounded tool loops** (gateway/protocol): implement the
+  three native dialects plus Responses projections under the published
+  transformed-route policy. Verify iteration/time/concurrency/cost bounds,
+  per-step attempts, approvals, digest-bound continuation and revocation.
+  Test cancellation/restart/unknown effects and prevent cache replay of runs.
+- [ ] **RM8.2 — Add prompt publication and rendering** (prompt/console):
+  implement immutable revisions, labels and bounded string substitution.
+  Verify equivalent API/playground/import rendering, fixed in-flight revisions,
+  unknown-variable and strict-route refusals, input guards and no persisted
+  variable values or rendered content.
+- [ ] **RM8.3 — Add delegated identities** (access): extend workload issuers,
+  implement explicit consent and scoped tokens, and enforce intersected rights
+  and user/agent/pair budgets. Test wrong audience/project/subject, replay,
+  expiry, renewal and either-principal revocation; retain separate live Entra
+  evidence without treating generic issuer fixtures as that qualification.
+- [ ] **RM8.4 — Serve A2A workflows** (agent/resource): implement both pinned
+  protocol adapters, retained owner-bound tasks and authenticated callbacks.
+  Verify send/stream/read/cancel/resubscribe, callback accounting, cross-project
+  denial and kill-switch behavior under lost connections. Preserve uncertainty
+  when remote termination cannot be proved. Delegated cases use RM8.3.
+- [ ] **RM8.5 — Add traces and operator views** (observability/console): after
+  RM8.1–RM8.4, implement bounded OTLP ingestion, scoped evidence links and
+  origin-labelled exports. Test content stripping, project isolation, retention
+  and inability to forge financial facts; exercise accessible operator journeys.
+- [ ] **RM8.6 — Qualify the complete agent surface** (release): run service
+  faults/restarts, authorization/isolation, pinned SDK/reference implementations,
+  Chromium and applicable check/race/build/Helm/performance gates on one candidate.
+  Publish runbooks for uncertain effects, remote cancellation limits, secret
+  enrollment/recovery and upgrades, then review exact support claims.
+
+**Exit:** every criterion below has evidence. Implementation checkboxes do not
+establish live support; record remaining blockers and artifact links using the
+[roadmap evidence rules](../../roadmap.md#updating-progress-and-evidence).
 
 ## Change map
 

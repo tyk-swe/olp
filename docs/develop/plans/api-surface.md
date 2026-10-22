@@ -6,7 +6,9 @@ records implemented, excluded, baseline-only and pending tuples. Legacy
 completions, text Decisions, the named file/batch families and the initial
 OCR/search slice have local evidence; remaining qualification is in
 [Qualification](../qualification.md#api-surfaces). This plan describes unfinished
-scope against the [frozen reference](../../roadmap.md).
+scope against the [frozen reference](../../roadmap.md) and owns the API work in
+roadmap RM3–RM6. The [delivery checklists](#delivery-order-and-ownership) separate
+current qualification, shared implementation and new families.
 
 ## Shared retained-resource dependency
 
@@ -15,8 +17,10 @@ The current batch implementation refuses token and non-exempt cost budgets with
 make budgets enabled after acceptance fail closed with `cost_accounting_incomplete`
 until settlement. New bounded asynchronous families require a PostgreSQL-backed
 provisional-debit ledger across every budget owner, shared with the
-[agent plan](agent-gateway.md#shared-implementation-contract). Ordinary leases
-must not release unresolved exposure across restart or retention.
+[agent plan](agent-gateway.md#shared-implementation-contract). RM4.2–RM4.3 below
+own this shared accounting work; agent-specific contracts are RM4.4, not a
+second ledger. Ordinary leases must not release unresolved exposure across
+restart or retention.
 
 Retain submission intent before dispatch, immutable target/slot/credential and
 price affinity, provider-evidence reconciliation of ambiguous creates, and
@@ -128,7 +132,7 @@ or synchronize those indexes. Bindings have gateway IDs and pinned connections;
 operators explicitly authorize which keys may search them. Mapping includes
 query, result limit, supported filters, document text, scores and citations.
 Reject filters/ranking controls without a faithful mapping; retain provider
-score meaning without inventing cross-vendor calibrated scores. the agent gateway consumes
+score meaning without inventing cross-vendor calibrated scores. The agent gateway consumes
 this certified `retrieval` operation rather than accessing indexes directly.
 
 ## Responses completion
@@ -238,20 +242,158 @@ probabilities, scales and explicit refusals; chat prompts cannot fabricate these
 
 ## Delivery order and ownership
 
-| Order | Owner | Gate |
-| --- | --- | --- |
-| 1 | Gateway / SDK maintainers | Extend the endpoint ledger, operation authorization and codecs; native byte preservation, transformed refusals and locked-SDK fixtures |
-| 2 | Resource / accounting maintainers | Qualify current files/batches; implement shared provisional debits before enabling bounded paid async work; concurrent/restart/crash and metadata-only storage evidence |
-| 3 | Resource / connector maintainers | Fine-tuning, vector stores, Conversations and retained families; nested-ID isolation, provider methods and pricing units |
-| 4 | Connector maintainers | Remaining OCR/search and query-only retrieval; filters/citations, egress and paid-unit fixtures |
-| 5 | Realtime maintainers | Server-control and browser fault tests plus live close/usage evidence before each new transport |
-| 6 | Routing / security / release maintainers | Pass-through path corpus, policy refusals, complete exclusions and integrated candidate qualification |
+The [roadmap](../../roadmap.md#remaining-outcomes) owns cross-plan order and
+status. IDs below identify deliverables, not a global serial queue. Preserve the
+existing `M9.*` identifiers in the endpoint ledger when adding roadmap references.
+Run RM3 qualification independently of new RM4–RM6 implementation. RM4.1 is the
+endpoint-ledger/authorization gate; it is distinct from the durable budget ledger
+in RM4.2–RM4.3. Stateless work needs the former, not all asynchronous machinery.
 
-Independent stateless codecs may proceed after the shared ledger/authorization
-gate. The agent gateway consumes certified retrieval, never direct index access.
+### RM3: Implemented API qualification
+
+**State:** Implemented; qualification open. **Accountable:** protocol/resource/SDK
+maintainers. **Entry:** current ledger tuples, candidate, disposable services and
+locked clients. RM3.1–RM3.4 can run independently; RM3.5 qualifies the resulting
+candidate. Keep current managed-batch and text-only limitations throughout.
+
+- [ ] **RM3.1 — Complete legacy-completions acceptance** (protocol/SDK/console):
+  run locked SDK fixtures and console/browser journeys, preserving native and
+  transformed refusals, inspection and token/usage behavior.
+- [ ] **RM3.2 — Complete text-Decisions acceptance** (protocol/console): verify
+  browser and configuration-promotion workflows alongside labels/order,
+  pricing, caller-paid budgets and inspection fixtures; preserve unsupported
+  image/box, streaming and reverse-mapping refusals.
+- [ ] **RM3.3 — Complete OCR/search acceptance** (connector/console): execute
+  raw-HTTP process and Chromium journeys with the documented route headers,
+  credential isolation and management/configuration path for nondefault profiles.
+  No locked official SDK exists for these APIs; do not imply SDK coverage.
+- [ ] **RM3.4 — Complete files/batches acceptance** (resource/accounting/SDK):
+  execute resource/accounting and full batch/provider integration, database-backed
+  official SDKs and console/Chromium journeys. Verify uploads, managed/native
+  jobs, ambiguous submission, cleanup and content-free settlement; the client
+  fixture without a database cannot close this item.
+- [ ] **RM3.5 — Qualify current tuples for release** (release/provider): run
+  full integration and applicable candidate gates, each claimed live provider
+  tuple and release performance. Record separate local/live results using
+  [API qualification](../qualification.md#api-surfaces) and update compatibility.
+
+**Exit:** all current in-scope tuples have the evidence required by the
+qualification matrix; missing live accounts or hardware remain open gates.
+
+### RM4: Shared execution foundations
+
+**State:** Planned additions to existing resource infrastructure.
+**Accountable:** gateway/SDK maintainers for RM4.1; resource/accounting maintainers
+for RM4.2–RM4.3. **Entry:** the binding ownership, pricing and runtime contracts
+above. RM4.1 and RM4.2 may proceed in parallel; RM4.3 verifies RM4.2 before new
+bounded asynchronous work is enabled.
+
+- [ ] **RM4.1 — Extend API contracts per operation:** before each new codec,
+  extend the existing endpoint ledger, operation authorization and declared
+  inspection surface. Define native byte-preservation, transformed-refusal and
+  locked-client cases, including cross-owner/route and nested-ID refusals; run
+  the existing authorization/refusal checks. Execute the new codec cases in its
+  RM5/RM6 slice. Track this gate per operation so unrelated pending tuples do not
+  block a ready family or become supported implicitly.
+- [ ] **RM4.2 — Implement durable provisional debits:** persist submission
+  intent and finite exposure across all budget owners before dispatch, with
+  immutable target/credential and price affinity. Share the reservation and
+  idempotent settlement mechanism with agent dispatch; retain unknown outcomes
+  across restart/retention and separate bounds from observed charges.
+- [ ] **RM4.3 — Verify recovery and settlement:** test concurrent workers,
+  crashes before/after dispatch and commit, ambiguous acknowledgements, repeated
+  results, cancellation and revocation. Prove no automatic redispatch after
+  ambiguous acceptance, no duplicate settlement, no TTL release of unresolved
+  exposure, and metadata-only storage.
+  Verify reconciliation and backup/restore preserve outstanding debits.
+
+[RM4.4 agent contracts](agent-gateway.md#rm44-agent-contracts) can develop in
+parallel and reuse this ledger. They are not prerequisites for API families.
+**Exit:** RM4.1 gates each operation; RM4.2–RM4.3 establish safe bounded async
+accounting. Existing batch budget refusals remain until the corresponding
+implementation and qualification explicitly support changing them.
+
+### RM5: Retained APIs and retrieval
+
+**State:** Planned. **Accountable:** resource/connector maintainers, with
+accounting and SDK owners. **Entry:** RM4.1 per operation, owner/credential
+affinity and defined priced units. Bounded asynchronous jobs/runs additionally
+require RM4.2–RM4.3; query-only retrieval does not wait for those jobs.
+
+- [ ] **RM5.1 — Add fine-tuning:** implement the OpenAI jobs family first,
+  followed by the pinned Azure and native Vertex methods in the [contract](#fine-tuning).
+  Verify file affinity, unknown-create recovery, priced training settlement and
+  certification/publication before any resulting model becomes servable.
+- [ ] **RM5.2 — Add native vector stores:** implement the pinned OpenAI/Azure
+  lifecycle, file attachments/batches and search. Test nested IDs, pagination,
+  provider-state permissions and Responses `file_search` identifier rewriting.
+- [ ] **RM5.3 — Add certified query-only retrieval:** implement project-owned
+  Bedrock Knowledge Bases, Vertex AI RAG Engine and Azure AI Search bindings.
+  Verify filters, limits, text, scores, citations, egress and pricing without
+  creating or synchronizing indexes. Retrieval-backed tools use the certified
+  `retrieval` operation for their selected RM5.2 or RM5.3 backend; they do not
+  wait for every backend or access indexes directly.
+- [ ] **RM5.4 — Complete Conversations and compaction:** implement pinned
+  lifecycle/items and native compact methods. Test cross-resource owner/target
+  affinity, inspection and independently priced compaction; do not retain a local
+  conversation history or substitute a summary prompt.
+- [ ] **RM5.5 — Add containers:** implement the declared OpenAI and supported
+  Azure lifecycle/file methods; verify owner isolation without gateway shell execution.
+- [ ] **RM5.6 — Add evals:** implement native OpenAI definitions/runs; test
+  data-source affinity, durable run reservations and terminal settlement.
+- [ ] **RM5.7 — Add skills:** implement native Anthropic skills/versions;
+  verify retained file/version ownership without local code execution.
+- [ ] **RM5.8 — Add context caches:** implement Gemini `cachedContents`;
+  verify owner-bound IDs, expiry and explicit storage pricing/reconciliation.
+- [ ] **RM5.9 — Add managed-agent resources:** implement Gemini native lifecycle
+  and isolation; keep resource management distinct from RM8 A2A/tool execution.
+
+**Exit:** each family passes the [shared exit criteria](#exit-criteria), including
+local lifecycle/failure evidence and separately recorded live qualification.
+The [family contracts](#provider-retained-resource-families) govern methods and
+versions; neither implementation nor a generic native prefix widens that scope.
+
+### RM6: Protocol and provider expansion
+
+**State:** Planned remaining breadth. **Accountable:** connector maintainers
+for RM6.1–RM6.3, realtime maintainers for RM6.4–RM6.5 and routing/security
+maintainers for RM6.6. **Entry:** RM4.1 per operation and its transport, pricing,
+egress and inspection contract. These tasks may progress independently;
+unresolved realtime exposure additionally requires RM4.2–RM4.3.
+
+- [ ] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
+  citations, time ranges, limits and request pricing; refuse unmappable fields.
+- [ ] **RM6.2 — Add Azure Document Intelligence polling:** implement bounded
+  202/poll transport; test deadline/cancellation, observed page/document pricing,
+  output fidelity and provider-fetched URL egress boundaries.
+- [ ] **RM6.3 — Add Vertex document processing:** implement its GCP-authenticated
+  profile; verify credential isolation, field fidelity, egress and observed units.
+- [ ] **RM6.4 — Add governed WebRTC:** implement OpenAI server-mediated session
+  creation/control first. Pass browser faults and live admission, five-second
+  revocation, close/usage, session-expiry and lost-control exposure checks before
+  considering Azure's independently qualified contract.
+- [ ] **RM6.5 — Add native duplex profiles:** independently implement and
+  qualify xAI realtime, Vertex AI Live and Bedrock Nova Sonic. Test owner-scoped
+  sessions, declared transcription support, cancellation and terminal usage;
+  no reconnect/fallback may move a session to another provider.
+- [ ] **RM6.6 — Add governed pass-through:** implement the separate route kind
+  and anchored namespace. Test adversarial path normalization, query/header
+  allowlists, redirect/credential isolation, bounds and policy-publication
+  refusals; verify per-request pricing or explicit unpriced accounting.
+
+**Exit:** local fixtures and exact live tuples satisfy the [shared exit criteria](#exit-criteria).
+Retain all exclusions in the contracts above, including raw realtime client
+secrets, pass-through WebSockets and conflicting guardrail/cache policies.
+
+### Completing a slice
+
 Update management/configuration schemas, generated clients, simulation,
-capabilities, console controls and runbooks in the same slice. Rollback disables
-new publication while retaining settlement history. No dates are promised.
+capabilities, console controls and runbooks in the same slice. Run its focused
+fixtures before service/SDK/browser and live checks; use the applicable
+candidate gates before claiming **Shipped**. Record blockers and artifacts under
+the [roadmap evidence rules](../../roadmap.md#updating-progress-and-evidence).
+Rollback disables new publication while retaining settlement history.
+No dates are promised.
 
 ## Exit criteria
 
