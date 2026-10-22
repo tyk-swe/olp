@@ -33,6 +33,23 @@ func TestMappingConsumerScopes(t *testing.T) {
 		t.Fatal("unknown consumer scope accepted")
 	}
 }
+
+func TestMappingRouteScopesRequireExplicitGroups(t *testing.T) {
+	for _, scope := range []string{"inference", "models_read"} {
+		c := fixtureConfig()
+		c.Mappings[0].RouteGroups = []string{}
+		c.Mappings[0].Scopes = []string{scope}
+		if c.Validate() == nil {
+			t.Fatalf("%s accepted unrestricted empty route groups", scope)
+		}
+	}
+	c := fixtureConfig()
+	c.Mappings[0].RouteGroups = []string{}
+	c.Mappings[0].Scopes = []string{"tools", "agents", "guardrails", "traces_write", "delegate"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("resource scopes required unrelated route grants: %v", err)
+	}
+}
 func fixtureClaims(now time.Time) map[string]any {
 	return map[string]any{"iss": "https://issuer.example", "sub": "private-service-account", "aud": []string{"gateway"}, "iat": now.Unix() - 1, "exp": now.Unix() + 120, "nbf": now.Unix() - 1, "repository": "example/repo", "customer": "customer-1"}
 }

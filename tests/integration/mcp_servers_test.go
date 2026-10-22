@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -42,7 +43,7 @@ func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
 		case "initialize":
 			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "tools/list":
-			result = map[string]any{"tools": []any{}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": map[string]any{"type": "object"}}}}
 		default:
 			t.Errorf("unexpected certification method %s", request.Method)
 			w.WriteHeader(400)
@@ -71,6 +72,37 @@ func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
 	if after := authority(); after != before+1 {
 		t.Fatal("reusing unchanged MCP configuration advanced authority")
 	}
+
+	// Full exports must retain immutable publication history while revoking
+	// the server on which that history depends.
+	server := document["mcp_servers"].([]any)[0].(map[string]any)
+	server["enabled"] = true
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("mcp-authority-enable"), 200)
+	serverID := created["id"].(string)
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: created["revision_id"].(string), CatalogDigest: created["catalog"].(map[string]any)["digest"].(string), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	draft := map[string]any{"project_id": project, "name": "Retained toolset", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", draft, idem("mcp-history-toolset"), 201)
+	path := "/api/v1/toolsets/" + toolset["id"].(string)
+	published := h.want(owner, "POST", path+"/publish", nil, withMatch(toolset, idem("mcp-history-publish")), 200)
+	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	exported["mcp_servers"].([]any)[0].(map[string]any)["enabled"] = false
+	for _, phase := range []string{"disable", "retain"} {
+		plan := h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": exported}, nil, 200)
+		if len(plan["blockers"].([]any)) != 0 || len(plan["conflicts"].([]any)) != 0 {
+			t.Fatalf("retained revoked publication blocked %s: %v", phase, plan)
+		}
+		h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": exported}, idem("mcp-history-"+phase), 200)
+		if current := h.want(owner, "GET", path, nil, nil, 200); current["revision_id"] != published["revision_id"] {
+			t.Fatal("retaining publication history changed its immutable revision")
+		}
+		var live bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.live_agent_publication_revisions WHERE publication_id=$1)`, toolset["id"]).Scan(&live); err != nil || live {
+			t.Fatalf("retained revision became executable after revocation: %v", err)
+		}
+	}
+	draft["name"] = "New publication"
+	newToolset := h.want(owner, "POST", "/api/v1/toolsets", draft, idem("mcp-history-new"), 201)
+	h.want(owner, "POST", "/api/v1/toolsets/"+newToolset["id"].(string)+"/publish", nil, withMatch(newToolset, idem("mcp-history-refuse")), 422)
 }
 
 func TestMCPServerCertificationPinsCatalogsAndRechecksAuthorityWithoutLocks(t *testing.T) {

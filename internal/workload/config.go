@@ -75,6 +75,9 @@ func (c Config) Validate() error {
 		if !unique(m.RouteGroups, 0, 64, 100) || !unique(m.Scopes, 1, 7, 32) {
 			return bad
 		}
+		if len(m.RouteGroups) == 0 && (slices.Contains(m.Scopes, "inference") || slices.Contains(m.Scopes, "models_read")) {
+			return bad
+		}
 		for _, group := range m.RouteGroups {
 			if !name.MatchString(group) {
 				return bad

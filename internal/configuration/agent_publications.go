@@ -294,6 +294,14 @@ func (s *Server) planAgentPublications(ctx context.Context, q access.Queryer, do
 		if err != nil {
 			return err
 		}
+		retained, err := retainedPublicationDefinitions(ctx, q, current)
+		if err != nil {
+			return err
+		}
+		retainedDraft := ""
+		if current != nil {
+			retainedDraft = exportedPublicationDigest(current.Draft)
+		}
 		for _, item := range []struct {
 			ref     *string
 			desired *agentcontract.Draft
@@ -313,7 +321,12 @@ func (s *Server) planAgentPublications(ctx context.Context, q access.Queryer, do
 			if referenceProject == "" {
 				referenceProject = "00000000-0000-4000-8000-000000000001"
 			}
-			for _, d := range e.definitions() {
+			for index, d := range e.definitions() {
+				// Retaining local history does not restore serving eligibility.
+				digest := exportedPublicationDigest(d)
+				if (index == 0 && digest == retainedDraft) || (index > 0 && retained[digest]) {
+					continue
+				}
 				d.ProjectID = referenceProject
 				if err = agents.ValidateReferences(ctx, q, e.Kind, d); err != nil {
 					var expected *access.Problem
@@ -331,6 +344,45 @@ func (s *Server) planAgentPublications(ctx context.Context, q access.Queryer, do
 		result.item("agent_publication", publicationKey(e), action, "Promote reviewed immutable configuration only; execution metadata and secrets remain local.")
 	}
 	return nil
+}
+
+func exportedPublicationDigest(d agentcontract.Draft) string {
+	return agentcontract.DraftDigest(agentcontract.NormalizeDraft(exportPublicationDraft(d)))
+}
+
+func retainedPublicationDefinitions(ctx context.Context, q access.Queryer, p *agents.Publication) (map[string]bool, error) {
+	retained := map[string]bool{}
+	if p == nil {
+		return retained, nil
+	}
+	rows, err := q.Query(ctx, `SELECT definition FROM olp.agent_publication_revisions WHERE publication_id=$1`, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d agentcontract.Draft
+		if err = rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		retained[exportedPublicationDigest(d)] = true
+	}
+	return retained, rows.Err()
+}
+
+func publishConfigurationDefinition(ctx context.Context, tx pgx.Tx, actor string, p *agents.Publication, d agentcontract.Draft) error {
+	p.Draft = agentcontract.NormalizeDraft(d)
+	var id string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, p.ID, agentcontract.DraftDigest(p.Draft)).Scan(&id)
+	if err == nil {
+		// Immutable history survives revocation; live authority is checked separately.
+		p.RevisionID = &id
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	return agents.Publish(ctx, tx, actor, p)
 }
 
 func (s *Server) applyAgentPublications(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings bindingSet) error {
@@ -399,8 +451,7 @@ func (s *Server) applyAgentPublications(ctx context.Context, tx pgx.Tx, p access
 				return err
 			}
 
-			next.Draft = v
-			if err = agents.Publish(ctx, tx, p.UserID(), next); err != nil {
+			if err = publishConfigurationDefinition(ctx, tx, p.UserID(), next, v); err != nil {
 				return err
 			}
 			id := *next.RevisionID
@@ -414,8 +465,7 @@ func (s *Server) applyAgentPublications(ctx context.Context, tx pgx.Tx, p access
 		for _, label := range []string{"production", "staging"} {
 			if v, ok := e.Labels[label]; ok {
 				v.ProjectID = project
-				next.Draft = v
-				if err = agents.Publish(ctx, tx, p.UserID(), next); err != nil {
+				if err = publishConfigurationDefinition(ctx, tx, p.UserID(), next, v); err != nil {
 					return err
 				}
 				if err = agents.SetLabel(ctx, tx, next, label, *next.RevisionID, access.NewID()); err != nil {
