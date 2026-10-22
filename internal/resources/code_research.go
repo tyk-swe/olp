@@ -10,9 +10,13 @@ import (
 	"github.com/tyk-swe/olp/internal/codeplans"
 )
 
-// ResearchAccount is used at draft validation, publication and every dispatch.
+// ResearchAccount validates the provider draft before route publication.
 // Research does not need a model offer and never selects a replacement account.
 func ResearchAccount(ctx context.Context, q access.Queryer, route codemode.Route) (codemode.Account, error) {
+	return researchAccount(ctx, q, route, true)
+}
+
+func researchAccount(ctx context.Context, q access.Queryer, route codemode.Route, draft bool) (codemode.Account, error) {
 	var a codemode.Account
 	if route.Tools == nil {
 		return a, codemode.Refuse(404, "code_research_disabled")
@@ -25,8 +29,8 @@ func ResearchAccount(ctx context.Context, q access.Queryer, route codemode.Route
 		WHERE a.id=$1 AND pa.pool_id=$2 AND pool.project_id=$3 AND a.project_id=$3 AND p.project_id=$3
 		AND a.enabled AND p.state<>'disabled' AND c.provider_id=a.provider_id AND c.principal=a.principal
 		AND c.profile_id=$4 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND g.expires_at IS NULL AND g.refresh_token_id IS NULL
-		AND p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=$4`,
-		route.Tools.AccountID, route.PoolID, route.ProjectID, codeplans.ZAIProfile).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &a.Name, &a.Enabled)
+		AND (NOT $5 OR (p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=$4))`,
+		route.Tools.AccountID, route.PoolID, route.ProjectID, codeplans.ZAIProfile, draft).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &a.Name, &a.Enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, access.Invalid("tools", "Choose an enabled, enrolled Z.ai global account in this project's route pool.")
 	}
@@ -47,7 +51,9 @@ func (s *CodeStore) AuthorizeResearch(ctx context.Context, route codemode.Route,
 	if err = codeAuthorityFor(ctx, tx, CodeAdmission{Route: route, APIKeyID: key}, &authority, false); err != nil {
 		return authority, account, err
 	}
-	account, err = ResearchAccount(ctx, tx, route)
+	// Dispatch uses the frozen connection, which the gateway authorizer checks.
+	// A provider draft can change without changing the published route.
+	account, err = researchAccount(ctx, tx, route, false)
 	if err != nil {
 		if _, invalid := errors.AsType[*access.Problem](err); invalid {
 			return authority, account, codemode.Refuse(403, "code_research_account_unavailable")
@@ -105,8 +111,8 @@ func (s *CodeStore) CreateResearchSession(ctx context.Context, b codemode.Resear
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM olp.code_research_sessions s USING olp.code_route_revisions old,olp.code_route_revisions current
 		WHERE s.revision_id=old.id AND current.id=$2 AND old.route_id=current.route_id AND s.api_key_id=$1
-		AND (s.revision_id<>$2 OR (s.service=$3 AND (s.account_id<>$4 OR s.credential_id<>$5 OR s.generation<>$6)))`,
-		b.APIKeyID, b.RevisionID, b.Service, b.AccountID, b.CredentialID, b.Generation); err != nil {
+		AND (s.revision_id<>$2 OR s.account_id<>$3 OR s.credential_id<>$4 OR s.generation<>$5)`,
+		b.APIKeyID, b.RevisionID, b.AccountID, b.CredentialID, b.Generation); err != nil {
 		return "", err
 	}
 	var available bool

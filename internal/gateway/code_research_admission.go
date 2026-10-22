@@ -21,6 +21,7 @@ type researchAttempt struct {
 	auth                 codemode.Authorization
 	binding              codemode.ResearchSessionBinding
 	lease, providerLease *limits.Lease
+	streamLease          *limits.Lease
 	dispatched           bool
 }
 
@@ -38,7 +39,9 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 		}
 	}()
 	var failure *Error
-	fresh = researchRateAuthority(fresh, cancellation)
+	streamAuthority := fresh
+	control := cancellation || r.Method == http.MethodGet
+	fresh = researchRateAuthority(fresh, control)
 	a.lease, failure = s.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
@@ -52,7 +55,7 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	if quota.Options.Limits != nil {
 		copy := *quota.Options.Limits
 		copy.TokensPerMinute = nil
-		if cancellation {
+		if control {
 			copy.MaxConcurrency = nil
 		}
 		quota.Options.Limits = &copy
@@ -60,6 +63,12 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	a.providerLease, failure = s.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
+	}
+	if r.Method == http.MethodGet {
+		a.streamLease, failure = s.Admission.reserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits)
+		if failure != nil {
+			return nil, codemode.Refuse(failure.Status, "code_research_stream_limited")
+		}
 	}
 	a.auth, err = s.researchAuthorization(ctx, a.config, account, service)
 	if err != nil {
@@ -70,20 +79,20 @@ func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, rout
 	return a, nil
 }
 
-// Research consumes requests, without inference tokens. Cancellation also
-// bypasses the concurrency slots held by the work it must stop.
-func researchRateAuthority(authority access.Authority, cancellation bool) access.Authority {
+// Research consumes requests, without inference tokens. Cancellation bypasses
+// work concurrency; GET streams reserve separate concurrency below.
+func researchRateAuthority(authority access.Authority, control bool) access.Authority {
 	// This also clones the nested route and end-user policies before editing.
 	authority = withoutCostBudgets(authority)
 	authority.Policy.TokensPerMinute = nil
 	authority.BudgetGroupTPM = nil
-	if cancellation {
+	if control {
 		authority.Policy.MaxConcurrency = nil
 		authority.BudgetGroupConcurrency = nil
 	}
 	for slug, policy := range authority.Policy.RouteLimits {
 		policy.TokensPerMinute = nil
-		if cancellation {
+		if control {
 			policy.MaxConcurrency = nil
 		}
 		authority.Policy.RouteLimits[slug] = policy
@@ -91,12 +100,12 @@ func researchRateAuthority(authority access.Authority, cancellation bool) access
 	for _, policy := range []*access.EndUserPolicy{authority.Policy.EndUserPolicy, authority.ProjectEndUserPolicy} {
 		if policy != nil {
 			policy.Defaults.TokensPerMinute = nil
-			if cancellation {
+			if control {
 				policy.Defaults.MaxConcurrency = nil
 			}
 			for digest, limits := range policy.Overrides {
 				limits.TokensPerMinute = nil
-				if cancellation {
+				if control {
 					limits.MaxConcurrency = nil
 				}
 				policy.Overrides[digest] = limits
@@ -156,4 +165,5 @@ func (a *researchAttempt) finish(ctx context.Context) {
 	zero := int64(0)
 	settleKey(ctx, a.lease, a.dispatched, &zero, a.server.log)
 	settleKey(ctx, a.providerLease, a.dispatched, &zero, a.server.log)
+	settleKey(ctx, a.streamLease, a.dispatched, &zero, a.server.log)
 }

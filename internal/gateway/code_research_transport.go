@@ -71,7 +71,12 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 		w.WriteHeader(response.StatusCode)
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		n, err := w.Write(raw)
-		return err == nil && n == len(raw) && response.StatusCode == http.StatusOK && forwarding.method == "initialize" && coderesearch.Initialized(raw, forwarding.requestID)
+		if err != nil || n != len(raw) || response.StatusCode != http.StatusOK || forwarding.method != "initialize" || !coderesearch.Initialized(raw, forwarding.requestID) || r.Context().Err() != nil {
+			return false
+		}
+		// Write may only acknowledge net/http's local response buffer. Flush the
+		// session ID and result before keeping a tentative initialization alive.
+		return http.NewResponseController(w).Flush() == nil && r.Context().Err() == nil
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")

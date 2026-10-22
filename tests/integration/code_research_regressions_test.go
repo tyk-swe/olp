@@ -20,7 +20,86 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/testutil"
 )
+
+func TestCodeResearchDispatchKeepsPublishedProviderConnection(t *testing.T) {
+	f := researchFixture(t)
+	response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200)
+	session := response.Header.Get("Mcp-Session-Id")
+	next := installPlugin(t, f.h, f.owner, testutil.BuildPlugin(t, "./tests/fixtures/research-migration"))
+	path := "/api/v1/providers/" + f.providers[0]
+	provider := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	configuration := provider["configuration"].(map[string]any)
+	configuration["profile_id"], configuration["profile_revision"] = "zai-next", next
+	f.h.want(f.owner, "PATCH", path, map[string]any{"name": provider["name"], "configuration": configuration}, etagHeader(provider), 200)
+	// The old enrollment and frozen connection remain valid until publication.
+	f.research(t, "POST", "search", f.key, session, researchList, 200)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route["id"].(string)+"/publish", nil, withMatch(f.route, idem("research-invalid-next-profile")), 422)
+}
+
+func TestCodeResearchRotationReclaimsOtherServiceSessions(t *testing.T) {
+	f := researchFixture(t)
+	for range 32 {
+		f.research(t, "POST", "reader", f.key, "", researchInit, 200)
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.provider_grants SET generation=generation+1 WHERE credential_id=$1`, f.accounts[0]["credential_id"]); err != nil {
+		t.Fatal(err)
+	}
+	f.h.refresh()
+	// All reader sessions are now unusable. A first initialization of another
+	// enabled service must reclaim them rather than exhaust the key's limit.
+	f.research(t, "POST", "search", f.key, "", researchInit, 200)
+	researchSessionCount(t, f, 1)
+}
+
+func TestCodeResearchNotificationStreamHasSeparateConcurrency(t *testing.T) {
+	f := researchFixture(t)
+	_, _, limiter := limSetup(t, "research-notification-stream")
+	f.h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=policy||'{"max_concurrency":1,"requests_per_minute":100,"route_limits":{"qualification":{"max_concurrency":1}}}' WHERE id=$1`, f.keyID); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/providers/" + f.providers[0]
+	provider := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	configuration := provider["configuration"].(map[string]any)
+	configuration["options"].(map[string]any)["limits"] = map[string]any{"max_concurrency": 1, "requests_per_minute": 100}
+	f.h.want(f.owner, "PATCH", path, map[string]any{"name": provider["name"], "configuration": configuration}, etagHeader(provider), 200)
+	f.publishResearch(t, []string{"search"})
+	response, _ := f.research(t, "POST", "search", f.key, "", researchInit, 200)
+	session := response.Header.Get("Mcp-Session-Id")
+	f.peer.mu.Lock()
+	native := f.peer.respond
+	f.peer.respond = func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, ": heartbeat\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		native(w, r)
+	}
+	f.peer.mu.Unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, "GET", f.gateway.URL+"/code/qualification/mcp/search", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+f.key)
+	request.Header.Set("Mcp-Session-Id", session)
+	stream, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != 200 {
+		t.Fatalf("notification stream status: %d", stream.StatusCode)
+	}
+	f.research(t, "GET", "search", f.key, session, "", 429)
+	f.research(t, "POST", "search", f.key, session, researchList, 200)
+}
 
 func TestCodeResearchIgnoresInferenceTokenRates(t *testing.T) {
 	f := researchFixture(t)

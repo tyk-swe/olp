@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -185,6 +186,30 @@ func TestResearchInitializationMustReachClient(t *testing.T) {
 type researchFailedWriter struct{ *httptest.ResponseRecorder }
 
 func (*researchFailedWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+type researchFailedFlush struct{ *httptest.ResponseRecorder }
+
+func (*researchFailedFlush) FlushError() error { return io.ErrClosedPipe }
+
+func TestResearchJSONInitializationRequiresDelivery(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(t.Context())
+		if cancelled {
+			cancel()
+		}
+		response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(researchInitialized))}
+		var writer http.ResponseWriter = &researchFailedFlush{httptest.NewRecorder()}
+		if cancelled {
+			writer = httptest.NewRecorder()
+		}
+		request := httptest.NewRequest("POST", "/", nil).WithContext(ctx)
+		accepted := (&Server{}).copyResearchResponse(writer, request, response, researchResponse{method: "initialize", service: "search", requestID: []byte(`1`)})
+		cancel()
+		if accepted {
+			t.Fatalf("undelivered JSON result retained a session (cancelled=%v)", cancelled)
+		}
+	}
+}
 
 func TestResearchResponseBoundsAndNativeErrors(t *testing.T) {
 	s := &Server{}

@@ -214,6 +214,11 @@ func clonePredicate(p Predicate) Predicate {
 	return p
 }
 func cloneCodeRoute(r codemode.Route) codemode.Route {
+	if r.Tools != nil {
+		tools := *r.Tools
+		tools.Services = slices.Clone(tools.Services)
+		r.Tools = &tools
+	}
 	r.MaxBodyBytes = copyPointer(r.MaxBodyBytes)
 	r.Models = slices.Clone(r.Models)
 	r.PublishedAt = copyPointer(r.PublishedAt)

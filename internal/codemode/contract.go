@@ -138,7 +138,7 @@ type Pool struct {
 }
 
 type Route struct {
-	Tools        *ResearchTools `json:"tools"`
+	Tools        *ResearchTools `json:"tools,omitempty"`
 	MaxBodyBytes *int64         `json:"max_body_bytes,omitempty"`
 	ID           string         `json:"id"`
 	ProjectID    string         `json:"project_id"`

@@ -150,6 +150,7 @@ generation. Stateless upstreams also receive an OLP session fence, without
 forwarding an invented session ID to the vendor. Initialize first and send the
 returned OLP session ID on subsequent requests. Republishing or rotating
 credentials requires initialization again; another key cannot reuse a session.
+Rotation reclaims obsolete sessions across all research services for the route.
 State is shared across gateway replicas,
 expires after one idle hour or 24 hours total, and is limited to 32 sessions per
 key and 10,000 per installation. Session creation reclaims expired metadata.
@@ -158,7 +159,7 @@ ID from another key or session cannot resume a stream, including on stateless
 upstreams. OLP translates valid resume IDs back to native upstream IDs.
 Session state is tentative until a valid initialization result for the request
 reaches the client. Failed, malformed or interrupted handshakes release their
-session slots. A delayed handshake cannot retire sessions from a newer
+session slots, including JSON delivery failures and client cancellation. A delayed handshake cannot retire sessions from a newer
 publication or credential generation. SSE response headers are flushed
 immediately, including for idle streams that initially contain only heartbeat
 comments. Upstream heartbeat comments also reach the client while waiting for
@@ -179,10 +180,16 @@ native schemas, structured results, source references and tool errors pass
 through. Each request is bounded to two minutes, 1 MiB of input, 8 MiB of
 upstream output and 1 MiB per SSE event; installation and route body limits can
 lower the input limit. Key and connection request/concurrency limits also apply.
+GET notification streams use separate concurrency counters per service at the
+key, group, route, end-user and provider boundaries. They do not occupy tool-call
+slots, and request-rate counters remain shared with other research requests.
 Session-scoped cancellation notifications retain request-rate limits but do not
 need another concurrency slot while their tool call holds one.
 Research has no inference token usage, token-rate reservation or hard token
 reservation.
+
+Published research uses the route's frozen provider connection. Staging a new
+provider draft does not change dispatch until the route is published again.
 
 Dispatched calls are never replayed or moved to another account. Service errors
 and tool allowance errors do not change inference account health or affect other
