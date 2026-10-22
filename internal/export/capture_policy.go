@@ -107,8 +107,6 @@ func (p CapturePolicy) Sample(requestID string) bool {
 	return left.Cmp(right) < 0
 }
 
-func (p CapturePolicy) Includes(field string) bool { return slices.Contains(p.Include, field) }
-
 func (p CapturePolicy) Matches(project, route, key, endUser string) bool {
 	return (p.ProjectID == nil || *p.ProjectID == project) && (p.Route == nil || *p.Route == route) &&
 		(len(p.KeyIDs) == 0 || slices.Contains(p.KeyIDs, key)) &&

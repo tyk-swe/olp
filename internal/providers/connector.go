@@ -393,30 +393,6 @@ func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
 	return cursor, nil
 }
 
-func decodeModels(body []byte) ([]string, error) {
-	var listing struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &listing); err != nil || listing.Data == nil {
-		return nil, &probeError{Code: "provider_protocol_error", Detail: "The upstream model listing must contain a data array."}
-	}
-	var models []string
-	seen := map[string]bool{}
-	for _, m := range listing.Data {
-		if ValidModelName("model", m.ID) != nil || seen[m.ID] {
-			continue
-		}
-		seen[m.ID] = true
-		models = append(models, m.ID)
-		if len(models) == 2000 {
-			break
-		}
-	}
-	return models, nil
-}
-
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
 func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
 	if !configurationCertifiable(cfg, tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {

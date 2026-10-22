@@ -115,11 +115,6 @@ func thresholdEvidence(accrued string, limit *string, threshold int) (decimal.De
 		Cmp(limitValue.Mul(decimal.NewFromInt(int64(threshold)))) >= 0
 }
 
-func thresholdMet(accrued string, limit *string, threshold int) bool {
-	_, _, met := thresholdEvidence(accrued, limit, threshold)
-	return met
-}
-
 func retryDue(lastAttemptAt *time.Time, attempts int, now time.Time) bool {
 	if lastAttemptAt == nil {
 		return true

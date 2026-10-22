@@ -58,9 +58,6 @@ type KeyRing struct {
 }
 
 func (k *KeyRing) String() string { return "KeyRing([REDACTED])" }
-func LoadRing(path string) (*KeyRing, error) {
-	return LoadRingWithUnwrapper(context.Background(), path, nil)
-}
 
 type KeyUnwrapper interface {
 	Unwrap(context.Context, secretstore.WrappedKey) ([]byte, error)

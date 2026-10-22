@@ -95,11 +95,9 @@ type ScoringRequest struct {
 	sourceSentence, sentences, parameters oif.Value
 }
 
-func (r ScoringRequest) Schema() oif.Identity      { return identity("scoring") }
-func (r ScoringRequest) Source() oif.Request       { return r.source }
-func (r ScoringRequest) SourceSentence() oif.Value { return r.sourceSentence }
-func (r ScoringRequest) Sentences() oif.Value      { return r.sentences }
-func (r ScoringRequest) Parameters() oif.Value     { return r.parameters }
+func (r ScoringRequest) Schema() oif.Identity  { return identity("scoring") }
+func (r ScoringRequest) Source() oif.Request   { return r.source }
+func (r ScoringRequest) Parameters() oif.Value { return r.parameters }
 
 type Similarity struct {
 	InputIndex int

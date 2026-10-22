@@ -507,14 +507,6 @@ func ValidateDefaults(defaults map[string]json.RawMessage) error {
 func Encode(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage) ([]byte, error) {
 	return encode(r, upstreamModel, defaults, nil)
 }
-func EncodeWithProvenance(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage) ([]byte, []oif.Provenance, error) {
-	fields, provenance, err := EncodeFieldsWithProvenance(r, upstreamModel, defaults)
-	if err != nil {
-		return nil, provenance, err
-	}
-	body, err := json.Marshal(fields)
-	return body, provenance, err
-}
 
 // EncodeFieldsWithProvenance gives the transformed dialect codec its owned
 // destination fields without a serialize/parse round trip. The source remains

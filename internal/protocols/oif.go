@@ -2,7 +2,6 @@ package protocols
 
 import (
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 
@@ -118,29 +117,4 @@ func PrepareIdentity(r *wire.Request, model string) (oif.Prepared, error) {
 		changes = append(changes, oif.Change{Pointer: path, Value: value, Origin: oif.TransportOption, Reason: "observe native usage for shared accounting"})
 	}
 	return contracts.PrepareIdentity(r.OIF(), d, changes)
-}
-
-func GenerationRequest(r *wire.Request) (generation.Request, error) {
-	d := r.OIF().Descriptor()
-	binding, err := contracts.Binding(d.Dialect, d.Operation)
-	if err != nil || binding.Request == nil {
-		return generation.Request{}, fmt.Errorf("generation request view unavailable")
-	}
-	view, err := binding.Request.LiftRequest(r.OIF())
-	if err != nil {
-		return generation.Request{}, err
-	}
-	return view.(generation.Request), nil
-}
-func GenerationResult(result oif.Result) (generation.Result, error) {
-	d := result.Descriptor()
-	binding, err := contracts.Binding(d.Dialect, d.Operation)
-	if err != nil || binding.Result == nil {
-		return generation.Result{}, fmt.Errorf("generation result view unavailable")
-	}
-	view, err := binding.Result.LiftResult(result)
-	if err != nil {
-		return generation.Result{}, err
-	}
-	return view.(generation.Result), nil
 }

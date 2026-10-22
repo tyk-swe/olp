@@ -91,13 +91,6 @@ func Observe(body []byte, unary bool) Observation {
 	return Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id}
 }
 
-// Stream observes bounded SSE events independently of the forwarded byte stream.
-type Stream struct{ *codewire.Events }
-
-func NewStream(limit int, emit func(Observation)) *Stream {
-	return &Stream{codewire.NewEvents(limit, func(data []byte) { emit(Observe(data, false)) })}
-}
-
 func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
 	result := &codemode.Allowance{ObservedAt: now}
 	prefixes := map[string]bool{"x-codex": true}
