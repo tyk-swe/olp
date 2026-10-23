@@ -531,8 +531,7 @@ func (l *Limiter) keysFor(r Request) keys {
 
 // rateKeys addresses the counters one lookup shares across replicas.
 func (l *Limiter) rateKeys(lookupID string) (string, string) {
-	tagged := l.namespace + ":{" + lookupID + "}"
-	return tagged + ":rate", tagged + ":concurrency"
+	return l.namespace + ":{" + lookupID + "}:rate", l.namespace + ":{" + lookupID + "}:concurrency"
 }
 
 // simpleUUID renders a UUID without dashes so it is safe inside a hash tag. A
@@ -542,7 +541,7 @@ func simpleUUID(value string) string {
 	if err != nil {
 		return value
 	}
-	return strings.ReplaceAll(parsed.String(), "-", "")
+	return hex.EncodeToString(parsed[:])
 }
 
 // ConnectionLookup names the quota shared by every attempt through one provider
