@@ -211,8 +211,16 @@ func TestVendorCOutputMapping(t *testing.T) {
 						t.Error("wrong event")
 					}
 				case "rubrik":
-					if body["object"] != "chat.completion" || body["choices"] == nil {
+					request, requestOK := body["request"].(map[string]any)
+					response, responseOK := body["response"].(map[string]any)
+					if !requestOK || len(request) != 0 || !responseOK || response["object"] != "chat.completion" || response["choices"] == nil {
 						t.Error("wrong envelope")
+					} else {
+						choice := response["choices"].([]any)[0].(map[string]any)
+						message := choice["message"].(map[string]any)
+						if message["role"] != "assistant" || message["content"] != "answer" {
+							t.Error("wrong completion message")
+						}
 					}
 				case "akto":
 					if !strings.Contains(body["responsePayload"].(string), "answer") {

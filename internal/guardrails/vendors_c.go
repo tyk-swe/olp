@@ -349,7 +349,7 @@ func evaluateOvalix(ctx context.Context, client *http.Client, c ExternalConfig, 
 	default:
 		return Verdict{}, errEvaluation
 	}
-	if response.Modified != nil && response.Modified.Content != nil && *response.Modified.Content != s.Text {
+	if response.Modified != nil && response.Modified.Content != nil && (response.Action == "anonymize" || *response.Modified.Content != s.Text) {
 		return vendorReplacement(s, *response.Modified.Content, "ovalix.policy")
 	}
 	if response.Action == "anonymize" && (response.Modified == nil || response.Modified.Content == nil) {
@@ -500,7 +500,8 @@ func evaluateRubrik(ctx context.Context, client *http.Client, c ExternalConfig, 
 	body := map[string]any{"model": "", "messages": []any{vendorCMessage(s, phase)}}
 	output := vendorCInputType(phase) == "response"
 	if output {
-		body = map[string]any{"id": uuid.NewString(), "object": "chat.completion", "created": time.Now().Unix(), "model": "", "choices": []any{map[string]any{"index": 0, "message": vendorCMessage(s, phase), "finish_reason": "stop"}}}
+		completion := map[string]any{"id": uuid.NewString(), "object": "chat.completion", "created": time.Now().Unix(), "model": "", "choices": []any{map[string]any{"index": 0, "message": vendorCMessage(s, phase), "finish_reason": "stop"}}}
+		body = map[string]any{"request": map[string]any{}, "response": completion}
 	}
 	raw, err := vendorJSON(ctx, client, c.Endpoint, body, credential, "Authorization", "Bearer ")
 	if err != nil {

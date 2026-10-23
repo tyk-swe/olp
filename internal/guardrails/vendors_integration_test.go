@@ -44,16 +44,22 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 }
 
 func TestVendorInterventionWithoutReplacement(t *testing.T) {
-	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus", "noma_v2", "straiker"} {
+	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus", "noma_v2", "straiker", "ovalix"} {
 		for _, action := range []string{Block, Redact} {
 			for _, policy := range []string{FailClosed, FailOpen} {
 				t.Run(kind+"/"+action+"/"+policy, func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
+						if kind == "ovalix" {
+							io.WriteString(w, `{"action_type":"anonymize","modified_data":{"content":"unchanged"}}`)
+							return
+						}
 						io.WriteString(w, `{"action":"GUARDRAIL_INTERVENED","texts":["unchanged"]}`)
 					})
 					parameters := json.RawMessage(`{}`)
 					if kind == "deepkeep" {
 						parameters = json.RawMessage(`{"firewall_id":"firewall"}`)
+					} else if kind == "ovalix" {
+						parameters = json.RawMessage(`{"application_id":"app","checkpoint_id":"checkpoint","actor":"caller"}`)
 					}
 					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: parameters})
 					definition := Revision{ID: "revision", GuardrailID: "guard", Type: kind, Configuration: config, TimeoutMS: 1000, OnError: policy}
