@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -314,7 +315,7 @@ func TestBatchSettlementReconcilesPagesUnknownSubmissionsAndPartialResults(t *te
 	}
 	assertBatchSettlement(t, h, cancelledResource, "settled", 2, 0)
 
-	_, _, ambiguousRoute, ambiguousKey := provisionOpenAIWith(t, h, fixture.URL,
+	_, _, ambiguousRoute, ambiguousKey := provisionOpenAIInProject(t, h, owner, nil, fixture.URL,
 		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}},
 		[]string{"batch"}, map[string]any{"overall_timeout_ms": 1000})
 	ambiguousUploadStatus, ambiguousUpload := h.uploadTestFile(ambiguousRoute, ambiguousKey, nativeBatchInput("ambiguous-input"))
@@ -600,7 +601,29 @@ func addBatchPrice(t *testing.T, h *accessHarness, owner *browser, providerID st
 	h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{
 		"effective_at": effective.UTC().Format(time.RFC3339Nano), "prices": []any{price},
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
-	h.refresh()
+	// Serving prices have their own 10-second refresh obligation. Wait for
+	// this revision to reach the routing inputs so the batch submission
+	// pins it instead of pinning no price.
+	eventually(t, "batch price in routing inputs", 30*time.Second, func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		if inputs == nil {
+			return false
+		}
+		found := inputs.Price("azure_openai", providerID, "", vendorModel, "generation", time.Now())
+		if found == nil || found.EffectiveAt.Before(effective.Truncate(time.Microsecond)) {
+			return false
+		}
+		if multiplier == "" {
+			return found.BatchMultiplier == nil
+		}
+		if found.BatchMultiplier == nil {
+			return false
+		}
+		want, ok1 := new(big.Rat).SetString(multiplier)
+		got, ok2 := new(big.Rat).SetString(*found.BatchMultiplier)
+		return ok1 && ok2 && want.Cmp(got) == 0
+	})
 }
 
 func assertBatchSettlement(t *testing.T, h *accessHarness, resourceID uuid.UUID, state string, settled, uncertain int64) {
@@ -617,7 +640,7 @@ func assertBatchSettlement(t *testing.T, h *accessHarness, resourceID uuid.UUID,
 func batchFactTotals(t *testing.T, h *accessHarness, resourceID uuid.UUID) (facts, batchFacts, unpricedFacts int64, cost string) {
 	t.Helper()
 	err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE f.batch),
-		count(*) FILTER(WHERE f.unpriced),COALESCE(sum(COALESCE(f.estimated_cost,0)),0)::text
+		count(*) FILTER(WHERE f.unpriced),COALESCE(sum(COALESCE(f.estimated_cost,0)),0)::numeric(38,12)::text
 		FROM olp.batch_settlement_results r JOIN olp.attempt_usage_facts f ON f.event_id=r.event_id
 		WHERE r.resource_id=$1`, resourceID).Scan(&facts, &batchFacts, &unpricedFacts, &cost)
 	if err != nil {

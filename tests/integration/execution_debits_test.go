@@ -152,7 +152,7 @@ func TestExecutionDebitOrdinaryUTCSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	cap, requestID := "1", acctID(t)
-	if _, err = limiter.Reserve(t.Context(), limits.Request{LookupID: f.Key, CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.4", RequestID: requestID, LeaseTTL: time.Minute}); err != nil {
+	if _, err = limiter.Reserve(t.Context(), limits.Request{LookupID: strings.ReplaceAll(f.Key, "-", ""), CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.4", RequestID: requestID, LeaseTTL: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	w := limits.BudgetWindows(time.Now())
@@ -169,7 +169,7 @@ func TestExecutionDebitOrdinaryUTCSnapshot(t *testing.T) {
 	if reserved, err := limiter.Reserved(t.Context(), f.Key); err != nil || reserved != "0" {
 		t.Fatalf("settled reservation remains: %s %v", reserved, err)
 	}
-	_, err = limiter.Reserve(t.Context(), limits.Request{LookupID: f.Key, CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.3", RequestID: acctID(t), LeaseTTL: time.Minute})
+	_, err = limiter.Reserve(t.Context(), limits.Request{LookupID: strings.ReplaceAll(f.Key, "-", ""), CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.3", RequestID: acctID(t), LeaseTTL: time.Minute})
 	var exceeded *limits.ExceededError
 	if !errors.As(err, &exceeded) {
 		t.Fatalf("ordinary spend was omitted from admission: %v", err)
@@ -211,7 +211,7 @@ func TestExecutionDebitFencesRecoveryAndDurableProjection(t *testing.T) {
 	if err = peerStore.CheckOwnerAccounting(t.Context(), f.Key); err != nil {
 		t.Fatal(err)
 	}
-	_, err = peerLimiter.Reserve(t.Context(), limits.Request{LookupID: f.Key, CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.1", RequestID: acctID(t), LeaseTTL: time.Minute})
+	_, err = peerLimiter.Reserve(t.Context(), limits.Request{LookupID: strings.ReplaceAll(f.Key, "-", ""), CostOwnerID: f.Key, DailyCostLimit: &cap, CostEstimate: "0.1", RequestID: acctID(t), LeaseTTL: time.Minute})
 	var exceeded *limits.ExceededError
 	if !errors.As(err, &exceeded) {
 		t.Fatalf("stale regional projection admitted spend: %v", err)
@@ -312,7 +312,7 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 	if err = s.MarkDispatched(t.Context(), i.ID, i.ClaimID); err != nil {
 		t.Fatal(err)
 	}
-	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 0, "debit-model", 200, acctObserved(1_000_000, 0, nil, nil))}})
+	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 1, "debit-model", 200, acctObserved(1_000_000, 0, nil, nil))}})
 	event.RuntimeGenerationID = i.Affinity.ReleaseID
 	event.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: i.ID}
 	event.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: f.Revision}
@@ -423,7 +423,7 @@ func TestExecutionDebitNonAcceptanceRequiresImmutableProof(t *testing.T) {
 	if err := s.MarkDispatched(t.Context(), i.ID, i.ClaimID); err != nil {
 		t.Fatal(err)
 	}
-	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 0, "debit-model", 500, acctUncertain())}})
+	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 1, "debit-model", 500, acctUncertain())}})
 	event.RuntimeGenerationID = i.Affinity.ReleaseID
 	event.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: i.Affinity.ProviderRevisionID}
 	event.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: i.ID}
@@ -506,7 +506,7 @@ func TestExecutionDebitFinalResultCannotEraseEarlierUncertainty(t *testing.T) {
 		t.Fatal(err)
 	}
 	makeEvent := func(evidence *usage.AttemptUsage) *usage.Event {
-		e := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 0, "debit-model", 200, evidence)}})
+		e := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 1, "debit-model", 200, evidence)}})
 		e.RuntimeGenerationID = i.Affinity.ReleaseID
 		e.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: i.ID}
 		e.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: f.Revision}

@@ -241,6 +241,15 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Temp
 		if !ok {
 			return nil, fmt.Errorf("route target references an unavailable provider")
 		}
+		// The durable contract binds OpenAI batch requests only. A target
+		// whose batch capability is on another surface (Anthropic, Gemini,
+		// native cloud) has no template: its own handler refuses strict
+		// batch at request time, so activation must not fail here.
+		if !slices.ContainsFunc(provider.Capabilities, func(c Capability) bool {
+			return c.Model == target.ProviderModel && c.Operation == "batch" && c.Surface == "openai" && c.Mode == "unary"
+		}) {
+			continue
+		}
 		template, err := durablecontract.Compile(durablecontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
 		if err != nil {
 			return nil, err

@@ -1491,6 +1491,7 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 
 // Defines values for ConfigurationPlanItemKind.
 const (
+	ConfigurationPlanItemKindAgentPublication    ConfigurationPlanItemKind = "agent_publication"
 	ConfigurationPlanItemKindBillingImport       ConfigurationPlanItemKind = "billing_import"
 	ConfigurationPlanItemKindCatalogPublication  ConfigurationPlanItemKind = "catalog_publication"
 	ConfigurationPlanItemKindConfiguration       ConfigurationPlanItemKind = "configuration"
@@ -1514,6 +1515,8 @@ const (
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
 func (e ConfigurationPlanItemKind) Valid() bool {
 	switch e {
+	case ConfigurationPlanItemKindAgentPublication:
+		return true
 	case ConfigurationPlanItemKindBillingImport:
 		return true
 	case ConfigurationPlanItemKindCatalogPublication:

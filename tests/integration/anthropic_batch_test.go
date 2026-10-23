@@ -167,11 +167,11 @@ func TestAnthropicNativeBatchResourcesAndSettlement(t *testing.T) {
 	}
 	models := h.want(owner, http.MethodGet, providerPath+"/models", nil, nil, http.StatusOK)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
-	model := h.want(owner, http.MethodGet, providerPath+"/models/"+modelID, nil, nil, http.StatusOK)
+	detail := h.want(owner, http.MethodGet, providerPath, nil, nil, http.StatusOK)
 	updated := h.want(owner, http.MethodPatch, providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{
 		map[string]any{"operation": "generation", "surface": "anthropic", "mode": "unary"},
 		map[string]any{"operation": "batch", "surface": "anthropic", "mode": "unary"},
-	}}, etagHeader(model), http.StatusOK)
+	}}, etagHeader(detail), http.StatusOK)
 	certified := h.want(owner, http.MethodPost, providerPath+"/models/"+modelID+"/certify", nil, etagHeader(updated), http.StatusOK)
 	if certified["status"] != "certified" {
 		t.Fatalf("Anthropic batch certification: %v", certified)
