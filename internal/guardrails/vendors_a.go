@@ -195,8 +195,8 @@ func aLakera(ctx context.Context, client *http.Client, c ExternalConfig, cred ex
 	}
 	var response struct {
 		Results []struct {
-			Flagged *bool              `json:"flagged"`
-			Scores  map[string]float64 `json:"category_scores"`
+			Flagged *bool               `json:"flagged"`
+			Scores  map[string]*float64 `json:"category_scores"`
 		} `json:"results"`
 	}
 	if aRead(raw, &response) != nil || len(response.Results) != 1 || response.Results[0].Flagged == nil {
@@ -207,10 +207,10 @@ func aLakera(ctx context.Context, client *http.Client, c ExternalConfig, cred ex
 		blocked = false
 		for k, threshold := range p.CategoryThresholds {
 			score, ok := response.Results[0].Scores[k]
-			if !ok || score < 0 || score > 1 {
+			if !ok || score == nil || *score < 0 || *score > 1 {
 				return Verdict{}, errEvaluation
 			}
-			blocked = blocked || score >= threshold
+			blocked = blocked || *score >= threshold
 		}
 	}
 	return vendorBoolean(blocked, "lakera.prompt_injection"), nil

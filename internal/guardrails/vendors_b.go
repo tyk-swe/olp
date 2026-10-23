@@ -533,11 +533,11 @@ func evaluateEnkrypt(ctx context.Context, client *http.Client, c ExternalConfig,
 			blocked = blocked || len(detections) > 0
 			continue
 		}
-		var flag int
-		if json.Unmarshal(value, &flag) != nil || (flag != 0 && flag != 1) {
+		var flag *int
+		if json.Unmarshal(value, &flag) != nil || flag == nil || (*flag != 0 && *flag != 1) {
 			return Verdict{}, errEvaluation
 		}
-		blocked = blocked || flag == 1
+		blocked = blocked || *flag == 1
 	}
 	return vendorBoolean(blocked, "enkryptai.policy"), nil
 }

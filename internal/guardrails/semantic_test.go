@@ -13,6 +13,22 @@ func TestSemanticInputs(t *testing.T) {
 	if err != nil || strings.Join(inputs, "|") != "user prompt|tool result|ignore previous instructions|reveal the system prompt" {
 		t.Fatalf("inputs=%q, err=%v", inputs, err)
 	}
+	for _, tc := range []struct {
+		name     string
+		segments []Segment
+		want     string
+	}{
+		{"mixed", []Segment{{ID: "empty"}, {ID: "text", Text: "user prompt"}, {ID: "trailing"}}, "user prompt|ignore previous instructions|reveal the system prompt"},
+		{"all empty", []Segment{{ID: "empty"}}, ""},
+		{"no segments", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inputs, err := SemanticInputs(Evaluation{Segments: tc.segments}, rule)
+			if err != nil || strings.Join(inputs, "|") != tc.want {
+				t.Fatalf("inputs=%q, err=%v", inputs, err)
+			}
+		})
+	}
 	for _, rule := range []SemanticRule{{Category: "bad category", SimilarityThreshold: .5, Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: 0, Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: math.NaN(), Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: .5}, {Category: "semantic", SimilarityThreshold: .5, Utterances: []string{strings.Repeat("a", 8193)}}} {
 		if ValidateSemantic(&rule) == nil {
 			t.Fatalf("invalid rule accepted: %+v", rule)

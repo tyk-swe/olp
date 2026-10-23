@@ -100,6 +100,35 @@ func TestNamedVendorFailurePoliciesAndCircuitIsolation(t *testing.T) {
 	}
 }
 
+func TestNamedVendorNullDecisions(t *testing.T) {
+	for _, tc := range []struct{ kind, parameters, response string }{
+		{"lakera_v1", `{"category_thresholds":{"prompt_injection":0.5}}`, `{"results":[{"flagged":true,"category_scores":{"prompt_injection":null}}]}`},
+		{"enkryptai", `{}`, `{"summary":{"policy_violation":null}}`},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			for _, policy := range []string{FailOpen, FailClosed} {
+				t.Run(policy, func(t *testing.T) {
+					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.response) })
+					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: json.RawMessage(tc.parameters)})
+					d := Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: policy}
+					engine, err := Compile([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: Input, Action: Block}}, map[string]Revision{d.ID: d}, runner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "private"}}}, nil)
+					wantOutcome := "failed_open"
+					if policy == FailClosed {
+						wantOutcome = "failed_closed"
+					}
+					if (policy == FailClosed) != errors.Is(err, ErrBlocked) || len(result.Decisions) != 1 || result.Decisions[0].Outcome != wantOutcome {
+						t.Fatalf("result=%+v error=%v, want %s", result, err, wantOutcome)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestExternalDeadlineIncludesCredentialResolution(t *testing.T) {
 	runner, endpoint := fakeRunner(t, func(http.ResponseWriter, *http.Request) { t.Error("request after credential deadline") })
 	runner.Credentials = func(ctx context.Context, _ string) ([]byte, error) {

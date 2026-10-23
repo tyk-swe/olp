@@ -283,8 +283,8 @@
         >
         <label
           >Type<select bind:value={type} disabled={!!selected}
-            >{#each guardrailTypes as value (value)}<option
-                {value}>{value}</option
+            >{#each guardrailTypes as value (value)}<option {value}
+                >{value}</option
               >{/each}</select
           ></label
         >

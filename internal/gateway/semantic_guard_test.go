@@ -24,6 +24,7 @@ func TestSemanticGuardAccountedEmbedding(t *testing.T) {
 					}{
 						{"different", `{"object":"list","model":"model-b","data":[{"object":"embedding","index":0,"embedding":[0,1]},{"object":"embedding","index":1,"embedding":[1,0]}],"usage":{"prompt_tokens":5,"total_tokens":5}}`, http.StatusOK},
 						{"match", `{"object":"list","model":"model-b","data":[{"object":"embedding","index":1,"embedding":[1,0]},{"object":"embedding","index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":5,"total_tokens":5}}`, http.StatusBadRequest},
+						{"empty", "", http.StatusOK},
 					} {
 						t.Run(decision.name, func(t *testing.T) {
 							h := newHarness(t, Config{})
@@ -44,11 +45,17 @@ func TestSemanticGuardAccountedEmbedding(t *testing.T) {
 							if err := snapshot.Compile(); err != nil {
 								t.Fatal(err)
 							}
-							h.mock.set("a", completion(modelA, "generated answer"))
+							answer := "generated answer"
 							query := "hi"
 							if phase == guardrails.Output {
-								query = "generated answer"
+								query = answer
 							}
+							wantEmbeddings := 1
+							if decision.name == "empty" {
+								answer, query = "", ""
+								wantEmbeddings = 0
+							}
+							h.mock.set("a", completion(modelA, answer))
 							h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
 								var request struct {
 									Input  []string `json:"input"`
@@ -60,11 +67,18 @@ func TestSemanticGuardAccountedEmbedding(t *testing.T) {
 								w.Header().Set("Content-Type", "application/json")
 								io.WriteString(w, decision.response)
 							})
-							response, body := h.chat(fullKey, nil)
-							if response.StatusCode != decision.status {
-								t.Fatalf("status=%d want=%d body=%v events=%+v", response.StatusCode, decision.status, body, h.sink.await(t, 2))
+							// Empty messages must neither invalidate a nonempty batch nor
+							// dispatch an embeddings request for an all-empty evaluation.
+							input := "hi"
+							if decision.name == "empty" {
+								input = ""
 							}
-							if h.mock.count("b") != 1 {
+							messages, _ := json.Marshal([]map[string]string{{"role": "system", "content": ""}, {"role": "user", "content": input}})
+							response, body := h.chat(fullKey, nil, `,"messages":`+string(messages))
+							if response.StatusCode != decision.status {
+								t.Fatalf("status=%d want=%d body=%v events=%+v", response.StatusCode, decision.status, body, h.sink.await(t, 1+wantEmbeddings))
+							}
+							if h.mock.count("b") != wantEmbeddings {
 								t.Fatalf("embedding repeated or recursive: %d", h.mock.count("b"))
 							}
 							wantGeneration := 0
@@ -74,7 +88,7 @@ func TestSemanticGuardAccountedEmbedding(t *testing.T) {
 							if h.mock.count("a") != wantGeneration {
 								t.Fatalf("unchecked generation dispatch: %d", h.mock.count("a"))
 							}
-							events := h.sink.await(t, 2)
+							events := h.sink.await(t, 1+wantEmbeddings)
 							var evaluator, parent *Envelope
 							for i := range events {
 								event := &events[i]
@@ -83,6 +97,12 @@ func TestSemanticGuardAccountedEmbedding(t *testing.T) {
 								} else if event.Origin == "" {
 									parent = event
 								}
+							}
+							if wantEmbeddings == 0 {
+								if evaluator != nil || parent == nil {
+									t.Fatalf("empty evaluation created accounting or lost parent: %+v", events)
+								}
+								return
 							}
 							if evaluator == nil || parent == nil || evaluator.ParentRequestID != parent.RequestID || evaluator.KeyID != h.keyID || evaluator.EvaluatorGuardrailID != "guard" || evaluator.Operation != "embeddings" || evaluator.Usage == nil || evaluator.Usage.InputTokens != 5 || len(evaluator.Attempts) != 1 || evaluator.PayloadCaptured {
 								t.Fatalf("semantic evaluation lost accounting or privacy: %+v", events)

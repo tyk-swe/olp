@@ -39,17 +39,24 @@ func ValidateSemantic(rule *SemanticRule) error {
 	return nil
 }
 
-// SemanticInputs places queried segments first, followed by references. The
-// response indexes are checked against this exact order by SemanticVerdict.
+// SemanticInputs places nonempty queried segments first, followed by references.
+// It returns no inputs when there is no text to evaluate. The response indexes
+// are checked against this exact order by SemanticVerdict.
 func SemanticInputs(e Evaluation, rule SemanticRule) ([]string, error) {
-	if ValidateSemantic(&rule) != nil || validateSegments(e.Segments) != nil || len(e.Segments) == 0 || len(e.Segments) > MaxSemanticSegments {
+	if ValidateSemantic(&rule) != nil || validateSegments(e.Segments) != nil || len(e.Segments) > MaxSemanticSegments {
 		return nil, errEvaluation
 	}
 	inputs := make([]string, 0, len(e.Segments)+len(rule.Utterances))
 	size := 0
 	for _, segment := range e.Segments {
+		if segment.Text == "" {
+			continue
+		}
 		inputs = append(inputs, segment.Text)
 		size += len(segment.Text)
+	}
+	if len(inputs) == 0 {
+		return nil, nil
 	}
 	for _, utterance := range rule.Utterances {
 		inputs = append(inputs, utterance)

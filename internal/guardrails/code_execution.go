@@ -23,9 +23,9 @@ type codeExecutionDetector struct {
 }
 
 var (
-	codeFence        = regexp.MustCompile("(?s)```(\\w*)\\r?\\n(.*?)```")
-	escapedCodeFence = regexp.MustCompile("(?s)```(\\w*)(?:\\\\r\\\\n|\\\\n|\\\\r)(.*?)```")
-	codeLanguage     = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+	codeFence        = regexp.MustCompile("(?s)```([^`\\r\\n]*)\\r?\\n(.*?)```")
+	escapedCodeFence = regexp.MustCompile("(?s)```([^`\\\\\\r\\n]*)(?:\\\\r\\\\n|\\\\n|\\\\r)(.*?)```")
+	codeLanguage     = regexp.MustCompile(`^[a-zA-Z0-9_+#.-]+$`)
 )
 
 func compileCodeExecution(raw json.RawMessage) (detector, error) {
@@ -88,7 +88,10 @@ func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation
 		}
 		spans := fences.FindAllStringSubmatchIndex(segment.Text, -1)
 		for _, span := range spans {
-			language := normalizeCodeLanguage(segment.Text[span[2]:span[3]])
+			language := ""
+			if info := strings.Fields(segment.Text[span[2]:span[3]]); len(info) > 0 {
+				language = normalizeCodeLanguage(info[0])
+			}
 			confidence := 1.0
 			if len(d.languages) > 0 {
 				if !d.languages[language] {

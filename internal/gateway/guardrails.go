@@ -533,6 +533,9 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 		if err != nil {
 			return guardrails.Verdict{}, err
 		}
+		if len(embeddingInputs) == 0 {
+			return guardrails.Verdict{Action: "pass"}, nil
+		}
 	} else {
 		segments, _ := json.Marshal(e.Segments)
 		text = config.Rule.Prompt + "\n" + string(segments)
@@ -656,7 +659,7 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 		return guardrails.Verdict{}, out.err
 	}
 	if semantic {
-		return guardrails.SemanticVerdict(raw, *config.Semantic, len(e.Segments))
+		return guardrails.SemanticVerdict(raw, *config.Semantic, len(embeddingInputs)-len(config.Semantic.Utterances))
 	}
 	return guardrails.ModelVerdict(raw, *config.Rule)
 }
