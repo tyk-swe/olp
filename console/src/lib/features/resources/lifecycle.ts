@@ -2,7 +2,8 @@ import { gatewayFetch } from '$lib/api/gateway';
 import {
   parseNativeJSON,
   stringifyNativeJSON,
-  nativeObject
+  nativeObject,
+  type NativeValue
 } from '$lib/json/nativeJson';
 
 export type AgentAction = 'create' | 'list' | 'get' | 'delete';
@@ -24,6 +25,20 @@ export class ResourceRequestError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Equivalent JSON edits retain the identity of an unresolved submission. */
+export function agentSubmissionFingerprint(route: string, body: string): string {
+  const canonical = (value: NativeValue): string => {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+    if (nativeObject(value))
+      return `{${Object.keys(value)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${canonical(value[key]!)}`)
+        .join(',')}}`;
+    return stringifyNativeJSON(value);
+  };
+  return `${route.trim()}\n${canonical(parseNativeJSON(body))}`;
 }
 
 /** Credentials and provider content stay in the calling component's memory. */

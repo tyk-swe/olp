@@ -39,6 +39,8 @@ type geminiLifecycleProvider struct {
 	calls           []geminiLifecycleCall
 	sequence        int
 	missingAgents   map[string]bool
+	agents          map[string]map[string]any
+	agentReadDelay  atomic.Int64
 	slowSent        atomic.Int32
 	slowDone        chan struct{}
 	badAck          atomic.Bool
@@ -81,6 +83,7 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 		p.sequence++
 		id := fmt.Sprintf("v1_fixture_%d", p.sequence)
 		agentMissing := p.missingAgents[strings.TrimPrefix(r.URL.Path, "/v1beta/agents/")]
+		agent := p.agents[strings.TrimPrefix(r.URL.Path, "/v1beta/agents/")]
 		p.mu.Unlock()
 		if gate := p.replyGate.Load(); gate != nil && r.Method == gate.method && strings.HasSuffix(r.URL.Path, gate.suffix) {
 			close(gate.reached)
@@ -102,16 +105,36 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				writeJSON(w, map[string]any{"invalid": true})
 				return
 			}
-			writeJSON(w, map[string]any{"id": id, "description": "created agent"})
+			created := map[string]any{}
+			_ = json.Unmarshal(body, &created)
+			created["id"] = id
+			p.mu.Lock()
+			if p.agents == nil {
+				p.agents = make(map[string]map[string]any)
+			}
+			p.agents[id] = created
+			p.mu.Unlock()
+			writeJSON(w, created)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/agents":
 			writeJSON(w, map[string]any{"agents": []any{map[string]any{"id": "foreign-native-agent"}}})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
+			if delay := time.Duration(p.agentReadDelay.Load()); delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-r.Context().Done():
+					return
+				}
+			}
 			if agentMissing {
 				w.WriteHeader(http.StatusNotFound)
 				writeJSON(w, map[string]any{"error": map[string]any{"code": 404, "message": "not found"}})
 				return
 			}
-			writeJSON(w, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1beta/agents/"), "description": "created agent"})
+			if agent != nil {
+				writeJSON(w, agent)
+			} else {
+				writeJSON(w, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1beta/agents/"), "description": "created agent"})
+			}
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
 			writeJSON(w, map[string]any{})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":

@@ -7,6 +7,7 @@
   import { parseNativeJSON, nativeObject } from '$lib/json/nativeJson';
   import {
     ResourceRequestError,
+    agentSubmissionFingerprint,
     runAgentRequest,
     type AgentAction
   } from './lifecycle';
@@ -46,12 +47,14 @@
     busy = true;
     problem = '';
     controller = new AbortController();
-    const fingerprint = `${route}\n${definition}`;
-    if (action === 'create' && fingerprint !== submittedDefinition) {
-      submissionKey = crypto.randomUUID();
-      submittedDefinition = fingerprint;
-    }
     try {
+      if (action === 'create') {
+        const fingerprint = agentSubmissionFingerprint(route, definition);
+        if (fingerprint !== submittedDefinition) {
+          submissionKey = crypto.randomUUID();
+          submittedDefinition = fingerprint;
+        }
+      }
       const response = await runAgentRequest({
         action,
         apiKey,

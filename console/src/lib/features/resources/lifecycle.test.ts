@@ -1,10 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runAgentRequest, ResourceRequestError } from './lifecycle';
+import {
+  agentSubmissionFingerprint,
+  runAgentRequest,
+  ResourceRequestError
+} from './lifecycle';
 import { gatewayFetch } from '$lib/api/gateway';
 
 vi.mock('$lib/api/gateway', () => ({ gatewayFetch: vi.fn() }));
 
 describe('agent resource requests', () => {
+  it('keeps unresolved submission identity across equivalent JSON edits', () => {
+    const body =
+      '{"description":"agent","agent_config":{"seed":9007199254740993,"items":[{"b":2,"a":1}]}}';
+    const fingerprint = agentSubmissionFingerprint(' route ', body);
+    expect(
+      agentSubmissionFingerprint(
+        'route',
+        '{ "agent_config": { "items": [{ "a": 1, "b": 2 }], "seed": 9007199254740993 }, "description": "agent" }'
+      )
+    ).toBe(fingerprint);
+    expect(fingerprint).toContain('9007199254740993');
+    expect(
+      agentSubmissionFingerprint(
+        'route',
+        body.replace('9007199254740993', '9007199254740992')
+      )
+    ).not.toBe(fingerprint);
+    expect(agentSubmissionFingerprint('another-route', body)).not.toBe(
+      fingerprint
+    );
+  });
+
   it('bounds streamed results before buffering an entire response', async () => {
     const cancel = vi.fn();
     vi.mocked(gatewayFetch).mockResolvedValue(

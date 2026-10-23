@@ -146,6 +146,10 @@ func (s *Server) selectPin(ctx context.Context, x *call, route *routing.Route, o
 }
 
 func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
+	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
+}
+
+func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -157,6 +161,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.R
 	x.fixed = true
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p routing.Provider, t routing.Target) error {
+		if bound != nil && (bound.ProviderID != p.ID || bound.ProviderRevisionID != p.RevisionID || bound.TargetID != t.ID) {
+			return errors.New("resource affinity unavailable")
+		}
 		if !qualified(&p, t.ProviderModel) {
 			return errors.New("provider capability unavailable")
 		}
@@ -205,6 +212,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.R
 	}
 	for i := range provider.Slots {
 		slot := &provider.Slots[i]
+		if bound != nil && (bound.SlotID != slot.ID || !sameCredential(bound.CredentialID, slot.CredentialID)) {
+			continue
+		}
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}

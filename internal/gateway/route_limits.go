@@ -57,7 +57,7 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Au
 }
 
 // limitRoute matches the route used by request accounting. Collection reads have
-// no single route and remain subject to the other admission boundaries.
+// no single route; collection readers admit each represented route separately.
 func (x *call) limitRoute() string {
 	if route := x.named(); route != nil {
 		return route.Slug

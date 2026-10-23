@@ -147,7 +147,17 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(err)
 			return
 		}
-		p, err = s.selectPinSurface(r.Context(), x, route, e.Operation, e.Surface, "unary", func(provider *routing.Provider, model string) bool {
+		var base *resources.Resource
+		if value, present := source.Root().Lookup("base_agent"); present && value.Kind() != oif.Null {
+			id, _ := value.Text()
+			var getErr error
+			base, getErr = s.Resources.Get(r.Context(), "agent_resource", x.keyID, id)
+			if getErr != nil || base.RouteSlug != route.Slug || base.RouteRevisionID != route.RevisionID || base.State == "submitting" || base.State == "submission_unknown" || base.ContractVersion == nil || *base.ContractVersion != retainedapi.Revision {
+				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+				return
+			}
+		}
+		p, err = s.selectBoundPinSurface(r.Context(), x, route, e.Operation, e.Surface, "unary", base, func(provider *routing.Provider, model string) bool {
 			return provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 		})
 		if err != nil {
@@ -378,7 +388,7 @@ func (s *Server) projectRetainedAgent(ctx context.Context, x *call, resource *re
 		identity := resource.NativeIdentity()
 		identity.Kind = kind
 		identity.UpstreamID = id
-		bound, findErr := s.Resources.GetByUpstream(ctx, identity)
+		bound, findErr := s.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		if findErr != nil {
 			return "", findErr
 		}
@@ -427,7 +437,13 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		rows = rows[:limit]
 	}
 	items := make([]json.RawMessage, 0, len(rows))
-	responseBytes := 256
+	type listedResource struct {
+		resource *resources.Resource
+		pin      *pin
+		route    *routing.Route
+	}
+	ready := make([]listedResource, 0, len(rows))
+	var overall time.Duration
 	for _, resource := range rows {
 		if resource.State == "submitting" || resource.State == "submission_unknown" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 			continue
@@ -440,28 +456,58 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			fail(gateErr)
 			return gateErr.Status
 		}
-		ctx, cancel := s.stateDeadline(r.Context(), route)
 		if err := retainedControlPricing(x, p); err != nil {
-			cancel()
 			fail(err)
 			return err.Status
 		}
-		if x.lease == nil {
-			if gateErr := s.reserveState(ctx, x, a, time.Duration(route.OverallTimeout)*time.Millisecond); gateErr != nil {
-				cancel()
+		ready = append(ready, listedResource{resource, p, route})
+		timeout := time.Duration(route.OverallTimeout) * time.Millisecond
+		if len(ready) == 1 || timeout < overall {
+			overall = timeout
+		}
+	}
+	ctx := r.Context()
+	if len(ready) > 0 {
+		// One deadline covers the page and every lease held for its reads.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, overall)
+		defer cancel()
+		if gateErr := s.reserveState(ctx, x, a, overall); gateErr != nil {
+			fail(gateErr)
+			return gateErr.Status
+		}
+		authority := x.admissionAuthority(a)
+		admitted := make(map[string]bool)
+		costChecked := false
+		for _, entry := range ready {
+			if admitted[entry.route.Slug] {
+				continue
+			}
+			lease, gateErr := s.Admission.reserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, costReservation{}, &costChecked)
+			if gateErr != nil {
 				fail(gateErr)
 				return gateErr.Status
 			}
+			if lease != nil {
+				if x.lease == nil {
+					x.lease = lease
+				} else {
+					x.lease.Attach(lease)
+				}
+			}
+			admitted[entry.route.Slug] = true
 		}
+	}
+	responseBytes := 256
+	for _, entry := range ready {
+		resource, p, route := entry.resource, entry.pin, entry.route
 		if gateErr := s.gateRetainedSlot(ctx, x, p, route); gateErr != nil {
-			cancel()
 			fail(gateErr)
 			return gateErr.Status
 		}
 		endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, "agents/"+url.PathEscape(resource.UpstreamID), nil)
 		if urlErr != nil {
 			s.settlePinHold(ctx, x, p.hold, nil)
-			cancel()
 			fail(pinUnavailable())
 			return 409
 		}
@@ -472,14 +518,12 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 				commitCtx, commitCancel := resourceCommitContext(ctx)
 				removeErr := s.Resources.Tombstone(commitCtx, resource.ID)
 				commitCancel()
-				cancel()
 				if removeErr != nil {
 					fail(serverError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
 					return 503
 				}
 				continue
 			}
-			cancel()
 			fail(retainedPublicError(upstreamError(callErr), p, resource))
 			return upstreamError(callErr).Status
 		}
@@ -501,7 +545,6 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			x.completePinned()
 		}
 		s.settlePinHold(ctx, x, p.hold, nil)
-		cancel()
 		if readErr != nil {
 			fail(serverError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502

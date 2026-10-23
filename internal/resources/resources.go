@@ -239,13 +239,13 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
 		AND route_slug=$5 AND route_revision_id=$6 AND target_id=$7 AND slot_id=$8
 		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10
-		AND ($11::uuid IS NULL OR parent_id=$11::uuid)`
+		AND (NOT $12::boolean OR parent_id IS NOT DISTINCT FROM $11::uuid)`
 	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
-		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID}
+		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID, slices.Contains(retainedapi.Kinds(), identity.Kind)}
 	if includeDeleted {
 		statement += ` AND (expires_at IS NULL OR expires_at>now()) ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
 	} else {
-		statement += ` AND state<>$12 AND (expires_at IS NULL OR expires_at>now())`
+		statement += ` AND state<>$13 AND (expires_at IS NULL OR expires_at>now())`
 		args = append(args, StateDeleted)
 	}
 	r, err := scan(query.QueryRow(ctx, statement, args...))

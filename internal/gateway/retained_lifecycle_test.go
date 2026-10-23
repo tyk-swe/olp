@@ -136,6 +136,28 @@ func TestRetainedAffinity(t *testing.T) {
 	}
 }
 
+func TestRetainedSelectionUsesOwningTargetAndSlot(t *testing.T) {
+	h := newHarness(t, Config{})
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	target := route.Targets[1]
+	provider := h.rt.release.Snapshot.Providers[target.ProviderID]
+	slot := provider.Slots[0]
+	slot.ID = "owned-slot"
+	provider.Slots = append(provider.Slots, slot)
+	h.rt.release.Snapshot.Providers[provider.ID] = provider
+	bound := &resources.Resource{RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, TargetID: target.ID, SlotID: slot.ID, CredentialID: slot.CredentialID}
+	x := &call{keyID: h.keyID, family: wire.Chat, request: request{release: h.rt.release, startedAt: time.Now()}}
+	x.route = &route
+	p, err := h.gateway.selectBoundPinSurface(t.Context(), x, &route, "generation", "openai", "unary", bound, func(*routing.Provider, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.gateway.resourceSettle(t.Context(), x, p)
+	if !retainedAffinity(bound, p, &route) {
+		t.Fatalf("selected a different owner: %+v", p)
+	}
+}
+
 func TestRetainedProviderErrorDoesNotExposeIDs(t *testing.T) {
 	param := "native_secret"
 	original := &Error{Status: http.StatusBadRequest, Code: param, Type: param, Message: "bad " + param, Param: &param}
