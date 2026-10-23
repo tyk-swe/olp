@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 // These profiles follow the native APIs in the pinned integration inventory.
@@ -633,7 +635,8 @@ func evaluateOnyx(ctx context.Context, client *http.Client, c ExternalConfig, cr
 	if bOutput(phase) {
 		payload = map[string]any{"object": "chat.completion", "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": s.Text}, "finish_reason": "stop"}}}
 	}
-	raw, err := externalJSON(ctx, client, endpoint, map[string]any{"payload": payload, "input_type": bDirection(phase), "conversation_id": s.ID}, func(*http.Request, []byte) error { return nil })
+	// Segment IDs repeat across requests, so vendor correlation needs a fresh ID.
+	raw, err := externalJSON(ctx, client, endpoint, map[string]any{"payload": payload, "input_type": bDirection(phase), "conversation_id": uuid.NewString()}, func(*http.Request, []byte) error { return nil })
 	if err != nil {
 		return Verdict{}, err
 	}

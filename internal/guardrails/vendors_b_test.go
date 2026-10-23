@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // Fixtures encode the named vendors' native API fields, rather than the OLP
@@ -63,7 +65,16 @@ func TestNamedVendorBContracts(t *testing.T) {
 									want = tc.output
 								}
 								var gotJSON, wantJSON any
-								if json.Unmarshal(got, &gotJSON) != nil || json.Unmarshal([]byte(want), &wantJSON) != nil || !reflect.DeepEqual(gotJSON, wantJSON) {
+								if json.Unmarshal(got, &gotJSON) != nil || json.Unmarshal([]byte(want), &wantJSON) != nil {
+									t.Errorf("invalid native JSON payload: %s", got)
+								} else if tc.kind == "onyx" {
+									id, _ := gotJSON.(map[string]any)["conversation_id"].(string)
+									if _, err := uuid.Parse(id); err != nil {
+										t.Errorf("invalid conversation ID: %q", id)
+									}
+									wantJSON.(map[string]any)["conversation_id"] = id
+								}
+								if !reflect.DeepEqual(gotJSON, wantJSON) {
 									t.Errorf("native payload: got %s; want %s", got, want)
 								}
 								w.WriteHeader(decision.status)
@@ -85,6 +96,32 @@ func TestNamedVendorBContracts(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestOnyxConversationIDsDoNotReuseSegmentIDs(t *testing.T) {
+	ids := make(chan string, 2)
+	runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ConversationID string `json:"conversation_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		ids <- body.ConversationID
+		io.WriteString(w, `{"allowed":true}`)
+	})
+	config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "secret"})
+	definition := Revision{ID: "revision", GuardrailID: "guard", Type: "onyx", Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+	for _, requestID := range []string{"request-one", "request-two"} {
+		_, err := runner.Evaluate(t.Context(), definition, Evaluation{RequestID: requestID, Phase: Input, Segments: []Segment{{ID: "s0", Text: "message"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := <-ids, <-ids
+	if first == "" || second == "" || first == second || first == "s0" || second == "s0" {
+		t.Fatalf("unrelated requests share a conversation ID: %q, %q", first, second)
 	}
 }
 
