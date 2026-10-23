@@ -364,6 +364,12 @@ func (s *fakeStripe) handler() http.HandlerFunc {
 	}
 }
 
+func (s *fakeStripe) received() []stripeHit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]stripeHit(nil), s.hits...)
+}
+
 func stripeDestination(server *httptest.Server, project string) (Destination, []byte) {
 	settings, _ := json.Marshal(map[string]any{
 		"event_name":   "olp.attempt",

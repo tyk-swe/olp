@@ -299,6 +299,7 @@
           >Name <input bind:value={form.name} maxlength="100" required /></label
         ><label
           >Project <select
+            aria-label="Project"
             bind:value={form.project}
             disabled={!!current}
             onchange={() => {
@@ -316,6 +317,7 @@
         {#if kind === 'toolsets'}
           <label
             >Certified MCP server <select
+              aria-label="Certified MCP server"
               bind:value={serverID}
               onchange={chooseServer}
               ><option value="">Choose a server</option
