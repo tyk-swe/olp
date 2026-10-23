@@ -623,6 +623,9 @@ func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply,
 }
 
 func registeredOperation(operation string) bool {
+	if operation == "agent_resource" {
+		return true
+	}
 	for _, d := range operationregistry.Default.Dialects() {
 		if d.Operation.ID == operation {
 			return true

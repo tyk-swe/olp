@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
 type Management struct {
@@ -25,6 +26,19 @@ type Management struct {
 func (m *Management) Register(mux *http.ServeMux) {
 	m.registerCodeMode(mux)
 	m.Access.Route(mux, "GET /api/v1/provider-resources", m.list)
+	m.Access.Route(mux, "GET /api/v1/provider-resource-contracts", m.contracts)
+}
+
+func (m *Management) contracts(r *http.Request, p access.Principal) (access.Reply, error) {
+	items := make([]map[string]any, 0)
+	for _, family := range retainedapi.Families() {
+		implemented := false
+		for _, provider := range family.Providers {
+			implemented = implemented || retainedapi.Supports(provider, family.Operation, family.Surface, "unary")
+		}
+		items = append(items, map[string]any{"operation": family.Operation, "surface": family.Surface, "kind": family.Kind, "path": family.Path, "methods": family.Methods, "providers": family.Providers, "implemented": implemented, "metered": family.Metered})
+	}
+	return access.OK(map[string]any{"revision": retainedapi.Revision, "items": items}), nil
 }
 
 type manageFilters struct {
@@ -104,7 +118,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	if raw := query.Get("kind"); raw != "" {
 		if !contract.ListProviderResourcesParamsKind(raw).Valid() {
 			return access.Reply{}, access.Invalid("kind",
-				"Use file, batch, response, continuation, strict_response, interaction, strict_file, strict_batch, anthropic_file, anthropic_batch, gemini_upload, gemini_file, gemini_batch, or cloud_batch.")
+				"Use a resource kind from the provider resource contract catalogue.")
 		}
 		filters.kind = &raw
 	}

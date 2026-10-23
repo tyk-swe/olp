@@ -253,7 +253,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -328,7 +328,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3046,7 +3046,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -3121,7 +3121,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3510,7 +3510,7 @@
             ]
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -3537,7 +3537,7 @@
             "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
           },
           "url": {
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
             "type": "string"
           }
         },
@@ -5430,7 +5430,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "required": [
@@ -9127,7 +9127,24 @@
               "gemini_upload",
               "gemini_file",
               "gemini_batch",
-              "cloud_batch"
+              "cloud_batch",
+              "fine_tuning_job",
+              "fine_tuning_event",
+              "fine_tuning_checkpoint",
+              "vector_store",
+              "vector_store_file",
+              "vector_store_batch",
+              "conversation",
+              "conversation_item",
+              "container",
+              "container_file",
+              "eval",
+              "eval_run",
+              "eval_output_item",
+              "skill",
+              "skill_version",
+              "context_cache",
+              "agent_resource"
             ],
             "type": "string"
           },
@@ -13032,7 +13049,7 @@
         "type": "object"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
@@ -13143,7 +13160,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -13218,7 +13235,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -13381,7 +13398,7 @@
             "type": "string"
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -13409,7 +13426,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "type": "object",
@@ -20719,7 +20736,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           },
           "etag": {
             "type": "string"
@@ -20742,7 +20759,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           }
         }
       },
@@ -25936,6 +25953,69 @@
         "required": [
           "name"
         ]
+      },
+      "ProviderResourceContract": {
+        "type": "object",
+        "required": [
+          "operation",
+          "surface",
+          "kind",
+          "path",
+          "methods",
+          "providers",
+          "implemented",
+          "metered"
+        ],
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "implemented": {
+            "type": "boolean"
+          },
+          "metered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProviderResourceContractList": {
+        "type": "object",
+        "required": [
+          "revision",
+          "items"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceContract"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -25952,7 +26032,7 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_…). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
+        "description": "Management automation token (olpm_\u2026). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -33429,7 +33509,24 @@
                 "gemini_upload",
                 "gemini_file",
                 "gemini_batch",
-                "cloud_batch"
+                "cloud_batch",
+                "fine_tuning_job",
+                "fine_tuning_event",
+                "fine_tuning_checkpoint",
+                "vector_store",
+                "vector_store_file",
+                "vector_store_batch",
+                "conversation",
+                "conversation_item",
+                "container",
+                "container_file",
+                "eval",
+                "eval_run",
+                "eval_output_item",
+                "skill",
+                "skill_version",
+                "context_cache",
+                "agent_resource"
               ],
               "type": "string"
             }
@@ -34214,7 +34311,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -34382,7 +34479,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -61739,6 +61836,79 @@
             "description": "Observed ETag required"
           }
         }
+      }
+    },
+    "/api/v1/provider-resource-contracts": {
+      "get": {
+        "description": "Reviewed resource lifecycle contracts. Only entries with implemented=true are selectable; declarations do not enable native APIs.",
+        "operationId": "list_provider_resource_contracts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResourceContractList"
+                }
+              }
+            },
+            "description": "Resource capability catalogue"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid filter value"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
       }
     }
   },

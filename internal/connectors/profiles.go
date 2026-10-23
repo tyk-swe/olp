@@ -19,6 +19,7 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -72,6 +73,7 @@ var profileRegistry = []Profile{
 	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
 	{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
 	{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
+	{ID: "gemini-agents", Label: "Gemini managed agents", Kind: "gemini", Dialect: "gemini-agents", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
 	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
 	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
 	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
@@ -174,6 +176,10 @@ func init() {
 		// Interactions and Live have independent request and event grammars.
 		// Their profile tuples cannot fall through GenerateContent's codec.
 		switch p.Dialect {
+		case "gemini-agents":
+			p.Operations = []string{"agent_resource"}
+			p.Authentication = []string{"api_key"}
+			p.Documentation = "https://pkg.go.dev/google.golang.org/genai/interactions#Agents"
 		case "mistral-fim":
 			p.Operations = []string{"generation"}
 			p.Authentication = []string{"api_key"}
@@ -348,7 +354,7 @@ func (c Config) ValidateProfile() error {
 	if p.Kind != c.Kind || !slices.Contains(p.Authentication, c.AuthMode) {
 		return errors.New("profile, connector kind and authentication are not a supported composition")
 	}
-	if p.Dialect == "gemini-interactions" || p.Dialect == "gemini-live" {
+	if p.Dialect == "gemini-interactions" || p.Dialect == "gemini-live" || p.Dialect == "gemini-agents" {
 		if len(c.OperationDefaults) > 0 {
 			return errors.New("Gemini lifecycle profile does not admit unimplemented provider defaults")
 		}
@@ -498,6 +504,9 @@ func generationFamily(dialect string) (wire.Format, bool) {
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {
+	if retainedapi.Operation(operation) {
+		return retainedapi.Supports(c.Kind, operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
+	}
 	if operation == "batch" {
 		if surface == "native" {
 			return mode == "unary" && (c.Kind == "vertex_ai" && c.ProfileID == "vertex-batch-prediction" && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||

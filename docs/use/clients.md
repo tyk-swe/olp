@@ -57,6 +57,33 @@ of the gateway's module and runtime inventory.
 | Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.79.1 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
 | Google Gen AI Go | `google.golang.org/genai` | v1.73.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
 
+## Gemini managed-agent resources
+
+The pinned `google.golang.org/genai@v1.75.0` contract exposes agents under its
+nested interactions client. The gateway supports create/list/get/delete at
+`/gemini/v1beta/agents`; PATCH is excluded. Use a published `agent_resource`
+route and an inference key with provider-state permission. SDK retry attempts
+must reuse the same creation identity; disable automatic retries when in doubt.
+
+For example, with `OLP_BASE_URL`, `OLP_API_KEY` and a stable
+`OLP_SUBMISSION_KEY` set for one logical creation:
+
+```sh
+curl "$OLP_BASE_URL/gemini/v1beta/agents" \
+  -H "Authorization: Bearer $OLP_API_KEY" \
+  -H "Idempotency-Key: $OLP_SUBMISSION_KEY" \
+  -H 'X-OLP-Route: managed-agents' \
+  -H 'Content-Type: application/json' \
+  --data '{"description":"Support agent","system_instruction":"Give concise answers."}'
+```
+
+Use the returned `agent_resource_…` ID for reads/deletes. `base_agent` accepts
+an owned, compatible local agent ID; raw provider agent/environment references
+are not accepted. Listing returns only resources created by this key. See the
+[operator recovery notes](../operate/operations.md#managed-gemini-resources)
+before retrying an ambiguous creation. This API manages resources; it does not
+execute agents.
+
 ## What the suites assert
 
 Every suite checks the client's result **and** recorded upstream requests:

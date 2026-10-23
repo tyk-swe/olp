@@ -33,6 +33,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	if s.Resources == nil {
 		return
 	}
+	s.registerRetainedLifecycle(mux)
 	s.registerCloudBatchState(mux)
 	if s.Media != nil {
 		s.registerAnthropicState(mux)
@@ -1431,10 +1432,16 @@ func gateError(gate gateResult) *Error {
 }
 
 func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
+	s.writeStateJSONStatus(w, x, body, http.StatusOK)
+}
+
+func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byte, status int) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-	w.Header().Set("Content-Type", "application/json")
+	if body != nil {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	x.responseHeaders(w.Header(), false)
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	n, err := w.Write(body)
 	if err == nil && n == len(body) {
 		err = http.NewResponseController(w).Flush()
@@ -1459,7 +1466,7 @@ func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
 			evidence.ClientState = usage.ClientTerminal
 		}
 	}
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
+	s.finish(x, &outcome{committed: true}, status)
 }
 
 func listArgs(r *http.Request) (int, string, *Error) {

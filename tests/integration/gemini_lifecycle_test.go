@@ -38,6 +38,7 @@ type geminiLifecycleProvider struct {
 	mu              sync.Mutex
 	calls           []geminiLifecycleCall
 	sequence        int
+	missingAgents   map[string]bool
 	slowSent        atomic.Int32
 	slowDone        chan struct{}
 	badAck          atomic.Bool
@@ -79,6 +80,7 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 		p.calls = append(p.calls, geminiLifecycleCall{r.Method, r.URL.Path, r.URL.RawQuery, bytes.Clone(body), r.Header.Get("X-Goog-Api-Key")})
 		p.sequence++
 		id := fmt.Sprintf("v1_fixture_%d", p.sequence)
+		agentMissing := p.missingAgents[strings.TrimPrefix(r.URL.Path, "/v1beta/agents/")]
 		p.mu.Unlock()
 		if gate := p.replyGate.Load(); gate != nil && r.Method == gate.method && strings.HasSuffix(r.URL.Path, gate.suffix) {
 			close(gate.reached)
@@ -95,6 +97,23 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 			return
 		}
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/agents":
+			if p.badAck.Load() {
+				writeJSON(w, map[string]any{"invalid": true})
+				return
+			}
+			writeJSON(w, map[string]any{"id": id, "description": "created agent"})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/agents":
+			writeJSON(w, map[string]any{"agents": []any{map[string]any{"id": "foreign-native-agent"}}})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
+			if agentMissing {
+				w.WriteHeader(http.StatusNotFound)
+				writeJSON(w, map[string]any{"error": map[string]any{"code": 404, "message": "not found"}})
+				return
+			}
+			writeJSON(w, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1beta/agents/"), "description": "created agent"})
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
+			writeJSON(w, map[string]any{})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
 			var input struct {
 				Stream     bool `json:"stream"`
@@ -287,6 +306,9 @@ func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, pr
 	capabilities := []any{map[string]any{"operation": operation, "surface": "gemini", "mode": mode}}
 	if profile == "gemini-interactions" {
 		capabilities = append(capabilities, map[string]any{"operation": operation, "surface": "gemini", "mode": "streaming"})
+	} else if profile == "gemini-agents" {
+		operation = "agent_resource"
+		capabilities = []any{map[string]any{"operation": operation, "surface": "gemini", "mode": "unary"}}
 	} else {
 		capabilities = []any{map[string]any{"operation": "realtime", "surface": "gemini", "mode": "realtime"}}
 		operation = "realtime"

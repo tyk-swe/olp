@@ -12,35 +12,36 @@ func (p DigestPurpose) String() string { return p.name }
 
 // Digest purposes.
 var (
-	SAMLStateDigest       = DigestPurpose{"saml_state"}
-	SAMLCookieDigest      = DigestPurpose{"saml_cookie"}
-	SAMLAssertionDigest   = DigestPurpose{"saml_assertion"}
-	MFAChallengeDigest    = DigestPurpose{"mfa_challenge"}
-	MFARecoveryDigest     = DigestPurpose{"mfa_recovery"}
-	WorkloadDigest        = DigestPurpose{"workload_identity"}
-	CacheKeyDigest        = DigestPurpose{"cache_key"}
-	APIKeyDigest          = DigestPurpose{"api_key"}
-	EndUserDigest         = DigestPurpose{"end_user"}
-	ManagementTokenDigest = DigestPurpose{"management_token"}
-	SessionDigest         = DigestPurpose{"session"}
-	RecentAuthDigest      = DigestPurpose{"recent_auth"}
-	CSRFDigest            = DigestPurpose{"csrf"}
-	OIDCStateDigest       = DigestPurpose{"oidc_state"}
-	OIDCCookieDigest      = DigestPurpose{"oidc_cookie"}
-	InvitationDigest      = DigestPurpose{"invitation"}
-	AdmissionDigest       = DigestPurpose{"admission"}
-	MutationDigest        = DigestPurpose{"mutation"}
-	InstallationDigest    = DigestPurpose{"installation"}
-	BatchSubmissionDigest = DigestPurpose{"batch_submission"}
-	ApprovalDigest        = DigestPurpose{"agent_approval"}
-	AgentPrincipalDigest  = DigestPurpose{"agent_principal"}
-	BatchLineDigest       = DigestPurpose{"batch_line"}
+	SAMLStateDigest          = DigestPurpose{"saml_state"}
+	SAMLCookieDigest         = DigestPurpose{"saml_cookie"}
+	SAMLAssertionDigest      = DigestPurpose{"saml_assertion"}
+	MFAChallengeDigest       = DigestPurpose{"mfa_challenge"}
+	MFARecoveryDigest        = DigestPurpose{"mfa_recovery"}
+	WorkloadDigest           = DigestPurpose{"workload_identity"}
+	CacheKeyDigest           = DigestPurpose{"cache_key"}
+	APIKeyDigest             = DigestPurpose{"api_key"}
+	EndUserDigest            = DigestPurpose{"end_user"}
+	ManagementTokenDigest    = DigestPurpose{"management_token"}
+	SessionDigest            = DigestPurpose{"session"}
+	RecentAuthDigest         = DigestPurpose{"recent_auth"}
+	CSRFDigest               = DigestPurpose{"csrf"}
+	OIDCStateDigest          = DigestPurpose{"oidc_state"}
+	OIDCCookieDigest         = DigestPurpose{"oidc_cookie"}
+	InvitationDigest         = DigestPurpose{"invitation"}
+	AdmissionDigest          = DigestPurpose{"admission"}
+	MutationDigest           = DigestPurpose{"mutation"}
+	InstallationDigest       = DigestPurpose{"installation"}
+	BatchSubmissionDigest    = DigestPurpose{"batch_submission"}
+	RetainedSubmissionDigest = DigestPurpose{"retained_submission"}
+	ApprovalDigest           = DigestPurpose{"agent_approval"}
+	AgentPrincipalDigest     = DigestPurpose{"agent_principal"}
+	BatchLineDigest          = DigestPurpose{"batch_line"}
 )
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
 	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest}
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, RetainedSubmissionDigest}
 }
 
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed

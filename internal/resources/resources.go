@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -89,7 +90,7 @@ func parseLocal(local string) (uuid.UUID, error) {
 		return uuid.Nil, ErrNotFound
 	}
 	id, err := uuid.Parse(rest[:8] + "-" + rest[8:12] + "-" + rest[12:16] + "-" + rest[16:20] + "-" + rest[20:])
-	if err != nil || LocalID(local[:i], id) != local {
+	if err != nil || id == uuid.Nil || LocalID(local[:i], id) != local {
 		return uuid.Nil, ErrNotFound
 	}
 	switch local[:i] {
@@ -97,7 +98,9 @@ func parseLocal(local string) (uuid.UUID, error) {
 		KindStrictFile, KindStrictBatch, KindAnthropicFile, KindAnthropicBatch, KindGeminiUpload,
 		KindGeminiFile, KindGeminiBatch, KindCloudBatch:
 	default:
-		return uuid.Nil, ErrNotFound
+		if !slices.Contains(retainedapi.Kinds(), local[:i]) {
+			return uuid.Nil, ErrNotFound
+		}
 	}
 	return id, nil
 }
@@ -174,11 +177,11 @@ func (s *Store) put(ctx context.Context, query resourceRowQuerier, r *Resource) 
 		r.UUID = uuid.Must(uuid.NewV7())
 	}
 	out, err := scan(query.QueryRow(ctx, `INSERT INTO olp.provider_resources
-		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,target_id,parent_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,target_id,parent_id,contract_version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING `+columns,
 		r.UUID, r.Kind, r.APIKeyID, r.RouteSlug, r.ProviderID, r.ProviderRevisionID,
-		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.TargetID, r.ParentID))
+		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.TargetID, r.ParentID, r.ContractVersion))
 	if err != nil {
 		return nil, fmt.Errorf("provider resource put: %w", err)
 	}
@@ -208,13 +211,14 @@ func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resou
 type NativeIdentity struct {
 	Kind, APIKeyID, RouteSlug, ProviderID, ProviderRevisionID, RouteRevisionID, TargetID, SlotID, UpstreamID string
 	CredentialID                                                                                             *string
+	ParentID                                                                                                 *uuid.UUID
 }
 
 func (r *Resource) NativeIdentity() NativeIdentity {
 	return NativeIdentity{Kind: r.Kind, APIKeyID: r.APIKeyID, RouteSlug: r.RouteSlug,
 		ProviderID: r.ProviderID, ProviderRevisionID: r.ProviderRevisionID,
 		RouteRevisionID: r.RouteRevisionID, TargetID: r.TargetID, SlotID: r.SlotID,
-		CredentialID: r.CredentialID, UpstreamID: r.UpstreamID}
+		CredentialID: r.CredentialID, UpstreamID: r.UpstreamID, ParentID: r.ParentID}
 }
 
 func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Resource, error) {
@@ -234,13 +238,14 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 	statement := `SELECT ` + columns + ` FROM olp.provider_resources
 		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
 		AND route_slug=$5 AND route_revision_id=$6 AND target_id=$7 AND slot_id=$8
-		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10`
+		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10
+		AND ($11::uuid IS NULL OR parent_id=$11::uuid)`
 	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
-		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID}
+		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID}
 	if includeDeleted {
 		statement += ` AND (expires_at IS NULL OR expires_at>now()) ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
 	} else {
-		statement += ` AND state<>$11 AND (expires_at IS NULL OR expires_at>now())`
+		statement += ` AND state<>$12 AND (expires_at IS NULL OR expires_at>now())`
 		args = append(args, StateDeleted)
 	}
 	r, err := scan(query.QueryRow(ctx, statement, args...))
@@ -261,6 +266,16 @@ func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afte
 // either storage contract. The cursor belongs to this owner and one of the
 // requested kinds; an unrelated local ID cannot move the page boundary.
 func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
+	return s.listKinds(ctx, kinds, apiKeyID, limit, afterID, false)
+}
+
+// ListLifecycle keeps owner-scoped cursors usable when reconciliation deletes
+// the last row in the previous page. It never returns deleted resources.
+func (s *Store) ListLifecycle(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
+	return s.listKinds(ctx, []string{kind}, apiKeyID, limit, afterID, true)
+}
+
+func (s *Store) listKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor bool) ([]*Resource, error) {
 	var after uuid.UUID
 	if afterID != "" {
 		parsed, err := parseLocal(afterID)
@@ -276,9 +291,9 @@ func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, 
 	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
 		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
 		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp.provider_resources
-		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND state<>$3 AND (expires_at IS NULL OR expires_at>now())))
+		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())))
 		ORDER BY created_at DESC, id DESC LIMIT $5`,
-		kinds, apiKeyID, StateDeleted, nilUUID(after), limit)
+		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)
 	}
