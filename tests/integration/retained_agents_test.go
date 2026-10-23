@@ -25,7 +25,7 @@ func TestRetainedAgentsOwnershipAndSubmissionFence(t *testing.T) {
 	route, key, _ := provisionGeminiLifecycle(t, h, owner, "gemini-agents", provider)
 	headers := map[string]string{"X-OLP-Route": route, "Idempotency-Key": uuid.NewString()}
 	create := func() (*http.Response, []byte) {
-		return geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{"description":"test","system_instruction":"Be brief."}`), headers)
+		return geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{"description":"test","system_instruction":"Be brief.","base_agent":""}`), headers)
 	}
 	response, body := create()
 	if response.StatusCode != 200 {

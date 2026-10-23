@@ -82,6 +82,11 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(err)
 			return
 		}
+		source, parseErr = normalizeRetainedAgent(source)
+		if parseErr != nil {
+			fail(invalidRequest("invalid_request", "The agent definition could not be normalized.", nil))
+			return
+		}
 	}
 	var route *routing.Route
 	var resource *resources.Resource
@@ -385,6 +390,10 @@ func (s *Server) projectRetainedAgent(ctx context.Context, x *call, resource *re
 	if contractErr := retainedAgentEnvironment(source); contractErr != nil {
 		return nil, resources.ErrContract
 	}
+	source, err = normalizeRetainedAgent(source)
+	if err != nil {
+		return nil, err
+	}
 	projected, err := retainedapi.Rewrite(source, map[string]string{"/id": "agent_resource", "base_agent": "agent_resource"}, func(kind, id string) (string, error) {
 		if id == resource.UpstreamID {
 			return resource.ID, nil
@@ -594,14 +603,33 @@ func retainedAgentEnvironment(source oif.Document) *Error {
 	if present && v.Kind() != oif.Null && v.Kind() != oif.Object {
 		return policyUnavailable("unsupported_stateful_reference", "Native environment references are not supported by this agent resource contract.")
 	}
+	var bindings []oif.Value
 	if env, ok := v.Lookup("env"); ok {
 		for _, variable := range env.Members() {
-			if credential, ok := variable.Value.Lookup("credential"); ok && credential.Kind() != oif.Null {
-				return policyUnavailable("unsupported_stateful_reference", "Native credential references are not supported by this agent resource contract.")
-			}
+			bindings = append(bindings, variable.Value)
+		}
+	}
+	if network, ok := v.Lookup("network"); ok {
+		if allowlist, ok := network.Lookup("allowlist"); ok {
+			bindings = append(bindings, allowlist.Elements()...)
+		}
+	}
+	for _, binding := range bindings {
+		if credential, ok := binding.Lookup("credential"); ok && credential.Kind() != oif.Null {
+			return policyUnavailable("unsupported_stateful_reference", "Native credential references are not supported by this agent resource contract.")
 		}
 	}
 	return nil
+}
+
+// The native SDK represents a standalone agent with an empty optional base.
+func normalizeRetainedAgent(source oif.Document) (oif.Document, error) {
+	if value, present := source.Root().Lookup("base_agent"); present {
+		if id, text := value.Text(); text && id == "" {
+			return oif.Apply(source, []oif.Change{{Pointer: "/base_agent", Remove: true, Origin: oif.ResourceBinding, Reason: "empty optional base agent"}})
+		}
+	}
+	return source, nil
 }
 
 // This contract contains resource control calls, without model execution or

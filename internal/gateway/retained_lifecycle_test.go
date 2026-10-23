@@ -30,6 +30,11 @@ func TestRetainedAgentInput(t *testing.T) {
 		{`{"base_environment":{"env":{"TOKEN":{"credential":""}}}}`, false},
 		{`{"base_environment":{"env":{"TOKEN":{"credential":null,"value":"inline"}}}}`, true},
 		{`{"base_environment":{"env":{"credential":{"value":"inline"}}}}`, true},
+		{`{"base_environment":{"network":{"allowlist":[{"domain":"*","credential":"another-owner"}]}}}`, false},
+		{`{"base_environment":{"network":{"allowlist":[{"domain":"*","credential":""}]}}}`, false},
+		{`{"base_environment":{"network":{"allowlist":[{"domain":"example.com","credential":null}]}}}`, true},
+		{`{"base_environment":{"network":{"allowlist":"disabled"}}}`, true},
+		{`{"base_agent":""}`, true},
 		{`{"description":{"text":"wrong"}}`, false},
 		{`{"tools":"wrong"}`, false},
 		{`{"agent_config":false}`, false},
@@ -43,6 +48,41 @@ func TestRetainedAgentInput(t *testing.T) {
 				t.Fatalf("validation=%v, valid=%v", got, tc.valid)
 			}
 		})
+	}
+}
+
+func TestRetainedAgentNormalizationAndProjection(t *testing.T) {
+	source, err := oif.ParseJSON([]byte(`{"base_agent":"","agent_config":{"max_total_tokens":9007199254740993}}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := normalizeRetainedAgent(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := normalized.Root().Lookup("base_agent"); present || !bytes.Contains(normalized.Bytes(), []byte("9007199254740993")) {
+		t.Fatalf("normalization: %s", normalized.Bytes())
+	}
+	if _, present := source.Root().Lookup("base_agent"); !present {
+		t.Fatal("normalization modified source")
+	}
+	s := &Server{}
+	resource := &resources.Resource{ID: "agent_resource_local", UpstreamID: "native-agent"}
+	for _, tc := range []struct {
+		body string
+		bad  bool
+	}{
+		{body: `{"id":"native-agent","base_agent":""}`},
+		{body: `{"id":"native-agent","base_environment":{"env":{"TOKEN":{"credential":"foreign"}}}}`, bad: true},
+		{body: `{"id":"native-agent","base_environment":{"network":{"allowlist":[{"credential":"foreign"}]}}}`, bad: true},
+	} {
+		projected, err := s.projectRetainedAgent(t.Context(), &call{}, resource, []byte(tc.body))
+		if (err != nil) != tc.bad {
+			t.Fatalf("projection of %s: %s, %v", tc.body, projected, err)
+		}
+		if !tc.bad && (bytes.Contains(projected, []byte("base_agent")) || !bytes.Contains(projected, []byte(resource.ID))) {
+			t.Fatalf("projected standalone agent: %s", projected)
+		}
 	}
 }
 

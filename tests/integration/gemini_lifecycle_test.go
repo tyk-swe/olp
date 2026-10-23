@@ -108,6 +108,9 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 			created := map[string]any{}
 			_ = json.Unmarshal(body, &created)
 			created["id"] = id
+			if _, present := created["base_agent"]; !present {
+				created["base_agent"] = ""
+			}
 			p.mu.Lock()
 			if p.agents == nil {
 				p.agents = make(map[string]map[string]any)
