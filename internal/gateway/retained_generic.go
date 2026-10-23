@@ -226,7 +226,27 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(err)
 			return
 		}
-		p, err = s.selectBoundPinSurface(r.Context(), x, route, e.Operation, e.Surface, "unary", selected, func(provider *routing.Provider, model string) bool {
+		// Resources referenced by the creation body own the pin that
+		// must serve it; resolve them before unconstrained selection.
+		bound := selected
+		if bound == nil && source.Root().Kind() == oif.Object {
+			referenced, refErr := s.referencedResources(r.Context(), x, source, e)
+			if refErr != nil {
+				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+				return
+			}
+			for _, candidate := range referenced {
+				if bound == nil {
+					bound = candidate
+					continue
+				}
+				if !samePin(candidate, bound) {
+					fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+					return
+				}
+			}
+		}
+		p, err = s.selectBoundPinSurface(r.Context(), x, route, e.Operation, e.Surface, "unary", bound, func(provider *routing.Provider, model string) bool {
 			return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 		})
 		if err != nil {
@@ -277,7 +297,11 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		version := retainedapi.Revision
 		candidateRes := &resources.Resource{Kind: e.Kind, APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, Metadata: meta, ContractVersion: &version}
 		if parent != nil {
+			// A child shares its parent's serving revision so listing,
+			// projection, and cursor checks keep one identity even
+			// after the route is republished.
 			candidateRes.ParentID = &parent.UUID
+			candidateRes.RouteRevisionID = parent.RouteRevisionID
 		}
 		var fresh bool
 		var prepareErr error
@@ -437,9 +461,28 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 	if e.Action == "content" {
 		_ = observeRetainedUsage(x, oif.Document{}, false)
 		x.completePinned()
+		// Binary delivery finalizes like the JSON path: a successful
+		// write commits the envelope, a failed one cancels it.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		w.Header().Set("Content-Type", "application/octet-stream")
+		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(native.StatusCode)
-		_, _ = w.Write(response)
+		n, writeErr := w.Write(response)
+		if writeErr == nil && n == len(response) {
+			writeErr = http.NewResponseController(w).Flush()
+		}
+		if writeErr != nil || n != len(response) {
+			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
+			if len(x.facts) > 0 {
+				x.facts[len(x.facts)-1].Class = classCancelled
+			}
+			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
+			return native.StatusCode
+		}
+		if n > 0 {
+			x.delivered(s.now())
+		}
+		s.finish(x, &outcome{committed: true}, native.StatusCode)
 		return native.StatusCode
 	}
 	if isCreate {
@@ -522,99 +565,129 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	}
 	ready := make([]listedResource, 0, limit+1)
 	cursor := r.URL.Query().Get(cursorParam)
-	// Page over authorized bindings. Revoked or unresolved rows cannot leak
-	// through continuation tokens or leave an otherwise populated page empty.
-	for len(ready) <= limit {
-		rows, err := s.Resources.ListLifecycleOrdered(r.Context(), e.Kind, x.keyID, 101, cursor, order == "asc")
-		if err != nil {
-			if errors.Is(err, resources.ErrNotFound) {
-				fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
-				return 400
-			}
-			fail(serverError(503, "provider_state_unavailable", "Provider state is unavailable."))
-			return 503
-		}
-		for _, resource := range rows {
-			cursor = resource.ID
-			if resource.State == "submitting" || resource.State == "submission_unknown" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
-				continue
-			}
-			p, route, resolveErr := s.resolveResource(r.Context(), x, a, resource, e.Operation, retainedRetrieval)
-			if resolveErr != nil {
-				if resolveErr.Status != http.StatusNotFound && resolveErr.Status != http.StatusConflict {
-					fail(resolveErr)
-					return resolveErr.Status
-				}
-				continue
-			}
-			ready = append(ready, listedResource{resource, p, route})
-			if len(ready) > limit {
-				break
-			}
-		}
-		if len(rows) < 101 {
-			break
-		}
-	}
-	hasMore := len(ready) > limit
-	if hasMore {
-		ready = ready[:limit]
-	}
-	items := make([]json.RawMessage, 0, len(ready))
+	exhausted := false
 	var overall time.Duration
-	for index, entry := range ready {
-		x.route = entry.route
-		if gateErr := x.guardrailSurfaceGate(entry.route); gateErr != nil {
+	admitted := make(map[string]bool)
+	// fill scans authorized bindings until ready holds more than
+	// target entries or the owner's rows are exhausted. Each new
+	// candidate is policy-checked as it is collected so refilled
+	// candidates carry the same prices and guardrails.
+	fill := func(ctx context.Context, target int) int {
+		for len(ready) <= target && !exhausted {
+			rows, err := s.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc")
+			if err != nil {
+				if errors.Is(err, resources.ErrNotFound) {
+					fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
+					return 400
+				}
+				fail(serverError(503, "provider_state_unavailable", "Provider state is unavailable."))
+				return 503
+			}
+			if len(rows) < 101 {
+				exhausted = true
+			}
+			for _, resource := range rows {
+				cursor = resource.ID
+				if resource.State == "submitting" || resource.State == "submission_unknown" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
+					continue
+				}
+				p, route, resolveErr := s.resolveResource(ctx, x, a, resource, e.Operation, retainedRetrieval)
+				if resolveErr != nil {
+					if resolveErr.Status != http.StatusNotFound && resolveErr.Status != http.StatusConflict {
+						fail(resolveErr)
+						return resolveErr.Status
+					}
+					continue
+				}
+				entry := listedResource{resource, p, route}
+				x.route = route
+				if gateErr := x.guardrailSurfaceGate(route); gateErr != nil {
+					fail(gateErr)
+					return gateErr.Status
+				}
+				if policyErr := s.retainedAccountingPolicy(x, p, route, false); policyErr != nil {
+					fail(policyErr)
+					return policyErr.Status
+				}
+				timeout := time.Duration(route.OverallTimeout) * time.Millisecond
+				if len(ready) == 0 || timeout < overall {
+					overall = timeout
+				}
+				ready = append(ready, entry)
+				if len(ready) > target {
+					break
+				}
+			}
+		}
+		return 0
+	}
+	if status := fill(r.Context(), limit); status != 0 {
+		return status
+	}
+	items := make([]json.RawMessage, 0, limit)
+	ctx := r.Context()
+	authority := x.admissionAuthority(a)
+	costChecked := false
+	admitRoute := func(entry listedResource) int {
+		if admitted[entry.route.Slug] {
+			return 0
+		}
+		lease, gateErr := s.Admission.reserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, costReservation{}, &costChecked)
+		if gateErr != nil {
 			fail(gateErr)
 			return gateErr.Status
 		}
-		if err := s.retainedAccountingPolicy(x, entry.pin, entry.route, false); err != nil {
-			fail(err)
-			return err.Status
+		if lease != nil {
+			if x.lease == nil {
+				x.lease = lease
+			} else {
+				x.lease.Attach(lease)
+			}
 		}
-		timeout := time.Duration(entry.route.OverallTimeout) * time.Millisecond
-		if index == 0 || timeout < overall {
-			overall = timeout
-		}
+		admitted[entry.route.Slug] = true
+		return 0
 	}
-	ctx := r.Context()
 	if len(ready) > 0 {
 		// One deadline covers the page and every lease held for its reads.
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, overall)
 		defer cancel()
-		// The policy loop leaves x.route on the last entry; clearing it
-		// keeps reserveState to per-key limits so the per-route pass
-		// below reserves each route exactly once.
+		// Clearing the collection route keeps reserveState to per-key
+		// limits so the per-route pass reserves each route once.
 		x.route = nil
 		if gateErr := s.reserveState(ctx, x, a, overall); gateErr != nil {
 			fail(gateErr)
 			return gateErr.Status
 		}
-		authority := x.admissionAuthority(a)
-		admitted := make(map[string]bool)
-		costChecked := false
 		for _, entry := range ready {
-			if admitted[entry.route.Slug] {
-				continue
+			if status := admitRoute(entry); status != 0 {
+				return status
 			}
-			lease, gateErr := s.Admission.reserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, costReservation{}, &costChecked)
-			if gateErr != nil {
-				fail(gateErr)
-				return gateErr.Status
-			}
-			if lease != nil {
-				if x.lease == nil {
-					x.lease = lease
-				} else {
-					x.lease.Attach(lease)
-				}
-			}
-			admitted[entry.route.Slug] = true
 		}
 	}
 	responseBytes := 256
-	for _, entry := range ready {
+	readIdx := 0
+	var lastItem *resources.Resource
+	// Reads refill after tombstones so a page never returns empty
+	// with a continuation while live bindings remain.
+	for {
+		if len(items) >= limit || readIdx >= len(ready) && exhausted {
+			break
+		}
+		if readIdx >= len(ready) {
+			if status := fill(ctx, len(ready)); status != 0 {
+				return status
+			}
+			if readIdx >= len(ready) {
+				break
+			}
+			if status := admitRoute(ready[len(ready)-1]); status != 0 {
+				return status
+			}
+			continue
+		}
+		entry := ready[readIdx]
+		readIdx++
 		resource, p, route := entry.resource, entry.pin, entry.route
 		x.route = route
 		if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
@@ -682,17 +755,19 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return 502
 		}
 		items = append(items, projected)
+		lastItem = resource
 	}
+	hasMore := readIdx < len(ready) || !exhausted
 	response := map[string]any{e.Collection: items}
-	if hasMore && len(ready) > 0 {
+	if hasMore && lastItem != nil {
 		if e.Surface == "gemini" || e.Surface == "native" {
-			response["nextPageToken"] = ready[len(ready)-1].resource.ID
+			response["nextPageToken"] = lastItem.ID
 		}
 	}
 	if e.Operation == "skill" {
 		// The Skills auto-pager follows next_page, not has_more.
-		if hasMore && len(ready) > 0 {
-			response["next_page"] = ready[len(ready)-1].resource.ID
+		if hasMore && lastItem != nil {
+			response["next_page"] = lastItem.ID
 		} else {
 			response["next_page"] = nil
 		}
@@ -848,7 +923,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 				bound = candidate
 				continue
 			}
-			if candidate.ProviderID != bound.ProviderID || candidate.ProviderRevisionID != bound.ProviderRevisionID || candidate.TargetID != bound.TargetID || candidate.SlotID != bound.SlotID || !sameCredential(candidate.CredentialID, bound.CredentialID) {
+			if !samePin(candidate, bound) {
 				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 				return
 			}

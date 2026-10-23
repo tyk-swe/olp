@@ -147,12 +147,22 @@ func hasItemReference(v oif.Value) bool {
 			}
 		}
 	case oif.Object:
+		// Item references permit type to be omitted or null; an
+		// untyped item carrying an id is still a provider reference.
+		kind := ""
 		if t, ok := v.Lookup("type"); ok {
-			if text, isText := t.Text(); isText && text == "item_reference" {
-				return true
+			if text, isText := t.Text(); isText {
+				kind = text
 			}
 		}
+		if _, hasID := v.Lookup("id"); hasID && (kind == "" || kind == "item_reference") {
+			return true
+		}
 		for _, field := range v.Members() {
+			switch field.Name {
+			case "metadata", "attributes", "schema", "json_schema", "parameters", "input_schema", "item_schema":
+				continue
+			}
 			if hasItemReference(field.Value) {
 				return true
 			}
@@ -188,6 +198,85 @@ func retainedFileIDs(v oif.Value) []string {
 	}
 	walk(v)
 	return out
+}
+
+// referencedResources resolves the retained resources a request body
+// names through the endpoint's declared references, so pin selection
+// can bind to their serving identity before dispatch.
+func (s *Server) referencedResources(ctx context.Context, x *call, source oif.Document, e retainedapi.Endpoint) ([]*resources.Resource, error) {
+	refs := retainedRequestRefs(e)
+	var out []*resources.Resource
+	seen := map[string]bool{}
+	resolve := func(kind, id string) error {
+		key := kind + "\x00" + id
+		if seen[key] {
+			return nil
+		}
+		seen[key] = true
+		var bound *resources.Resource
+		var err error
+		switch kind {
+		case resources.KindResponse:
+			bound, _, err = s.readResponseResource(ctx, x.keyID, id)
+		case resources.KindFile:
+			bound, _, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
+		default:
+			bound, err = s.Resources.Get(ctx, kind, x.keyID, id)
+		}
+		if err != nil {
+			return err
+		}
+		out = append(out, bound)
+		return nil
+	}
+	var walk func(oif.Value) error
+	walk = func(v oif.Value) error {
+		switch v.Kind() {
+		case oif.Array:
+			for _, child := range v.Elements() {
+				if err := walk(child); err != nil {
+					return err
+				}
+			}
+		case oif.Object:
+			for _, field := range v.Members() {
+				switch field.Name {
+				case "metadata", "attributes", "schema", "json_schema", "parameters", "input_schema", "item_schema":
+					continue
+				}
+				kind, isRef := refs[field.Name]
+				if !isRef || kind == retainedapi.Literal {
+					if err := walk(field.Value); err != nil {
+						return err
+					}
+					continue
+				}
+				values := []oif.Value{field.Value}
+				if field.Value.Kind() == oif.Array {
+					values = field.Value.Elements()
+				}
+				for _, value := range values {
+					id, ok := value.Text()
+					if !ok || id == "" {
+						return resources.ErrNotFound
+					}
+					if err := resolve(kind, id); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(source.Root()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// samePin reports whether two resources share one serving pin.
+func samePin(a, b *resources.Resource) bool {
+	return a.ProviderID == b.ProviderID && a.ProviderRevisionID == b.ProviderRevisionID && a.TargetID == b.TargetID && a.SlotID == b.SlotID && sameCredential(a.CredentialID, b.CredentialID)
 }
 
 func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.Authority, p *pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {

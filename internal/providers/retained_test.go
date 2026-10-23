@@ -39,6 +39,14 @@ func TestRetainedCapabilitiesAreValidAndCertifiable(t *testing.T) {
 	if err := New(nil, policy, nil).certifyTuple(context.Background(), &cfg, []byte("secret"), "model", CapabilityInput{"vector_store", "openai", "unary"}, 4096); err != nil {
 		t.Fatalf("retained certification: %v", err)
 	}
+	// An unrelated 200 object does not prove an OpenAI collection exists.
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{}`) }))
+	defer empty.Close()
+	cfg.Endpoint = new(empty.URL + "/v1")
+	cfg.Normalize()
+	if err := New(nil, policy, nil).certifyTuple(context.Background(), &cfg, []byte("secret"), "model", CapabilityInput{"vector_store", "openai", "unary"}, 4096); err == nil {
+		t.Fatal("missing collection certified")
+	}
 }
 
 func TestRetainedAgentCertificationDoesNotCreateResources(t *testing.T) {

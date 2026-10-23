@@ -285,9 +285,19 @@ func TestRetainedCompactionRejectsItemReferences(t *testing.T) {
 		provider.Kind = "openai"
 		h.rt.release.Snapshot.Providers[id] = provider
 	}
-	resp := probeRetainedCompact(h, `{"model":"m","input":[{"type":"item_reference","id":"msg_native"}]}`)
-	if resp.Code != 400 || !strings.Contains(resp.Body.String(), "invalid_resource_reference") || h.mock.count("a") != 0 {
-		t.Fatalf("item_reference dispatched: %d %s", resp.Code, resp.Body.String())
+	for _, body := range []string{
+		`{"model":"m","input":[{"type":"item_reference","id":"msg_native"}]}`,
+		`{"model":"m","input":[{"id":"msg_native"}]}`,
+		`{"model":"m","input":[{"type":null,"id":"msg_native"}]}`,
+	} {
+		resp := probeRetainedCompact(h, body)
+		if resp.Code != 400 || !strings.Contains(resp.Body.String(), "invalid_resource_reference") || h.mock.count("a") != 0 {
+			t.Fatalf("item_reference dispatched: %d %s", resp.Code, resp.Body.String())
+		}
+	}
+	if !samePin(&resources.Resource{ProviderID: "p", TargetID: "t", SlotID: "s"}, &resources.Resource{ProviderID: "p", TargetID: "t", SlotID: "s"}) ||
+		samePin(&resources.Resource{ProviderID: "p", TargetID: "t", SlotID: "s"}, &resources.Resource{ProviderID: "p", TargetID: "t", SlotID: "other"}) {
+		t.Fatal("pin agreement check broken")
 	}
 }
 

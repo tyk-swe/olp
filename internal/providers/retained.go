@@ -64,6 +64,11 @@ func (s *Server) certifyRetained(ctx context.Context, cfg *Configuration, creden
 		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid retained collection."}
 	}
 	items, present := source.Root().Lookup(collection)
+	// Only Protobuf JSON (Gemini/Vertex) may omit an empty repeated
+	// field; OpenAI and Anthropic collections must carry their array.
+	if !present && (tuple.Surface == "openai" || tuple.Surface == "anthropic") {
+		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid retained collection."}
+	}
 	if present && items.Kind() != oif.Array {
 		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid retained collection."}
 	}
