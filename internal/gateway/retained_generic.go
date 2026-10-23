@@ -584,6 +584,10 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, overall)
 		defer cancel()
+		// The policy loop leaves x.route on the last entry; clearing it
+		// keeps reserveState to per-key limits so the per-route pass
+		// below reserves each route exactly once.
+		x.route = nil
 		if gateErr := s.reserveState(ctx, x, a, overall); gateErr != nil {
 			fail(gateErr)
 			return gateErr.Status
@@ -817,8 +821,22 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		// selecting first would admit the slot against the floored
 		// minimum estimate regardless of the actual input size.
 		x.estimate = int64(len(body))
+		// A continuation reference owns the pin that must serve this
+		// call; resolve it first so selection is bound to its target
+		// and credential slot instead of rejecting it on affinity.
+		var bound *resources.Resource
+		if value, present := source.Root().Lookup("previous_response_id"); present {
+			if id, isText := value.Text(); isText && id != "" {
+				resolved, _, readErr := s.readResponseResource(r.Context(), x.keyID, id)
+				if readErr != nil {
+					fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+					return
+				}
+				bound = resolved
+			}
+		}
 		var pinErr *Error
-		p, pinErr = s.selectBoundPinSurface(r.Context(), x, route, operation, "openai", "unary", nil, func(provider *routing.Provider, model string) bool {
+		p, pinErr = s.selectBoundPinSurface(r.Context(), x, route, operation, "openai", "unary", bound, func(provider *routing.Provider, model string) bool {
 			return provider.CredentialSource != "caller" && (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.Connector().Supports(operation, "openai", "unary")
 		})
 		if pinErr != nil {
@@ -884,7 +902,13 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		fail(serverError(502, "provider_protocol_error", "The provider returned invalid usage."))
 		return
 	}
-	projected, projectErr := s.projectRetainedGeneric(ctx, resource, codec, response)
+	// Compaction has no parent resource; project its returned
+	// references against the serving pin's owner-scoped identity.
+	projectAs := resource
+	if projectAs == nil && p != nil && route != nil {
+		projectAs = &resources.Resource{APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID}
+	}
+	projected, projectErr := s.projectRetainedGeneric(ctx, projectAs, codec, response)
 	if projectErr != nil {
 		fail(serverError(502, "provider_protocol_error", "The provider response contained an unbound resource reference."))
 		return

@@ -145,3 +145,20 @@ func TestRewriteInlineHeaderNames(t *testing.T) {
 		t.Fatal("non-string header value accepted")
 	}
 }
+
+func TestRewriteLeavesEvalItemSchemaOpaque(t *testing.T) {
+	raw := `{"name":"e","data_source_config":{"type":"custom","item_schema":{"type":"object","properties":{"id":{"type":"string"},"user_id":{"type":"string"}}}},"test_case":{"file_id":"file_local"}}`
+	source, err := oif.ParseJSON([]byte(raw), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Rewrite(source, map[string]string{"file_id": "file"}, func(kind, id string) (string, error) {
+		return "file_native", nil
+	})
+	if err != nil {
+		t.Fatalf("eval schema treated as references: %v", err)
+	}
+	if !strings.Contains(result.Raw(), `"user_id":{"type":"string"}`) || !strings.Contains(result.Raw(), `"file_id":"file_native"`) {
+		t.Fatalf("schema or reference changed: %s", result.Raw())
+	}
+}

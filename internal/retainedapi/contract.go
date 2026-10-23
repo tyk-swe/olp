@@ -189,7 +189,7 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 					}
 					continue
 				}
-				if slices.Contains([]string{"metadata", "attributes", "schema", "json_schema", "parameters", "input_schema"}, field.Name) {
+				if slices.Contains([]string{"metadata", "attributes", "schema", "json_schema", "parameters", "input_schema", "item_schema"}, field.Name) {
 					continue
 				}
 				kind, reference := refs[p]

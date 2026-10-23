@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/realtimecontract"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
 // ValidateRouteContracts validates the complete configured links of a route.
@@ -143,6 +144,27 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 				provider, ok := s.Providers[target.ProviderID]
 				if !ok || !provider.Connector().Supports(op, "gemini", "unary") {
 					return nil, fmt.Errorf("route target cannot serve the agent resource contract")
+				}
+			}
+			continue
+		}
+		if retainedapi.Operation(op) {
+			// Retained families serve through their own pinned
+			// handlers, not an operationplan dialect. Compilation
+			// only proves every target can serve the contract.
+			for _, target := range route.Targets {
+				provider, ok := s.Providers[target.ProviderID]
+				if !ok {
+					return nil, fmt.Errorf("route target references an unavailable provider")
+				}
+				served := op == "retrieval" && provider.Connector().Supports(op, "openai", "unary")
+				for _, family := range retainedapi.Families() {
+					if family.Operation == op && provider.Connector().Supports(op, family.Surface, "unary") {
+						served = true
+					}
+				}
+				if !served {
+					return nil, fmt.Errorf("route target cannot serve the %s contract", op)
 				}
 			}
 			continue

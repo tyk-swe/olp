@@ -236,6 +236,11 @@ func capabilityOptions() []CapabilityInput {
 	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"), tuple("batch", "native", "unary"))
 	out = append(out, tuple("decision", "native", "unary"))
 	out = append(out, tuple("agent_resource", "gemini", "unary"))
+	for _, operation := range []string{"vector_store", "conversation", "container", "eval", "retrieval"} {
+		out = append(out, tuple(operation, "openai", "unary"))
+	}
+	out = append(out, tuple("fine_tuning", "openai", "unary"), tuple("fine_tuning", "native", "unary"),
+		tuple("skill", "anthropic", "unary"), tuple("context_cache", "gemini", "unary"))
 	return out
 }
 
@@ -304,7 +309,10 @@ func reviewedMedia(kind, vendor, operation string) bool {
 
 func certifiable(kind, vendor string, c CapabilityInput) bool {
 	if retainedapi.Operation(c.Operation) {
-		return vendor == "google" && retainedapi.Supports(kind, c.Operation, c.Surface, c.Mode)
+		if c.Operation == "agent_resource" {
+			return vendor == "google" && retainedapi.Supports(kind, c.Operation, c.Surface, c.Mode)
+		}
+		return retainedapi.Supports(kind, c.Operation, c.Surface, c.Mode)
 	}
 	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
 		return false

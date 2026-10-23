@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -398,8 +399,8 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	if !configurationCertifiable(cfg, tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
-	if tuple.Operation == "agent_resource" {
-		return s.certifyAgentResources(ctx, cfg, credential, model)
+	if retainedapi.Operation(tuple.Operation) {
+		return s.certifyRetained(ctx, cfg, credential, model, tuple)
 	}
 	if cfg.ProfileID == "gemini-interactions" && tuple.Operation == "generation" && tuple.Surface == "gemini" {
 		return s.certifyGeminiInteraction(ctx, cfg, credential, model, tuple.Mode, maxEventBytes)

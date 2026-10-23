@@ -180,6 +180,23 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 					err = resources.ErrNotFound
 				}
 			}
+		} else if kind == resources.KindFile {
+			// A file handle may name either the transformed or the
+			// strict durable kind; resolve it through the durable
+			// contract so strict handles keep their checks.
+			var contract *durableDocument
+			bound, contract, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
+			if err == nil {
+				var failure *Error
+				if contract != nil {
+					_, _, failure = s.admitDurable(ctx, x, a, bound, contract, x.operationName(), retainedNewWork)
+				} else {
+					_, _, failure = s.resolveResource(ctx, x, a, bound, x.operationName(), retainedNewWork)
+				}
+				if failure != nil {
+					err = resources.ErrNotFound
+				}
+			}
 		} else {
 			bound, err = s.Resources.Get(ctx, kind, x.keyID, id)
 			if err == nil {

@@ -460,6 +460,7 @@ var knownOperations = map[string]struct{}{
 	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
 	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
 	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {}, "guardrail": {}, "agent_resource": {},
+	"fine_tuning": {}, "vector_store": {}, "retrieval": {}, "conversation": {}, "container": {}, "eval": {}, "skill": {}, "context_cache": {},
 }
 
 var knownSurfaces = map[string]struct{}{

@@ -40,6 +40,8 @@ func nativeMediaProbeServer(t *testing.T) *Server {
 			t.Errorf("unexpected certification request: %s %s", r.Method, r.URL)
 		}
 		switch r.URL.Path {
+		case "/v1/vector_stores", "/v1/conversations", "/v1/containers", "/v1/evals", "/v1/fine_tuning/jobs":
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[]}`)), Request: r}, nil
 		case "/v1/files", "/v1/batches":
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[]}`)), Request: r}, nil
 		case "/v1/models":
@@ -69,8 +71,8 @@ func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
 			t.Fatalf("certify %v: %v", tuple, err)
 		}
 	}
-	if mediaTuples != 17 {
-		t.Fatalf("media capabilities=%d, want 17", mediaTuples)
+	if mediaTuples != 23 {
+		t.Fatalf("media capabilities=%d, want 23", mediaTuples)
 	}
 	if err := s.certifyTuple(t.Context(), &cfg, []byte("test-credential"), "missing-model", CapabilityInput{"speech", "openai", "unary"}, 4096); err == nil {
 		t.Fatal("inaccessible media model certified")
