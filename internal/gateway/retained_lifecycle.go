@@ -287,7 +287,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
-		fail(retainedPublicError(upstreamError(failure), p, resource))
+		fail(retainedPublicError(upstreamError(failure), failure.status))
 		return
 	}
 	defer native.Body.Close()
@@ -429,8 +429,11 @@ func (s *Server) projectRetainedAgent(ctx context.Context, x *call, resource *re
 
 // Provider errors may echo native resource identifiers. Preserve the stable
 // HTTP status while keeping provider identities outside public errors.
-func retainedPublicError(err *Error, p *pin, resource *resources.Resource) *Error {
+func retainedPublicError(err *Error, status int) *Error {
 	out := *err
+	if status >= http.StatusBadRequest && status <= 599 {
+		out.Status = status
+	}
 	out.Message = "The provider could not complete this resource operation."
 	out.Param = nil
 	out.Code = "provider_resource_error"
@@ -553,8 +556,9 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 				}
 				continue
 			}
-			fail(retainedPublicError(upstreamError(callErr), p, resource))
-			return upstreamError(callErr).Status
+			public := retainedPublicError(upstreamError(callErr), callErr.status)
+			fail(public)
+			return public.Status
 		}
 		body, readErr := readBounded(native.Body, s.retainedResponseLimit())
 		native.Body.Close()
@@ -589,16 +593,27 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 	if hasMore && len(rows) > 0 {
 		response["next_page_token"] = rows[len(rows)-1].ID
 	}
-	body, marshalErr := json.Marshal(response)
-	if marshalErr != nil {
-		fail(serverError(500, "internal_error", "The resource list could not be encoded."))
-		return 500
+	body, encodeErr := encodeRetainedPage(response)
+	if encodeErr != nil {
+		fail(encodeErr)
+		return encodeErr.Status
 	}
 	s.writeStateJSONStatus(w, x, body, http.StatusOK)
 	return 200
 }
 
 const retainedBodyLimit = 4 << 20
+
+func encodeRetainedPage(response map[string]any) ([]byte, *Error) {
+	body, err := json.Marshal(response)
+	if err != nil {
+		return nil, serverError(500, "internal_error", "The resource list could not be encoded.")
+	}
+	if len(body) > retainedBodyLimit {
+		return nil, serverError(502, "provider_protocol_error", "The resource page exceeds the supported response size; request a smaller page.")
+	}
+	return body, nil
+}
 
 func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *routing.Route) *Error {
 	if p.hold != nil {

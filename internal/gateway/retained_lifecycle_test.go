@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -241,11 +242,39 @@ func TestRetainedSelectionUsesOwningTargetAndSlot(t *testing.T) {
 func TestRetainedProviderErrorDoesNotExposeIDs(t *testing.T) {
 	param := "native_secret"
 	original := &Error{Status: http.StatusBadRequest, Code: param, Type: param, Message: "bad " + param, Param: &param}
-	got := retainedPublicError(original, nil, nil)
+	got := retainedPublicError(original, original.Status)
 	if strings.Contains(got.Message, param) || strings.Contains(got.Code, param) || strings.Contains(got.Type, param) || got.Param != nil || got.Status != 400 {
 		t.Fatalf("unsafe error: %+v", got)
 	}
 	if original.Param == nil || original.Message != "bad "+param {
 		t.Fatal("mutated shared provider error")
+	}
+}
+
+func TestRetainedProviderErrorPreservesHTTPStatus(t *testing.T) {
+	for _, status := range []int{0, 400, 401, 403, 429, 500, 503} {
+		failure := &attemptFailure{status: status}
+		public := retainedPublicError(upstreamError(failure), failure.status)
+		want := status
+		if want == 0 {
+			want = http.StatusBadGateway
+		}
+		if public.Status != want || public.Code != "provider_resource_error" {
+			t.Fatalf("native status %d returned %+v", status, public)
+		}
+	}
+}
+
+func TestRetainedPageLimitIncludesJSONEscaping(t *testing.T) {
+	for _, size := range []int{1, retainedBodyLimit / 6} {
+		item := json.RawMessage(`{"description":"` + strings.Repeat("<", size) + `"}`)
+		body, err := encodeRetainedPage(map[string]any{"agents": []json.RawMessage{item}})
+		if size == 1 {
+			if err != nil || !bytes.Contains(body, []byte(`\u003c`)) {
+				t.Fatalf("small encoded page: %s, %v", body, err)
+			}
+		} else if err == nil || err.Status != http.StatusBadGateway || len(body) != 0 {
+			t.Fatalf("oversized encoded page: %d bytes, %v", len(body), err)
+		}
 	}
 }
