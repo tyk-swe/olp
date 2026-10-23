@@ -340,3 +340,16 @@ func probeRetainedCompact(h *harness, body string) *httptest.ResponseRecorder {
 	h.gateway.retainedCompact(response, req)
 	return response
 }
+
+func TestRetainedPerRequestBoundAndFileIDs(t *testing.T) {
+	x := &call{operationOverride: "vector_store", request: request{startedAt: time.Now()}}
+	price := &usage.RoutingPrice{Price: usage.Price{ProviderKind: "openai", Model: modelA, Operation: "vector_store", PerRequest: new("0.01")}}
+	bound, ok := x.targetCostBound(routing.Provider{}, routing.Target{}, price, nil)
+	if !ok || bound.String() != "0.01" {
+		t.Fatalf("retained fixed-fee bound: %s ok=%v", bound.String(), ok)
+	}
+	source, _ := oif.ParseJSON([]byte(`{"input":[{"type":"input_file","file_id":"file_1"},{"type":"input_file","file_id":"file_1"},{"type":"input_file","file_id":"file_2"}]}`), oif.Limits{})
+	if ids := retainedFileIDs(source.Root()); len(ids) != 2 || ids[0] != "file_1" || ids[1] != "file_2" {
+		t.Fatalf("file ids=%v", ids)
+	}
+}

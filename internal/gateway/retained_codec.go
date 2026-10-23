@@ -161,6 +161,35 @@ func hasItemReference(v oif.Value) bool {
 	return false
 }
 
+// retainedFileIDs collects the file handles a request body references,
+// in first-seen order, so pin selection can bind to their owner.
+func retainedFileIDs(v oif.Value) []string {
+	var out []string
+	seen := map[string]bool{}
+	var walk func(oif.Value)
+	walk = func(value oif.Value) {
+		switch value.Kind() {
+		case oif.Array:
+			for _, child := range value.Elements() {
+				walk(child)
+			}
+		case oif.Object:
+			for _, field := range value.Members() {
+				if field.Name == "file_id" {
+					if id, ok := field.Value.Text(); ok && id != "" && !seen[id] {
+						seen[id] = true
+						out = append(out, id)
+					}
+					continue
+				}
+				walk(field.Value)
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
 func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.Authority, p *pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
 	if (e.Operation == "conversation" || e.Operation == "compaction") && hasItemReference(source.Root()) {
 		return oif.Document{}, errors.New("item_reference inputs are not supported")
@@ -388,6 +417,13 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			return parent.ID, nil
 		}
 		bound, findErr := s.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		if errors.Is(findErr, resources.ErrNotFound) && kind == resources.KindFile {
+			// An echoed file reference may name the strict durable
+			// kind under the same serving identity.
+			strictIdentity := identity
+			strictIdentity.Kind = resources.KindStrictFile
+			bound, findErr = s.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
+		}
 		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill") {
 			child := *resource
 			child.UUID, child.ID = [16]byte{}, ""

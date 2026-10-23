@@ -271,9 +271,10 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	if x.anthropicFilesBeta {
 		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
 	}
-	if x.anthropicSkillsBeta {
-		req.Header.Set("Anthropic-Beta", "skills-2025-10-02")
-	}
+	// Skills use the GA contract the pinned SDK parses (id-addressed
+	// versions, latest_version_id). The dated beta header would opt
+	// into legacy response shapes with incompatible identities, so
+	// it is deliberately not sent.
 	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 }
 

@@ -224,7 +224,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil || x.operationName() == "search" {
+	if x.media != nil || x.operationName() == "search" || retainedControlOperation(x.operationName()) {
 		u := usage.AttemptUsage{Complete: true}
 		if x.media != nil {
 			var ok bool
@@ -285,7 +285,7 @@ func (x *call) targetCostBound(provider routing.Provider, target routing.Target,
 		}
 		return price.Cost(u, x.request.startedAt, true, discount)
 	}
-	if x.operationName() == "search" {
+	if x.operationName() == "search" || retainedControlOperation(x.operationName()) {
 		return price.Cost(usage.AttemptUsage{Complete: true}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {

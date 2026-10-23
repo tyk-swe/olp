@@ -115,7 +115,6 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	x.operationOverride = e.Operation
 	x.mode = "unary"
 	x.actor = "api_key_resource"
-	x.anthropicSkillsBeta = e.Operation == "skill"
 	var p *pin
 	status := http.StatusInternalServerError
 	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
@@ -821,10 +820,10 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		// selecting first would admit the slot against the floored
 		// minimum estimate regardless of the actual input size.
 		x.estimate = int64(len(body))
-		// A continuation reference owns the pin that must serve this
-		// call; resolve it first so selection is bound to its target
-		// and credential slot instead of rejecting it on affinity.
-		var bound *resources.Resource
+		// Retained references own the pin that must serve this call;
+		// resolve them first so selection is bound to their target
+		// and credential slot instead of rejecting them on affinity.
+		var candidates []*resources.Resource
 		if value, present := source.Root().Lookup("previous_response_id"); present {
 			if id, isText := value.Text(); isText && id != "" {
 				resolved, _, readErr := s.readResponseResource(r.Context(), x.keyID, id)
@@ -832,7 +831,26 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 					fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 					return
 				}
-				bound = resolved
+				candidates = append(candidates, resolved)
+			}
+		}
+		for _, fileID := range retainedFileIDs(source.Root()) {
+			resolved, _, readErr := s.readDurable(r.Context(), durableKind(resources.KindFile, fileID), x.keyID, fileID)
+			if readErr != nil {
+				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+				return
+			}
+			candidates = append(candidates, resolved)
+		}
+		var bound *resources.Resource
+		for _, candidate := range candidates {
+			if bound == nil {
+				bound = candidate
+				continue
+			}
+			if candidate.ProviderID != bound.ProviderID || candidate.ProviderRevisionID != bound.ProviderRevisionID || candidate.TargetID != bound.TargetID || candidate.SlotID != bound.SlotID || !sameCredential(candidate.CredentialID, bound.CredentialID) {
+				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+				return
 			}
 		}
 		var pinErr *Error

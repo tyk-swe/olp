@@ -26,7 +26,10 @@ func (s *Server) certifyRetained(ctx context.Context, cfg *Configuration, creden
 			path = "fine_tuning/jobs"
 		}
 	case "conversation":
-		path = "conversations"
+		// Conversations have no collection endpoint in the pinned SDK
+		// or retained contract, so certification proves the credential
+		// and model through the supported model listing instead.
+		return s.certifyListedModel(ctx, cfg, credential, model)
 	case "container":
 		path = "containers"
 	case "eval":

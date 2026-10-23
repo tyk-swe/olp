@@ -42,6 +42,17 @@ func (s *Server) retainedSettle(ctx context.Context, x *call, p *pin) {
 	s.settleAdmission(ctx, x)
 }
 
+// retainedControlOperation reports whether an operation label names a
+// retained control/search family whose work consumes no tokens, so its
+// price can only be a fixed per-request fee.
+func retainedControlOperation(operation string) bool {
+	switch operation {
+	case "fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval", "skill", "context_cache", "agent_resource":
+		return true
+	}
+	return false
+}
+
 func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
 	if x.exchange == nil {
 		return nil
