@@ -1,227 +1,273 @@
-# Roadmap
+# Implementation roadmap
 
-Use this roadmap to choose the next implementation or qualification task. Work
-is ordered by dependency, with no promised dates. Current behavior belongs in
-the [Use](README.md#use-the-gateway) and [Operate](README.md#operate-an-installation)
-guides. The three development plans retain binding designs and detailed
-acceptance criteria. An implementation or registration is not a release
-qualification result.
+This roadmap tracks implementation work and milestones in dependency order,
+with no promised dates. **A milestone is Done when its implementation is
+complete.** Each checkbox represents an implementation deliverable.
 
-The capability comparison is frozen to LiteLLM v1.105.0 documentation reviewed
-2026-10-13, including beta/Enterprise scope. The previous repository status review
-was 2026-10-18. This milestone breakdown was checked against the local plans,
-endpoint ledger and relevant implementation on 2026-10-22; it adds no test or
-release qualification evidence. The
-[benchmark comparator](develop/performance.md#what-is-pinned) separately remains
-v1.103.2 at its recorded digest. A newer documentation baseline never changes a
-historical benchmark pin. Rebaseline deliberately, documenting scope, impact and
-evidence; missing credentials, time or hardware do not justify an exclusion.
+Feature scope uses LiteLLM v1.105.0 as the comparison baseline. Detailed designs
+live in the [guardrail](develop/plans/guardrails.md),
+[API surface](develop/plans/api-surface.md) and
+[agent gateway](develop/plans/agent-gateway.md) plans. Current behavior is
+documented in the [Use](README.md#use-the-gateway) and
+[Operate](README.md#operate-an-installation) guides.
 
 ## Start here
 
-Choose a task whose entry conditions are available; milestone numbers are stable
-identifiers, not a requirement to finish every lower number first.
+Choose work whose implementation dependencies are available. Milestone numbers
+are stable identifiers; independent work can proceed in parallel.
 
-| Lane | Next task | Entry conditions |
+| Workstream | Next implementation | Dependencies |
 | --- | --- | --- |
-| Shared implementation | RM4.1 API contracts, RM4.2 durable debits, and RM4.4 agent contracts | Existing resource, accounting and access owners; these designs can progress in parallel |
-| Local acceptance | RM2.1 capture readback and RM3.1–RM3.4 current API checks | Disposable PostgreSQL/Valkey, appropriate SDK/browser setup and a recorded candidate |
-| External qualification | RM1.1 candidate/environment manifest, then applicable RM1 tasks | Exact supported tuples, authorized accounts and reference hardware for the selected gate |
-| Independent extensions | RM9.1 cloud import contracts | Authoritative export scope and representative fixtures; no dependency on agent work |
+| Guardrail integrations | Remaining named adapters in RM2 | Existing engine, credential and egress contracts |
+| Retained APIs and retrieval | RM5.1–RM5.9, independently by family | Implemented RM4 foundations and each family's ownership and pricing contracts |
+| Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
+| Consumer MCP | RM7.1 direct Streamable HTTP execution | Implemented RM4 accounting and agent contracts, plus existing tool governance |
+| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | RM7.1 direct execution |
+| Cloud invoice imports | RM9.1 import contracts, then each cloud adapter | Existing importer and reconciliation machinery |
 
 The [architecture map](develop/architecture.md#contracts-and-feature-ownership)
-and [testing guide](../tests/README.md) identify implementation boundaries and
-suite setup. Work-item checklists live once, either below or in the linked plan.
-Use their IDs in changes and evidence records.
+identifies implementation boundaries and owners.
 
-## Remaining outcomes
+<a id="remaining-outcomes"></a>
 
-| Milestone | Current state | Completion gate |
+## Implementation milestones
+
+| Milestone | Status | Implementation scope |
 | --- | --- | --- |
-| [RM1: Existing gateway qualification](#rm1-existing-gateway-qualification) | In progress: qualification and scope decisions open | Candidate-specific performance, integration, billing and code-mode evidence |
-| [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | In progress: local code exists; live acceptance and vendor backlog open | Capture/policy acceptance, six live adapters, reference workloads and inventory review |
-| [RM3: Implemented API qualification](#rm3-implemented-api-qualification) | Implemented: qualification open | SDK, database, browser, live-provider and performance gates for current tuples |
-| [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | In progress: foundations implemented; service and restore qualification open | Restart-safe reservation/settlement and independently verified agent contracts |
-| [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Planned | Priced, owner-isolated lifecycle/query operations and per-tuple qualification |
-| [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Planned: remaining breadth only | OCR/search fidelity, live realtime control/usage and governed pass-through |
-| [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution and all declared transports/auth modes qualified |
-| [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Bounded loops, prompts, delegation/A2A, traces and operator journeys |
-| [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | Each cloud adapter has scoped fixtures and live closed-day reconciliation |
+| [RM1: Existing gateway](#rm1-existing-gateway) | Done | Provider routing, access, operations, billing, exports and code mode |
+| [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | In progress | Core implementation complete; additional named integrations remain |
+| [RM3: Current APIs](#rm3-current-apis) | Done | Current completions, text Decisions, OCR/search, files and batches |
+| [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Done | Operation contracts, durable debits, recovery, settlement and agent contracts |
+| [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Planned | Fine-tuning, vector stores, retrieval and retained resource families |
+| [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Planned | Additional OCR/search transports, realtime profiles and pass-through |
+| [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution, per-user grants, HTTP+SSE and stdio |
+| [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
+| [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | AWS CUR, Google billing and Azure Cost Management imports |
 
-### RM1: Existing gateway qualification
+### RM1: Existing gateway
 
-**Accountable:** release maintainers; specialist owners are named per task.
-**Entry:** existing implementations and an exact candidate. Start with RM1.1;
-RM1.2–RM1.9 can then run independently when their environments are available.
+**Status: Done.** **Owners:** gateway, connector, access, operations, billing
+and code-mode maintainers.
 
-- [ ] **RM1.1 — Freeze the evidence manifest** (release): record commit/image
-  digest, supported tuples, tool/provider versions, commands, accounts/topology,
-  artifact locations and missing prerequisites. Use the [qualification record](develop/qualification.md).
-- [ ] **RM1.2 — Publish reference performance** (benchmark/release): run full-rate
-  S1–S6, S1-shadow and pinned LiteLLM S1–S5; repeat from a clean checkout and retain
-  raw artifacts meeting every [performance target](develop/performance.md).
-- [ ] **RM1.3 — Measure token estimates** (catalog/provider): measure
-  Anthropic/Gemini factors using vendor counts, publish signed provenance and
-  pass live OpenAI exact-prefix checks under [provider qualification](develop/qualification.md#providers-and-token-estimates).
-- [ ] **RM1.4 — Qualify providers and signed artifacts** (connector/release):
-  execute live supported tuples and release-trust startup/doctor, tamper and
-  rollback checks; retain exact versions and every skip.
-- [ ] **RM1.5 — Qualify identity** (access): execute production IdP SAML/SCIM
-  and issuer/JWKS rollover, expiry, disablement and stale-authority checks, plus
-  the candidate's [access/isolation and recovery gates](develop/qualification.md#identity-and-access).
-- [ ] **RM1.6 — Qualify operations** (operations/automation/security): verify
-  target-cloud secret rotation and recovery, both Terraform/OpenTofu engines,
-  regional failures and backup restore at the [required scope](develop/qualification.md#operator-ecosystem).
-- [ ] **RM1.7 — Reconcile existing billing** (billing): run scoped
-  OpenAI/Anthropic closed-day imports, pagination/restatements and commitment
-  accounting/restore checks in [billing qualification](develop/qualification.md#observability-and-billing).
-- [ ] **RM1.8 — Verify delivery and readback** (export/observability): qualify
-  each claimed destination, CloudEvents and Stripe test metering; retain durable
-  delivery, retry/duplicate, privacy and scoped-readback evidence.
-- [ ] **RM1.9 — Qualify native coding subscriptions** (code-mode/qualification):
-  prove enrollment, allowance, inference and provider-enforced hard bounds for
-  each exact account/client/model/transport. Resolve the fresh HTTP-only
-  root-registration decision in [code qualification](develop/qualification.md#code-mode-qualification).
-
-**Exit:** all applicable candidate gates pass; missing accounts/hardware and
-unresolved scope decisions remain explicit blockers, not successful results.
+Implemented scope includes provider routing and token estimation, signed
+artifacts, identity and access controls, deployment and recovery tooling,
+OpenAI/Anthropic billing imports, commitment accounting, export delivery,
+CloudEvents, Stripe metering and native coding subscription integration.
 
 ### RM2: Guardrails, capture and caching
 
-**Accountable:** guardrail maintainers, with export, connector and performance
-owners in the [RM2 checklist](develop/plans/guardrails.md#remaining-work-and-acceptance).
-**Entry:** implemented immutable revision, scope and inspection contracts.
-Capture/policy checks, inventory review and cache checks can start independently;
-live adapters require target accounts and S3/cache measurements require reference hardware.
-**Exit:** RM2.1–RM2.6 and the plan's acceptance gates pass. Vendor coverage remains
-**Partial** while gaps remain; prompt-cache savings require separate live evidence.
+**Status: In progress.** **Owners:** guardrail, connector, export and cache
+maintainers. **Dependencies:** existing immutable revision, scope and inspection
+contracts.
 
-### RM3: Implemented API qualification
+- [x] Implement the guardrail engine, built-in detectors, model evaluators,
+  confined WASM and signed webhook execution, including action policies,
+  streaming bounds and evaluator accounting.
+- [x] Implement capture redaction, immutable capture-policy pins, scoped
+  publication and external sink delivery without durable payload staging.
+- [x] Implement the six existing external adapters: Bedrock, Azure Content
+  Safety, Azure Prompt Shields, Model Armor, Lakera v2 and Presidio.
+- [x] Implement exact and semantic response caching, guarded replay, scoped
+  cache identity, purge, eviction and provider prompt-cache controls.
+- [ ] Implement the remaining named integrations in the
+  [vendor inventory](develop/plans/guardrails.md#vendor-inventory), including
+  each adapter's authentication, request/response mapping, supported actions,
+  replacement handling, deadlines and failure policies.
 
-**Accountable:** protocol/resource/SDK maintainers.
-**Entry:** the existing endpoint ledger, certified tuples, inspection and prices;
-current qualification does not wait for new RM4 implementations.
-Follow the [RM3 checklist](develop/plans/api-surface.md#rm3-implemented-api-qualification).
-**Exit:** current completions, text Decisions, OCR/search and file/batch tuples
-pass database-backed SDK, console, live-provider and release-performance gates.
-Current managed-batch and text-only limits remain explicit.
+Each additional adapter can be implemented independently using the existing
+engine contracts. RM2 is Done when the remaining integration backlog is
+implemented.
+
+### RM3: Current APIs
+
+**Status: Done.** **Owners:** protocol, resource, SDK and console maintainers.
+
+Implemented scope includes legacy completions, text Decisions, current
+OCR/search operations, and current file/batch operations. The current
+managed-batch and text-only boundaries remain part of that scope. Additional
+resource families and provider transports are listed in RM5 and RM6.
 
 ### RM4: Shared execution foundations
 
-The implementation includes operation admission declarations, the shared
-provisional-debit ledger, fenced recovery, agent publications and approvals,
-configuration promotion, and operator console controls. Focused unit checks
-cover these contracts. Database/Valkey, management, recovery, and replacement
-restore scenarios are added to the existing CI integration suite; they have not
-been executed as local acceptance evidence. RM4.3 and the overall completion gate
-remain open until those checks pass. Existing async budget refusals remain.
+**Status: Done.** **Owners:** gateway/SDK maintainers for RM4.1,
+resource/accounting maintainers for RM4.2–RM4.3, and access/agent maintainers
+for RM4.4.
 
-**Accountable:** gateway/SDK maintainers for RM4.1, resource/accounting maintainers
-for RM4.2–RM4.3 and access/agent maintainers for RM4.4.
-**Entry:** existing ownership, pricing and runtime contracts.
-The [API foundation checklist](develop/plans/api-surface.md#rm4-shared-execution-foundations)
-owns operation contracts and durable accounting; the [agent foundation checklist](develop/plans/agent-gateway.md#rm44-agent-contracts)
-owns scopes, publication, runs and approvals. RM4.4 is not an API-family prerequisite.
-**Exit:** bounded debits survive uncertainty/restart and settle once, and agent
-authority/publication contracts pass their own isolation and privacy checks.
+- [x] **RM4.1 — Operation contracts:** implement operation admission
+  declarations, authorization and inspection contracts in the endpoint ledger.
+- [x] **RM4.2 — Durable provisional debits:** persist submission intent and
+  finite exposure across budget owners before dispatch, with immutable
+  target/credential and price affinity and idempotent settlement.
+- [x] **RM4.3 — Recovery and settlement:** implement fenced recovery,
+  persistent unresolved exposure, atomic accounting, reconciliation and
+  restoration of outstanding debits. Ambiguous acceptance does not trigger
+  automatic redispatch or expiry of unresolved exposure.
+- [x] **RM4.4 — Agent authority and publication:** implement agent scopes,
+  immutable publications, configuration promotion, run references, one-use
+  approvals and operator console controls.
+
+New RM5/RM6 operations extend these contracts within their own implementation
+slice. Bounded asynchronous work and realtime exposure use the shared debit
+ledger. Agent execution additionally uses RM4.4; API families can proceed
+independently of agent work.
 
 ### RM5: Retained APIs and retrieval
 
-**Accountable:** resource/connector maintainers.
-**Entry:** RM4.1 for each operation; RM4.2–RM4.3 before enabling bounded paid
-asynchronous work. Each family also needs historical ownership/credential
-affinity and finite priced units. Query-only retrieval can proceed independently
-of asynchronous job implementation.
-Follow the [RM5 checklist](develop/plans/api-surface.md#rm5-retained-apis-and-retrieval).
-**Exit:** the declared families pass lifecycle, nested-ID isolation, uncertain
-create/restart, pricing and privacy gates, with exact provider tuples qualified.
+**Status: Planned.** **Owners:** resource and connector maintainers, with
+accounting and SDK owners. **Dependencies:** RM4 operation contracts,
+owner/credential affinity and priced units; asynchronous jobs also use the
+implemented durable accounting foundation.
+
+- [ ] **RM5.1 — Fine-tuning:** implement OpenAI jobs, followed by the declared
+  Azure and Vertex methods, including file affinity, unknown-create recovery,
+  training accounting and resulting-model publication.
+- [ ] **RM5.2 — Native vector stores:** implement OpenAI/Azure lifecycle,
+  file attachments, batches and search, with nested-ID ownership, pagination
+  and Responses `file_search` identifier rewriting.
+- [ ] **RM5.3 — Query-only retrieval:** implement project-owned Bedrock
+  Knowledge Bases, Vertex AI RAG Engine and Azure AI Search bindings, including
+  filters, limits, text, scores, citations, egress and pricing. Index creation
+  and synchronization remain outside this scope.
+- [ ] **RM5.4 — Conversations and compaction:** implement native lifecycle,
+  items and compact methods, owner/target affinity, inspection and separately
+  priced compaction without retaining local conversation history.
+- [ ] **RM5.5 — Containers:** implement the declared OpenAI and supported
+  Azure lifecycle/file methods with owner isolation.
+- [ ] **RM5.6 — Evals:** implement native OpenAI definitions/runs, data-source
+  affinity, durable reservations and terminal settlement.
+- [ ] **RM5.7 — Skills:** implement native Anthropic skills/versions and
+  retained file/version ownership.
+- [ ] **RM5.8 — Context caches:** implement Gemini `cachedContents`, owner-bound
+  IDs, expiry and storage accounting/reconciliation.
+- [ ] **RM5.9 — Managed-agent resources:** implement Gemini native resource
+  lifecycle and isolation. Agent execution is covered by RM8.
+
+Families can proceed independently. Query-only retrieval can be implemented
+before asynchronous jobs. Retrieval-backed tools need only the implemented
+`retrieval` operation for their selected RM5.2 or RM5.3 backend.
 
 ### RM6: Protocol and provider expansion
 
-**Accountable:** connector/realtime/routing maintainers, with security review.
-**Entry:** RM4.1 for each new operation; transport-specific control, metering,
-revocation and egress contracts. Realtime unresolved exposure uses RM4.2–RM4.3;
-stateless codecs and pass-through do not wait for all retained families.
-Follow the [RM6 checklist](develop/plans/api-surface.md#rm6-protocol-and-provider-expansion).
-**Exit:** field fidelity, live close/usage and adversarial path/policy gates pass
-for the declared scope; unsupported transports and fields stay explicit.
+**Status: Planned.** **Owners:** connector maintainers for RM6.1–RM6.3,
+realtime maintainers for RM6.4–RM6.5, and routing maintainers for RM6.6.
+**Dependencies:** RM4 operation contracts plus transport-specific control,
+metering, revocation and egress behavior. Realtime exposure uses the shared
+durable accounting foundation.
+
+- [ ] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
+  citations, time ranges, limits and request pricing, with explicit refusal
+  of unmappable fields.
+- [ ] **RM6.2 — Azure Document Intelligence polling:** implement bounded
+  202/poll transport, deadlines, cancellation, page/document pricing,
+  output mapping and provider-fetched URL egress controls.
+- [ ] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
+  profile, credential isolation, field mapping, egress and observed-unit
+  accounting.
+- [ ] **RM6.4 — Governed WebRTC:** implement OpenAI server-mediated session
+  creation/control, five-second revocation checks, close/usage accounting,
+  session expiry and lost-control exposure. Extend Azure through its separate
+  transport contract.
+- [ ] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
+  Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
+  declared transcription support, cancellation and terminal usage accounting.
+- [ ] **RM6.6 — Governed pass-through:** implement the separate route kind
+  and anchored namespace, path normalization, query/header allowlists,
+  redirect refusal, credential isolation, bounds, policy compatibility and
+  per-request pricing or explicit unpriced accounting.
+
+These implementations can proceed independently of one another and of retained
+resource families.
 
 ### RM7: Consumer MCP
 
-**Accountable:** MCP/access maintainers.
-**Entry:** RM4.3, RM4.4 and existing tool-governance execution contracts.
-Follow the [RM7 checklist](develop/plans/agent-gateway.md#rm7-consumer-mcp): direct
-Streamable HTTP first, then per-user grants and remaining declared transports.
-**Exit:** pinned conformance/drift, grant isolation, bounded effects and one
-financial attempt per dispatch pass. Existing registration and management MCP
-do not establish consumer execution. RM2 live-vendor closure is not an entry gate.
+**Status: Planned.** **Owners:** MCP and access maintainers.
+**Dependencies:** RM4 durable accounting and agent contracts, plus existing
+guardrail argument/result execution.
+
+- [ ] **RM7.1 — Direct Streamable HTTP execution:** publish pinned toolsets,
+  static credentials, bounded sessions and compiled schemas. Serve `/mcp` and
+  JSON tool endpoints through one authorized call path with catalog-drift
+  handling, argument/result policies, limits, priced attempts and durable
+  dispatch state. Repeated call IDs must not repeat effects.
+- [ ] **RM7.2 — OAuth and per-user grants:** implement server/client/audience/
+  scope/project/user binding, single-flight refresh, expiry, revocation and
+  isolated credentials. Missing grants must refuse execution.
+- [ ] **RM7.3 — Legacy HTTP+SSE:** implement the explicit `2024-11-05`
+  transport while preserving modern sessions' selected transport.
+- [ ] **RM7.4 — Experimental stdio:** implement operator-installed executable
+  dispatch with the same call, isolation and accounting limits as HTTP.
+  Executable configuration remains operator-controlled.
+
+Implement RM7.1 first; RM7.2–RM7.4 can then proceed independently.
 
 ### RM8: Agent workflows
 
-**Accountable:** agent/access maintainers, with protocol and observability owners.
-**Entry:** direct MCP (RM7.1) for loops/prompts; MCP interoperability for
-delegation/A2A; those run contracts and observability exports for traces.
-Follow the [RM8 checklist](develop/plans/agent-gateway.md#rm8-agent-workflows).
-Retrieval-backed tools additionally require the certified `retrieval` operation
-for their selected backend in RM5.2 or RM5.3.
-**Exit:** immutable rendering, bounded approvals/effects, consent/revocation,
-pair budgets, origin-labelled traces and accessible operator journeys pass
-the agent plan's candidate gates.
+**Status: Planned.** **Owners:** agent and access maintainers, with protocol,
+prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops
+and prompts; the relevant MCP transport/auth implementation for delegation and
+A2A. Retrieval-backed tools also use their selected RM5 backend.
+
+- [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
+  dialects plus Responses projections, iteration/time/concurrency/cost bounds,
+  per-step accounting, approvals, digest-bound continuation, revocation and
+  durable handling of cancellation, restart and unknown effects.
+- [ ] **RM8.2 — Prompt publication and rendering:** implement immutable
+  revisions, labels and bounded string substitution across API, playground
+  and import, with fixed in-flight revisions, variable handling, input guards
+  and content-free persistence.
+- [ ] **RM8.3 — Delegated identities:** extend workload issuers and implement
+  consent, scoped tokens, intersected rights, user/agent/pair budgets, expiry,
+  renewal and either-principal revocation.
+- [ ] **RM8.4 — A2A workflows:** implement the declared protocol adapters,
+  owner-bound tasks, authenticated callbacks, send/stream/read/cancel/
+  resubscribe operations, callback accounting and kill-switch behavior.
+  Preserve unresolved remote effects; delegated cases use RM8.3.
+- [ ] **RM8.5 — Traces and operator views:** implement bounded OTLP ingestion,
+  scoped trace links, origin-labelled exports and accessible operator views,
+  with content stripping, project isolation and retention controls.
+
+RM8.5 builds on the RM8.1–RM8.4 workflow contracts and existing observability
+exports.
 
 ### RM9: Cloud invoice imports
 
-**Accountable:** billing maintainers, with export/connector owners.
-**Entry:** existing importer and reconciliation contracts; authoritative source
-scope and representative export fixtures. This milestone does not block the
-limited OpenAI/Anthropic tranche in RM1.7.
+**Status: Planned.** **Owners:** billing maintainers, with export and connector
+owners. **Dependencies:** existing importer and reconciliation contracts.
 
-- [ ] **RM9.1 — Define each import contract:** record authoritative account
-  scope, source revision, currency, UTC-day mapping and idempotent late-correction
-  behavior for AWS CUR, Google billing and Azure Cost Management independently.
-- [ ] **RM9.2 — Implement AWS CUR import:** after its RM9.1 contract, add scoped
-  fixtures for pagination, empty days, duplicates and restatements; verify
-  reconciliation without duplicate charges.
-- [ ] **RM9.3 — Implement Google billing import:** after its RM9.1 contract,
-  pass the same scoped fixture and correction checks for the Google source.
-- [ ] **RM9.4 — Implement Azure Cost Management import:** after its RM9.1
-  contract, pass the same scoped fixture and correction checks for Azure.
-- [ ] **RM9.5 — Qualify each adapter live:** after that adapter's fixtures pass,
-  reconcile at least one closed UTC day in an authorized account; retain source
-  scope/revision, currency, coverage and correction evidence, and update [FinOps](operate/finops.md).
+- [ ] **RM9.1 — Cloud import contracts:** add source account scope, source
+  revision, currency, UTC-day mapping and idempotent late-correction handling
+  for AWS CUR, Google billing and Azure Cost Management.
+- [ ] **RM9.2 — AWS CUR import:** implement scoped ingestion, pagination,
+  empty-day handling, deduplication, restatements and reconciliation without
+  duplicate charges.
+- [ ] **RM9.3 — Google billing import:** implement scoped ingestion,
+  pagination, empty-day handling, deduplication, restatements and reconciliation
+  for the Google source.
+- [ ] **RM9.4 — Azure Cost Management import:** implement scoped ingestion,
+  pagination, empty-day handling, deduplication, restatements and reconciliation
+  for the Azure source.
 
-**Exit:** all three adapters have individual fixture and live evidence. One
-adapter may advance without the others; missing source access leaves its gate open.
+Each adapter depends on its own RM9.1 contract and can be implemented
+independently of the other adapters and of agent work.
 
-## Deferred scope
+## Deferred implementation
 
-Deferred provider breadth remains conditional: Vertex Veo needs an agreed result
-and deletion contract; fal needs a certifiable authentication path; NVIDIA rerank
-needs representable raw scores. Vendor speech translation, media streaming and
-non-OpenAI image variations remain follow-up work. Reopening a decline requires
-a reviewed contract, pricing/usage and certification evidence; see
-[Compatibility](use/compatibility.md#provider-qualification-and-support-boundaries).
+- Vertex Veo: define and implement result and deletion behavior.
+- fal: add a supported authentication integration.
+- NVIDIA rerank: add representable raw scores.
+- Vendor speech translation, media streaming and non-OpenAI image variations:
+  add the corresponding provider operations and transports.
 
-## Updating progress and evidence
+<a id="updating-progress-and-evidence"></a>
 
-Every slice follows [change acceptance](develop/qualification.md#change-acceptance).
-**Planned** means the contract exists but serving code does not; **In progress**
-means implementation or scope closure remains; **Implemented** has focused code
-checks and an owned qualification gap; **Shipped** requires candidate-specific
-release evidence. These states describe delivery maturity, not whether someone
-is actively running a task. A milestone with mixed work records that distinction
-in its state; never promote the whole milestone from one successful subtask.
+## Updating progress
 
-Check a work item only when its stated deliverable and verification are complete;
-an implementation checkbox does not imply **Shipped**. Record its ID, owner role,
-commit/image digest, exact scope, commands, artifact links and remaining gates.
-Track unavailable accounts, hardware, prerequisite IDs and undecided contracts
-separately as blockers, with the action needed to unblock them. Do not create
-dates or individual assignments without agreement.
+- **Planned:** implementation has not started.
+- **In progress:** some implementation work remains.
+- **Done:** all implementation work in the milestone's stated scope is complete.
 
-Before a release claim, run the applicable check/integration/race/build/Helm and
-performance gates on the same candidate. New surfaces must enforce compatible
-guardrail/cache policies or reject them before dispatch. Update this roadmap and
-the relevant guide/plan together, preserving the historical `M9.*` IDs in the
-[endpoint ledger](../tests/clients/m9-endpoints.json). Scope changes require the
-review and evidence described above; unavailable credentials, time or hardware
-do not close a gate.
+Check each deliverable when implemented and mark its milestone **Done** when
+all deliverables are implemented. Record remaining code work and implementation
+dependencies alongside the affected item. Keep milestone and work-item IDs
+stable, including historical `M9.*` IDs in the
+[endpoint ledger](../tests/clients/m9-endpoints.json).

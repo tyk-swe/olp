@@ -13,8 +13,8 @@ explicit storage contracts.
 
 OpenLLMProxy 0.1.0 is a work in progress. During 0.x it makes no compatibility,
 upgrade, mixed-version or rollback promises: releases may change the management
-API, configuration and storage. [Roadmap](docs/roadmap.md) tracks unfinished work
-and qualification gates.
+API, configuration and storage. [Roadmap](docs/roadmap.md) tracks implementation
+work and milestones.
 
 For local development, follow [Contributing](CONTRIBUTING.md); suite selection is
 in [Testing](tests/README.md). Production operators should start with
