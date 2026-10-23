@@ -76,6 +76,22 @@ func TestRewriteRejectsUndeclaredReferences(t *testing.T) {
 	}
 }
 
+func TestRewriteDistinguishesLiteralAndRetainedIDs(t *testing.T) {
+	source, err := oif.ParseJSON([]byte(`{"id":"native-job","organization_id":"native-org","metadata":{"other_id":"user"}}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Rewrite(source, map[string]string{"/id": "fine_tuning_job", "organization_id": Literal}, func(kind, id string) (string, error) {
+		if kind != "fine_tuning_job" || id != "native-job" {
+			t.Fatalf("literal resolved as a resource: %s %s", kind, id)
+		}
+		return "local-job", nil
+	})
+	if err != nil || !strings.Contains(result.Raw(), `"organization_id":"native-org"`) || !strings.Contains(result.Raw(), `"id":"local-job"`) {
+		t.Fatalf("rewrite=%s error=%v", result.Raw(), err)
+	}
+}
+
 func TestRewriteEnvironmentVariableNames(t *testing.T) {
 	for _, raw := range []string{
 		`{"base_environment":{"env":{"client_id":"app","id":"value","base_agent":"literal"}}}`,

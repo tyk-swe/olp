@@ -23,7 +23,7 @@ import (
 
 func (s *Server) registerRetainedLifecycle(mux *http.ServeMux) {
 	for _, endpoint := range retainedapi.Endpoints() {
-		if !retainedapi.Supports("gemini", endpoint.Operation, endpoint.Surface, "unary") {
+		if endpoint.Operation != "agent_resource" || !retainedapi.Supports("gemini", endpoint.Operation, endpoint.Surface, "unary") {
 			continue
 		}
 		mux.HandleFunc(endpoint.Method+" "+endpoint.Pattern, func(w http.ResponseWriter, r *http.Request) { s.retainedLifecycle(w, r, endpoint) })

@@ -425,6 +425,17 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 		return "", errors.New("invalid upstream resource path")
 	}
 	base, traits := c.profileBase(), c.traits()
+	// Tuning is a project/location API, outside the publisher model API.
+	if c.Kind == "vertex_ai" && (path == "tuningJobs" || strings.HasPrefix(path, "tuningJobs/")) {
+		u, err := url.Parse(base)
+		if err != nil {
+			return "", err
+		}
+		if i := strings.Index(u.Path, "/publishers/"); i >= 0 {
+			u.Path = u.Path[:i]
+		}
+		base = strings.TrimRight(u.String(), "/")
+	}
 	if traits.deployment {
 		if strings.HasPrefix(path, "deployments/") {
 			deployment := c.Model(model)

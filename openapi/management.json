@@ -9144,7 +9144,8 @@
               "skill",
               "skill_version",
               "context_cache",
-              "agent_resource"
+              "agent_resource",
+              "vertex_tuning_job"
             ],
             "type": "string"
           },
@@ -33526,7 +33527,8 @@
                 "skill",
                 "skill_version",
                 "context_cache",
-                "agent_resource"
+                "agent_resource",
+                "vertex_tuning_job"
               ],
               "type": "string"
             }

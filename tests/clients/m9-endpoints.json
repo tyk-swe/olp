@@ -4203,10 +4203,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4228,10 +4240,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4253,10 +4277,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4278,10 +4314,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4303,10 +4351,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4328,10 +4388,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4353,10 +4425,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4378,10 +4462,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4403,10 +4499,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4428,10 +4536,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4453,10 +4573,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4478,10 +4610,22 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4500,10 +4644,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
@@ -4522,10 +4678,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
@@ -4544,10 +4712,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
@@ -4566,10 +4746,22 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "training_file",
+        "validation_file",
+        "hyperparameters",
+        "seed",
+        "suffix"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
@@ -4591,10 +4783,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4616,10 +4818,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4641,10 +4853,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4666,10 +4888,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4691,10 +4923,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4716,10 +4958,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4741,10 +4993,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4766,10 +5028,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4791,10 +5063,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4816,10 +5098,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4841,10 +5133,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4866,10 +5168,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4891,10 +5203,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4916,10 +5238,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4941,10 +5273,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4966,10 +5308,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -4991,10 +5343,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5016,10 +5378,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5041,10 +5413,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5066,10 +5448,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5091,10 +5483,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5116,10 +5518,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5141,10 +5553,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5166,10 +5588,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5191,10 +5623,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5216,10 +5658,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "file_ids",
+        "expires_after",
+        "metadata"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5241,10 +5693,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "query",
+        "max_num_results",
+        "filters",
+        "ranking_options"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5266,10 +5728,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "query",
+        "max_num_results",
+        "filters",
+        "ranking_options"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5291,10 +5763,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "query",
+        "max_num_results",
+        "filters",
+        "ranking_options"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5316,10 +5798,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "query",
+        "max_num_results",
+        "filters",
+        "ranking_options"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5341,10 +5833,20 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "query",
+        "max_num_results",
+        "filters",
+        "ranking_options"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5366,10 +5868,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5391,10 +5901,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5416,10 +5934,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5441,10 +5967,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5466,10 +6000,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5491,10 +6033,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5516,10 +6066,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5541,10 +6099,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5566,10 +6132,18 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "metadata",
+        "items"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5591,10 +6165,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "input",
+        "instructions"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -5616,10 +6199,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "input",
+        "instructions"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6076,10 +6668,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6101,10 +6702,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6126,10 +6736,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6151,10 +6770,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6176,10 +6804,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6201,10 +6838,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6226,10 +6872,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6251,10 +6906,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6276,10 +6940,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6301,10 +6974,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6326,10 +7008,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6351,10 +7042,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6376,10 +7076,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6401,10 +7110,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6426,10 +7144,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6451,10 +7178,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6476,10 +7212,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6501,10 +7246,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "expires_after",
+        "file_ids"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6526,10 +7280,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6551,10 +7314,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6576,10 +7348,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6601,10 +7382,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6626,10 +7416,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6651,10 +7450,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6676,10 +7484,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6701,10 +7518,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6726,10 +7552,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6751,10 +7586,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6776,10 +7620,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6801,10 +7654,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6826,10 +7688,19 @@
         "module": "github.com/openai/openai-go/v3",
         "version": "3.78.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "data_source_config",
+        "testing_criteria"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
@@ -6851,10 +7722,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -6876,10 +7756,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -6901,10 +7790,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -6926,10 +7824,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -6951,10 +7858,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -6976,10 +7892,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -7001,10 +7926,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -7026,10 +7960,19 @@
         "module": "github.com/anthropics/anthropic-sdk-go",
         "version": "1.82.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "name",
+        "description",
+        "license"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "github.com/anthropics/anthropic-sdk-go@1.82.0",
@@ -7051,10 +7994,20 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "contents",
+        "ttl",
+        "display_name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "google.golang.org/genai@1.75.0",
@@ -7076,10 +8029,20 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "contents",
+        "ttl",
+        "display_name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "google.golang.org/genai@1.75.0",
@@ -7101,10 +8064,20 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "contents",
+        "ttl",
+        "display_name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "google.golang.org/genai@1.75.0",
@@ -7126,10 +8099,20 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "contents",
+        "ttl",
+        "display_name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "google.golang.org/genai@1.75.0",
@@ -7151,10 +8134,20 @@
         "module": "google.golang.org/genai",
         "version": "1.75.0"
       },
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "contents",
+        "ttl",
+        "display_name"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/retainedapi/contract.go",
+        "internal/gateway/retained_generic.go",
+        "internal/gateway/retained_generic_test.go",
+        "internal/retainedapi/supports_test.go"
+      ],
       "live_qualification": "required",
       "refusals": [],
       "reference_revision": "google.golang.org/genai@1.75.0",

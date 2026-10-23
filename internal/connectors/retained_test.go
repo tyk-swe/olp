@@ -44,3 +44,16 @@ func TestRetainedAgentProfile(t *testing.T) {
 		t.Fatal("unbound defaults enabled")
 	}
 }
+
+func TestVertexTuningResourceURL(t *testing.T) {
+	cfg := Config{Kind: "vertex_ai", Endpoint: "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/publishers/google"}
+	for path, want := range map[string]string{
+		"tuningJobs":              "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/tuningJobs",
+		"tuningJobs/job-1:cancel": "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/tuningJobs/job-1:cancel",
+	} {
+		got, err := cfg.ResourceURL("gemini-2.5-flash", path, nil)
+		if err != nil || got != want {
+			t.Fatalf("%s = %q, %v; want %q", path, got, err, want)
+		}
+	}
+}

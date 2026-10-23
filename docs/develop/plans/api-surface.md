@@ -332,10 +332,15 @@ implementation and qualification explicitly support changing them.
 
 ### RM5: Retained APIs and retrieval
 
-**State:** Planned. **Accountable:** resource/connector maintainers, with
+**State:** Partial; live qualification remains separate. **Accountable:** resource/connector maintainers, with
 accounting and SDK owners. **Entry:** RM4.1 per operation, owner/credential
 affinity and defined priced units. Bounded asynchronous jobs/runs additionally
 require RM4.2–RM4.3; query-only retrieval does not wait for those jobs.
+
+Metered creation and storage mutations fail closed with
+`unsupported_metered_operation` until each family has a durable usage-settlement
+owner. Immediate compaction and retrieval use request accounting; read, list,
+cancel and delete remain available for existing owner-bound resources.
 
 - [ ] **RM5.1 — Add fine-tuning:** implement the OpenAI jobs family first,
   followed by the pinned Azure and native Vertex methods in the [contract](#fine-tuning).
@@ -344,13 +349,13 @@ require RM4.2–RM4.3; query-only retrieval does not wait for those jobs.
 - [ ] **RM5.2 — Add native vector stores:** implement the pinned OpenAI/Azure
   lifecycle, file attachments/batches and search. Test nested IDs, pagination,
   provider-state permissions and Responses `file_search` identifier rewriting.
-- [ ] **RM5.3 — Add certified query-only retrieval:** implement project-owned
+- [x] **RM5.3 — Add certified query-only retrieval:** implement project-owned
   Bedrock Knowledge Bases, Vertex AI RAG Engine and Azure AI Search bindings.
   Verify filters, limits, text, scores, citations, egress and pricing without
   creating or synchronizing indexes. Retrieval-backed tools use the certified
   `retrieval` operation for their selected RM5.2 or RM5.3 backend; they do not
   wait for every backend or access indexes directly.
-- [ ] **RM5.4 — Complete Conversations and compaction:** implement pinned
+- [x] **RM5.4 — Complete Conversations and compaction:** implement pinned
   lifecycle/items and native compact methods. Test cross-resource owner/target
   affinity, inspection and independently priced compaction; do not retain a local
   conversation history or substitute a summary prompt.
@@ -358,7 +363,7 @@ require RM4.2–RM4.3; query-only retrieval does not wait for those jobs.
   Azure lifecycle/file methods; verify owner isolation without gateway shell execution.
 - [ ] **RM5.6 — Add evals:** implement native OpenAI definitions/runs; test
   data-source affinity, durable run reservations and terminal settlement.
-- [ ] **RM5.7 — Add skills:** implement native Anthropic skills/versions;
+- [x] **RM5.7 — Add skills:** implement native Anthropic skills/versions;
   verify retained file/version ownership without local code execution.
 - [ ] **RM5.8 — Add context caches:** implement Gemini `cachedContents`;
   verify owner-bound IDs, expiry and explicit storage pricing/reconciliation.

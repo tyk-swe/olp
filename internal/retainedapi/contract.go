@@ -14,6 +14,9 @@ import (
 
 const Revision = "retained-resources-1"
 
+// Literal declares a documented identifier that is not a retained resource.
+const Literal = "@literal"
+
 type Family struct {
 	Operation  string   `json:"operation"`
 	Surface    string   `json:"surface"`
@@ -59,16 +62,40 @@ var families = []Family{
 		Children: []Family{{Path: "versions", Kind: "skill_version", Identity: "version", Collection: "data", Methods: []string{"create", "list", "get", "delete"}}}},
 	{Operation: "context_cache", Surface: "gemini", Path: "/gemini/v1beta/cachedContents", Kind: "context_cache", Identity: "name", Collection: "cachedContents", Providers: []string{"gemini"}, Methods: []string{"create", "list", "get", "patch", "delete"}, Metered: true},
 	{Operation: "agent_resource", Surface: "gemini", Path: "/gemini/v1beta/agents", Kind: "agent_resource", Identity: "id", Collection: "agents", Providers: []string{"gemini"}, Methods: []string{"create", "list", "get", "delete"}},
+	{Operation: "fine_tuning", Surface: "native", Path: "/native/vertex-tuning/jobs", Kind: "vertex_tuning_job", Identity: "name", Collection: "tuningJobs", Providers: []string{"vertex_ai"}, Methods: []string{"create", "list", "get", "cancel"}, Metered: true},
 }
 
 func Operation(op string) bool {
 	return op == "retrieval" || slices.ContainsFunc(families, func(f Family) bool { return f.Operation == op })
 }
 
-// Supports is deliberately narrower than the declaration catalogue. A family
-// becomes selectable only after its native transport is implemented.
+// Supports is the reviewed native-transport matrix for retained families.
+// A family is selectable only on the provider kinds and surfaces declared
+// for it; streaming and cross-surface tuples never qualify.
 func Supports(kind, operation, surface, mode string) bool {
-	return mode == "unary" && kind == "gemini" && operation == "agent_resource" && surface == "gemini"
+	if mode != "unary" {
+		return false
+	}
+	openAI := (kind == "openai" || kind == "azure_openai") && surface == "openai"
+	switch operation {
+	case "agent_resource":
+		return kind == "gemini" && surface == "gemini"
+	case "context_cache":
+		return kind == "gemini" && surface == "gemini"
+	case "skill":
+		return kind == "anthropic" && surface == "anthropic"
+	case "fine_tuning":
+		return openAI || kind == "vertex_ai" && surface == "native"
+	case "vector_store", "container":
+		return openAI
+	case "conversation", "eval":
+		return kind == "openai" && surface == "openai"
+	case "retrieval":
+		// Native stores search on their own surface; RM5.3 query-only
+		// bindings expose the same operation on operator-bound backends.
+		return openAI || surface == "openai" && (kind == "bedrock" || kind == "vertex_ai" || kind == "azure_openai")
+	}
+	return false
 }
 
 func Kinds() []string {
@@ -167,6 +194,12 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 				kind, reference := refs[p]
 				if !reference {
 					kind, reference = refs[field.Name]
+				}
+				if reference && kind == Literal {
+					if field.Value.Kind() != oif.String && field.Value.Kind() != oif.Null {
+						return errors.New("literal identifier must be a string")
+					}
+					continue
 				}
 				if reference && field.Value.Kind() != oif.Null {
 					values := []oif.Value{field.Value}

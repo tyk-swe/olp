@@ -34,6 +34,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 		return
 	}
 	s.registerRetainedLifecycle(mux)
+	s.registerRetainedGeneric(mux)
 	s.registerCloudBatchState(mux)
 	if s.Media != nil {
 		s.registerAnthropicState(mux)
@@ -269,6 +270,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	}
 	if x.anthropicFilesBeta {
 		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
+	}
+	if x.anthropicSkillsBeta {
+		req.Header.Set("Anthropic-Beta", "skills-2025-10-02")
 	}
 	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 }

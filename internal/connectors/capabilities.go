@@ -14,7 +14,10 @@ import (
 // families; no other connector may serve them.
 func Supports(kind, vendor, operation, surface, mode string) bool {
 	if retainedapi.Operation(operation) {
-		return vendor == "google" && retainedapi.Supports(kind, operation, surface, mode)
+		if operation == "agent_resource" {
+			return vendor == "google" && retainedapi.Supports(kind, operation, surface, mode)
+		}
+		return retainedapi.Supports(kind, operation, surface, mode)
 	}
 	if surface != "openai" && surface != "anthropic" && surface != "gemini" && surface != "bedrock" && surface != "native" {
 		return false

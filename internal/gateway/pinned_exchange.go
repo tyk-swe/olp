@@ -25,12 +25,15 @@ func (s *Server) beginPinned(ctx context.Context, x *call, p *pin, method string
 	x.finalizePinned(nil, s.now())
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = x.mode
+	if x.retainedAccounting {
+		fact.PricingPinned = true
+	}
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
 	}
 	exchange := &pinnedExchange{
 		state: attemptState{parent: ctx, classifier: upstream.Classifier{AtMostOnce: method == http.MethodPost, Declared: p.provider.Connector().Classification()}},
-		index: len(x.facts), billable: (x.family == wire.GeminiInteractions || x.family == wire.Bedrock || x.family == wire.BedrockInvoke) && x.actor != "api_key_resource",
+		index: len(x.facts), billable: x.retainedMetered || x.retainedAccounting && (fact.Price != nil || fact.cardRev != nil) || (x.family == wire.GeminiInteractions || x.family == wire.Bedrock || x.family == wire.BedrockInvoke) && x.actor != "api_key_resource",
 	}
 	x.facts = append(x.facts, fact)
 	x.exchange = exchange
