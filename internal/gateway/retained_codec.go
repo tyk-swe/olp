@@ -134,7 +134,37 @@ func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *pin) (oif
 	return oif.Apply(source, []oif.Change{{Pointer: "/" + field, Value: strconv.Quote(p.model), Origin: oif.ResourceBinding, Reason: "selected route model"}})
 }
 
+// hasItemReference reports whether any nested input item references
+// provider-held content by native ID. Such IDs name another caller's
+// retained items under the shared provider credential, so the variant
+// is refused until it can be resolved through owner-scoped bindings.
+func hasItemReference(v oif.Value) bool {
+	switch v.Kind() {
+	case oif.Array:
+		for _, child := range v.Elements() {
+			if hasItemReference(child) {
+				return true
+			}
+		}
+	case oif.Object:
+		if t, ok := v.Lookup("type"); ok {
+			if text, isText := t.Text(); isText && text == "item_reference" {
+				return true
+			}
+		}
+		for _, field := range v.Members() {
+			if hasItemReference(field.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.Authority, p *pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
+	if (e.Operation == "conversation" || e.Operation == "compaction") && hasItemReference(source.Root()) {
+		return oif.Document{}, errors.New("item_reference inputs are not supported")
+	}
 	return retainedapi.Rewrite(source, retainedRequestRefs(e), func(kind, id string) (string, error) {
 		if s.Resources == nil {
 			return "", resources.ErrNotFound
@@ -198,6 +228,19 @@ func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpo
 				return nil, invalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
 			}
 			v = bound.UpstreamID
+		case "beta":
+			// The pinned Anthropic SDK appends ?beta=true to every
+			// Skills and Skill Versions request; forward it unchanged.
+			if e.Operation != "skill" || v != "true" {
+				return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
+		case "page":
+			// Skills lists paginate with the provider's opaque page
+			// token (the previous response's next_page), not a gateway
+			// resource ID, so it passes through without a binding lookup.
+			if e.Operation != "skill" || e.Action != "list" || v == "" {
+				return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
 		case "updateMask":
 			if e.Kind != "context_cache" || e.Action != "patch" {
 				return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
@@ -238,6 +281,7 @@ func retainedResponseRefs(e retainedapi.Endpoint, source oif.Document) map[strin
 		refs["id"] = retainedapi.Literal // message/content item identity
 	case "skill":
 		refs["skill_id"] = "skill"
+		refs["latest_version_id"] = "skill_version"
 	case "compaction":
 		refs["id"] = retainedapi.Literal  // transient output items
 		refs["/id"] = retainedapi.Literal // stateless compaction receipt
@@ -249,6 +293,10 @@ func retainedResponseRefs(e retainedapi.Endpoint, source oif.Document) map[strin
 				refs["/"+e.Collection+"/"+strconv.Itoa(i)+"/"+e.Identity] = e.Kind
 			}
 			refs["first_id"], refs["last_id"] = e.Kind, e.Kind
+		} else if e.Kind == "conversation_item" && e.Action == "delete" {
+			// Deleting a conversation item returns the parent
+			// Conversation, so the root identity is the parent's.
+			refs["/"+e.Identity] = "conversation"
 		} else {
 			refs["/"+e.Identity] = e.Kind
 		}
@@ -310,6 +358,10 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			} else {
 				identity.ParentID = resource.ParentID
 			}
+		} else if kind == "skill_version" && resource.Kind == "skill" {
+			// A Skill response names its latest version, a child
+			// observed through the authorized parent Skill.
+			identity.ParentID = &resource.UUID
 		} else if resource.ParentID != nil && len(e.Ancestors) > 0 && kind == e.Ancestors[len(e.Ancestors)-1] {
 			// The parent's own parent may not be nil (eval runs, for example).
 			parent, findErr := s.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
@@ -319,7 +371,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			return parent.ID, nil
 		}
 		bound, findErr := s.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
-		if errors.Is(findErr, resources.ErrNotFound) && kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 {
+		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill") {
 			child := *resource
 			child.UUID, child.ID = [16]byte{}, ""
 			child.Kind, child.UpstreamID, child.State = kind, id, "active"

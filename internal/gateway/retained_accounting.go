@@ -63,5 +63,27 @@ func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
 }
 
 func (s *Server) reserveRetainedCost(ctx context.Context, x *call, p *pin, route *routing.Route) *Error {
-	return s.reserveSessionCost(ctx, x, x.authority, p.attempt, time.Duration(route.OverallTimeout)*time.Millisecond)
+	if s.Runtime != nil {
+		if release := s.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot
+		}
+	}
+	if x.routingInputs == nil && s.Runtime != nil {
+		x.routingInputs = s.Runtime.RoutingInputs()
+	}
+	if x.lease == nil || !x.costBudgeted(x.authority) {
+		return nil
+	}
+	bound := x.attemptCostBound(p.attempt)
+	charge := x.attemptChargeBound(p.attempt, bound)
+	if bound.IsZero() && charge.IsZero() {
+		return nil
+	}
+	// GrowCost replaces the reservation with the supplied total, so a
+	// collection page must reserve what its earlier reads already
+	// dispatched (tracked in spentCost/spentCharge by spendCaps) plus
+	// this read, not just this read alone.
+	total := x.spentCost.Add(bound)
+	totalCharge := x.spentCharge.Add(charge)
+	return s.growCost(ctx, x.lease, total.String(), totalCharge.String(), x.request.accountingID(), time.Duration(route.OverallTimeout)*time.Millisecond)
 }

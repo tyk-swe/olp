@@ -488,8 +488,15 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	}
 	if e.Surface == "anthropic" {
 		cursorParam = "after_id"
+		if e.Operation == "skill" {
+			// Skills paginate with the page/next_page token pair.
+			cursorParam = "page"
+		}
 	}
 	for name, values := range r.URL.Query() {
+		if name == "beta" && e.Operation == "skill" && len(values) == 1 && values[0] == "true" {
+			continue
+		}
 		if (name != pageSizeParam && name != cursorParam && !(name == "order" && e.Surface == "openai")) || len(values) != 1 {
 			fail(invalidRequest("invalid_parameter", "Unsupported or repeated list parameter.", &name))
 			return 400
@@ -679,6 +686,14 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			response["nextPageToken"] = ready[len(ready)-1].resource.ID
 		}
 	}
+	if e.Operation == "skill" {
+		// The Skills auto-pager follows next_page, not has_more.
+		if hasMore && len(ready) > 0 {
+			response["next_page"] = ready[len(ready)-1].resource.ID
+		} else {
+			response["next_page"] = nil
+		}
+	}
 	if e.Surface == "openai" || e.Surface == "anthropic" {
 		response["has_more"] = hasMore
 		if e.Surface == "openai" {
@@ -764,7 +779,10 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			return
 		}
 		var resolveErr *Error
-		p, route, resolveErr = s.resolveResource(r.Context(), x, authority, resource, operation, retainedRetrieval)
+		// Searching a retained store starts new billable work, so it
+		// must satisfy current new-work restrictions rather than the
+		// historical retrieval contract that created the binding.
+		p, route, resolveErr = s.resolveResource(r.Context(), x, authority, resource, operation, retainedNewWork)
 		if resolveErr != nil {
 			fail(resolveErr)
 			return
@@ -795,6 +813,10 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			fail(gateErr)
 			return
 		}
+		// Price the work before selection reserves the provider hold:
+		// selecting first would admit the slot against the floored
+		// minimum estimate regardless of the actual input size.
+		x.estimate = int64(len(body))
 		var pinErr *Error
 		p, pinErr = s.selectBoundPinSurface(r.Context(), x, route, operation, "openai", "unary", nil, func(provider *routing.Provider, model string) bool {
 			return provider.CredentialSource != "caller" && (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.Connector().Supports(operation, "openai", "unary")

@@ -141,7 +141,7 @@ func init() {
 				p.Operations = append(p.Operations, "context_cache")
 			}
 			if p.Kind == "vertex_ai" {
-				p.Operations = append(p.Operations, "fine_tuning", "retrieval")
+				p.Operations = append(p.Operations, "fine_tuning")
 			}
 			if p.Kind == "gemini" && p.Hosting == "direct-gemini" {
 				p.Operations = append(p.Operations, "batch")

@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -272,6 +273,61 @@ func TestRetainedRequestRefs(t *testing.T) {
 	}
 	if refs := retainedRequestRefs(retainedapi.Endpoint{Family: retainedapi.Family{Operation: "skill"}}); len(refs) != 0 {
 		t.Fatalf("skill refs should be empty: %v", refs)
+	}
+}
+
+func TestRetainedCompactionRejectsItemReferences(t *testing.T) {
+	h := newHarness(t, Config{})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowProviderState = true
+	h.rt.keys[fullKey] = authority
+	for id, provider := range h.rt.release.Snapshot.Providers {
+		provider.Kind = "openai"
+		h.rt.release.Snapshot.Providers[id] = provider
+	}
+	resp := probeRetainedCompact(h, `{"model":"m","input":[{"type":"item_reference","id":"msg_native"}]}`)
+	if resp.Code != 400 || !strings.Contains(resp.Body.String(), "invalid_resource_reference") || h.mock.count("a") != 0 {
+		t.Fatalf("item_reference dispatched: %d %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestRetainedSkillContracts(t *testing.T) {
+	// The pinned SDK identifies a Skill Version by id, and every Skill
+	// response carries its latest version as a child reference.
+	var versionEndpoint retainedapi.Endpoint
+	for _, e := range retainedapi.Endpoints() {
+		if e.Kind == "skill_version" && e.Action == "create" {
+			versionEndpoint = e
+		}
+	}
+	if versionEndpoint.Identity != "id" {
+		t.Fatalf("skill_version identity=%q", versionEndpoint.Identity)
+	}
+	ids, err := retainedCreateIDs(versionEndpoint, []byte(`{"id":"ver_native","skill_id":"skill_native"}`))
+	if err != nil || len(ids) != 1 || ids[0] != "ver_native" {
+		t.Fatalf("skill version identities=%v error=%v", ids, err)
+	}
+	skillGet := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "skill", Kind: "skill", Identity: "id"}, Action: "get"}
+	source, _ := oif.ParseJSON([]byte(`{"id":"skill_native","latest_version_id":"ver_native"}`), oif.Limits{})
+	if refs := retainedResponseRefs(skillGet, source); refs["latest_version_id"] != "skill_version" {
+		t.Fatalf("latest version not a child reference: %v", refs)
+	}
+	// Only the Skills beta flag and opaque page token reach the provider.
+	s := &Server{}
+	query, queryErr := s.retainedQuery(t.Context(), &call{}, retainedapi.Endpoint{Family: retainedapi.Family{Operation: "skill", Kind: "skill"}, Action: "list"}, nil, url.Values{"beta": {"true"}, "page": {"tok-1"}, "limit": {"10"}})
+	if queryErr != nil || query.Get("beta") != "true" || query.Get("page") != "tok-1" {
+		t.Fatalf("skills query rejected: %v %v", query, queryErr)
+	}
+	if _, queryErr := s.retainedQuery(t.Context(), &call{}, retainedapi.Endpoint{Family: retainedapi.Family{Operation: "vector_store", Kind: "vector_store"}, Action: "list"}, nil, url.Values{"beta": {"true"}}); queryErr == nil {
+		t.Fatal("beta flag admitted outside skills")
+	}
+}
+
+func TestRetainedConversationItemDeleteIdentity(t *testing.T) {
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "conversation", Kind: "conversation_item", Identity: "id"}, Action: "delete"}
+	source, _ := oif.ParseJSON([]byte(`{"id":"conv_native","object":"conversation"}`), oif.Limits{})
+	if refs := retainedResponseRefs(e, source); refs["/id"] != "conversation" {
+		t.Fatalf("delete root identity=%v", refs)
 	}
 }
 

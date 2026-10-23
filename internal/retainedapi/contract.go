@@ -59,7 +59,7 @@ var families = []Family{
 	{Operation: "eval", Surface: "openai", Path: "/v1/evals", Kind: "eval", Identity: "id", Collection: "data", Providers: []string{"openai"}, Methods: []string{"create", "list", "get", "update", "delete"},
 		Children: []Family{{Path: "runs", Kind: "eval_run", Identity: "id", Collection: "data", Methods: []string{"create", "list", "get", "cancel", "delete"}, Metered: true, Children: []Family{{Path: "output_items", Kind: "eval_output_item", Identity: "id", Collection: "data", Methods: []string{"list", "get"}}}}}},
 	{Operation: "skill", Surface: "anthropic", Path: "/anthropic/v1/skills", Kind: "skill", Identity: "id", Collection: "data", Providers: []string{"anthropic"}, Methods: []string{"create", "list", "get", "delete"},
-		Children: []Family{{Path: "versions", Kind: "skill_version", Identity: "version", Collection: "data", Methods: []string{"create", "list", "get", "delete"}}}},
+		Children: []Family{{Path: "versions", Kind: "skill_version", Identity: "id", Collection: "data", Methods: []string{"create", "list", "get", "delete"}}}},
 	{Operation: "context_cache", Surface: "gemini", Path: "/gemini/v1beta/cachedContents", Kind: "context_cache", Identity: "name", Collection: "cachedContents", Providers: []string{"gemini"}, Methods: []string{"create", "list", "get", "patch", "delete"}, Metered: true},
 	{Operation: "agent_resource", Surface: "gemini", Path: "/gemini/v1beta/agents", Kind: "agent_resource", Identity: "id", Collection: "agents", Providers: []string{"gemini"}, Methods: []string{"create", "list", "get", "delete"}},
 	{Operation: "fine_tuning", Surface: "native", Path: "/native/vertex-tuning/jobs", Kind: "vertex_tuning_job", Identity: "name", Collection: "tuningJobs", Providers: []string{"vertex_ai"}, Methods: []string{"create", "list", "get", "cancel"}, Metered: true},
@@ -91,9 +91,10 @@ func Supports(kind, operation, surface, mode string) bool {
 	case "conversation", "eval":
 		return kind == "openai" && surface == "openai"
 	case "retrieval":
-		// Native stores search on their own surface; RM5.3 query-only
-		// bindings expose the same operation on operator-bound backends.
-		return openAI || surface == "openai" && (kind == "bedrock" || kind == "vertex_ai" || kind == "azure_openai")
+		// Only the OpenAI-style vector-store search has an executable
+		// native path. Cloud knowledge-base tuples stay unsupported
+		// until their own binding and transport exist.
+		return openAI
 	}
 	return false
 }

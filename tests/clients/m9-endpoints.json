@@ -5769,7 +5769,7 @@
         "filters",
         "ranking_options"
       ],
-      "status": "implemented",
+      "status": "pending",
       "expected_refusal": null,
       "evidence": [
         "internal/retainedapi/contract.go",
@@ -5804,7 +5804,7 @@
         "filters",
         "ranking_options"
       ],
-      "status": "implemented",
+      "status": "pending",
       "expected_refusal": null,
       "evidence": [
         "internal/retainedapi/contract.go",
