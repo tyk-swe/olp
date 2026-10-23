@@ -99,6 +99,11 @@ func TestPendingCostOwnerLookupAtOccupiedProject(t *testing.T) {
 		}
 		baselines[subject] = pendingProofBuffers(t, probe, trace, subject)
 	}
+	installationOwner := limits.AggregateBudgetID("installation", installation)
+	if err = store.CheckPendingCostOwner(t.Context(), installationOwner); !errors.Is(err, resources.ErrPendingUsage) {
+		t.Fatalf("installation did not own the one pending subject: %v", err)
+	}
+	installationBaseline := pendingProofBuffers(t, probe, trace, installationOwner)
 	if _, err = h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_resources(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at)
  SELECT v.id,'response',r.api_key_id,r.route_slug,r.provider_id,r.provider_revision_id,r.route_revision_id,r.slot_id,r.credential_id,v.id::text,'in_progress',
  jsonb_set(jsonb_set(r.metadata,'{pending_usage,request_id}',to_jsonb(v.id::text)),'{pending_usage,event_id}',to_jsonb(v.id::text)),r.expires_at
@@ -146,14 +151,13 @@ func TestPendingCostOwnerLookupAtOccupiedProject(t *testing.T) {
 			t.Errorf("recorded owners caused an occupied proof scan: baseline=%g occupied=%g", baselines[subject], buffers)
 		}
 	}
-	installationOwner := limits.AggregateBudgetID("installation", installation)
 	if err = store.CheckPendingCostOwner(t.Context(), installationOwner); !errors.Is(err, resources.ErrPendingUsage) {
 		t.Fatalf("installation did not own occupied pending subjects: %v", err)
 	}
 	installationBuffers := pendingProofBuffers(t, probe, trace, installationOwner)
 	t.Logf("installation occupied proof buffers=%g", installationBuffers)
-	if installationBuffers > 64 {
-		t.Errorf("installation proof scanned the dead heap prefix: buffers=%g", installationBuffers)
+	if installationBuffers > installationBaseline+64 {
+		t.Errorf("installation proof scanned the dead heap prefix: baseline=%g occupied=%g", installationBaseline, installationBuffers)
 	}
 	if _, err = h.Pool.Exec(t.Context(), `DELETE FROM olp.provider_resources WHERE metadata ? 'pending_usage'`); err != nil {
 		t.Fatal(err)

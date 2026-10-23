@@ -152,6 +152,7 @@
     "GET /api/v1/provider-kinds/{provider_kind}/capabilities": "YYYYYYYYYYYY",
     "GET /api/v1/provider-models": "YYYYYYYYYYYY",
     "GET /api/v1/provider-profiles": "YYYYYYYYYYYY",
+    "GET /api/v1/provider-resource-contracts": "YYYYYYYYYYYY",
     "GET /api/v1/provider-resources": "YYYYYYYYYYYY",
     "GET /api/v1/provider-vendors": "YYYYYYYYYYYY",
     "GET /api/v1/providers": "YYYYYYYYYYYY",

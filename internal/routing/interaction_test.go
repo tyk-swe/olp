@@ -23,8 +23,13 @@ func TestCompileDurableSkipsNonOpenAIBatchSurfaces(t *testing.T) {
 		t.Fatalf("anthropic batch surface: templates=%v err=%v", templates, err)
 	}
 	provider := s.Providers["provider-1"]
-	provider.Kind, provider.VendorID, provider.ProfileID = "openai_compatible", "together", "together-files-batches"
+	provider.Kind, provider.VendorID, provider.ProfileID = "gemini", "google", "gemini-generation"
 	provider.Capabilities = []Capability{{Model: "wire-model", Operation: "batch", Surface: "openai", Mode: "unary"}}
+	s.Providers["provider-1"] = provider
+	if templates, err := s.compileDurable(route); err != nil || len(templates) != 0 {
+		t.Fatalf("gemini OpenAI-surface batch: templates=%v err=%v", templates, err)
+	}
+	provider.Kind, provider.VendorID, provider.ProfileID = "openai", "openai", ""
 	s.Providers["provider-1"] = provider
 	if _, err := s.compileDurable(route); err == nil {
 		t.Fatal("unqualified OpenAI batch hosting compiled a durable template")
