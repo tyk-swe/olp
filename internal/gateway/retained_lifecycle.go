@@ -452,8 +452,12 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 	}
 	rows, err := s.Resources.ListLifecycle(r.Context(), e.Kind, x.keyID, limit+1, r.URL.Query().Get("page_token"))
 	if err != nil {
-		fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
-		return 400
+		if errors.Is(err, resources.ErrNotFound) {
+			fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
+			return http.StatusBadRequest
+		}
+		fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable."))
+		return http.StatusServiceUnavailable
 	}
 	hasMore := len(rows) > limit
 	if hasMore {
@@ -473,6 +477,10 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		}
 		p, route, resolveErr := s.resolveResource(r.Context(), x, a, resource, e.Operation, retainedRetrieval)
 		if resolveErr != nil {
+			if resolveErr.Status != http.StatusNotFound && resolveErr.Status != http.StatusConflict {
+				fail(resolveErr)
+				return resolveErr.Status
+			}
 			continue
 		}
 		if gateErr := x.guardrailSurfaceGate(route); gateErr != nil {

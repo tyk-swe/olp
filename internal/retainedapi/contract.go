@@ -144,6 +144,14 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 				}
 			}
 		case oif.Object:
+			if inlineHeaderDictionary(path) {
+				for _, field := range v.Members() {
+					if field.Value.Kind() != oif.String {
+						return errors.New("inline header values must be strings")
+					}
+				}
+				return nil
+			}
 			for _, field := range v.Members() {
 				p := path + "/" + strings.ReplaceAll(strings.ReplaceAll(field.Name, "~", "~0"), "/", "~1")
 				if path == "/base_environment/env" {
@@ -196,4 +204,24 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 		return oif.Document{}, err
 	}
 	return oif.Apply(source, changes)
+}
+
+// These dictionaries contain literal header names and values, not typed IDs.
+func inlineHeaderDictionary(path string) bool {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) == 3 && parts[0] == "tools" && parts[2] == "headers" {
+		_, err := strconv.Atoi(parts[1])
+		return err == nil
+	}
+	if (len(parts) == 5 || len(parts) == 6) && parts[0] == "base_environment" && parts[1] == "network" && parts[2] == "allowlist" && parts[4] == "transform" {
+		if _, err := strconv.Atoi(parts[3]); err != nil {
+			return false
+		}
+		if len(parts) == 6 {
+			_, err := strconv.Atoi(parts[5])
+			return err == nil
+		}
+		return true
+	}
+	return false
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -474,5 +475,30 @@ func TestRetainedAgentsConfiguredResponseLimit(t *testing.T) {
 	response, body = geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{}`), headers)
 	if response.StatusCode != http.StatusBadGateway {
 		t.Fatalf("oversized POST: %d (%d bytes)", response.StatusCode, len(body))
+	}
+}
+
+func TestRetainedAgentsListPropagatesResolverFailure(t *testing.T) {
+	h := newAccessHarness(t)
+	provider := newGeminiLifecycleProvider(t)
+	t.Cleanup(provider.Close)
+	route, key, _ := provisionGeminiLifecycle(t, h, h.owner(), "gemini-agents", provider)
+	response, body := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{}`), map[string]string{"X-OLP-Route": route, "Idempotency-Key": uuid.NewString()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("create %d: %s", response.StatusCode, body)
+	}
+	// Keep the resource store available while the resolver's database is down.
+	pool, err := pgxpool.NewWithConfig(t.Context(), h.Pool.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	resolver := h.Gateway.Resolver
+	h.Gateway.Resolver = resources.NewResolver(pool)
+	t.Cleanup(func() { h.Gateway.Resolver = resolver })
+	before := len(provider.captured())
+	response, body = geminiPublic(t, h, http.MethodGet, "/gemini/v1beta/agents", key, nil)
+	if response.StatusCode != http.StatusInternalServerError || strings.Contains(string(body), "next_page_token") || len(provider.captured()) != before {
+		t.Fatalf("resolver failure hidden: %d %s", response.StatusCode, body)
 	}
 }

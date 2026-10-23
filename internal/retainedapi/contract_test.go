@@ -102,3 +102,30 @@ func TestRewriteEnvironmentVariableNames(t *testing.T) {
 		t.Fatal("undeclared binding identity accepted")
 	}
 }
+
+func TestRewriteInlineHeaderNames(t *testing.T) {
+	for _, raw := range []string{
+		`{"tools":[{"type":"mcp_server","headers":{"client_id":"app","base_agent":"literal"}}]}`,
+		`{"base_environment":{"network":{"allowlist":[{"domain":"example.com","transform":{"client_id":"app","id":"value"}}]}}}`,
+		`{"base_environment":{"network":{"allowlist":[{"domain":"example.com","transform":[{"base_agent":"literal"}]}]}}}`,
+	} {
+		source, err := oif.ParseJSON([]byte(raw), oif.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		projected, err := Rewrite(source, map[string]string{"base_agent": "agent_resource"}, func(string, string) (string, error) {
+			t.Fatal("inline header treated as a resource reference")
+			return "", nil
+		})
+		if err != nil || projected.Raw() != raw {
+			t.Fatalf("inline header changed: %s %v", projected.Raw(), err)
+		}
+	}
+	source, err := oif.ParseJSON([]byte(`{"tools":[{"headers":{"client_id":{"unexpected_id":"native"}}}]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Rewrite(source, nil, nil); err == nil {
+		t.Fatal("non-string header value accepted")
+	}
+}
