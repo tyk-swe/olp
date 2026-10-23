@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // RM5 generic retained families share the RM5.9 lifecycle contracts:
@@ -566,27 +568,36 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	ready := make([]listedResource, 0, limit+1)
 	cursor := r.URL.Query().Get(cursorParam)
 	exhausted := false
+	var pending []*resources.Resource
+	pendingLast := false
 	var overall time.Duration
 	admitted := make(map[string]bool)
 	// fill scans authorized bindings until ready holds more than
 	// target entries or the owner's rows are exhausted. Each new
 	// candidate is policy-checked as it is collected so refilled
-	// candidates carry the same prices and guardrails.
+	// candidates carry the same prices and guardrails. A fetched
+	// batch is marked last only once all of its rows are consumed.
 	fill := func(ctx context.Context, target int) int {
 		for len(ready) <= target && !exhausted {
-			rows, err := s.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc")
-			if err != nil {
-				if errors.Is(err, resources.ErrNotFound) {
-					fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
-					return 400
+			if len(pending) == 0 {
+				rows, err := s.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc")
+				if err != nil {
+					if errors.Is(err, resources.ErrNotFound) {
+						fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
+						return 400
+					}
+					fail(serverError(503, "provider_state_unavailable", "Provider state is unavailable."))
+					return 503
 				}
-				fail(serverError(503, "provider_state_unavailable", "Provider state is unavailable."))
-				return 503
+				pending, pendingLast = rows, len(rows) < 101
+				if len(pending) == 0 {
+					exhausted = true
+					break
+				}
 			}
-			if len(rows) < 101 {
-				exhausted = true
-			}
-			for _, resource := range rows {
+			consumed := 0
+			for _, resource := range pending {
+				consumed++
 				cursor = resource.ID
 				if resource.State == "submitting" || resource.State == "submission_unknown" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 					continue
@@ -618,6 +629,10 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 					break
 				}
 			}
+			pending = pending[consumed:]
+			if len(pending) == 0 && pendingLast {
+				exhausted = true
+			}
 		}
 		return 0
 	}
@@ -628,6 +643,24 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	ctx := r.Context()
 	authority := x.admissionAuthority(a)
 	costChecked := false
+	// Route leases stay separate from the caller's page lease: each
+	// route's cost budget is grown and settled with only its own
+	// reads, never the whole page total.
+	routeLeases := make(map[string]*limits.Lease)
+	routeReserved := make(map[string]usage.Cost)
+	routeReservedCharge := make(map[string]usage.Cost)
+	routeActual := make(map[string]usage.Cost)
+	routeActualCharge := make(map[string]usage.Cost)
+	routeDispatched := make(map[string]bool)
+	defer func() {
+		zero := int64(0)
+		for slug, lease := range routeLeases {
+			if actual, ok := routeActual[slug]; ok {
+				lease.SetActualCost(actual.String(), routeActualCharge[slug].String())
+			}
+			settleKey(ctx, lease, routeDispatched[slug], &zero, s.log)
+		}
+	}()
 	admitRoute := func(entry listedResource) int {
 		if admitted[entry.route.Slug] {
 			return 0
@@ -638,11 +671,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return gateErr.Status
 		}
 		if lease != nil {
-			if x.lease == nil {
-				x.lease = lease
-			} else {
-				x.lease.Attach(lease)
-			}
+			routeLeases[entry.route.Slug] = lease
 		}
 		admitted[entry.route.Slug] = true
 		return 0
@@ -690,9 +719,21 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		readIdx++
 		resource, p, route := entry.resource, entry.pin, entry.route
 		x.route = route
+		bound := x.attemptCostBound(p.attempt)
+		charge := x.attemptChargeBound(p.attempt, bound)
 		if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
 			fail(costErr)
 			return costErr.Status
+		}
+		if lease := routeLeases[route.Slug]; lease != nil && !(bound.IsZero() && charge.IsZero()) {
+			total := routeReserved[route.Slug].Add(bound)
+			totalCharge := routeReservedCharge[route.Slug].Add(charge)
+			if costErr := s.growCost(ctx, lease, total.String(), totalCharge.String(), x.request.accountingID(), time.Duration(route.OverallTimeout)*time.Millisecond); costErr != nil {
+				fail(costErr)
+				return costErr.Status
+			}
+			routeReserved[route.Slug] = total
+			routeReservedCharge[route.Slug] = totalCharge
 		}
 		if gateErr := s.gateRetainedSlot(ctx, x, p, route); gateErr != nil {
 			fail(gateErr)
@@ -721,6 +762,9 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			fail(public)
 			return public.Status
 		}
+		routeDispatched[route.Slug] = true
+		routeActual[route.Slug] = routeActual[route.Slug].Add(bound)
+		routeActualCharge[route.Slug] = routeActualCharge[route.Slug].Add(charge)
 		body, readErr := readBounded(native.Body, s.retainedResponseLimit())
 		native.Body.Close()
 		if readErr == nil {

@@ -622,6 +622,11 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *r
 	// Bound work crosses the same spend-cap boundary as a fresh attempt:
 	// gateSlot alone would reserve token quota but never the route,
 	// provider, or credential-slot spend caps pinned on the attempt.
+	// Spend caps are evaluated against the attempt's route, which some
+	// collection handlers carry only as this argument.
+	if x.route == nil {
+		x.route = route
+	}
 	gate := s.gateAttempt(ctx, x, p.attempt, &p.provider, &p.slot, max(resourceEstimate, x.estimate), s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)

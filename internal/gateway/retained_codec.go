@@ -131,7 +131,7 @@ func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *pin) (oif
 	if e.Action != "create" && e.Operation != "compaction" {
 		return source, nil
 	}
-	return oif.Apply(source, []oif.Change{{Pointer: "/" + field, Value: strconv.Quote(p.model), Origin: oif.ResourceBinding, Reason: "selected route model"}})
+	return oif.Apply(source, []oif.Change{{Pointer: "/" + field, Value: strconv.Quote(p.provider.Connector().Model(p.model)), Origin: oif.ResourceBinding, Reason: "selected route model"}})
 }
 
 // hasItemReference reports whether any nested input item references
