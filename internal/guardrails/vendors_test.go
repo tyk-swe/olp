@@ -104,6 +104,7 @@ func TestNamedVendorNullDecisions(t *testing.T) {
 	for _, tc := range []struct{ kind, parameters, response string }{
 		{"lakera_v1", `{"category_thresholds":{"prompt_injection":0.5}}`, `{"results":[{"flagged":true,"category_scores":{"prompt_injection":null}}]}`},
 		{"enkryptai", `{}`, `{"summary":{"policy_violation":null}}`},
+		{"microsoft_purview", `{"application_id":"app","application_name":"OLP"}`, `{"policyActions":[{"action":"restrictAccess","restrictionAction":null}]}`},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			for _, policy := range []string{FailOpen, FailClosed} {

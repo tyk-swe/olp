@@ -23,9 +23,8 @@ type codeExecutionDetector struct {
 }
 
 var (
-	codeFence        = regexp.MustCompile("(?s)```([^`\\r\\n]*)\\r?\\n(.*?)```")
-	escapedCodeFence = regexp.MustCompile("(?s)```([^`\\\\\\r\\n]*)(?:\\\\r\\\\n|\\\\n|\\\\r)(.*?)```")
-	codeLanguage     = regexp.MustCompile(`^[a-zA-Z0-9_+#.-]+$`)
+	codeFence    = regexp.MustCompile("(?s)```([^`\\r\\n]*?)(?:\\r?\\n|\\\\r\\\\n|\\\\n|\\\\r)(.*?)```")
+	codeLanguage = regexp.MustCompile(`^[a-zA-Z0-9_+#.-]+$`)
 )
 
 func compileCodeExecution(raw json.RawMessage) (detector, error) {
@@ -80,20 +79,17 @@ func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation
 		if input && d.intent && !intent {
 			continue
 		}
-		fences := codeFence
-		if !strings.ContainsAny(segment.Text, "\r\n") {
-			// Match escaped newlines in place so replacements retain the original
-			// byte offsets rather than offsets into normalized text.
-			fences = escapedCodeFence
-		}
-		spans := fences.FindAllStringSubmatchIndex(segment.Text, MaxFindings+1)
+		// Match real and escaped newlines in place, even when mixed, so
+		// replacements retain the original byte offsets.
+		spans := codeFence.FindAllStringSubmatchIndex(segment.Text, MaxFindings+1)
 		if len(spans) > MaxFindings {
 			return Verdict{}, errEvaluation
 		}
 		for _, span := range spans {
 			language := ""
-			if info := strings.Fields(segment.Text[span[2]:span[3]]); len(info) > 0 {
-				language = normalizeCodeLanguage(info[0])
+			for word := range strings.FieldsSeq(segment.Text[span[2]:span[3]]) {
+				language = normalizeCodeLanguage(word)
+				break
 			}
 			confidence := 1.0
 			if len(d.languages) > 0 {

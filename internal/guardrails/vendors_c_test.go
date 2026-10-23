@@ -10,6 +10,34 @@ import (
 	"testing"
 )
 
+func TestPurviewRestrictionDecisions(t *testing.T) {
+	for _, tc := range []struct {
+		name, actions      string
+		blocked, malformed bool
+	}{
+		{"block", `[{"@odata.type":"#microsoft.graph.restrictAccessAction","restrictionAction":"block"}]`, true, false},
+		{"warn", `[{"@odata.type":"#microsoft.graph.restrictAccessAction","restrictionAction":"warn"}]`, false, false},
+		{"audit", `[{"action":"restrictAccess","restrictionAction":"audit"}]`, false, false},
+		{"missing", `[{"@odata.type":"#microsoft.graph.restrictAccessAction"}]`, false, true},
+		{"null", `[{"action":"restrictAccess","restrictionAction":null}]`, false, true},
+		{"unknown", `[{"action":"restrictAccess","restrictionAction":"unknownFutureValue"}]`, false, true},
+		{"malformed after block", `[{"action":"restrictAccess","restrictionAction":"block"},{"action":"restrictAccess"}]`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `{"policyActions":`+tc.actions+`}`)
+			}))
+			defer server.Close()
+			verdict, err := evaluatePurview(t.Context(), server.Client(), ExternalConfig{
+				Endpoint: server.URL, Parameters: json.RawMessage(`{"application_id":"app","application_name":"OLP"}`),
+			}, externalCredential{APIKey: "token"}, Input, Segment{ID: "s", Text: "private"})
+			if (err != nil) != tc.malformed || err == nil && (verdict.Action == Block) != tc.blocked {
+				t.Fatalf("verdict=%+v error=%v", verdict, err)
+			}
+		})
+	}
+}
+
 func TestVendorCContracts(t *testing.T) {
 	const sample = "inspect café"
 	tests := []struct {

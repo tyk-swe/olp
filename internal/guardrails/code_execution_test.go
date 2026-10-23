@@ -49,6 +49,7 @@ func TestCodeExecutionBoundaries(t *testing.T) {
 		{"output code", `{}`, Output, "```python\nprint(1)\n```", true},
 		{"CRLF output code", `{}`, Output, "```python\r\nprint(1)\r\n```", true},
 		{"escaped output code", `{}`, Output, "```python\\nprint(1)\\n```", true},
+		{"escaped fence after real newline", `{}`, Output, "example:\n```python\\nprint(1)\\n```", true},
 		{"C++ output code", `{}`, Output, "```c++\nint main() {}\n```", true},
 		{"C# output code", `{}`, Output, "```c#\nConsole.WriteLine(1);\n```", true},
 		{"escaped C++ output code", `{}`, Output, "```c++\\nint main() {}\\n```", true},
@@ -66,6 +67,18 @@ func TestCodeExecutionBoundaries(t *testing.T) {
 				t.Fatalf("blocked=%v error=%v", result.Blocked, err)
 			}
 		})
+	}
+}
+
+func TestCodeExecutionMixedNewlines(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		engine := testEngine(t, "builtin.code_execution", `{}`, Output, Redact, false, nil)
+		input := "é" + newline + "```c++\\nfirst\\n```" + newline + "middle" + newline + "```python" + newline + "second" + newline + "```" + newline + "終"
+		want := "é" + newline + "[CODE BLOCKED]" + newline + "middle" + newline + "[CODE BLOCKED]" + newline + "終"
+		result, err := evaluateText(t, engine, input, Output, nil)
+		if err != nil || len(result.Segments) != 1 || result.Segments[0].Text != want || !result.Changed {
+			t.Fatalf("mixed-newline code escaped: %+v error=%v", result, err)
+		}
 	}
 }
 

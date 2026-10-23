@@ -385,15 +385,22 @@ func evaluatePurview(ctx context.Context, client *http.Client, c ExternalConfig,
 	if json.Unmarshal(raw, &response) != nil || response.Actions == nil {
 		return Verdict{}, errEvaluation
 	}
+	blocked := false
 	for _, action := range *response.Actions {
-		if (strings.Contains(action.Type, "restrictAccessAction") || action.Action == "restrictAccess") && action.Restriction == "block" {
-			return vendorBoolean(true, "microsoft_purview.policy"), nil
+		if strings.Contains(action.Type, "restrictAccessAction") || action.Action == "restrictAccess" {
+			switch action.Restriction {
+			case "block":
+				blocked = true
+			case "warn", "audit":
+			default:
+				return Verdict{}, errEvaluation
+			}
 		}
 		if action.Type == "" && action.Action == "" {
 			return Verdict{}, errEvaluation
 		}
 	}
-	return Verdict{Action: "pass"}, nil
+	return vendorBoolean(blocked, "microsoft_purview.policy"), nil
 }
 
 func evaluateAkto(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
