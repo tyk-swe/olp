@@ -75,3 +75,30 @@ func TestRewriteRejectsUndeclaredReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestRewriteEnvironmentVariableNames(t *testing.T) {
+	for _, raw := range []string{
+		`{"base_environment":{"env":{"client_id":"app","id":"value","base_agent":"literal"}}}`,
+		`{"base_environment":{"env":{"client_id":{"value":"app"},"base_agent":{"value":"literal"}}}}`,
+	} {
+		source, err := oif.ParseJSON([]byte(raw), oif.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		projected, err := Rewrite(source, map[string]string{"base_agent": "agent_resource"}, func(string, string) (string, error) {
+			t.Fatal("environment variable treated as a resource reference")
+			return "", nil
+		})
+		if err != nil || projected.Raw() != raw {
+			t.Fatalf("environment variable changed: %s %v", projected.Raw(), err)
+		}
+	}
+	// Dictionary names do not make the binding's own fields opaque.
+	source, err := oif.ParseJSON([]byte(`{"base_environment":{"env":{"schema":{"unexpected_id":"native"}}}}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Rewrite(source, nil, nil); err == nil {
+		t.Fatal("undeclared binding identity accepted")
+	}
+}

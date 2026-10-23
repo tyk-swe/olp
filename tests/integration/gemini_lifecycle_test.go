@@ -35,19 +35,20 @@ type geminiReplyGate struct {
 
 type geminiLifecycleProvider struct {
 	*httptest.Server
-	mu              sync.Mutex
-	calls           []geminiLifecycleCall
-	sequence        int
-	missingAgents   map[string]bool
-	agents          map[string]map[string]any
-	agentReadDelay  atomic.Int64
-	slowSent        atomic.Int32
-	slowDone        chan struct{}
-	badAck          atomic.Bool
-	escapedCreateID atomic.Bool
-	escapedReadID   atomic.Bool
-	escapedStreamID atomic.Bool
-	replyGate       atomic.Pointer[geminiReplyGate]
+	mu                   sync.Mutex
+	calls                []geminiLifecycleCall
+	sequence             int
+	missingAgents        map[string]bool
+	agents               map[string]map[string]any
+	agentReadDelay       atomic.Int64
+	agentResponsePadding atomic.Int64
+	slowSent             atomic.Int32
+	slowDone             chan struct{}
+	badAck               atomic.Bool
+	escapedCreateID      atomic.Bool
+	escapedReadID        atomic.Bool
+	escapedStreamID      atomic.Bool
+	replyGate            atomic.Pointer[geminiReplyGate]
 	// deleteMissing makes a delete answer that the Interaction does not exist, as
 	// it does for one an earlier delete whose response was lost already removed.
 	deleteMissing   atomic.Bool
@@ -93,6 +94,10 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				return
 			}
 		}
+		if agentMissing && (r.Method == http.MethodGet || r.Method == http.MethodDelete) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if reply := p.accountingReply.Load(); reply != nil && strings.HasPrefix(r.URL.Path, "/v1beta/interactions/") &&
 			(r.Method == http.MethodGet || r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel")) {
 			id = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1beta/interactions/"), "/cancel")
@@ -108,6 +113,9 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 			created := map[string]any{}
 			_ = json.Unmarshal(body, &created)
 			created["id"] = id
+			if padding := p.agentResponsePadding.Load(); padding > 0 {
+				created["description"] = strings.Repeat("x", int(padding))
+			}
 			if _, present := created["base_agent"]; !present {
 				created["base_agent"] = ""
 			}
@@ -121,17 +129,16 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/agents":
 			writeJSON(w, map[string]any{"agents": []any{map[string]any{"id": "foreign-native-agent"}}})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
+			if padding := p.agentResponsePadding.Load(); padding > 0 {
+				writeJSON(w, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1beta/agents/"), "description": strings.Repeat("x", int(padding))})
+				return
+			}
 			if delay := time.Duration(p.agentReadDelay.Load()); delay > 0 {
 				select {
 				case <-time.After(delay):
 				case <-r.Context().Done():
 					return
 				}
-			}
-			if agentMissing {
-				w.WriteHeader(http.StatusNotFound)
-				writeJSON(w, map[string]any{"error": map[string]any{"code": 404, "message": "not found"}})
-				return
 			}
 			if agent != nil {
 				writeJSON(w, agent)

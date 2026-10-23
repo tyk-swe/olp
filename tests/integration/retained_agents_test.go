@@ -418,3 +418,61 @@ func TestRetainedAgentsUnknownAcceptanceNeverRedispatches(t *testing.T) {
 		t.Fatalf("unknown create was resubmitted: %d %s", response.StatusCode, body)
 	}
 }
+
+func TestRetainedAgentsReconcileEmptyNotFound(t *testing.T) {
+	h := newAccessHarness(t)
+	provider := newGeminiLifecycleProvider(t)
+	t.Cleanup(provider.Close)
+	route, key, _ := provisionGeminiLifecycle(t, h, h.owner(), "gemini-agents", provider)
+	authority, err := h.Runtime.Authenticate(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		response, body := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{}`), map[string]string{"X-OLP-Route": route, "Idempotency-Key": uuid.NewString()})
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("create %d: %s", response.StatusCode, body)
+		}
+		id := response.Header.Get("X-OLP-Resource-ID")
+		resource, err := h.Gateway.Resources.Get(t.Context(), "agent_resource", authority.ID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		provider.mu.Lock()
+		provider.missingAgents = map[string]bool{resource.UpstreamID: true}
+		provider.mu.Unlock()
+		response, body = geminiPublic(t, h, method, "/gemini/v1beta/agents/"+id, key, nil)
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s empty 404: %d %s", method, response.StatusCode, body)
+		}
+		var state string
+		if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.provider_resources WHERE id=$1`, resource.UUID).Scan(&state); err != nil || state != "deleted" {
+			t.Fatalf("%s stale mapping: %s %v", method, state, err)
+		}
+	}
+}
+
+func TestRetainedAgentsConfiguredResponseLimit(t *testing.T) {
+	h := newAccessHarness(t) // The harness configures a 1 MiB provider-response limit.
+	provider := newGeminiLifecycleProvider(t)
+	t.Cleanup(provider.Close)
+	route, key, _ := provisionGeminiLifecycle(t, h, h.owner(), "gemini-agents", provider)
+	headers := map[string]string{"X-OLP-Route": route, "Idempotency-Key": uuid.NewString()}
+	response, body := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{}`), headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("create %d: %s", response.StatusCode, body)
+	}
+	id := response.Header.Get("X-OLP-Resource-ID")
+	provider.agentResponsePadding.Store((1 << 20) + 1)
+	for _, path := range []string{"/gemini/v1beta/agents/" + id, "/gemini/v1beta/agents"} {
+		response, body = geminiPublic(t, h, http.MethodGet, path, key, nil)
+		if response.StatusCode != http.StatusBadGateway {
+			t.Fatalf("oversized GET %s: %d (%d bytes)", path, response.StatusCode, len(body))
+		}
+	}
+	headers["Idempotency-Key"] = uuid.NewString()
+	response, body = geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{}`), headers)
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("oversized POST: %d (%d bytes)", response.StatusCode, len(body))
+	}
+}

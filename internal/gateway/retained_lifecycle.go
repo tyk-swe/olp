@@ -273,10 +273,13 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	native, failure := s.pinnedDo(ctx, x, p, e.Method, endpoint, body, "application/json")
 	if failure != nil {
-		if resource != nil && e.Action != "create" && upstreamError(failure).Status == http.StatusNotFound {
+		if resource != nil && e.Action != "create" && failure.status == http.StatusNotFound {
 			commitCtx, cancel := resourceCommitContext(ctx)
 			defer cancel()
-			_ = s.Resources.Tombstone(commitCtx, resource.ID)
+			if removeErr := s.Resources.Tombstone(commitCtx, resource.ID); removeErr != nil {
+				fail(serverError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
+				return
+			}
 			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
@@ -284,7 +287,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		return
 	}
 	defer native.Body.Close()
-	response, readErr := readBounded(native.Body, retainedBodyLimit)
+	response, readErr := readBounded(native.Body, s.retainedResponseLimit())
 	if readErr != nil {
 		fail(serverError(502, "provider_protocol_error", "The provider response exceeded the supported resource contract."))
 		return
@@ -355,6 +358,13 @@ func retainedAffinity(resource *resources.Resource, p *pin, route *routing.Route
 }
 func sameCredential(a, b *string) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+func (s *Server) retainedResponseLimit() int64 {
+	if s.cfg.MaxResponseBytes > 0 && s.cfg.MaxResponseBytes < retainedBodyLimit {
+		return s.cfg.MaxResponseBytes
+	}
+	return retainedBodyLimit
 }
 
 func retainedAgentInput(source oif.Document) *Error {
@@ -527,7 +537,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		native, callErr := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if callErr != nil {
 			s.settlePinHold(ctx, x, p.hold, nil)
-			if upstreamError(callErr).Status == http.StatusNotFound {
+			if callErr.status == http.StatusNotFound {
 				commitCtx, commitCancel := resourceCommitContext(ctx)
 				removeErr := s.Resources.Tombstone(commitCtx, resource.ID)
 				commitCancel()
@@ -540,7 +550,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			fail(retainedPublicError(upstreamError(callErr), p, resource))
 			return upstreamError(callErr).Status
 		}
-		body, readErr := readBounded(native.Body, retainedBodyLimit)
+		body, readErr := readBounded(native.Body, s.retainedResponseLimit())
 		native.Body.Close()
 		if readErr == nil {
 			var id string

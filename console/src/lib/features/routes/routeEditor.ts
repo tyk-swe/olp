@@ -234,6 +234,7 @@ export function toRouteModelOptions(
 }
 
 export function surfacesFor(operation: string): string[] {
+  if (operation === 'agent_resource') return ['gemini'];
   if (operation === 'bedrock_invoke') return ['bedrock'];
   if (operation === 'generation')
     return ['openai', 'anthropic', 'gemini', 'bedrock'];

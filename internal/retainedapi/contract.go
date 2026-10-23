@@ -146,6 +146,13 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 		case oif.Object:
 			for _, field := range v.Members() {
 				p := path + "/" + strings.ReplaceAll(strings.ReplaceAll(field.Name, "~", "~0"), "/", "~1")
+				if path == "/base_environment/env" {
+					// Variable names are user data; each binding still has typed fields.
+					if err := walk(field.Value, p); err != nil {
+						return err
+					}
+					continue
+				}
 				if slices.Contains([]string{"metadata", "attributes", "schema", "json_schema", "parameters", "input_schema"}, field.Name) {
 					continue
 				}
