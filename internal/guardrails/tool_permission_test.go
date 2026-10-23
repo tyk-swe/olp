@@ -69,6 +69,23 @@ func TestToolPermissionDefaultsAndRuleFallback(t *testing.T) {
 	}
 }
 
+func TestToolPermissionParameterRulesAcrossSegments(t *testing.T) {
+	detector, err := compileToolPermission(json.RawMessage(`{"rules":[{"id":"yes","tool_name":"tool","decision":"allow","allowed_param_patterns":{"value":"yes"}},{"id":"no","tool_name":"tool","decision":"allow","allowed_param_patterns":{"value":"no"}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	segments := []Segment{{ID: "s0", Kind: "tool_call", ToolName: "tool", Text: `{"value":"no"}`}, {ID: "s1", Kind: "tool_call", ToolName: "tool", Text: `{"value":"yes"}`}}
+	verdict, err := detector.detect(t.Context(), Evaluation{Segments: segments})
+	if err != nil || verdict.Action != "pass" {
+		t.Fatalf("parameter fallback failed: %+v error=%v", verdict, err)
+	}
+	segments[1].Text = `{"value":"other"}`
+	verdict, err = detector.detect(t.Context(), Evaluation{Segments: segments})
+	if err != nil || verdict.Action != Block {
+		t.Fatalf("arguments from another segment were reused: %+v error=%v", verdict, err)
+	}
+}
+
 func TestToolPermissionInvalidConfig(t *testing.T) {
 	for _, raw := range []string{
 		`{"default_action":"ignore"}`, `{"rules":[{"id":"x","decision":"maybe"}]}`,

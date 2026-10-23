@@ -490,7 +490,7 @@ func evaluateTextAPI(ctx context.Context, client *http.Client, c ExternalConfig,
 		if response.Action == "GUARDRAIL_INTERVENED" && response.Texts == nil {
 			return Verdict{}, errEvaluation
 		}
-		return Verdict{Action: "pass"}, nil
+		return vendorBoolean(response.Action == "GUARDRAIL_INTERVENED", kind+".policy"), nil
 	default:
 		return Verdict{}, errEvaluation
 	}

@@ -43,6 +43,34 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 	}
 }
 
+func TestVendorInterventionWithoutReplacement(t *testing.T) {
+	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus"} {
+		for _, action := range []string{Block, Redact} {
+			for _, policy := range []string{FailClosed, FailOpen} {
+				t.Run(kind+"/"+action+"/"+policy, func(t *testing.T) {
+					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
+						io.WriteString(w, `{"action":"GUARDRAIL_INTERVENED","texts":["unchanged"]}`)
+					})
+					parameters := json.RawMessage(`{}`)
+					if kind == "deepkeep" {
+						parameters = json.RawMessage(`{"firewall_id":"firewall"}`)
+					}
+					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: parameters})
+					definition := Revision{ID: "revision", GuardrailID: "guard", Type: kind, Configuration: config, TimeoutMS: 1000, OnError: policy}
+					engine, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: action}}, map[string]Revision{"revision": definition}, runner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, err := evaluateText(t, engine, "unchanged", Input, nil)
+					if err != ErrBlocked || !result.Blocked || result.Changed || len(result.Decisions) != 1 || len(result.Decisions[0].Categories) == 0 {
+						t.Fatalf("explicit intervention lost: %+v error=%v", result, err)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestLassoTransformationRequiresEveryFinding(t *testing.T) {
 	for _, tc := range []struct {
 		name, findings string

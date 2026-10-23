@@ -77,7 +77,7 @@ func evaluateGenericGuardrail(ctx context.Context, client *http.Client, c Extern
 		return Verdict{}, errEvaluation
 	}
 	if *response.Texts[0] == s.Text {
-		return vendorBoolean(false, ""), nil
+		return vendorBoolean(response.Action == "GUARDRAIL_INTERVENED", "vendor.generic_guardrail_api"), nil
 	}
 	return vendorReplacement(s, *response.Texts[0], "vendor.generic_guardrail_api")
 }

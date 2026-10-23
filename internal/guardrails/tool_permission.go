@@ -117,16 +117,26 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 			continue
 		}
 		allowed := d.defaultAllow
+		var values map[string][]string
 		for _, rule := range d.rules {
+			if err := ctx.Err(); err != nil {
+				return Verdict{}, err
+			}
 			// Native captured tools are function tools. Other provider tool types do
 			// not have a compatible argument surface and cannot match these captures.
 			if rule.name != nil && !rule.name.MatchString(segment.ToolName) || rule.kind != nil && !rule.kind.MatchString("function") {
 				continue
 			}
 			if segment.Kind == "tool_call" && len(rule.parameters) > 0 {
-				values, err := toolPermissionValues(segment.Text)
-				if err != nil {
-					return vendorBoolean(true, "tool.arguments_invalid"), nil
+				if values == nil {
+					var err error
+					values, err = toolPermissionValues(segment.Text)
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						return Verdict{}, ctxErr
+					}
+					if err != nil {
+						return vendorBoolean(true, "tool.arguments_invalid"), nil
+					}
 				}
 				matches := true
 				for path, pattern := range rule.parameters {
