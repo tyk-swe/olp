@@ -1158,31 +1158,86 @@ func (e ConfigurationGuardrailOnError) Valid() bool {
 
 // Defines values for ConfigurationGuardrailType.
 const (
-	ConfigurationGuardrailTypeAzureContentSafety ConfigurationGuardrailType = "azure.content_safety"
-	ConfigurationGuardrailTypeAzurePromptShields ConfigurationGuardrailType = "azure.prompt_shields"
-	ConfigurationGuardrailTypeBedrock            ConfigurationGuardrailType = "bedrock"
-	ConfigurationGuardrailTypeBuiltinKeywords    ConfigurationGuardrailType = "builtin.keywords"
-	ConfigurationGuardrailTypeBuiltinPii         ConfigurationGuardrailType = "builtin.pii"
-	ConfigurationGuardrailTypeBuiltinRegex       ConfigurationGuardrailType = "builtin.regex"
-	ConfigurationGuardrailTypeBuiltinSchema      ConfigurationGuardrailType = "builtin.schema"
-	ConfigurationGuardrailTypeBuiltinSecrets     ConfigurationGuardrailType = "builtin.secrets"
-	ConfigurationGuardrailTypeBuiltinTools       ConfigurationGuardrailType = "builtin.tools"
-	ConfigurationGuardrailTypeLakera             ConfigurationGuardrailType = "lakera"
-	ConfigurationGuardrailTypeModel              ConfigurationGuardrailType = "model"
-	ConfigurationGuardrailTypeModelArmor         ConfigurationGuardrailType = "model_armor"
-	ConfigurationGuardrailTypePlugin             ConfigurationGuardrailType = "plugin"
-	ConfigurationGuardrailTypePresidio           ConfigurationGuardrailType = "presidio"
-	ConfigurationGuardrailTypeWebhook            ConfigurationGuardrailType = "webhook"
+	ConfigurationGuardrailTypeAim                   ConfigurationGuardrailType = "aim"
+	ConfigurationGuardrailTypeAkto                  ConfigurationGuardrailType = "akto"
+	ConfigurationGuardrailTypeAlice                 ConfigurationGuardrailType = "alice"
+	ConfigurationGuardrailTypeAporia                ConfigurationGuardrailType = "aporia"
+	ConfigurationGuardrailTypeAzureContentSafety    ConfigurationGuardrailType = "azure.content_safety"
+	ConfigurationGuardrailTypeAzurePromptShields    ConfigurationGuardrailType = "azure.prompt_shields"
+	ConfigurationGuardrailTypeBedrock               ConfigurationGuardrailType = "bedrock"
+	ConfigurationGuardrailTypeBuiltinCodeExecution  ConfigurationGuardrailType = "builtin.code_execution"
+	ConfigurationGuardrailTypeBuiltinKeywords       ConfigurationGuardrailType = "builtin.keywords"
+	ConfigurationGuardrailTypeBuiltinPii            ConfigurationGuardrailType = "builtin.pii"
+	ConfigurationGuardrailTypeBuiltinRegex          ConfigurationGuardrailType = "builtin.regex"
+	ConfigurationGuardrailTypeBuiltinSchema         ConfigurationGuardrailType = "builtin.schema"
+	ConfigurationGuardrailTypeBuiltinSecrets        ConfigurationGuardrailType = "builtin.secrets"
+	ConfigurationGuardrailTypeBuiltinToolPermission ConfigurationGuardrailType = "builtin.tool_permission"
+	ConfigurationGuardrailTypeBuiltinTools          ConfigurationGuardrailType = "builtin.tools"
+	ConfigurationGuardrailTypeCatoNetworks          ConfigurationGuardrailType = "cato_networks"
+	ConfigurationGuardrailTypeCiscoAiDefense        ConfigurationGuardrailType = "cisco_ai_defense"
+	ConfigurationGuardrailTypeCompresr              ConfigurationGuardrailType = "compresr"
+	ConfigurationGuardrailTypeConduct               ConfigurationGuardrailType = "conduct"
+	ConfigurationGuardrailTypeCrowdstrikeAidr       ConfigurationGuardrailType = "crowdstrike_aidr"
+	ConfigurationGuardrailTypeDecisionModel         ConfigurationGuardrailType = "decision_model"
+	ConfigurationGuardrailTypeDeepkeep              ConfigurationGuardrailType = "deepkeep"
+	ConfigurationGuardrailTypeDynamoai              ConfigurationGuardrailType = "dynamoai"
+	ConfigurationGuardrailTypeEnkryptai             ConfigurationGuardrailType = "enkryptai"
+	ConfigurationGuardrailTypeGenericGuardrailApi   ConfigurationGuardrailType = "generic_guardrail_api"
+	ConfigurationGuardrailTypeGrayswan              ConfigurationGuardrailType = "grayswan"
+	ConfigurationGuardrailTypeGuardrailsAi          ConfigurationGuardrailType = "guardrails_ai"
+	ConfigurationGuardrailTypeHeadroom              ConfigurationGuardrailType = "headroom"
+	ConfigurationGuardrailTypeHiddenlayer           ConfigurationGuardrailType = "hiddenlayer"
+	ConfigurationGuardrailTypeIbmGuardrails         ConfigurationGuardrailType = "ibm_guardrails"
+	ConfigurationGuardrailTypeJavelin               ConfigurationGuardrailType = "javelin"
+	ConfigurationGuardrailTypeLakera                ConfigurationGuardrailType = "lakera"
+	ConfigurationGuardrailTypeLakeraV1              ConfigurationGuardrailType = "lakera_v1"
+	ConfigurationGuardrailTypeLasso                 ConfigurationGuardrailType = "lasso"
+	ConfigurationGuardrailTypeMicrosoftPurview      ConfigurationGuardrailType = "microsoft_purview"
+	ConfigurationGuardrailTypeModel                 ConfigurationGuardrailType = "model"
+	ConfigurationGuardrailTypeModelArmor            ConfigurationGuardrailType = "model_armor"
+	ConfigurationGuardrailTypeNoma                  ConfigurationGuardrailType = "noma"
+	ConfigurationGuardrailTypeNomaV2                ConfigurationGuardrailType = "noma_v2"
+	ConfigurationGuardrailTypeOnyx                  ConfigurationGuardrailType = "onyx"
+	ConfigurationGuardrailTypeOpenaiModeration      ConfigurationGuardrailType = "openai_moderation"
+	ConfigurationGuardrailTypeOvalix                ConfigurationGuardrailType = "ovalix"
+	ConfigurationGuardrailTypePangea                ConfigurationGuardrailType = "pangea"
+	ConfigurationGuardrailTypePanwPrismaAirs        ConfigurationGuardrailType = "panw_prisma_airs"
+	ConfigurationGuardrailTypePillar                ConfigurationGuardrailType = "pillar"
+	ConfigurationGuardrailTypePlugin                ConfigurationGuardrailType = "plugin"
+	ConfigurationGuardrailTypePresidio              ConfigurationGuardrailType = "presidio"
+	ConfigurationGuardrailTypePromptSecurity        ConfigurationGuardrailType = "prompt_security"
+	ConfigurationGuardrailTypePromptguard           ConfigurationGuardrailType = "promptguard"
+	ConfigurationGuardrailTypeQostodianNexus        ConfigurationGuardrailType = "qostodian_nexus"
+	ConfigurationGuardrailTypeQualifire             ConfigurationGuardrailType = "qualifire"
+	ConfigurationGuardrailTypeRepelloai             ConfigurationGuardrailType = "repelloai"
+	ConfigurationGuardrailTypeRubrik                ConfigurationGuardrailType = "rubrik"
+	ConfigurationGuardrailTypeSemanticGuard         ConfigurationGuardrailType = "semantic_guard"
+	ConfigurationGuardrailTypeSingulr               ConfigurationGuardrailType = "singulr"
+	ConfigurationGuardrailTypeStraiker              ConfigurationGuardrailType = "straiker"
+	ConfigurationGuardrailTypeVigilGuard            ConfigurationGuardrailType = "vigil_guard"
+	ConfigurationGuardrailTypeWebhook               ConfigurationGuardrailType = "webhook"
+	ConfigurationGuardrailTypeXecguard              ConfigurationGuardrailType = "xecguard"
+	ConfigurationGuardrailTypeZscalerAiGuard        ConfigurationGuardrailType = "zscaler_ai_guard"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationGuardrailType enum.
 func (e ConfigurationGuardrailType) Valid() bool {
 	switch e {
+	case ConfigurationGuardrailTypeAim:
+		return true
+	case ConfigurationGuardrailTypeAkto:
+		return true
+	case ConfigurationGuardrailTypeAlice:
+		return true
+	case ConfigurationGuardrailTypeAporia:
+		return true
 	case ConfigurationGuardrailTypeAzureContentSafety:
 		return true
 	case ConfigurationGuardrailTypeAzurePromptShields:
 		return true
 	case ConfigurationGuardrailTypeBedrock:
+		return true
+	case ConfigurationGuardrailTypeBuiltinCodeExecution:
 		return true
 	case ConfigurationGuardrailTypeBuiltinKeywords:
 		return true
@@ -1194,19 +1249,99 @@ func (e ConfigurationGuardrailType) Valid() bool {
 		return true
 	case ConfigurationGuardrailTypeBuiltinSecrets:
 		return true
+	case ConfigurationGuardrailTypeBuiltinToolPermission:
+		return true
 	case ConfigurationGuardrailTypeBuiltinTools:
 		return true
+	case ConfigurationGuardrailTypeCatoNetworks:
+		return true
+	case ConfigurationGuardrailTypeCiscoAiDefense:
+		return true
+	case ConfigurationGuardrailTypeCompresr:
+		return true
+	case ConfigurationGuardrailTypeConduct:
+		return true
+	case ConfigurationGuardrailTypeCrowdstrikeAidr:
+		return true
+	case ConfigurationGuardrailTypeDecisionModel:
+		return true
+	case ConfigurationGuardrailTypeDeepkeep:
+		return true
+	case ConfigurationGuardrailTypeDynamoai:
+		return true
+	case ConfigurationGuardrailTypeEnkryptai:
+		return true
+	case ConfigurationGuardrailTypeGenericGuardrailApi:
+		return true
+	case ConfigurationGuardrailTypeGrayswan:
+		return true
+	case ConfigurationGuardrailTypeGuardrailsAi:
+		return true
+	case ConfigurationGuardrailTypeHeadroom:
+		return true
+	case ConfigurationGuardrailTypeHiddenlayer:
+		return true
+	case ConfigurationGuardrailTypeIbmGuardrails:
+		return true
+	case ConfigurationGuardrailTypeJavelin:
+		return true
 	case ConfigurationGuardrailTypeLakera:
+		return true
+	case ConfigurationGuardrailTypeLakeraV1:
+		return true
+	case ConfigurationGuardrailTypeLasso:
+		return true
+	case ConfigurationGuardrailTypeMicrosoftPurview:
 		return true
 	case ConfigurationGuardrailTypeModel:
 		return true
 	case ConfigurationGuardrailTypeModelArmor:
 		return true
+	case ConfigurationGuardrailTypeNoma:
+		return true
+	case ConfigurationGuardrailTypeNomaV2:
+		return true
+	case ConfigurationGuardrailTypeOnyx:
+		return true
+	case ConfigurationGuardrailTypeOpenaiModeration:
+		return true
+	case ConfigurationGuardrailTypeOvalix:
+		return true
+	case ConfigurationGuardrailTypePangea:
+		return true
+	case ConfigurationGuardrailTypePanwPrismaAirs:
+		return true
+	case ConfigurationGuardrailTypePillar:
+		return true
 	case ConfigurationGuardrailTypePlugin:
 		return true
 	case ConfigurationGuardrailTypePresidio:
 		return true
+	case ConfigurationGuardrailTypePromptSecurity:
+		return true
+	case ConfigurationGuardrailTypePromptguard:
+		return true
+	case ConfigurationGuardrailTypeQostodianNexus:
+		return true
+	case ConfigurationGuardrailTypeQualifire:
+		return true
+	case ConfigurationGuardrailTypeRepelloai:
+		return true
+	case ConfigurationGuardrailTypeRubrik:
+		return true
+	case ConfigurationGuardrailTypeSemanticGuard:
+		return true
+	case ConfigurationGuardrailTypeSingulr:
+		return true
+	case ConfigurationGuardrailTypeStraiker:
+		return true
+	case ConfigurationGuardrailTypeVigilGuard:
+		return true
 	case ConfigurationGuardrailTypeWebhook:
+		return true
+	case ConfigurationGuardrailTypeXecguard:
+		return true
+	case ConfigurationGuardrailTypeZscalerAiGuard:
 		return true
 	default:
 		return false
@@ -1845,31 +1980,86 @@ func (e CreateGuardrailRequestOnError) Valid() bool {
 
 // Defines values for CreateGuardrailRequestType.
 const (
-	CreateGuardrailRequestTypeAzureContentSafety CreateGuardrailRequestType = "azure.content_safety"
-	CreateGuardrailRequestTypeAzurePromptShields CreateGuardrailRequestType = "azure.prompt_shields"
-	CreateGuardrailRequestTypeBedrock            CreateGuardrailRequestType = "bedrock"
-	CreateGuardrailRequestTypeBuiltinKeywords    CreateGuardrailRequestType = "builtin.keywords"
-	CreateGuardrailRequestTypeBuiltinPii         CreateGuardrailRequestType = "builtin.pii"
-	CreateGuardrailRequestTypeBuiltinRegex       CreateGuardrailRequestType = "builtin.regex"
-	CreateGuardrailRequestTypeBuiltinSchema      CreateGuardrailRequestType = "builtin.schema"
-	CreateGuardrailRequestTypeBuiltinSecrets     CreateGuardrailRequestType = "builtin.secrets"
-	CreateGuardrailRequestTypeBuiltinTools       CreateGuardrailRequestType = "builtin.tools"
-	CreateGuardrailRequestTypeLakera             CreateGuardrailRequestType = "lakera"
-	CreateGuardrailRequestTypeModel              CreateGuardrailRequestType = "model"
-	CreateGuardrailRequestTypeModelArmor         CreateGuardrailRequestType = "model_armor"
-	CreateGuardrailRequestTypePlugin             CreateGuardrailRequestType = "plugin"
-	CreateGuardrailRequestTypePresidio           CreateGuardrailRequestType = "presidio"
-	CreateGuardrailRequestTypeWebhook            CreateGuardrailRequestType = "webhook"
+	CreateGuardrailRequestTypeAim                   CreateGuardrailRequestType = "aim"
+	CreateGuardrailRequestTypeAkto                  CreateGuardrailRequestType = "akto"
+	CreateGuardrailRequestTypeAlice                 CreateGuardrailRequestType = "alice"
+	CreateGuardrailRequestTypeAporia                CreateGuardrailRequestType = "aporia"
+	CreateGuardrailRequestTypeAzureContentSafety    CreateGuardrailRequestType = "azure.content_safety"
+	CreateGuardrailRequestTypeAzurePromptShields    CreateGuardrailRequestType = "azure.prompt_shields"
+	CreateGuardrailRequestTypeBedrock               CreateGuardrailRequestType = "bedrock"
+	CreateGuardrailRequestTypeBuiltinCodeExecution  CreateGuardrailRequestType = "builtin.code_execution"
+	CreateGuardrailRequestTypeBuiltinKeywords       CreateGuardrailRequestType = "builtin.keywords"
+	CreateGuardrailRequestTypeBuiltinPii            CreateGuardrailRequestType = "builtin.pii"
+	CreateGuardrailRequestTypeBuiltinRegex          CreateGuardrailRequestType = "builtin.regex"
+	CreateGuardrailRequestTypeBuiltinSchema         CreateGuardrailRequestType = "builtin.schema"
+	CreateGuardrailRequestTypeBuiltinSecrets        CreateGuardrailRequestType = "builtin.secrets"
+	CreateGuardrailRequestTypeBuiltinToolPermission CreateGuardrailRequestType = "builtin.tool_permission"
+	CreateGuardrailRequestTypeBuiltinTools          CreateGuardrailRequestType = "builtin.tools"
+	CreateGuardrailRequestTypeCatoNetworks          CreateGuardrailRequestType = "cato_networks"
+	CreateGuardrailRequestTypeCiscoAiDefense        CreateGuardrailRequestType = "cisco_ai_defense"
+	CreateGuardrailRequestTypeCompresr              CreateGuardrailRequestType = "compresr"
+	CreateGuardrailRequestTypeConduct               CreateGuardrailRequestType = "conduct"
+	CreateGuardrailRequestTypeCrowdstrikeAidr       CreateGuardrailRequestType = "crowdstrike_aidr"
+	CreateGuardrailRequestTypeDecisionModel         CreateGuardrailRequestType = "decision_model"
+	CreateGuardrailRequestTypeDeepkeep              CreateGuardrailRequestType = "deepkeep"
+	CreateGuardrailRequestTypeDynamoai              CreateGuardrailRequestType = "dynamoai"
+	CreateGuardrailRequestTypeEnkryptai             CreateGuardrailRequestType = "enkryptai"
+	CreateGuardrailRequestTypeGenericGuardrailApi   CreateGuardrailRequestType = "generic_guardrail_api"
+	CreateGuardrailRequestTypeGrayswan              CreateGuardrailRequestType = "grayswan"
+	CreateGuardrailRequestTypeGuardrailsAi          CreateGuardrailRequestType = "guardrails_ai"
+	CreateGuardrailRequestTypeHeadroom              CreateGuardrailRequestType = "headroom"
+	CreateGuardrailRequestTypeHiddenlayer           CreateGuardrailRequestType = "hiddenlayer"
+	CreateGuardrailRequestTypeIbmGuardrails         CreateGuardrailRequestType = "ibm_guardrails"
+	CreateGuardrailRequestTypeJavelin               CreateGuardrailRequestType = "javelin"
+	CreateGuardrailRequestTypeLakera                CreateGuardrailRequestType = "lakera"
+	CreateGuardrailRequestTypeLakeraV1              CreateGuardrailRequestType = "lakera_v1"
+	CreateGuardrailRequestTypeLasso                 CreateGuardrailRequestType = "lasso"
+	CreateGuardrailRequestTypeMicrosoftPurview      CreateGuardrailRequestType = "microsoft_purview"
+	CreateGuardrailRequestTypeModel                 CreateGuardrailRequestType = "model"
+	CreateGuardrailRequestTypeModelArmor            CreateGuardrailRequestType = "model_armor"
+	CreateGuardrailRequestTypeNoma                  CreateGuardrailRequestType = "noma"
+	CreateGuardrailRequestTypeNomaV2                CreateGuardrailRequestType = "noma_v2"
+	CreateGuardrailRequestTypeOnyx                  CreateGuardrailRequestType = "onyx"
+	CreateGuardrailRequestTypeOpenaiModeration      CreateGuardrailRequestType = "openai_moderation"
+	CreateGuardrailRequestTypeOvalix                CreateGuardrailRequestType = "ovalix"
+	CreateGuardrailRequestTypePangea                CreateGuardrailRequestType = "pangea"
+	CreateGuardrailRequestTypePanwPrismaAirs        CreateGuardrailRequestType = "panw_prisma_airs"
+	CreateGuardrailRequestTypePillar                CreateGuardrailRequestType = "pillar"
+	CreateGuardrailRequestTypePlugin                CreateGuardrailRequestType = "plugin"
+	CreateGuardrailRequestTypePresidio              CreateGuardrailRequestType = "presidio"
+	CreateGuardrailRequestTypePromptSecurity        CreateGuardrailRequestType = "prompt_security"
+	CreateGuardrailRequestTypePromptguard           CreateGuardrailRequestType = "promptguard"
+	CreateGuardrailRequestTypeQostodianNexus        CreateGuardrailRequestType = "qostodian_nexus"
+	CreateGuardrailRequestTypeQualifire             CreateGuardrailRequestType = "qualifire"
+	CreateGuardrailRequestTypeRepelloai             CreateGuardrailRequestType = "repelloai"
+	CreateGuardrailRequestTypeRubrik                CreateGuardrailRequestType = "rubrik"
+	CreateGuardrailRequestTypeSemanticGuard         CreateGuardrailRequestType = "semantic_guard"
+	CreateGuardrailRequestTypeSingulr               CreateGuardrailRequestType = "singulr"
+	CreateGuardrailRequestTypeStraiker              CreateGuardrailRequestType = "straiker"
+	CreateGuardrailRequestTypeVigilGuard            CreateGuardrailRequestType = "vigil_guard"
+	CreateGuardrailRequestTypeWebhook               CreateGuardrailRequestType = "webhook"
+	CreateGuardrailRequestTypeXecguard              CreateGuardrailRequestType = "xecguard"
+	CreateGuardrailRequestTypeZscalerAiGuard        CreateGuardrailRequestType = "zscaler_ai_guard"
 )
 
 // Valid indicates whether the value is a known member of the CreateGuardrailRequestType enum.
 func (e CreateGuardrailRequestType) Valid() bool {
 	switch e {
+	case CreateGuardrailRequestTypeAim:
+		return true
+	case CreateGuardrailRequestTypeAkto:
+		return true
+	case CreateGuardrailRequestTypeAlice:
+		return true
+	case CreateGuardrailRequestTypeAporia:
+		return true
 	case CreateGuardrailRequestTypeAzureContentSafety:
 		return true
 	case CreateGuardrailRequestTypeAzurePromptShields:
 		return true
 	case CreateGuardrailRequestTypeBedrock:
+		return true
+	case CreateGuardrailRequestTypeBuiltinCodeExecution:
 		return true
 	case CreateGuardrailRequestTypeBuiltinKeywords:
 		return true
@@ -1881,19 +2071,99 @@ func (e CreateGuardrailRequestType) Valid() bool {
 		return true
 	case CreateGuardrailRequestTypeBuiltinSecrets:
 		return true
+	case CreateGuardrailRequestTypeBuiltinToolPermission:
+		return true
 	case CreateGuardrailRequestTypeBuiltinTools:
 		return true
+	case CreateGuardrailRequestTypeCatoNetworks:
+		return true
+	case CreateGuardrailRequestTypeCiscoAiDefense:
+		return true
+	case CreateGuardrailRequestTypeCompresr:
+		return true
+	case CreateGuardrailRequestTypeConduct:
+		return true
+	case CreateGuardrailRequestTypeCrowdstrikeAidr:
+		return true
+	case CreateGuardrailRequestTypeDecisionModel:
+		return true
+	case CreateGuardrailRequestTypeDeepkeep:
+		return true
+	case CreateGuardrailRequestTypeDynamoai:
+		return true
+	case CreateGuardrailRequestTypeEnkryptai:
+		return true
+	case CreateGuardrailRequestTypeGenericGuardrailApi:
+		return true
+	case CreateGuardrailRequestTypeGrayswan:
+		return true
+	case CreateGuardrailRequestTypeGuardrailsAi:
+		return true
+	case CreateGuardrailRequestTypeHeadroom:
+		return true
+	case CreateGuardrailRequestTypeHiddenlayer:
+		return true
+	case CreateGuardrailRequestTypeIbmGuardrails:
+		return true
+	case CreateGuardrailRequestTypeJavelin:
+		return true
 	case CreateGuardrailRequestTypeLakera:
+		return true
+	case CreateGuardrailRequestTypeLakeraV1:
+		return true
+	case CreateGuardrailRequestTypeLasso:
+		return true
+	case CreateGuardrailRequestTypeMicrosoftPurview:
 		return true
 	case CreateGuardrailRequestTypeModel:
 		return true
 	case CreateGuardrailRequestTypeModelArmor:
 		return true
+	case CreateGuardrailRequestTypeNoma:
+		return true
+	case CreateGuardrailRequestTypeNomaV2:
+		return true
+	case CreateGuardrailRequestTypeOnyx:
+		return true
+	case CreateGuardrailRequestTypeOpenaiModeration:
+		return true
+	case CreateGuardrailRequestTypeOvalix:
+		return true
+	case CreateGuardrailRequestTypePangea:
+		return true
+	case CreateGuardrailRequestTypePanwPrismaAirs:
+		return true
+	case CreateGuardrailRequestTypePillar:
+		return true
 	case CreateGuardrailRequestTypePlugin:
 		return true
 	case CreateGuardrailRequestTypePresidio:
 		return true
+	case CreateGuardrailRequestTypePromptSecurity:
+		return true
+	case CreateGuardrailRequestTypePromptguard:
+		return true
+	case CreateGuardrailRequestTypeQostodianNexus:
+		return true
+	case CreateGuardrailRequestTypeQualifire:
+		return true
+	case CreateGuardrailRequestTypeRepelloai:
+		return true
+	case CreateGuardrailRequestTypeRubrik:
+		return true
+	case CreateGuardrailRequestTypeSemanticGuard:
+		return true
+	case CreateGuardrailRequestTypeSingulr:
+		return true
+	case CreateGuardrailRequestTypeStraiker:
+		return true
+	case CreateGuardrailRequestTypeVigilGuard:
+		return true
 	case CreateGuardrailRequestTypeWebhook:
+		return true
+	case CreateGuardrailRequestTypeXecguard:
+		return true
+	case CreateGuardrailRequestTypeZscalerAiGuard:
 		return true
 	default:
 		return false
@@ -2493,31 +2763,86 @@ func (e GuardrailResponseOnError) Valid() bool {
 
 // Defines values for GuardrailResponseType.
 const (
-	GuardrailResponseTypeAzureContentSafety GuardrailResponseType = "azure.content_safety"
-	GuardrailResponseTypeAzurePromptShields GuardrailResponseType = "azure.prompt_shields"
-	GuardrailResponseTypeBedrock            GuardrailResponseType = "bedrock"
-	GuardrailResponseTypeBuiltinKeywords    GuardrailResponseType = "builtin.keywords"
-	GuardrailResponseTypeBuiltinPii         GuardrailResponseType = "builtin.pii"
-	GuardrailResponseTypeBuiltinRegex       GuardrailResponseType = "builtin.regex"
-	GuardrailResponseTypeBuiltinSchema      GuardrailResponseType = "builtin.schema"
-	GuardrailResponseTypeBuiltinSecrets     GuardrailResponseType = "builtin.secrets"
-	GuardrailResponseTypeBuiltinTools       GuardrailResponseType = "builtin.tools"
-	GuardrailResponseTypeLakera             GuardrailResponseType = "lakera"
-	GuardrailResponseTypeModel              GuardrailResponseType = "model"
-	GuardrailResponseTypeModelArmor         GuardrailResponseType = "model_armor"
-	GuardrailResponseTypePlugin             GuardrailResponseType = "plugin"
-	GuardrailResponseTypePresidio           GuardrailResponseType = "presidio"
-	GuardrailResponseTypeWebhook            GuardrailResponseType = "webhook"
+	GuardrailResponseTypeAim                   GuardrailResponseType = "aim"
+	GuardrailResponseTypeAkto                  GuardrailResponseType = "akto"
+	GuardrailResponseTypeAlice                 GuardrailResponseType = "alice"
+	GuardrailResponseTypeAporia                GuardrailResponseType = "aporia"
+	GuardrailResponseTypeAzureContentSafety    GuardrailResponseType = "azure.content_safety"
+	GuardrailResponseTypeAzurePromptShields    GuardrailResponseType = "azure.prompt_shields"
+	GuardrailResponseTypeBedrock               GuardrailResponseType = "bedrock"
+	GuardrailResponseTypeBuiltinCodeExecution  GuardrailResponseType = "builtin.code_execution"
+	GuardrailResponseTypeBuiltinKeywords       GuardrailResponseType = "builtin.keywords"
+	GuardrailResponseTypeBuiltinPii            GuardrailResponseType = "builtin.pii"
+	GuardrailResponseTypeBuiltinRegex          GuardrailResponseType = "builtin.regex"
+	GuardrailResponseTypeBuiltinSchema         GuardrailResponseType = "builtin.schema"
+	GuardrailResponseTypeBuiltinSecrets        GuardrailResponseType = "builtin.secrets"
+	GuardrailResponseTypeBuiltinToolPermission GuardrailResponseType = "builtin.tool_permission"
+	GuardrailResponseTypeBuiltinTools          GuardrailResponseType = "builtin.tools"
+	GuardrailResponseTypeCatoNetworks          GuardrailResponseType = "cato_networks"
+	GuardrailResponseTypeCiscoAiDefense        GuardrailResponseType = "cisco_ai_defense"
+	GuardrailResponseTypeCompresr              GuardrailResponseType = "compresr"
+	GuardrailResponseTypeConduct               GuardrailResponseType = "conduct"
+	GuardrailResponseTypeCrowdstrikeAidr       GuardrailResponseType = "crowdstrike_aidr"
+	GuardrailResponseTypeDecisionModel         GuardrailResponseType = "decision_model"
+	GuardrailResponseTypeDeepkeep              GuardrailResponseType = "deepkeep"
+	GuardrailResponseTypeDynamoai              GuardrailResponseType = "dynamoai"
+	GuardrailResponseTypeEnkryptai             GuardrailResponseType = "enkryptai"
+	GuardrailResponseTypeGenericGuardrailApi   GuardrailResponseType = "generic_guardrail_api"
+	GuardrailResponseTypeGrayswan              GuardrailResponseType = "grayswan"
+	GuardrailResponseTypeGuardrailsAi          GuardrailResponseType = "guardrails_ai"
+	GuardrailResponseTypeHeadroom              GuardrailResponseType = "headroom"
+	GuardrailResponseTypeHiddenlayer           GuardrailResponseType = "hiddenlayer"
+	GuardrailResponseTypeIbmGuardrails         GuardrailResponseType = "ibm_guardrails"
+	GuardrailResponseTypeJavelin               GuardrailResponseType = "javelin"
+	GuardrailResponseTypeLakera                GuardrailResponseType = "lakera"
+	GuardrailResponseTypeLakeraV1              GuardrailResponseType = "lakera_v1"
+	GuardrailResponseTypeLasso                 GuardrailResponseType = "lasso"
+	GuardrailResponseTypeMicrosoftPurview      GuardrailResponseType = "microsoft_purview"
+	GuardrailResponseTypeModel                 GuardrailResponseType = "model"
+	GuardrailResponseTypeModelArmor            GuardrailResponseType = "model_armor"
+	GuardrailResponseTypeNoma                  GuardrailResponseType = "noma"
+	GuardrailResponseTypeNomaV2                GuardrailResponseType = "noma_v2"
+	GuardrailResponseTypeOnyx                  GuardrailResponseType = "onyx"
+	GuardrailResponseTypeOpenaiModeration      GuardrailResponseType = "openai_moderation"
+	GuardrailResponseTypeOvalix                GuardrailResponseType = "ovalix"
+	GuardrailResponseTypePangea                GuardrailResponseType = "pangea"
+	GuardrailResponseTypePanwPrismaAirs        GuardrailResponseType = "panw_prisma_airs"
+	GuardrailResponseTypePillar                GuardrailResponseType = "pillar"
+	GuardrailResponseTypePlugin                GuardrailResponseType = "plugin"
+	GuardrailResponseTypePresidio              GuardrailResponseType = "presidio"
+	GuardrailResponseTypePromptSecurity        GuardrailResponseType = "prompt_security"
+	GuardrailResponseTypePromptguard           GuardrailResponseType = "promptguard"
+	GuardrailResponseTypeQostodianNexus        GuardrailResponseType = "qostodian_nexus"
+	GuardrailResponseTypeQualifire             GuardrailResponseType = "qualifire"
+	GuardrailResponseTypeRepelloai             GuardrailResponseType = "repelloai"
+	GuardrailResponseTypeRubrik                GuardrailResponseType = "rubrik"
+	GuardrailResponseTypeSemanticGuard         GuardrailResponseType = "semantic_guard"
+	GuardrailResponseTypeSingulr               GuardrailResponseType = "singulr"
+	GuardrailResponseTypeStraiker              GuardrailResponseType = "straiker"
+	GuardrailResponseTypeVigilGuard            GuardrailResponseType = "vigil_guard"
+	GuardrailResponseTypeWebhook               GuardrailResponseType = "webhook"
+	GuardrailResponseTypeXecguard              GuardrailResponseType = "xecguard"
+	GuardrailResponseTypeZscalerAiGuard        GuardrailResponseType = "zscaler_ai_guard"
 )
 
 // Valid indicates whether the value is a known member of the GuardrailResponseType enum.
 func (e GuardrailResponseType) Valid() bool {
 	switch e {
+	case GuardrailResponseTypeAim:
+		return true
+	case GuardrailResponseTypeAkto:
+		return true
+	case GuardrailResponseTypeAlice:
+		return true
+	case GuardrailResponseTypeAporia:
+		return true
 	case GuardrailResponseTypeAzureContentSafety:
 		return true
 	case GuardrailResponseTypeAzurePromptShields:
 		return true
 	case GuardrailResponseTypeBedrock:
+		return true
+	case GuardrailResponseTypeBuiltinCodeExecution:
 		return true
 	case GuardrailResponseTypeBuiltinKeywords:
 		return true
@@ -2529,19 +2854,99 @@ func (e GuardrailResponseType) Valid() bool {
 		return true
 	case GuardrailResponseTypeBuiltinSecrets:
 		return true
+	case GuardrailResponseTypeBuiltinToolPermission:
+		return true
 	case GuardrailResponseTypeBuiltinTools:
 		return true
+	case GuardrailResponseTypeCatoNetworks:
+		return true
+	case GuardrailResponseTypeCiscoAiDefense:
+		return true
+	case GuardrailResponseTypeCompresr:
+		return true
+	case GuardrailResponseTypeConduct:
+		return true
+	case GuardrailResponseTypeCrowdstrikeAidr:
+		return true
+	case GuardrailResponseTypeDecisionModel:
+		return true
+	case GuardrailResponseTypeDeepkeep:
+		return true
+	case GuardrailResponseTypeDynamoai:
+		return true
+	case GuardrailResponseTypeEnkryptai:
+		return true
+	case GuardrailResponseTypeGenericGuardrailApi:
+		return true
+	case GuardrailResponseTypeGrayswan:
+		return true
+	case GuardrailResponseTypeGuardrailsAi:
+		return true
+	case GuardrailResponseTypeHeadroom:
+		return true
+	case GuardrailResponseTypeHiddenlayer:
+		return true
+	case GuardrailResponseTypeIbmGuardrails:
+		return true
+	case GuardrailResponseTypeJavelin:
+		return true
 	case GuardrailResponseTypeLakera:
+		return true
+	case GuardrailResponseTypeLakeraV1:
+		return true
+	case GuardrailResponseTypeLasso:
+		return true
+	case GuardrailResponseTypeMicrosoftPurview:
 		return true
 	case GuardrailResponseTypeModel:
 		return true
 	case GuardrailResponseTypeModelArmor:
 		return true
+	case GuardrailResponseTypeNoma:
+		return true
+	case GuardrailResponseTypeNomaV2:
+		return true
+	case GuardrailResponseTypeOnyx:
+		return true
+	case GuardrailResponseTypeOpenaiModeration:
+		return true
+	case GuardrailResponseTypeOvalix:
+		return true
+	case GuardrailResponseTypePangea:
+		return true
+	case GuardrailResponseTypePanwPrismaAirs:
+		return true
+	case GuardrailResponseTypePillar:
+		return true
 	case GuardrailResponseTypePlugin:
 		return true
 	case GuardrailResponseTypePresidio:
 		return true
+	case GuardrailResponseTypePromptSecurity:
+		return true
+	case GuardrailResponseTypePromptguard:
+		return true
+	case GuardrailResponseTypeQostodianNexus:
+		return true
+	case GuardrailResponseTypeQualifire:
+		return true
+	case GuardrailResponseTypeRepelloai:
+		return true
+	case GuardrailResponseTypeRubrik:
+		return true
+	case GuardrailResponseTypeSemanticGuard:
+		return true
+	case GuardrailResponseTypeSingulr:
+		return true
+	case GuardrailResponseTypeStraiker:
+		return true
+	case GuardrailResponseTypeVigilGuard:
+		return true
 	case GuardrailResponseTypeWebhook:
+		return true
+	case GuardrailResponseTypeXecguard:
+		return true
+	case GuardrailResponseTypeZscalerAiGuard:
 		return true
 	default:
 		return false

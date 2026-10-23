@@ -26,6 +26,7 @@ import (
 
 type ExternalConfig struct {
 	Endpoint           string                    `json:"endpoint,omitempty"`
+	AuthEndpoint       string                    `json:"auth_endpoint,omitempty"`
 	AnonymizerEndpoint string                    `json:"anonymizer_endpoint,omitempty"`
 	CredentialRef      string                    `json:"credential_ref,omitempty"`
 	Network            *egress.ConnectionOptions `json:"network,omitempty"`
@@ -38,8 +39,10 @@ type ExternalConfig struct {
 	Threshold          int                       `json:"threshold,omitempty"`
 	Route              string                    `json:"route,omitempty"`
 	Rule               *ModelRule                `json:"rule,omitempty"`
+	Semantic           *SemanticRule             `json:"semantic,omitempty"`
 	PluginID           string                    `json:"plugin_id,omitempty"`
 	PluginVersion      string                    `json:"plugin_version,omitempty"`
+	Parameters         json.RawMessage           `json:"parameters,omitempty"`
 }
 type ModelRule struct {
 	Pointer  string          `json:"pointer"`
@@ -52,7 +55,7 @@ type ModelRule struct {
 // guardrail evaluator and its network connection.
 func ValidateCredential(secret []byte) error {
 	var c externalCredential
-	if len(secret) > 0 && len(secret) <= 256<<10 && decodeConfig(secret, &c) == nil && (c.APIKey != "" || len(c.SigningKey) >= 32 || (c.AccessKeyID != "" && c.SecretAccessKey != "")) {
+	if len(secret) > 0 && len(secret) <= 256<<10 && decodeConfig(secret, &c) == nil && (c.APIKey != "" || len(c.SigningKey) >= 32 || (c.AccessKeyID != "" && c.SecretAccessKey != "") || (c.ClientID != "" && c.ClientSecret != "")) {
 		return nil
 	}
 	if len(secret) > 0 && len(secret) <= 256<<10 && egress.ValidateConnectionSecret(secret) == nil {
@@ -72,7 +75,13 @@ func ValidateExternal(d Revision) error {
 		}
 		return nil
 	}
-	if d.Type == "model" {
+	if d.Type == "semantic_guard" {
+		if !identifier.MatchString(c.Route) || c.Rule != nil {
+			return errors.New("semantic guardrails require an embedding route and semantic rule")
+		}
+		return ValidateSemantic(c.Semantic)
+	}
+	if d.Type == "model" || d.Type == "decision_model" {
 		if !identifier.MatchString(c.Route) || c.Rule == nil || !categoryID.MatchString(c.Rule.Category) || !json.Valid(c.Rule.Equals) || len(c.Rule.Pointer) > 512 || len(c.Rule.Prompt) > 8192 {
 			return errors.New("invalid model guardrail route or verdict rule")
 		}
@@ -84,6 +93,12 @@ func ValidateExternal(d Revision) error {
 	}
 	if len(c.CredentialRef) < 1 || len(c.CredentialRef) > 100 || strings.ContainsAny(c.CredentialRef, "\r\n\x00") {
 		return errors.New("external guardrails require a credential reference")
+	}
+	if c.AuthEndpoint != "" {
+		u, e := url.Parse(c.AuthEndpoint)
+		if d.Type != "hiddenlayer" || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(c.AuthEndpoint) > 2048 {
+			return errors.New("invalid guardrail authentication endpoint")
+		}
 	}
 	if c.AnonymizerEndpoint != "" {
 		u, e := url.Parse(c.AnonymizerEndpoint)
@@ -99,6 +114,15 @@ func ValidateExternal(d Revision) error {
 	}
 	if d.Type == "model_armor" && (!strings.HasPrefix(c.Template, "projects/") || strings.Contains(c.Template, "..")) {
 		return errors.New("Model Armor requires a template resource")
+	}
+	if vendor, ok := lookupNamedVendor(d.Type); ok {
+		if vendor.validate != nil {
+			return vendor.validate(c.Parameters)
+		}
+		return decodeVendorParameters(c.Parameters, &struct{}{})
+	}
+	if len(c.Parameters) != 0 {
+		return errors.New("this guardrail does not accept vendor parameters")
 	}
 	return nil
 }
@@ -135,6 +159,8 @@ type circuit struct {
 }
 type externalCredential struct {
 	APIKey          string `json:"api_key"`
+	ClientID        string `json:"client_id"`
+	ClientSecret    string `json:"client_secret"`
 	SigningKey      string `json:"signing_key"`
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`
@@ -180,6 +206,12 @@ func (r *ExternalRunner) leave(id string, err error) {
 	}
 }
 func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation) (verdict Verdict, err error) {
+	// One deadline covers credential resolution and every segment/vendor call.
+	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !validPhase(e.Phase) {
+		return verdict, errEvaluation
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(d.TimeoutMS)*time.Millisecond)
+	defer cancel()
 	if !r.enter(d.ID) {
 		return verdict, errEvaluation
 	}
@@ -196,7 +228,15 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 	if err = decodeConfig(d.Configuration, &c); err != nil {
 		return
 	}
-	if d.Type == "model" {
+	if vendor, ok := lookupNamedVendor(d.Type); ok {
+		if err = ValidateExternal(d); err != nil {
+			return
+		}
+		if len(vendor.phases) > 0 && !slices.Contains(vendor.phases, e.Phase) {
+			return verdict, errEvaluation
+		}
+	}
+	if isModelGuardrail(d.Type) {
 		if r.Model == nil {
 			return verdict, errEvaluation
 		}
@@ -210,6 +250,11 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 	}
 	if _, err = r.Egress.ValidateEndpoint(c.Endpoint); err != nil {
 		return
+	}
+	if c.AuthEndpoint != "" {
+		if _, err = r.Egress.ValidateEndpoint(c.AuthEndpoint); err != nil {
+			return
+		}
 	}
 	if c.AnonymizerEndpoint != "" {
 		if _, err = r.Egress.ValidateEndpoint(c.AnonymizerEndpoint); err != nil {
@@ -262,19 +307,30 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 		return
 	}
 	verdict = Verdict{Action: "pass"}
+	missingReplacement := false
 	for _, segment := range e.Segments {
 		var part Verdict
 		part, err = r.vendor(ctx, client, c, credential, d.Type, e.Phase, segment)
 		if err != nil {
 			return
 		}
+		if err = validateVerdict(part, []Segment{segment}); err != nil {
+			return
+		}
 		if part.Action != "pass" {
+			missingReplacement = missingReplacement || len(part.Redactions) == 0
 			verdict.Action = Block
 			for _, category := range part.Categories {
 				verdict.Categories = appendCategory(verdict.Categories, category)
 			}
 			verdict.Redactions = append(verdict.Redactions, part.Redactions...)
 		}
+	}
+	// A transformation is safe only if every detected segment is repaired.
+	// Keep the finding, but omit partial repairs so the engine refuses it even
+	// when the definition's service-error policy is fail_open.
+	if missingReplacement {
+		verdict.Redactions = nil
 	}
 	return
 }
@@ -318,6 +374,9 @@ func externalJSON(ctx context.Context, client *http.Client, endpoint string, bod
 	return raw, nil
 }
 func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind, phase string, s Segment) (Verdict, error) {
+	if vendor, ok := lookupNamedVendor(kind); ok {
+		return vendor.evaluate(ctx, client, c, credential, phase, s)
+	}
 	endpoint := strings.TrimRight(c.Endpoint, "/")
 	var body any
 	auth := func(req *http.Request, _ []byte) error {
