@@ -1,6 +1,9 @@
 package connectors
 
-import "github.com/tyk-swe/olp/internal/vendors"
+import (
+	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/vendors"
+)
 
 // Supports is the reviewed connector matrix, distinct from a live model
 // certification. Generic endpoints never acquire native cross-surface
@@ -10,6 +13,9 @@ import "github.com/tyk-swe/olp/internal/vendors"
 // operations exist only on the OpenAI surface of the OpenAI connector
 // families; no other connector may serve them.
 func Supports(kind, vendor, operation, surface, mode string) bool {
+	if retainedapi.Operation(operation) {
+		return vendor == "google" && retainedapi.Supports(kind, operation, surface, mode)
+	}
 	if surface != "openai" && surface != "anthropic" && surface != "gemini" && surface != "bedrock" && surface != "native" {
 		return false
 	}

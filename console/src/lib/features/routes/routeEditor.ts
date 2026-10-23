@@ -214,6 +214,7 @@ export const operationOptions = [
   ['search', 'Web search'],
   ['moderation', 'Moderation'],
   ['batch', 'Batches'],
+  ['agent_resource', 'Managed agents'],
   ['realtime', 'Realtime sessions'],
   ['bedrock_invoke', 'Bedrock InvokeModel']
 ] as const;
@@ -233,6 +234,7 @@ export function toRouteModelOptions(
 }
 
 export function surfacesFor(operation: string): string[] {
+  if (operation === 'agent_resource') return ['gemini'];
   if (operation === 'bedrock_invoke') return ['bedrock'];
   if (operation === 'generation')
     return ['openai', 'anthropic', 'gemini', 'bedrock'];

@@ -19,7 +19,7 @@ are stable identifiers; independent work can proceed in parallel.
 | Workstream | Next implementation | Dependencies |
 | --- | --- | --- |
 | Guardrail integrations | Implemented RM2; live qualification tracked separately | Existing engine, credential and egress contracts |
-| Retained APIs and retrieval | RM5.1–RM5.9, independently by family | Implemented RM4 foundations and each family's ownership and pricing contracts |
+| Retained APIs and retrieval | RM5.1–RM5.8, independently by family; RM5.9 implemented | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | RM7.1 direct Streamable HTTP execution | Implemented RM4 accounting and agent contracts, plus existing tool governance |
 | Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | RM7.1 direct execution |
@@ -115,7 +115,7 @@ independently of agent work.
 
 ### RM5: Retained APIs and retrieval
 
-**Status: Planned.** **Owners:** resource and connector maintainers, with
+**Status: In progress.** **Owners:** resource and connector maintainers, with
 accounting and SDK owners. **Dependencies:** RM4 operation contracts,
 owner/credential affinity and priced units; asynchronous jobs also use the
 implemented durable accounting foundation.
@@ -141,8 +141,12 @@ implemented durable accounting foundation.
   retained file/version ownership.
 - [ ] **RM5.8 — Context caches:** implement Gemini `cachedContents`, owner-bound
   IDs, expiry and storage accounting/reconciliation.
-- [ ] **RM5.9 — Managed-agent resources:** implement Gemini native resource
-  lifecycle and isolation. Agent execution is covered by RM8.
+- [x] **RM5.9 — Managed-agent resources:** Gemini v1beta create/list/get/delete,
+  API-key ownership, pinned credentials, persistent creation fences, metadata
+  discovery and console workflows. PATCH and native environment references are
+  explicitly unsupported. Agent execution is covered by RM8. Focused local
+  checks pass; service integration scenarios are compiled, not yet executed,
+  and live qualification remains required.
 
 Families can proceed independently. Query-only retrieval can be implemented
 before asynchronous jobs. Retrieval-backed tools need only the implemented

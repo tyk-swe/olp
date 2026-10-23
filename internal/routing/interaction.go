@@ -135,6 +135,18 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
+		if op == "agent_resource" {
+			if !route.Fidelity.Strict() {
+				return nil, fmt.Errorf("agent resources require a strict route")
+			}
+			for _, target := range route.Targets {
+				provider, ok := s.Providers[target.ProviderID]
+				if !ok || !provider.Connector().Supports(op, "gemini", "unary") {
+					return nil, fmt.Errorf("route target cannot serve the agent resource contract")
+				}
+			}
+			continue
+		}
 		if !route.Fidelity.Strict() && !operationregistry.TransformedServing(op) {
 			continue
 		}

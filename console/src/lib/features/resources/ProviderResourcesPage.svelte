@@ -12,6 +12,7 @@
     emptyCursorHistory
   } from '$lib/lists/pagination';
   import { formatDate } from '$lib/format';
+  import AgentResources from './AgentResources.svelte';
 
   const kinds: ProviderResourceFilters['kind'][] = [
     'file',
@@ -27,7 +28,8 @@
     'gemini_upload',
     'gemini_file',
     'gemini_batch',
-    'cloud_batch'
+    'cloud_batch',
+    'agent_resource'
   ];
 
   let kind = $state('');
@@ -78,8 +80,8 @@
     <p class="eyebrow">Operations</p>
     <h1 class="page-title">Provider Resources</h1>
     <p class="page-description">
-      Metadata-only mappings for provider resources and batch settlement.
-      Provider content never appears in the console.
+      Inspect resource ownership and settlement, or manage resources with an
+      inference API key.
     </p>
   </div>
   <button
@@ -89,6 +91,7 @@
     disabled={resources.isFetching}>Refresh</button
   >
 </div>
+<AgentResources />
 <form
   class="card filters"
   aria-label="Provider resource filters"

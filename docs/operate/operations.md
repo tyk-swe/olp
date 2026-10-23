@@ -486,6 +486,46 @@ External adapters are tested against local contract fakes. Live-account vendor
 qualification and reference-hardware performance qualification must be recorded
 separately before declaring the guardrail release checklist complete.
 
+## Managed Gemini resources
+
+Use the `gemini-agents` profile at revision `1` with a Gemini API-key credential
+and a `/v1beta` endpoint. Certify `agent_resource/gemini/unary`, then publish a
+route for that capability. Inference keys must allow the route and provider
+state. Resource-control routes do not admit configured execution prices or
+rate cards; running an agent is outside this API.
+
+The provider-resources console supports create, list, inspect and delete using
+an inference key held in page memory. The management API's
+`GET /api/v1/provider-resource-contracts` exposes implemented capability metadata
+to the generated management SDK, CLI and MCP. Other declared families remain
+unavailable until their provider and accounting implementations are complete.
+
+Creates require `X-OLP-Route` and a stable `Idempotency-Key`. A successful or
+ambiguous create returns `X-OLP-Resource-ID`. Recovery compares the original
+caller request before selecting a target, so republishing the route or losing
+capacity does not lose the recovery ID. Equivalent JSON whitespace and object
+key order do not change the identity; changed request content returns an
+idempotency conflict. Retrying a submitted identity returns 409 and cannot
+dispatch another create. Inspect that local ID instead;
+do not change the submission key to retry an ambiguous request. A
+`submission_unknown` resource requires provider-side investigation. It cannot
+be safely adopted by guessing a provider ID, automatically redispatched or
+cleared by a retention timer. A crash before dispatch likewise retains its fence.
+
+Listing returns only resources created by the inference key, with local
+pagination tokens. Provider-deleted agents are tombstoned and skipped without
+blocking later pages. Reads and deletes enforce the original route's admission
+limits and use the resource's original provider,
+target and credential version. Revoked or missing credentials yield
+`provider_resource_credential_unavailable`; replacements never inherit access.
+Foreign IDs return 404. Provider errors are sanitized. Native environment
+references and unbound nested IDs are refused. No agent definitions, prompts,
+tool content or provider results are stored in resource metadata.
+
+Before release, run the service-backed retained-agent ownership, route-limit,
+replay-recovery and deletion scenarios and live qualification against the pinned Gemini
+contract. The local implementation checks do not establish those results.
+
 ## Response cache
 
 Response caching is opt-in per route and uses `OLP_CACHE_VALKEY_URL` (or its

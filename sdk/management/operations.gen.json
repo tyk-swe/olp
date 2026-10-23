@@ -19780,6 +19780,29 @@
     }
   },
   {
+    "name": "list_provider_resource_contracts",
+    "group": "provider-resources",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/provider-resource-contracts",
+    "description": "Reviewed resource lifecycle contracts. Only entries with implemented=true are selectable; declarations do not enable native APIs.",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_provider_resources",
     "group": "provider-resources",
     "method": "GET",
@@ -19869,7 +19892,24 @@
                 "gemini_upload",
                 "gemini_file",
                 "gemini_batch",
-                "cloud_batch"
+                "cloud_batch",
+                "fine_tuning_job",
+                "fine_tuning_event",
+                "fine_tuning_checkpoint",
+                "vector_store",
+                "vector_store_file",
+                "vector_store_batch",
+                "conversation",
+                "conversation_item",
+                "container",
+                "container_file",
+                "eval",
+                "eval_run",
+                "eval_output_item",
+                "skill",
+                "skill_version",
+                "context_cache",
+                "agent_resource"
               ],
               "type": "string"
             },

@@ -398,6 +398,9 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	if !configurationCertifiable(cfg, tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
+	if tuple.Operation == "agent_resource" {
+		return s.certifyAgentResources(ctx, cfg, credential, model)
+	}
 	if cfg.ProfileID == "gemini-interactions" && tuple.Operation == "generation" && tuple.Surface == "gemini" {
 		return s.certifyGeminiInteraction(ctx, cfg, credential, model, tuple.Mode, maxEventBytes)
 	}

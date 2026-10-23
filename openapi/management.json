@@ -9127,7 +9127,24 @@
               "gemini_upload",
               "gemini_file",
               "gemini_batch",
-              "cloud_batch"
+              "cloud_batch",
+              "fine_tuning_job",
+              "fine_tuning_event",
+              "fine_tuning_checkpoint",
+              "vector_store",
+              "vector_store_file",
+              "vector_store_batch",
+              "conversation",
+              "conversation_item",
+              "container",
+              "container_file",
+              "eval",
+              "eval_run",
+              "eval_output_item",
+              "skill",
+              "skill_version",
+              "context_cache",
+              "agent_resource"
             ],
             "type": "string"
           },
@@ -25936,6 +25953,69 @@
         "required": [
           "name"
         ]
+      },
+      "ProviderResourceContract": {
+        "type": "object",
+        "required": [
+          "operation",
+          "surface",
+          "kind",
+          "path",
+          "methods",
+          "providers",
+          "implemented",
+          "metered"
+        ],
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "implemented": {
+            "type": "boolean"
+          },
+          "metered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProviderResourceContractList": {
+        "type": "object",
+        "required": [
+          "revision",
+          "items"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceContract"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -33429,7 +33509,24 @@
                 "gemini_upload",
                 "gemini_file",
                 "gemini_batch",
-                "cloud_batch"
+                "cloud_batch",
+                "fine_tuning_job",
+                "fine_tuning_event",
+                "fine_tuning_checkpoint",
+                "vector_store",
+                "vector_store_file",
+                "vector_store_batch",
+                "conversation",
+                "conversation_item",
+                "container",
+                "container_file",
+                "eval",
+                "eval_run",
+                "eval_output_item",
+                "skill",
+                "skill_version",
+                "context_cache",
+                "agent_resource"
               ],
               "type": "string"
             }
@@ -61739,6 +61836,79 @@
             "description": "Observed ETag required"
           }
         }
+      }
+    },
+    "/api/v1/provider-resource-contracts": {
+      "get": {
+        "description": "Reviewed resource lifecycle contracts. Only entries with implemented=true are selectable; declarations do not enable native APIs.",
+        "operationId": "list_provider_resource_contracts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResourceContractList"
+                }
+              }
+            },
+            "description": "Resource capability catalogue"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid filter value"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
       }
     }
   },

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -234,6 +235,7 @@ func capabilityOptions() []CapabilityInput {
 	// Native generation dialects, which only their profiles serve.
 	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"), tuple("batch", "native", "unary"))
 	out = append(out, tuple("decision", "native", "unary"))
+	out = append(out, tuple("agent_resource", "gemini", "unary"))
 	return out
 }
 
@@ -301,6 +303,9 @@ func reviewedMedia(kind, vendor, operation string) bool {
 }
 
 func certifiable(kind, vendor string, c CapabilityInput) bool {
+	if retainedapi.Operation(c.Operation) {
+		return vendor == "google" && retainedapi.Supports(kind, c.Operation, c.Surface, c.Mode)
+	}
 	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
 		return false
 	}

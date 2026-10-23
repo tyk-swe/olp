@@ -76,7 +76,7 @@ func retainedContract(strict bool, current routing.RouteFidelity, use retainedUs
 // nothing about the contract (known is false).
 func strictResourceKind(kind string) (strict, known bool) {
 	switch kind {
-	case resources.KindStrictResponse, resources.KindStrictFile, resources.KindStrictBatch, resources.KindContinuation:
+	case resources.KindStrictResponse, resources.KindStrictFile, resources.KindStrictBatch, resources.KindContinuation, "agent_resource":
 		return true, true
 	case resources.KindResponse, resources.KindFile, resources.KindBatch,
 		resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiUpload,

@@ -362,8 +362,12 @@ require RM4.2–RM4.3; query-only retrieval does not wait for those jobs.
   verify retained file/version ownership without local code execution.
 - [ ] **RM5.8 — Add context caches:** implement Gemini `cachedContents`;
   verify owner-bound IDs, expiry and explicit storage pricing/reconciliation.
-- [ ] **RM5.9 — Add managed-agent resources:** implement Gemini native lifecycle
-  and isolation; keep resource management distinct from RM8 A2A/tool execution.
+- [x] **RM5.9 — Add managed-agent resources:** Gemini v1beta create/list/get/delete
+  with owner-scoped IDs, immutable affinity, submission fences and console
+  workflows. The pinned SDK does not expose PATCH. Native environment references
+  remain unsupported; resource control refuses configured execution pricing.
+  Service integration scenarios compile; execution and live qualification remain
+  required. RM8 A2A/tool execution remains separate.
 
 **Exit:** each family passes the [shared exit criteria](#exit-criteria), including
 local lifecycle/failure evidence and separately recorded live qualification.

@@ -4113,25 +4113,44 @@ func (e ProviderProbeResultStatus) Valid() bool {
 
 // Defines values for ProviderResourceItemKind.
 const (
-	ProviderResourceItemKindAnthropicBatch ProviderResourceItemKind = "anthropic_batch"
-	ProviderResourceItemKindAnthropicFile  ProviderResourceItemKind = "anthropic_file"
-	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
-	ProviderResourceItemKindCloudBatch     ProviderResourceItemKind = "cloud_batch"
-	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
-	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
-	ProviderResourceItemKindGeminiBatch    ProviderResourceItemKind = "gemini_batch"
-	ProviderResourceItemKindGeminiFile     ProviderResourceItemKind = "gemini_file"
-	ProviderResourceItemKindGeminiUpload   ProviderResourceItemKind = "gemini_upload"
-	ProviderResourceItemKindInteraction    ProviderResourceItemKind = "interaction"
-	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
-	ProviderResourceItemKindStrictBatch    ProviderResourceItemKind = "strict_batch"
-	ProviderResourceItemKindStrictFile     ProviderResourceItemKind = "strict_file"
-	ProviderResourceItemKindStrictResponse ProviderResourceItemKind = "strict_response"
+	ProviderResourceItemKindAgentResource        ProviderResourceItemKind = "agent_resource"
+	ProviderResourceItemKindAnthropicBatch       ProviderResourceItemKind = "anthropic_batch"
+	ProviderResourceItemKindAnthropicFile        ProviderResourceItemKind = "anthropic_file"
+	ProviderResourceItemKindBatch                ProviderResourceItemKind = "batch"
+	ProviderResourceItemKindCloudBatch           ProviderResourceItemKind = "cloud_batch"
+	ProviderResourceItemKindContainer            ProviderResourceItemKind = "container"
+	ProviderResourceItemKindContainerFile        ProviderResourceItemKind = "container_file"
+	ProviderResourceItemKindContextCache         ProviderResourceItemKind = "context_cache"
+	ProviderResourceItemKindContinuation         ProviderResourceItemKind = "continuation"
+	ProviderResourceItemKindConversation         ProviderResourceItemKind = "conversation"
+	ProviderResourceItemKindConversationItem     ProviderResourceItemKind = "conversation_item"
+	ProviderResourceItemKindEval                 ProviderResourceItemKind = "eval"
+	ProviderResourceItemKindEvalOutputItem       ProviderResourceItemKind = "eval_output_item"
+	ProviderResourceItemKindEvalRun              ProviderResourceItemKind = "eval_run"
+	ProviderResourceItemKindFile                 ProviderResourceItemKind = "file"
+	ProviderResourceItemKindFineTuningCheckpoint ProviderResourceItemKind = "fine_tuning_checkpoint"
+	ProviderResourceItemKindFineTuningEvent      ProviderResourceItemKind = "fine_tuning_event"
+	ProviderResourceItemKindFineTuningJob        ProviderResourceItemKind = "fine_tuning_job"
+	ProviderResourceItemKindGeminiBatch          ProviderResourceItemKind = "gemini_batch"
+	ProviderResourceItemKindGeminiFile           ProviderResourceItemKind = "gemini_file"
+	ProviderResourceItemKindGeminiUpload         ProviderResourceItemKind = "gemini_upload"
+	ProviderResourceItemKindInteraction          ProviderResourceItemKind = "interaction"
+	ProviderResourceItemKindResponse             ProviderResourceItemKind = "response"
+	ProviderResourceItemKindSkill                ProviderResourceItemKind = "skill"
+	ProviderResourceItemKindSkillVersion         ProviderResourceItemKind = "skill_version"
+	ProviderResourceItemKindStrictBatch          ProviderResourceItemKind = "strict_batch"
+	ProviderResourceItemKindStrictFile           ProviderResourceItemKind = "strict_file"
+	ProviderResourceItemKindStrictResponse       ProviderResourceItemKind = "strict_response"
+	ProviderResourceItemKindVectorStore          ProviderResourceItemKind = "vector_store"
+	ProviderResourceItemKindVectorStoreBatch     ProviderResourceItemKind = "vector_store_batch"
+	ProviderResourceItemKindVectorStoreFile      ProviderResourceItemKind = "vector_store_file"
 )
 
 // Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
 func (e ProviderResourceItemKind) Valid() bool {
 	switch e {
+	case ProviderResourceItemKindAgentResource:
+		return true
 	case ProviderResourceItemKindAnthropicBatch:
 		return true
 	case ProviderResourceItemKindAnthropicFile:
@@ -4140,9 +4159,31 @@ func (e ProviderResourceItemKind) Valid() bool {
 		return true
 	case ProviderResourceItemKindCloudBatch:
 		return true
+	case ProviderResourceItemKindContainer:
+		return true
+	case ProviderResourceItemKindContainerFile:
+		return true
+	case ProviderResourceItemKindContextCache:
+		return true
 	case ProviderResourceItemKindContinuation:
 		return true
+	case ProviderResourceItemKindConversation:
+		return true
+	case ProviderResourceItemKindConversationItem:
+		return true
+	case ProviderResourceItemKindEval:
+		return true
+	case ProviderResourceItemKindEvalOutputItem:
+		return true
+	case ProviderResourceItemKindEvalRun:
+		return true
 	case ProviderResourceItemKindFile:
+		return true
+	case ProviderResourceItemKindFineTuningCheckpoint:
+		return true
+	case ProviderResourceItemKindFineTuningEvent:
+		return true
+	case ProviderResourceItemKindFineTuningJob:
 		return true
 	case ProviderResourceItemKindGeminiBatch:
 		return true
@@ -4154,11 +4195,21 @@ func (e ProviderResourceItemKind) Valid() bool {
 		return true
 	case ProviderResourceItemKindResponse:
 		return true
+	case ProviderResourceItemKindSkill:
+		return true
+	case ProviderResourceItemKindSkillVersion:
+		return true
 	case ProviderResourceItemKindStrictBatch:
 		return true
 	case ProviderResourceItemKindStrictFile:
 		return true
 	case ProviderResourceItemKindStrictResponse:
+		return true
+	case ProviderResourceItemKindVectorStore:
+		return true
+	case ProviderResourceItemKindVectorStoreBatch:
+		return true
+	case ProviderResourceItemKindVectorStoreFile:
 		return true
 	default:
 		return false
@@ -5511,25 +5562,44 @@ func (e SetPromptLabelParamsLabel) Valid() bool {
 
 // Defines values for ListProviderResourcesParamsKind.
 const (
-	ListProviderResourcesParamsKindAnthropicBatch ListProviderResourcesParamsKind = "anthropic_batch"
-	ListProviderResourcesParamsKindAnthropicFile  ListProviderResourcesParamsKind = "anthropic_file"
-	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
-	ListProviderResourcesParamsKindCloudBatch     ListProviderResourcesParamsKind = "cloud_batch"
-	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
-	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
-	ListProviderResourcesParamsKindGeminiBatch    ListProviderResourcesParamsKind = "gemini_batch"
-	ListProviderResourcesParamsKindGeminiFile     ListProviderResourcesParamsKind = "gemini_file"
-	ListProviderResourcesParamsKindGeminiUpload   ListProviderResourcesParamsKind = "gemini_upload"
-	ListProviderResourcesParamsKindInteraction    ListProviderResourcesParamsKind = "interaction"
-	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
-	ListProviderResourcesParamsKindStrictBatch    ListProviderResourcesParamsKind = "strict_batch"
-	ListProviderResourcesParamsKindStrictFile     ListProviderResourcesParamsKind = "strict_file"
-	ListProviderResourcesParamsKindStrictResponse ListProviderResourcesParamsKind = "strict_response"
+	ListProviderResourcesParamsKindAgentResource        ListProviderResourcesParamsKind = "agent_resource"
+	ListProviderResourcesParamsKindAnthropicBatch       ListProviderResourcesParamsKind = "anthropic_batch"
+	ListProviderResourcesParamsKindAnthropicFile        ListProviderResourcesParamsKind = "anthropic_file"
+	ListProviderResourcesParamsKindBatch                ListProviderResourcesParamsKind = "batch"
+	ListProviderResourcesParamsKindCloudBatch           ListProviderResourcesParamsKind = "cloud_batch"
+	ListProviderResourcesParamsKindContainer            ListProviderResourcesParamsKind = "container"
+	ListProviderResourcesParamsKindContainerFile        ListProviderResourcesParamsKind = "container_file"
+	ListProviderResourcesParamsKindContextCache         ListProviderResourcesParamsKind = "context_cache"
+	ListProviderResourcesParamsKindContinuation         ListProviderResourcesParamsKind = "continuation"
+	ListProviderResourcesParamsKindConversation         ListProviderResourcesParamsKind = "conversation"
+	ListProviderResourcesParamsKindConversationItem     ListProviderResourcesParamsKind = "conversation_item"
+	ListProviderResourcesParamsKindEval                 ListProviderResourcesParamsKind = "eval"
+	ListProviderResourcesParamsKindEvalOutputItem       ListProviderResourcesParamsKind = "eval_output_item"
+	ListProviderResourcesParamsKindEvalRun              ListProviderResourcesParamsKind = "eval_run"
+	ListProviderResourcesParamsKindFile                 ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindFineTuningCheckpoint ListProviderResourcesParamsKind = "fine_tuning_checkpoint"
+	ListProviderResourcesParamsKindFineTuningEvent      ListProviderResourcesParamsKind = "fine_tuning_event"
+	ListProviderResourcesParamsKindFineTuningJob        ListProviderResourcesParamsKind = "fine_tuning_job"
+	ListProviderResourcesParamsKindGeminiBatch          ListProviderResourcesParamsKind = "gemini_batch"
+	ListProviderResourcesParamsKindGeminiFile           ListProviderResourcesParamsKind = "gemini_file"
+	ListProviderResourcesParamsKindGeminiUpload         ListProviderResourcesParamsKind = "gemini_upload"
+	ListProviderResourcesParamsKindInteraction          ListProviderResourcesParamsKind = "interaction"
+	ListProviderResourcesParamsKindResponse             ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindSkill                ListProviderResourcesParamsKind = "skill"
+	ListProviderResourcesParamsKindSkillVersion         ListProviderResourcesParamsKind = "skill_version"
+	ListProviderResourcesParamsKindStrictBatch          ListProviderResourcesParamsKind = "strict_batch"
+	ListProviderResourcesParamsKindStrictFile           ListProviderResourcesParamsKind = "strict_file"
+	ListProviderResourcesParamsKindStrictResponse       ListProviderResourcesParamsKind = "strict_response"
+	ListProviderResourcesParamsKindVectorStore          ListProviderResourcesParamsKind = "vector_store"
+	ListProviderResourcesParamsKindVectorStoreBatch     ListProviderResourcesParamsKind = "vector_store_batch"
+	ListProviderResourcesParamsKindVectorStoreFile      ListProviderResourcesParamsKind = "vector_store_file"
 )
 
 // Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
 func (e ListProviderResourcesParamsKind) Valid() bool {
 	switch e {
+	case ListProviderResourcesParamsKindAgentResource:
+		return true
 	case ListProviderResourcesParamsKindAnthropicBatch:
 		return true
 	case ListProviderResourcesParamsKindAnthropicFile:
@@ -5538,9 +5608,31 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 		return true
 	case ListProviderResourcesParamsKindCloudBatch:
 		return true
+	case ListProviderResourcesParamsKindContainer:
+		return true
+	case ListProviderResourcesParamsKindContainerFile:
+		return true
+	case ListProviderResourcesParamsKindContextCache:
+		return true
 	case ListProviderResourcesParamsKindContinuation:
 		return true
+	case ListProviderResourcesParamsKindConversation:
+		return true
+	case ListProviderResourcesParamsKindConversationItem:
+		return true
+	case ListProviderResourcesParamsKindEval:
+		return true
+	case ListProviderResourcesParamsKindEvalOutputItem:
+		return true
+	case ListProviderResourcesParamsKindEvalRun:
+		return true
 	case ListProviderResourcesParamsKindFile:
+		return true
+	case ListProviderResourcesParamsKindFineTuningCheckpoint:
+		return true
+	case ListProviderResourcesParamsKindFineTuningEvent:
+		return true
+	case ListProviderResourcesParamsKindFineTuningJob:
 		return true
 	case ListProviderResourcesParamsKindGeminiBatch:
 		return true
@@ -5552,11 +5644,21 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 		return true
 	case ListProviderResourcesParamsKindResponse:
 		return true
+	case ListProviderResourcesParamsKindSkill:
+		return true
+	case ListProviderResourcesParamsKindSkillVersion:
+		return true
 	case ListProviderResourcesParamsKindStrictBatch:
 		return true
 	case ListProviderResourcesParamsKindStrictFile:
 		return true
 	case ListProviderResourcesParamsKindStrictResponse:
+		return true
+	case ListProviderResourcesParamsKindVectorStore:
+		return true
+	case ListProviderResourcesParamsKindVectorStoreBatch:
+		return true
+	case ListProviderResourcesParamsKindVectorStoreFile:
 		return true
 	default:
 		return false
@@ -10793,6 +10895,24 @@ type ProviderQuotaUsage struct {
 	ConcurrentRequests int64 `json:"concurrent_requests"`
 	RequestsThisMinute int64 `json:"requests_this_minute"`
 	TokensThisMinute   int64 `json:"tokens_this_minute"`
+}
+
+// ProviderResourceContract defines model for ProviderResourceContract.
+type ProviderResourceContract struct {
+	Implemented bool     `json:"implemented"`
+	Kind        string   `json:"kind"`
+	Metered     bool     `json:"metered"`
+	Methods     []string `json:"methods"`
+	Operation   string   `json:"operation"`
+	Path        string   `json:"path"`
+	Providers   []string `json:"providers"`
+	Surface     string   `json:"surface"`
+}
+
+// ProviderResourceContractList defines model for ProviderResourceContractList.
+type ProviderResourceContractList struct {
+	Items    []ProviderResourceContract `json:"items"`
+	Revision string                     `json:"revision"`
 }
 
 // ProviderResourceItem Metadata-only provider resource mapping. Rows never carry prompts, file bytes, response bodies, JSONL lines, tool payloads, audio, or output content.

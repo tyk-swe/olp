@@ -35,16 +35,20 @@ type geminiReplyGate struct {
 
 type geminiLifecycleProvider struct {
 	*httptest.Server
-	mu              sync.Mutex
-	calls           []geminiLifecycleCall
-	sequence        int
-	slowSent        atomic.Int32
-	slowDone        chan struct{}
-	badAck          atomic.Bool
-	escapedCreateID atomic.Bool
-	escapedReadID   atomic.Bool
-	escapedStreamID atomic.Bool
-	replyGate       atomic.Pointer[geminiReplyGate]
+	mu                   sync.Mutex
+	calls                []geminiLifecycleCall
+	sequence             int
+	missingAgents        map[string]bool
+	agents               map[string]map[string]any
+	agentReadDelay       atomic.Int64
+	agentResponsePadding atomic.Int64
+	slowSent             atomic.Int32
+	slowDone             chan struct{}
+	badAck               atomic.Bool
+	escapedCreateID      atomic.Bool
+	escapedReadID        atomic.Bool
+	escapedStreamID      atomic.Bool
+	replyGate            atomic.Pointer[geminiReplyGate]
 	// deleteMissing makes a delete answer that the Interaction does not exist, as
 	// it does for one an earlier delete whose response was lost already removed.
 	deleteMissing   atomic.Bool
@@ -79,6 +83,8 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 		p.calls = append(p.calls, geminiLifecycleCall{r.Method, r.URL.Path, r.URL.RawQuery, bytes.Clone(body), r.Header.Get("X-Goog-Api-Key")})
 		p.sequence++
 		id := fmt.Sprintf("v1_fixture_%d", p.sequence)
+		agentMissing := p.missingAgents[strings.TrimPrefix(r.URL.Path, "/v1beta/agents/")]
+		agent := p.agents[strings.TrimPrefix(r.URL.Path, "/v1beta/agents/")]
 		p.mu.Unlock()
 		if gate := p.replyGate.Load(); gate != nil && r.Method == gate.method && strings.HasSuffix(r.URL.Path, gate.suffix) {
 			close(gate.reached)
@@ -88,6 +94,10 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				return
 			}
 		}
+		if agentMissing && (r.Method == http.MethodGet || r.Method == http.MethodDelete) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if reply := p.accountingReply.Load(); reply != nil && strings.HasPrefix(r.URL.Path, "/v1beta/interactions/") &&
 			(r.Method == http.MethodGet || r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel")) {
 			id = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1beta/interactions/"), "/cancel")
@@ -95,6 +105,48 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 			return
 		}
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/agents":
+			if p.badAck.Load() {
+				writeJSON(w, map[string]any{"invalid": true})
+				return
+			}
+			created := map[string]any{}
+			_ = json.Unmarshal(body, &created)
+			created["id"] = id
+			if padding := p.agentResponsePadding.Load(); padding > 0 {
+				created["description"] = strings.Repeat("x", int(padding))
+			}
+			if _, present := created["base_agent"]; !present {
+				created["base_agent"] = ""
+			}
+			p.mu.Lock()
+			if p.agents == nil {
+				p.agents = make(map[string]map[string]any)
+			}
+			p.agents[id] = created
+			p.mu.Unlock()
+			writeJSON(w, created)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/agents":
+			writeJSON(w, map[string]any{"agents": []any{map[string]any{"id": "foreign-native-agent"}}})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
+			if padding := p.agentResponsePadding.Load(); padding > 0 {
+				writeJSON(w, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1beta/agents/"), "description": strings.Repeat("x", int(padding))})
+				return
+			}
+			if delay := time.Duration(p.agentReadDelay.Load()); delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-r.Context().Done():
+					return
+				}
+			}
+			if agent != nil {
+				writeJSON(w, agent)
+			} else {
+				writeJSON(w, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1beta/agents/"), "description": "created agent"})
+			}
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1beta/agents/"):
+			writeJSON(w, map[string]any{})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
 			var input struct {
 				Stream     bool `json:"stream"`
@@ -287,6 +339,9 @@ func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, pr
 	capabilities := []any{map[string]any{"operation": operation, "surface": "gemini", "mode": mode}}
 	if profile == "gemini-interactions" {
 		capabilities = append(capabilities, map[string]any{"operation": operation, "surface": "gemini", "mode": "streaming"})
+	} else if profile == "gemini-agents" {
+		operation = "agent_resource"
+		capabilities = []any{map[string]any{"operation": operation, "surface": "gemini", "mode": "unary"}}
 	} else {
 		capabilities = []any{map[string]any{"operation": "realtime", "surface": "gemini", "mode": "realtime"}}
 		operation = "realtime"

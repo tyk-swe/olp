@@ -143,6 +143,9 @@ func (d *simulatedDemand) measure(target routing.Target, prompt *estimate.Prompt
 }
 
 func validTuple(operation, surface, mode string) error {
+	if operation == "agent_resource" && surface == "gemini" && mode == "unary" {
+		return nil
+	}
 	if operationregistry.Default.Supports(operation, surface, mode) || operation == "generation" && surface == "native" && (mode == "unary" || mode == "streaming") {
 		return nil
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -23,6 +24,9 @@ func configuredOperation(cfg *Configuration, operation string) (operations.Diale
 	return codec, ok && codec.Operation.ID == operation
 }
 func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
+	if retainedapi.Operation(tuple.Operation) {
+		return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	}
 	if cfg.ProfileID == "gemini-live" {
 		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}

@@ -33,6 +33,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	if s.Resources == nil {
 		return
 	}
+	s.registerRetainedLifecycle(mux)
 	s.registerCloudBatchState(mux)
 	if s.Media != nil {
 		s.registerAnthropicState(mux)
@@ -145,6 +146,10 @@ func (s *Server) selectPin(ctx context.Context, x *call, route *routing.Route, o
 }
 
 func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
+	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
+}
+
+func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -156,6 +161,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.R
 	x.fixed = true
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p routing.Provider, t routing.Target) error {
+		if bound != nil && (bound.ProviderID != p.ID || bound.ProviderRevisionID != p.RevisionID || bound.TargetID != t.ID) {
+			return errors.New("resource affinity unavailable")
+		}
 		if !qualified(&p, t.ProviderModel) {
 			return errors.New("provider capability unavailable")
 		}
@@ -204,6 +212,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.R
 	}
 	for i := range provider.Slots {
 		slot := &provider.Slots[i]
+		if bound != nil && (bound.SlotID != slot.ID || !sameCredential(bound.CredentialID, slot.CredentialID)) {
+			continue
+		}
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
@@ -1431,10 +1442,16 @@ func gateError(gate gateResult) *Error {
 }
 
 func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
+	s.writeStateJSONStatus(w, x, body, http.StatusOK)
+}
+
+func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byte, status int) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-	w.Header().Set("Content-Type", "application/json")
+	if body != nil {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	x.responseHeaders(w.Header(), false)
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	n, err := w.Write(body)
 	if err == nil && n == len(body) {
 		err = http.NewResponseController(w).Flush()
@@ -1459,7 +1476,7 @@ func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
 			evidence.ClientState = usage.ClientTerminal
 		}
 	}
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
+	s.finish(x, &outcome{committed: true}, status)
 }
 
 func listArgs(r *http.Request) (int, string, *Error) {

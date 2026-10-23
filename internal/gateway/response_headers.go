@@ -42,7 +42,7 @@ const (
 // in the spelling the headers are documented in. Header names match without
 // regard to case, so this is the list of the names above and of those a request
 // already carried.
-const exposedHeaders = "X-OLP-Cache, Age, X-OLP-Guardrails, X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay, X-Goog-Upload-URL, X-Goog-Upload-Status, X-Goog-Upload-Size-Received, " +
+const exposedHeaders = "X-OLP-Cache, Age, X-OLP-Guardrails, X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay, X-OLP-Resource-ID, X-Goog-Upload-URL, X-Goog-Upload-Status, X-Goog-Upload-Size-Received, " +
 	"X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider, X-OLP-Cost, " +
 	"x-ratelimit-limit-requests, x-ratelimit-remaining-requests, x-ratelimit-reset-requests, " +
 	"x-ratelimit-limit-tokens, x-ratelimit-remaining-tokens, x-ratelimit-reset-tokens, " +
