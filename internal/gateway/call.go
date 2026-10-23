@@ -33,6 +33,8 @@ type call struct {
 	semanticHeaders      http.Header
 	semanticQuery        url.Values
 	semanticQueryInvalid bool
+	retainedMetered      bool
+	retainedAccounting   bool
 	anthropicFilesBeta   bool
 	anthropicFileBinary  bool
 	geminiFileBinary     bool

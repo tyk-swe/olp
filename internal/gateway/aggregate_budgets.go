@@ -160,7 +160,10 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *Error {
 func (x *call) admissionAuthority(authority access.Authority) access.Authority {
 	if x != nil {
 		authority.Attribution = x.attribution
-		if x.actor == "api_key_resource" || x.callerCostExempt() {
+		// Billable retained calls keep caller cost budgets even though
+		// they act on an API-key resource; only unpriced resource
+		// control strips them.
+		if (x.actor == "api_key_resource" && !x.retainedAccounting && !x.retainedMetered) || x.callerCostExempt() {
 			authority = withoutCostBudgets(authority)
 		}
 	}

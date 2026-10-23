@@ -275,7 +275,15 @@ func (s *Store) ListLifecycle(ctx context.Context, kind, apiKeyID string, limit 
 	return s.listKinds(ctx, []string{kind}, apiKeyID, limit, afterID, true)
 }
 
+func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool) ([]*Resource, error) {
+	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, after, true, ascending)
+}
+
 func (s *Store) listKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor bool) ([]*Resource, error) {
+	return s.listKindsOrdered(ctx, kinds, apiKeyID, limit, afterID, deletedCursor, false)
+}
+
+func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor, ascending bool) ([]*Resource, error) {
 	var after uuid.UUID
 	if afterID != "" {
 		parsed, err := parseLocal(afterID)
@@ -288,11 +296,15 @@ func (s *Store) listKinds(ctx context.Context, kinds []string, apiKeyID string, 
 		}
 		after = parsed
 	}
+	comparison, direction := "<", "DESC"
+	if ascending {
+		comparison, direction = ">", "ASC"
+	}
 	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
 		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
-		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp.provider_resources
+		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(SELECT created_at,id FROM olp.provider_resources
 		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())))
-		ORDER BY created_at DESC, id DESC LIMIT $5`,
+		ORDER BY created_at `+direction+`, id `+direction+` LIMIT $5`,
 		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)

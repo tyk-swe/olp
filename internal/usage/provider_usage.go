@@ -15,8 +15,14 @@ func ObservedAttemptUsage(u *wire.Usage, complete bool, operation string) Attemp
 		Complete:         complete,
 		BillingUncertain: !complete,
 	}
+	// Retained control and search calls consume no tokens: an empty
+	// counter set is tokenless evidence, not explicit zero token
+	// dimensions, so a per-request-only price can still apply.
+	tokenless := u.MediaUnits == nil && u.InputTokens == 0 && u.OutputTokens == 0 && u.CachedInputTokens == nil &&
+		(operation == "fine_tuning" || operation == "vector_store" || operation == "retrieval" || operation == "conversation" ||
+			operation == "container" || operation == "eval" || operation == "skill" || operation == "context_cache" || operation == "agent_resource")
 	if u != nil {
-		if u.MediaUnits == nil || u.InputTokens != 0 || u.OutputTokens != 0 || u.CachedInputTokens != nil {
+		if !tokenless && (u.MediaUnits == nil || u.InputTokens != 0 || u.OutputTokens != 0 || u.CachedInputTokens != nil) {
 			input, output := max(u.InputTokens, 0), max(u.OutputTokens, 0)
 			evidence.InputTokens, evidence.OutputTokens = &input, &output
 		}

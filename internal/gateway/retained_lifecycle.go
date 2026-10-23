@@ -23,7 +23,7 @@ import (
 
 func (s *Server) registerRetainedLifecycle(mux *http.ServeMux) {
 	for _, endpoint := range retainedapi.Endpoints() {
-		if !retainedapi.Supports("gemini", endpoint.Operation, endpoint.Surface, "unary") {
+		if endpoint.Operation != "agent_resource" || !retainedapi.Supports("gemini", endpoint.Operation, endpoint.Surface, "unary") {
 			continue
 		}
 		mux.HandleFunc(endpoint.Method+" "+endpoint.Pattern, func(w http.ResponseWriter, r *http.Request) { s.retainedLifecycle(w, r, endpoint) })
@@ -619,7 +619,15 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *r
 	if p.hold != nil {
 		return nil
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
+	// Bound work crosses the same spend-cap boundary as a fresh attempt:
+	// gateSlot alone would reserve token quota but never the route,
+	// provider, or credential-slot spend caps pinned on the attempt.
+	// Spend caps are evaluated against the attempt's route, which some
+	// collection handlers carry only as this argument.
+	if x.route == nil {
+		x.route = route
+	}
+	gate := s.gateAttempt(ctx, x, p.attempt, &p.provider, &p.slot, max(resourceEstimate, x.estimate), s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

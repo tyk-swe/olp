@@ -76,6 +76,22 @@ func TestRewriteRejectsUndeclaredReferences(t *testing.T) {
 	}
 }
 
+func TestRewriteDistinguishesLiteralAndRetainedIDs(t *testing.T) {
+	source, err := oif.ParseJSON([]byte(`{"id":"native-job","organization_id":"native-org","metadata":{"other_id":"user"}}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Rewrite(source, map[string]string{"/id": "fine_tuning_job", "organization_id": Literal}, func(kind, id string) (string, error) {
+		if kind != "fine_tuning_job" || id != "native-job" {
+			t.Fatalf("literal resolved as a resource: %s %s", kind, id)
+		}
+		return "local-job", nil
+	})
+	if err != nil || !strings.Contains(result.Raw(), `"organization_id":"native-org"`) || !strings.Contains(result.Raw(), `"id":"local-job"`) {
+		t.Fatalf("rewrite=%s error=%v", result.Raw(), err)
+	}
+}
+
 func TestRewriteEnvironmentVariableNames(t *testing.T) {
 	for _, raw := range []string{
 		`{"base_environment":{"env":{"client_id":"app","id":"value","base_agent":"literal"}}}`,
@@ -127,5 +143,22 @@ func TestRewriteInlineHeaderNames(t *testing.T) {
 	}
 	if _, err := Rewrite(source, nil, nil); err == nil {
 		t.Fatal("non-string header value accepted")
+	}
+}
+
+func TestRewriteLeavesEvalItemSchemaOpaque(t *testing.T) {
+	raw := `{"name":"e","data_source_config":{"type":"custom","item_schema":{"type":"object","properties":{"id":{"type":"string"},"user_id":{"type":"string"}}}},"test_case":{"file_id":"file_local"}}`
+	source, err := oif.ParseJSON([]byte(raw), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Rewrite(source, map[string]string{"file_id": "file"}, func(kind, id string) (string, error) {
+		return "file_native", nil
+	})
+	if err != nil {
+		t.Fatalf("eval schema treated as references: %v", err)
+	}
+	if !strings.Contains(result.Raw(), `"user_id":{"type":"string"}`) || !strings.Contains(result.Raw(), `"file_id":"file_native"`) {
+		t.Fatalf("schema or reference changed: %s", result.Raw())
 	}
 }

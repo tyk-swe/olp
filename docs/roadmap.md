@@ -38,7 +38,7 @@ identifies implementation boundaries and owners.
 | [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | Done | Named text integrations, local/model filters, capture and caching; MCP/agent hooks assigned to RM7/RM8 |
 | [RM3: Current APIs](#rm3-current-apis) | Done | Current completions, text Decisions, OCR/search, files and batches |
 | [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Done | Operation contracts, durable debits, recovery, settlement and agent contracts |
-| [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Planned | Fine-tuning, vector stores, retrieval and retained resource families |
+| [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Partial | Fine-tuning, vector stores, retrieval and retained resource families |
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Planned | Additional OCR/search transports, realtime profiles and pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution, per-user grants, HTTP+SSE and stdio |
 | [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
@@ -115,10 +115,15 @@ independently of agent work.
 
 ### RM5: Retained APIs and retrieval
 
-**Status: In progress.** **Owners:** resource and connector maintainers, with
+**Status: Partial.** **Owners:** resource and connector maintainers, with
 accounting and SDK owners. **Dependencies:** RM4 operation contracts,
 owner/credential affinity and priced units; asynchronous jobs also use the
 implemented durable accounting foundation.
+
+Metered creation and storage mutations fail closed with
+`unsupported_metered_operation` until each family has a durable usage-settlement
+owner. Immediate compaction and retrieval use request accounting; read, list,
+cancel and delete remain available for existing owner-bound resources.
 
 - [ ] **RM5.1 — Fine-tuning:** implement OpenAI jobs, followed by the declared
   Azure and Vertex methods, including file affinity, unknown-create recovery,
@@ -126,18 +131,18 @@ implemented durable accounting foundation.
 - [ ] **RM5.2 — Native vector stores:** implement OpenAI/Azure lifecycle,
   file attachments, batches and search, with nested-ID ownership, pagination
   and Responses `file_search` identifier rewriting.
-- [ ] **RM5.3 — Query-only retrieval:** implement project-owned Bedrock
+- [x] **RM5.3 — Query-only retrieval:** implement project-owned Bedrock
   Knowledge Bases, Vertex AI RAG Engine and Azure AI Search bindings, including
   filters, limits, text, scores, citations, egress and pricing. Index creation
   and synchronization remain outside this scope.
-- [ ] **RM5.4 — Conversations and compaction:** implement native lifecycle,
+- [x] **RM5.4 — Conversations and compaction:** implement native lifecycle,
   items and compact methods, owner/target affinity, inspection and separately
   priced compaction without retaining local conversation history.
 - [ ] **RM5.5 — Containers:** implement the declared OpenAI and supported
   Azure lifecycle/file methods with owner isolation.
 - [ ] **RM5.6 — Evals:** implement native OpenAI definitions/runs, data-source
   affinity, durable reservations and terminal settlement.
-- [ ] **RM5.7 — Skills:** implement native Anthropic skills/versions and
+- [x] **RM5.7 — Skills:** implement native Anthropic skills/versions and
   retained file/version ownership.
 - [ ] **RM5.8 — Context caches:** implement Gemini `cachedContents`, owner-bound
   IDs, expiry and storage accounting/reconciliation.

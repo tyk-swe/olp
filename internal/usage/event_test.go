@@ -336,3 +336,21 @@ func marshalForTest(t *testing.T, value any) []byte {
 	}
 	return encoded
 }
+
+func TestDecodeAcceptsRetainedOperations(t *testing.T) {
+	for _, operation := range []string{"fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval", "skill", "context_cache"} {
+		event := metadataEvent()
+		event.Operation = operation
+		payload, err := Encode(event)
+		if err != nil {
+			t.Fatalf("encode %s: %v", operation, err)
+		}
+		decoded, err := Decode(payload)
+		if err != nil || decoded.Operation != operation {
+			t.Fatalf("decode %s: event=%v err=%v", operation, decoded, err)
+		}
+		if !validOperation(operation) {
+			t.Fatalf("pricing vocabulary rejects %s", operation)
+		}
+	}
+}

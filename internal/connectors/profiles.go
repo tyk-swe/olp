@@ -113,6 +113,12 @@ func init() {
 			if p.Kind != "openai_compatible" {
 				p.Operations = append(p.Operations, "batch", "realtime")
 			}
+			if p.Kind == "openai" {
+				p.Operations = append(p.Operations, "fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval")
+			}
+			if p.Kind == "azure_openai" {
+				p.Operations = append(p.Operations, "fine_tuning", "vector_store", "retrieval", "container")
+			}
 			if p.Kind == "azure_openai" {
 				p.Authentication = []string{"api_key", "azure_default", "azure_client_secret"}
 				if p.Hosting != "azure-v1" {
@@ -121,6 +127,7 @@ func init() {
 				p.Documentation = "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"
 			}
 		case "anthropic":
+			p.Operations = append(p.Operations, "skill")
 			p.SemanticHeaders = []string{"Anthropic-Version", "Anthropic-Beta"}
 			p.Documentation = "https://platform.claude.com/docs/en/api/versioning"
 			if p.Hosting == "direct-anthropic" {
@@ -130,6 +137,12 @@ func init() {
 			p.Documentation = "https://ai.google.dev/api/generate-content"
 			p.QuerySettings = []string{"$xgafv"}
 			p.Operations = []string{"generation", "token_count", "embeddings"}
+			if p.Kind == "gemini" {
+				p.Operations = append(p.Operations, "context_cache")
+			}
+			if p.Kind == "vertex_ai" {
+				p.Operations = append(p.Operations, "fine_tuning")
+			}
 			if p.Kind == "gemini" && p.Hosting == "direct-gemini" {
 				p.Operations = append(p.Operations, "batch")
 			}
@@ -505,7 +518,15 @@ func generationFamily(dialect string) (wire.Format, bool) {
 
 func (c Config) Supports(operation, surface, mode string) bool {
 	if retainedapi.Operation(operation) {
-		return retainedapi.Supports(c.Kind, operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
+		if operation == "agent_resource" {
+			return retainedapi.Supports(c.Kind, operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
+		}
+		// Dedicated single-purpose profiles never gain retained families.
+		switch c.ProfileID {
+		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim":
+			return false
+		}
+		return retainedapi.Supports(c.Kind, operation, surface, mode)
 	}
 	if operation == "batch" {
 		if surface == "native" {

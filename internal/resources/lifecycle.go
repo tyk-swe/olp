@@ -94,6 +94,12 @@ func (s *Store) UnknownLifecycle(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *Store) CompleteLifecycle(ctx context.Context, r *Resource) error {
+	return s.CompleteLifecycleChildren(ctx, r, nil)
+}
+
+// CompleteLifecycleChildren commits multi-object create results under the same
+// submission fence. The primary identity and all siblings become visible at once.
+func (s *Store) CompleteLifecycleChildren(ctx context.Context, r *Resource, children []*Resource) error {
 	if r.UpstreamID == "" || len(r.UpstreamID) > 512 || len(r.Metadata) > metadataLimit {
 		return ErrContract
 	}
@@ -113,7 +119,51 @@ func (s *Store) CompleteLifecycle(ctx context.Context, r *Resource) error {
 	if err != nil {
 		return fmt.Errorf("complete retained resource: %w", err)
 	}
+	for _, child := range children {
+		if _, err = s.PutTx(ctx, tx, child); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
+}
+
+func (s *Store) GetByUUID(ctx context.Context, id uuid.UUID, owner string) (*Resource, error) {
+	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, id, owner))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return r, err
+}
+
+// BindDiscovered is only for a provider-generated child observed through its
+// owner-authorized parent. Serializing discovery makes repeated pages stable.
+func (s *Store) BindDiscovered(ctx context.Context, child *Resource) (*Resource, error) {
+	if child.ParentID == nil {
+		return nil, ErrContract
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, child.APIKeyID+":"+child.ParentID.String()+":"+child.Kind+":"+child.UpstreamID); err != nil {
+		return nil, err
+	}
+	bound, err := s.getByUpstream(ctx, tx, child.NativeIdentity(), true)
+	if err == nil {
+		return bound, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	bound, err = s.PutTx(ctx, tx, child)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return bound, nil
 }
 
 // Child checks both the child's owner and its immutable parent relationship.

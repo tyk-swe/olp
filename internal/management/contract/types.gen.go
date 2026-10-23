@@ -4147,6 +4147,7 @@ const (
 	ProviderResourceItemKindVectorStore          ProviderResourceItemKind = "vector_store"
 	ProviderResourceItemKindVectorStoreBatch     ProviderResourceItemKind = "vector_store_batch"
 	ProviderResourceItemKindVectorStoreFile      ProviderResourceItemKind = "vector_store_file"
+	ProviderResourceItemKindVertexTuningJob      ProviderResourceItemKind = "vertex_tuning_job"
 )
 
 // Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
@@ -4213,6 +4214,8 @@ func (e ProviderResourceItemKind) Valid() bool {
 	case ProviderResourceItemKindVectorStoreBatch:
 		return true
 	case ProviderResourceItemKindVectorStoreFile:
+		return true
+	case ProviderResourceItemKindVertexTuningJob:
 		return true
 	default:
 		return false
@@ -5596,6 +5599,7 @@ const (
 	ListProviderResourcesParamsKindVectorStore          ListProviderResourcesParamsKind = "vector_store"
 	ListProviderResourcesParamsKindVectorStoreBatch     ListProviderResourcesParamsKind = "vector_store_batch"
 	ListProviderResourcesParamsKindVectorStoreFile      ListProviderResourcesParamsKind = "vector_store_file"
+	ListProviderResourcesParamsKindVertexTuningJob      ListProviderResourcesParamsKind = "vertex_tuning_job"
 )
 
 // Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
@@ -5662,6 +5666,8 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 	case ListProviderResourcesParamsKindVectorStoreBatch:
 		return true
 	case ListProviderResourcesParamsKindVectorStoreFile:
+		return true
+	case ListProviderResourcesParamsKindVertexTuningJob:
 		return true
 	default:
 		return false

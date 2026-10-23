@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -623,7 +624,7 @@ func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply,
 }
 
 func registeredOperation(operation string) bool {
-	if operation == "agent_resource" {
+	if retainedapi.Operation(operation) {
 		return true
 	}
 	for _, d := range operationregistry.Default.Dialects() {
