@@ -219,7 +219,7 @@ func newGeminiFileFixture(t *testing.T) *geminiFileFixture {
 			return
 		}
 		w.Header().Set("Content-Type", "application/jsonl")
-		_, _ = io.WriteString(w, `{"key":"file-success","response":{"candidates":[],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`+"\n"+
+		_, _ = io.WriteString(w, `{"key":"file-success","response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`+"\n"+
 			`{"key":"file-error","error":{"code":400,"message":"bad request"}}`+"\n")
 	})
 	fixture.server = httptest.NewTLSServer(mux)
@@ -257,11 +257,11 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 	}
 	models := h.want(owner, http.MethodGet, providerPath+"/models", nil, nil, http.StatusOK)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
-	model := h.want(owner, http.MethodGet, providerPath+"/models/"+modelID, nil, nil, http.StatusOK)
+	detail := h.want(owner, http.MethodGet, providerPath, nil, nil, http.StatusOK)
 	updated := h.want(owner, http.MethodPatch, providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{
 		map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
 		map[string]any{"operation": "batch", "surface": "gemini", "mode": "unary"},
-	}}, etagHeader(model), http.StatusOK)
+	}}, etagHeader(detail), http.StatusOK)
 	if certified := h.want(owner, http.MethodPost, providerPath+"/models/"+modelID+"/certify", nil, etagHeader(updated), http.StatusOK); certified["status"] != "certified" {
 		t.Fatalf("Gemini batch capability: %v", certified)
 	}
@@ -272,7 +272,7 @@ func TestGeminiResumableFileLifecycle(t *testing.T) {
 		draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
 			"slug": name, "operations": []string{"generation", "batch"}, "overall_timeout_ms": 1000, "max_attempts": 1,
 			"fidelity": map[string]any{"mode": mode},
-			"targets":  []any{map[string]any{"provider_id": provider["id"], "provider_model": "gemini-files-test", "priority": 0, "weight": 1, "timeout_ms": 5000}},
+			"targets":  []any{map[string]any{"provider_id": provider["id"], "provider_model": "gemini-files-test", "priority": 0, "weight": 1, "timeout_ms": 1000}},
 		}, idem(uuid.NewString()), http.StatusCreated)
 		h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil,
 			withMatch(draft, idem(uuid.NewString())), http.StatusOK)
@@ -426,11 +426,12 @@ func TestGeminiNativeBatchSettlementAndFiles(t *testing.T) {
 	}
 	models := h.want(owner, http.MethodGet, providerPath+"/models", nil, nil, http.StatusOK)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
-	model := h.want(owner, http.MethodGet, providerPath+"/models/"+modelID, nil, nil, http.StatusOK)
+	detail := h.want(owner, http.MethodGet, providerPath, nil, nil, http.StatusOK)
 	updated := h.want(owner, http.MethodPatch, providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{
 		map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
 		map[string]any{"operation": "batch", "surface": "gemini", "mode": "unary"},
-	}}, etagHeader(model), http.StatusOK)
+		map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"},
+	}}, etagHeader(detail), http.StatusOK)
 	if certified := h.want(owner, http.MethodPost, providerPath+"/models/"+modelID+"/certify", nil, etagHeader(updated), http.StatusOK); certified["status"] != "certified" {
 		t.Fatalf("Gemini batch capability: %v", certified)
 	}
@@ -655,7 +656,7 @@ func uploadGeminiManagedOpenAIFile(t *testing.T, h *accessHarness, key, route st
 		"Content-Type": form.FormDataContentType(), "X-OLP-Route": route,
 	})
 	if status != http.StatusOK {
-		return status, nil
+		return status, map[string]any{"raw": string(raw)}
 	}
 	var result map[string]any
 	_ = json.Unmarshal(raw, &result)

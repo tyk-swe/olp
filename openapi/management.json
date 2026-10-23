@@ -1877,7 +1877,8 @@
               "rate_card",
               "billing_import",
               "guardrail_policy",
-              "guardrail_attachment"
+              "guardrail_attachment",
+              "agent_publication"
             ],
             "type": "string"
           }

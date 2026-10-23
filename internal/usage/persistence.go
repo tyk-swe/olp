@@ -430,7 +430,9 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 	// rather than as free.
 	successfulWithoutUsage := !usage.Observed && attempt.Attempt.ErrorClass == nil &&
 		attempt.StatusCode != nil && *attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
-	unpriced := status != chargeNotBillable && (successfulWithoutUsage || !pricing.complete)
+	// Incomplete usage is never given a cost above, so a billable attempt
+	// with incomplete usage is unpriced spend, whatever rates exist.
+	unpriced := status != chargeNotBillable && (successfulWithoutUsage || !pricing.complete || !usage.Complete)
 	var selector, baselineCost *string
 	if routing := attempt.Attempt.Routing; routing != nil {
 		selector = routing.Selector

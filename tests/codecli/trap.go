@@ -19,6 +19,46 @@ import (
 // the generated configuration must keep from reaching OLP or the upstream.
 const Decoy = "SEEDED_WORKSTATION_SECRET"
 
+// tempHome returns a private home outside the system temporary directory.
+// Codex refuses to create its PATH helper binaries under the temporary
+// directory and warns instead, which would corrupt the exact version output
+// resolvedBinary checks and the homes the agents run in.
+func tempHome(t testing.TB) string {
+	t.Helper()
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if temp := os.TempDir(); cache == temp || strings.HasPrefix(cache, temp+string(filepath.Separator)) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache = filepath.Join(home, ".cache")
+	}
+	root := filepath.Join(cache, "olp-codecli")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.MkdirTemp(root, "home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// An agent can still be writing into its home when a command
+		// returns, so removal retries while that settles.
+		var err error
+		for range 50 {
+			if err = os.RemoveAll(home); err == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Error(err)
+	})
+	return home
+}
+
 func resolvedBinary(t testing.TB, variable, format string) (string, string) {
 	t.Helper()
 	binary := os.Getenv(variable)
@@ -26,7 +66,7 @@ func resolvedBinary(t testing.TB, variable, format string) (string, string) {
 	if binary == "" || version == "" {
 		t.Fatalf("%s and its resolved version are required; source the environment from scripts/code-mode-qualification.sh resolve", variable)
 	}
-	home := t.TempDir()
+	home := tempHome(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, "--version")
@@ -44,7 +84,7 @@ func resolvedBinary(t testing.TB, variable, format string) (string, string) {
 func agent(t testing.TB, variable, key, format string) *Agent {
 	t.Helper()
 	binary, version := resolvedBinary(t, variable, format)
-	home := t.TempDir()
+	home := tempHome(t)
 	return &Agent{Binary: binary, Version: version, Home: home, Work: t.TempDir(), Key: key, Trap: NewTrap(t), env: []string{
 		"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TERM=dumb", "NO_COLOR=1", "OLP_API_KEY=" + key,
 		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),

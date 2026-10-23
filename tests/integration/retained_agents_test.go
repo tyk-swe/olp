@@ -239,7 +239,7 @@ func TestRetainedAgentListAdmitsEveryRoute(t *testing.T) {
 	draftInput := strictDraft(fidelityDraft(second, providerID))
 	draftInput["operations"] = []string{"agent_resource"}
 	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+draft["id"].(string)+"/publish", nil, etagHeader(draft), 200)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
 	authority, err := h.Runtime.Authenticate(key)
 	if err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestRetainedAgentListHasOneDeadline(t *testing.T) {
 	draftInput["overall_timeout_ms"] = 1000
 	draftInput["targets"].([]any)[0].(map[string]any)["timeout_ms"] = 1000
 	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+draft["id"].(string)+"/publish", nil, etagHeader(draft), 200)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
 	h.refresh()
 	for range 2 {
 		response, body := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents", key, []byte(`{}`), map[string]string{"X-OLP-Route": route, "Idempotency-Key": uuid.NewString()})

@@ -116,8 +116,12 @@ func TestBatchOpaquePendingUsageNeverOwnsGenerationAccounting(t *testing.T) {
 				if projection != 0 || facts != 0 {
 					t.Fatalf("native metadata became accounting: projection=%d facts=%d", projection, facts)
 				}
-				if err := h.Gateway.Resources.CheckPendingCostOwner(t.Context(), keyID); err != nil {
-					t.Fatalf("opaque native metadata quarantined a budget owner: %v", err)
+				// The batch's own settlement subjects legitimately pend
+				// until the worker settles it; only the generation
+				// namespace must stay empty for this owner.
+				var ownerPending int
+				if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resource_pending_usage WHERE api_key_id=$1`, keyID).Scan(&ownerPending); err != nil || ownerPending != 0 {
+					t.Fatalf("opaque native metadata quarantined a budget owner: pending=%d err=%v", ownerPending, err)
 				}
 			}
 			assertNoAccounting()
@@ -131,6 +135,7 @@ func TestBatchOpaquePendingUsageNeverOwnsGenerationAccounting(t *testing.T) {
 				t.Fatalf("tombstone removed opaque native metadata: %v %v", unchanged, err)
 			}
 			expired := *resource
+			expired.UUID = uuid.Nil // Put mints a fresh identity for the copy.
 			expiry := time.Now().Add(-time.Minute)
 			expired.UpstreamID, expired.ExpiresAt = "batch-native-expiry", &expiry
 			stored, err := h.Gateway.Resources.Put(t.Context(), &expired)

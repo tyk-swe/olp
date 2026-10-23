@@ -38,7 +38,6 @@ func TestMessagesRequirePairedBetaHeaders(t *testing.T) {
 		{"context management", "claude-code-20250219", "context-management-", map[string]any{"context_management": map[string]any{"edits": []any{}}}, []any{user("x")}},
 		{"safeguards", "context-management-2025-06-27", "dangerous-tool-use-", map[string]any{"safeguards": []any{map[string]any{"type": "dangerous_tool_use"}}}, []any{user("x")}},
 		{"effort", "claude-code-20250219", "effort-", map[string]any{"output_config": map[string]any{"effort": "high"}}, []any{user("x")}},
-		{"mid-conversation system message", "claude-code-20250219", "mid-conversation-system-", nil, []any{user("x"), system, user("y")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := map[string]any{"model": AnthropicModel, "max_tokens": 8, "messages": tc.messages}
@@ -57,11 +56,13 @@ func TestMessagesRequirePairedBetaHeaders(t *testing.T) {
 		})
 	}
 	// A request that uses none of them needs no beta, and structured output in
-	// output_config is not an effort.
+	// output_config is not an effort. A system message between turns needs
+	// none either: mid-conversation system messages are generally available.
 	want(t, message(h, map[string]any{"messages": []any{user("x")}}), 200)
 	want(t, message(h, map[string]any{"messages": []any{user("x")}, "output_config": map[string]any{"format": map[string]any{"type": "json_schema", "schema": map[string]any{"type": "object"}}}}), 200)
+	want(t, message(h, map[string]any{"messages": []any{user("x"), system, user("y")}}), 200)
 	count := h.do("POST", AnthropicPrefix+"/messages/count_tokens", headers(""), map[string]any{"model": AnthropicModel, "messages": []any{user("x"), system}})
-	want(t, count, http.StatusBadRequest) // counting follows the rule of generation
+	want(t, count, 200) // counting follows the rule of generation
 	// Only user, assistant and system are roles.
 	want(t, message(h, map[string]any{"messages": []any{user("x"), map[string]any{"role": "tool", "content": "r"}}}), http.StatusBadRequest)
 }

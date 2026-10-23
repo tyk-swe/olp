@@ -217,11 +217,17 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			return
 		}
 		batchID := fmt.Sprintf("batch-up-%d", batchNumber)
-		batch := map[string]any{
-			"id": batchID, "object": "batch", "status": "validating",
-			"endpoint": body["endpoint"], "completion_window": body["completion_window"],
-			"input_file_id": body["input_file_id"], "created_at": time.Now().Unix(),
+		// Seeded fields (such as a test's pending_usage) survive creation;
+		// the canonical fields below win over the seeded template.
+		f.mu.Lock()
+		batch := make(map[string]any, len(f.batches[batchID])+7)
+		for key, value := range f.batches[batchID] {
+			batch[key] = value
 		}
+		f.mu.Unlock()
+		batch["id"], batch["object"], batch["status"] = batchID, "batch", "validating"
+		batch["endpoint"], batch["completion_window"] = body["endpoint"], body["completion_window"]
+		batch["input_file_id"], batch["created_at"] = body["input_file_id"], time.Now().Unix()
 		f.mu.Lock()
 		f.batches[batchID] = batch
 		hold, read := f.batchCreateHold, f.batchCreateRead
@@ -527,13 +533,22 @@ func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabi
 }
 func provisionOpenAIInProject(t *testing.T, h *accessHarness, owner *browser, project *string, endpoint string, capabilities []any, operations []string, draftFields map[string]any, providerFields ...map[string]any) (*browser, map[string]any, string, string) {
 	t.Helper()
-	detail := activeAzureProviderInProject(t, h, owner, "Provider state fixture", endpoint, project, capabilities, providerFields...)
+	detail := activeAzureProviderInProject(t, h, owner, "Provider state fixture "+uuid.NewString()[:8], endpoint, project, capabilities, providerFields...)
 	slug := "state-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	// Without a provider profile the route must be transformed; callers that
 	// configure a profile may declare a strict route instead.
 	draftBody := map[string]any{"project_id": project, "slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 	for key, value := range draftFields {
 		draftBody[key] = value
+	}
+	// A caller may shorten the overall timeout below the default target
+	// timeout; the target must fit inside it.
+	if overall, ok := draftBody["overall_timeout_ms"].(int); ok && overall < 5000 {
+		if targets, ok := draftBody["targets"].([]any); ok && len(targets) == 1 {
+			if target, ok := targets[0].(map[string]any); ok {
+				target["timeout_ms"] = overall
+			}
+		}
 	}
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftBody, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)

@@ -24,30 +24,7 @@ type Client struct {
 func New(t testing.TB, baseURL, key string, websocket bool) *Client {
 	t.Helper()
 	binary, version := resolvedBinary(t, "OLP_CODEX_BINARY", "codex-cli %s")
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := filepath.Join(cache, "olp-codecli")
-	if err := os.MkdirAll(root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	home, err := os.MkdirTemp(root, "home-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		// Codex can still be cloning its plugin catalogue into the home when a
-		// command returns, so removal retries while that clone settles.
-		var err error
-		for range 50 {
-			if err = os.RemoveAll(home); err == nil {
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		t.Error(err)
-	})
+	home := tempHome(t)
 	c := &Client{Binary: binary, Version: version, Home: home, Work: t.TempDir(), Key: key}
 	config := fmt.Sprintf(`model = %q
 model_provider = "olp"

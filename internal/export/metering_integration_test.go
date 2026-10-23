@@ -19,6 +19,14 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+// received lives here, not with fakeStripe, so the default test build does
+// not carry a method only integration tests call.
+func (s *fakeStripe) received() []stripeHit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]stripeHit(nil), s.hits...)
+}
+
 // meteringFixtures seeds the smallest priced-attempt chain: an owner, a
 // project-owned API key, a provider and one 3-per-million USD price.
 type meteringFixtures struct {
