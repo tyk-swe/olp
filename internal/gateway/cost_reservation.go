@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -224,7 +225,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil || x.operationName() == "search" || retainedControlOperation(x.operationName()) {
+	if x.media != nil || x.operationName() == "search" || retainedapi.Operation(x.operationName()) {
 		u := usage.AttemptUsage{Complete: true}
 		if x.media != nil {
 			var ok bool
@@ -285,7 +286,7 @@ func (x *call) targetCostBound(provider routing.Provider, target routing.Target,
 		}
 		return price.Cost(u, x.request.startedAt, true, discount)
 	}
-	if x.operationName() == "search" || retainedControlOperation(x.operationName()) {
+	if x.operationName() == "search" || retainedapi.Operation(x.operationName()) {
 		return price.Cost(usage.AttemptUsage{Complete: true}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {

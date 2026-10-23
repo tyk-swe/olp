@@ -283,7 +283,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 	if (e.Operation == "conversation" || e.Operation == "compaction") && hasItemReference(source.Root()) {
 		return oif.Document{}, errors.New("item_reference inputs are not supported")
 	}
-	return retainedapi.Rewrite(source, retainedRequestRefs(e), func(kind, id string) (string, error) {
+	rewritten, err := retainedapi.Rewrite(source, retainedRequestRefs(e), func(kind, id string) (string, error) {
 		if s.Resources == nil {
 			return "", resources.ErrNotFound
 		}
@@ -329,6 +329,10 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 		}
 		return bound.UpstreamID, nil
 	})
+	if err != nil {
+		return oif.Document{}, err
+	}
+	return bindRetainedModel(rewritten, e, p)
 }
 
 // Only declared pagination/filter fields reach the provider. ID cursors have
@@ -391,6 +395,33 @@ func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpo
 		out.Set(name, v)
 	}
 	return out, nil
+}
+
+func retainedRequestRefs(e retainedapi.Endpoint) map[string]string {
+	refs := map[string]string{}
+	switch e.Operation {
+	case "fine_tuning":
+		refs["training_file"] = resources.KindFile
+		refs["validation_file"] = resources.KindFile
+	case "vector_store", "container":
+		refs["file_ids"] = resources.KindFile
+		refs["file_id"] = resources.KindFile
+	case "eval":
+		refs["file_id"] = resources.KindFile
+	case "conversation", "compaction":
+		refs["vector_store_id"] = "vector_store"
+		refs["file_id"] = resources.KindFile
+		refs["previous_response_id"] = resources.KindResponse
+		refs["call_id"] = retainedapi.Literal
+		refs["item_id"] = retainedapi.Literal
+		refs["id"] = retainedapi.Literal
+	case "retrieval":
+		refs["file_id"] = resources.KindFile
+	case "context_cache":
+		refs["file_uri"] = resources.KindGeminiFile
+		refs["fileUri"] = resources.KindGeminiFile
+	}
+	return refs
 }
 
 func retainedResponseRefs(e retainedapi.Endpoint, source oif.Document) map[string]string {

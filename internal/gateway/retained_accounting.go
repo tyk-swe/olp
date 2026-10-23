@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -12,11 +13,24 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+func (s *Server) admitRetainedRequest(ctx context.Context, x *call, a access.Authority, p *pin, route *routing.Route, deferred bool) *Error {
+	if err := s.retainedAccountingPolicy(x, p, deferred); err != nil {
+		return err
+	}
+	if err := s.reserveState(ctx, x, a, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
+		return err
+	}
+	if err := s.reserveRetainedCost(ctx, x, p, route); err != nil {
+		return err
+	}
+	return s.gateRetainedSlot(ctx, x, p, route)
+}
+
 // Unlike agent control, retained operations may have effective prices. Pin
 // those prices and discounts before admission, and settle observed usage with
 // the normal request accounting path. Deferred work cannot safely be accepted
 // until a durable settlement owner exists for that resource kind.
-func (s *Server) retainedAccountingPolicy(x *call, p *pin, route *routing.Route, deferred bool) *Error {
+func (s *Server) retainedAccountingPolicy(x *call, p *pin, deferred bool) *Error {
 	if p.provider.CredentialSource == "caller" {
 		return policyUnavailable("unsupported_provider_credentials", "Retained resources require managed provider credentials.")
 	}
@@ -40,17 +54,6 @@ func (s *Server) retainedSettle(ctx context.Context, x *call, p *pin) {
 		s.settlePinHold(ctx, x, p.hold, x.settledTokens())
 	}
 	s.settleAdmission(ctx, x)
-}
-
-// retainedControlOperation reports whether an operation label names a
-// retained control/search family whose work consumes no tokens, so its
-// price can only be a fixed per-request fee.
-func retainedControlOperation(operation string) bool {
-	switch operation {
-	case "fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval", "skill", "context_cache", "agent_resource":
-		return true
-	}
-	return false
 }
 
 func observeRetainedUsage(x *call, source oif.Document, generation bool) error {

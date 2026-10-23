@@ -80,33 +80,6 @@ func retainedUpstreamPath(e retainedapi.Endpoint, ids map[string]string) string 
 	return path
 }
 
-func retainedRequestRefs(e retainedapi.Endpoint) map[string]string {
-	refs := map[string]string{}
-	switch e.Operation {
-	case "fine_tuning":
-		refs["training_file"] = resources.KindFile
-		refs["validation_file"] = resources.KindFile
-	case "vector_store", "container":
-		refs["file_ids"] = resources.KindFile
-		refs["file_id"] = resources.KindFile
-	case "eval":
-		refs["file_id"] = resources.KindFile
-	case "conversation", "compaction":
-		refs["vector_store_id"] = "vector_store"
-		refs["file_id"] = resources.KindFile
-		refs["previous_response_id"] = resources.KindResponse
-		refs["call_id"] = retainedapi.Literal
-		refs["item_id"] = retainedapi.Literal
-		refs["id"] = retainedapi.Literal
-	case "retrieval":
-		refs["file_id"] = resources.KindFile
-	case "context_cache":
-		refs["file_uri"] = resources.KindGeminiFile
-		refs["fileUri"] = resources.KindGeminiFile
-	}
-	return refs
-}
-
 func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retainedapi.Endpoint) {
 	format := retainedSurfaceFormat(e.Surface)
 	x, authority, done := s.stateBegin(w, r, format)
@@ -257,9 +230,6 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		}
 		if source.Root().Kind() == oif.Object {
 			rewritten, rwErr := s.rewriteRetainedRequest(r.Context(), x, authority, p, route, source, e)
-			if rwErr == nil {
-				rewritten, rwErr = bindRetainedModel(rewritten, e, p)
-			}
 			if rwErr != nil {
 				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 				return
@@ -269,19 +239,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 
 		ctx, cancel := s.stateDeadline(r.Context(), route)
 		defer cancel()
-		if err := s.retainedAccountingPolicy(x, p, route, e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")); err != nil {
-			fail(err)
-			return
-		}
-		if err = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
-			fail(err)
-			return
-		}
-		if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
-			fail(costErr)
-			return
-		}
-		if err = s.gateRetainedSlot(ctx, x, p, route); err != nil {
+		if err := s.admitRetainedRequest(ctx, x, authority, p, route, e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")); err != nil {
 			fail(err)
 			return
 		}
@@ -383,9 +341,6 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	}
 	if source.Root().Kind() == oif.Object {
 		rewritten, rwErr := s.rewriteRetainedRequest(r.Context(), x, authority, p, route, source, e)
-		if rwErr == nil {
-			rewritten, rwErr = bindRetainedModel(rewritten, e, p)
-		}
 		if rwErr != nil {
 			fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 			return
@@ -395,19 +350,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	ids["id"] = resource.UpstreamID
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
-	if err := s.retainedAccountingPolicy(x, p, route, e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")); err != nil {
-		fail(err)
-		return
-	}
-	if err = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
-		fail(err)
-		return
-	}
-	if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
-		fail(costErr)
-		return
-	}
-	if err = s.gateRetainedSlot(ctx, x, p, route); err != nil {
+	if err := s.admitRetainedRequest(ctx, x, authority, p, route, e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")); err != nil {
 		fail(err)
 		return
 	}
@@ -616,7 +559,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 					fail(gateErr)
 					return gateErr.Status
 				}
-				if policyErr := s.retainedAccountingPolicy(x, p, route, false); policyErr != nil {
+				if policyErr := s.retainedAccountingPolicy(x, p, false); policyErr != nil {
 					fail(policyErr)
 					return policyErr.Status
 				}
@@ -987,9 +930,6 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 	rewritten, rewriteErr := s.rewriteRetainedRequest(r.Context(), x, authority, p, route, source, codec)
-	if rewriteErr == nil {
-		rewritten, rewriteErr = bindRetainedModel(rewritten, codec, p)
-	}
 	if rewriteErr != nil {
 		fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 		return
@@ -998,19 +938,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 	x.estimate = int64(len(body))
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
-	if err := s.retainedAccountingPolicy(x, p, route, false); err != nil {
-		fail(err)
-		return
-	}
-	if err = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
-		fail(err)
-		return
-	}
-	if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
-		fail(costErr)
-		return
-	}
-	if err = s.gateRetainedSlot(ctx, x, p, route); err != nil {
+	if err := s.admitRetainedRequest(ctx, x, authority, p, route, false); err != nil {
 		fail(err)
 		return
 	}

@@ -309,10 +309,7 @@ func reviewedMedia(kind, vendor, operation string) bool {
 
 func certifiable(kind, vendor string, c CapabilityInput) bool {
 	if retainedapi.Operation(c.Operation) {
-		if c.Operation == "agent_resource" {
-			return vendor == "google" && retainedapi.Supports(kind, c.Operation, c.Surface, c.Mode)
-		}
-		return retainedapi.Supports(kind, c.Operation, c.Surface, c.Mode)
+		return connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode)
 	}
 	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
 		return false

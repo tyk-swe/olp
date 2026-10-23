@@ -168,11 +168,10 @@ func TestRetainedAccountingPolicy(t *testing.T) {
 	s := &Server{Runtime: &fakeRuntime{inputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}, RateCards: []usage.RoutingRateCard{{ProjectID: &project, Revisions: []usage.RoutingCardRevision{{ID: "card", EffectiveAt: now.Add(-time.Minute)}}}}}}}
 	x := &call{operationOverride: "generation", request: request{startedAt: now}}
 	p := &pin{provider: routing.Provider{Kind: "openai"}, model: "model"}
-	route := &routing.Route{ProjectID: &project}
-	if err := s.retainedAccountingPolicy(x, p, route, false); err != nil || p.attempt.Price == nil {
+	if err := s.retainedAccountingPolicy(x, p, false); err != nil || p.attempt.Price == nil {
 		t.Fatalf("priced immediate operation rejected: %v", err)
 	}
-	if err := s.retainedAccountingPolicy(x, p, route, true); err == nil || err.Code != "unsupported_metered_operation" {
+	if err := s.retainedAccountingPolicy(x, p, true); err == nil || err.Code != "unsupported_metered_operation" {
 		t.Fatalf("unowned deferred usage dispatched: %v", err)
 	}
 }
