@@ -215,7 +215,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
-	if err := retainedControlPricing(x, p); err != nil {
+	if err := s.retainedControlPricing(x, p, route); err != nil {
 		fail(err)
 		return
 	}
@@ -295,10 +295,14 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(serverError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return
 		}
-		// Gemini's native delete result is empty. No provider identity escapes.
+		// Gemini's native delete result is an empty JSON message.
 		status = native.StatusCode
 		x.completePinned()
-		s.writeStateJSONStatus(w, x, nil, status)
+		body := []byte(`{}`)
+		if status == http.StatusNoContent {
+			body = nil
+		}
+		s.writeStateJSONStatus(w, x, body, status)
 		return
 	}
 	nativeID, validID := nativeResourceID(response, retainedBodyLimit)
@@ -456,7 +460,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			fail(gateErr)
 			return gateErr.Status
 		}
-		if err := retainedControlPricing(x, p); err != nil {
+		if err := s.retainedControlPricing(x, p, route); err != nil {
 			fail(err)
 			return err.Status
 		}
@@ -583,20 +587,33 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *r
 	return nil
 }
 
-// Environment references require their own owner-scoped contract. Inline
-// environment objects are inspected by Rewrite; raw provider names never pass.
+// Environment and credential references require their own owner-scoped
+// contracts. Inline environment values may pass without provider references.
 func retainedAgentEnvironment(source oif.Document) *Error {
 	v, present := source.Root().Lookup("base_environment")
 	if present && v.Kind() != oif.Null && v.Kind() != oif.Object {
 		return policyUnavailable("unsupported_stateful_reference", "Native environment references are not supported by this agent resource contract.")
+	}
+	if env, ok := v.Lookup("env"); ok {
+		for _, variable := range env.Members() {
+			if credential, ok := variable.Value.Lookup("credential"); ok && credential.Kind() != oif.Null {
+				return policyUnavailable("unsupported_stateful_reference", "Native credential references are not supported by this agent resource contract.")
+			}
+		}
 	}
 	return nil
 }
 
 // This contract contains resource control calls, without model execution or
 // usage observations. Never admit configured fees through the unpriced path.
-func retainedControlPricing(x *call, p *pin) *Error {
-	if p.attempt.Price != nil || x.attemptCardRevision(p.provider.ID, x.request.startedAt) != nil {
+func (s *Server) retainedControlPricing(x *call, p *pin, route *routing.Route) *Error {
+	if x.routingInputs == nil && s.Runtime != nil {
+		x.routingInputs = s.Runtime.RoutingInputs()
+	}
+	if p.attempt.Price == nil {
+		p.attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
+	}
+	if p.attempt.Price != nil || x.attemptCardRevisionForRoute(p.provider.ID, route, x.request.startedAt) != nil {
 		return policyUnavailable("unsupported_pricing", "Agent resource control does not support priced execution. Use an unpriced resource route.")
 	}
 	return nil

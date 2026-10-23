@@ -28,7 +28,10 @@ export class ResourceRequestError extends Error {
 }
 
 /** Equivalent JSON edits retain the identity of an unresolved submission. */
-export function agentSubmissionFingerprint(route: string, body: string): string {
+export function agentSubmissionFingerprint(
+  route: string,
+  body: string
+): string {
   const canonical = (value: NativeValue): string => {
     if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
     if (nativeObject(value))

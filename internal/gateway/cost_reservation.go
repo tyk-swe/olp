@@ -462,6 +462,10 @@ func (s *Server) settledCharge(x *call) usage.Cost {
 }
 
 func (x *call) attemptCardRevision(providerID string, at time.Time) *usage.RoutingCardRevision {
+	return x.attemptCardRevisionForRoute(providerID, x.route, at)
+}
+
+func (x *call) attemptCardRevisionForRoute(providerID string, route *routing.Route, at time.Time) *usage.RoutingCardRevision {
 	if x.cardPinned {
 		return x.cardRev
 	}
@@ -479,8 +483,8 @@ func (x *call) attemptCardRevision(providerID string, at time.Time) *usage.Routi
 			}
 		}
 	}
-	if project == nil && x.route != nil {
-		project = x.route.ProjectID
+	if project == nil && route != nil {
+		project = route.ProjectID
 	}
 	if revision, known := inputs.RateCardRevision(project, at); known && revision != nil {
 		return revision

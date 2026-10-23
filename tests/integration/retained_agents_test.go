@@ -72,7 +72,7 @@ func TestRetainedAgentsOwnershipAndSubmissionFence(t *testing.T) {
 		t.Fatalf("foreign owner reached resource: %d %s", response.StatusCode, body)
 	}
 	response, body = geminiPublic(t, h, http.MethodDelete, "/gemini/v1beta/agents/"+agent.ID, key, nil)
-	if response.StatusCode != 200 {
+	if response.StatusCode != 200 || response.Header.Get("Content-Type") != "application/json" || string(body) != "{}" {
 		t.Fatalf("delete %d: %s", response.StatusCode, body)
 	}
 	response, _ = geminiPublic(t, h, http.MethodGet, "/gemini/v1beta/agents/"+agent.ID, key, nil)

@@ -214,6 +214,7 @@ export const operationOptions = [
   ['search', 'Web search'],
   ['moderation', 'Moderation'],
   ['batch', 'Batches'],
+  ['agent_resource', 'Managed agents'],
   ['realtime', 'Realtime sessions'],
   ['bedrock_invoke', 'Bedrock InvokeModel']
 ] as const;

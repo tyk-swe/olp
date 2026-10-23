@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestRetainedAgentInput(t *testing.T) {
@@ -25,6 +26,10 @@ func TestRetainedAgentInput(t *testing.T) {
 		{`{"description":"agent","system_instruction":"Be brief","agent_config":{"antigravity":{}}}`, true},
 		{`{"id":"provider-id"}`, false}, {`{"execute":true}`, false},
 		{`{"base_environment":"provider-environment"}`, false},
+		{`{"base_environment":{"env":{"TOKEN":{"credential":"another-owner"}}}}`, false},
+		{`{"base_environment":{"env":{"TOKEN":{"credential":""}}}}`, false},
+		{`{"base_environment":{"env":{"TOKEN":{"credential":null,"value":"inline"}}}}`, true},
+		{`{"base_environment":{"env":{"credential":{"value":"inline"}}}}`, true},
 		{`{"description":{"text":"wrong"}}`, false},
 		{`{"tools":"wrong"}`, false},
 		{`{"agent_config":false}`, false},
@@ -36,6 +41,37 @@ func TestRetainedAgentInput(t *testing.T) {
 			}
 			if got := retainedAgentInput(source); (got == nil) != tc.valid {
 				t.Fatalf("validation=%v, valid=%v", got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestRetainedControlPricing(t *testing.T) {
+	now := time.Now()
+	project := "route-project"
+	price := usage.RoutingPrice{Price: usage.Price{ProviderKind: "gemini", Model: "agent-model", Operation: "agent_resource"}, EffectiveAt: now.Add(-time.Minute)}
+	card := usage.RoutingRateCard{ProjectID: &project, Revisions: []usage.RoutingCardRevision{{ID: "card", EffectiveAt: now.Add(-time.Minute)}}}
+	for _, tc := range []struct {
+		name   string
+		inputs *usage.RoutingInputs
+		route  *routing.Route
+		denied bool
+	}{
+		{name: "unpriced", inputs: &usage.RoutingInputs{RefreshedAt: now}},
+		{name: "historical pin with effective price", inputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}}, denied: true},
+		{name: "collection route project card", inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}, route: &routing.Route{ProjectID: &project}, denied: true},
+		{name: "unrelated project card", inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}, route: &routing.Route{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{Runtime: &fakeRuntime{inputs: tc.inputs}}
+			x := &call{operationOverride: "agent_resource", request: request{startedAt: now}}
+			p := &pin{provider: routing.Provider{ID: "provider", Kind: "gemini"}, model: "agent-model"}
+			err := s.retainedControlPricing(x, p, tc.route)
+			if (err != nil) != tc.denied || err != nil && err.Code != "unsupported_pricing" {
+				t.Fatalf("pricing error=%v, denied=%v", err, tc.denied)
+			}
+			if x.route != nil {
+				t.Fatal("pricing assigned one route to a collection request")
 			}
 		})
 	}
@@ -85,7 +121,7 @@ func TestRetainedResponseDelivery(t *testing.T) {
 	}{
 		{name: "create", status: 201, body: []byte(`{"id":"agent_resource_local"}`)},
 		{name: "get", status: 200, body: []byte(`{"id":"agent_resource_local"}`)},
-		{name: "delete", status: 200},
+		{name: "delete", status: 200, body: []byte(`{}`)},
 		{name: "list", status: 200, body: []byte(`{"agents":[]}`)},
 		{name: "write failure", status: 200, body: []byte(`{}`), writeErr: errors.New("write failed")},
 		{name: "flush failure", status: 200, body: []byte(`{}`), flushErr: errors.New("flush failed")},
