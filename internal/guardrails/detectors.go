@@ -58,6 +58,10 @@ func (p *patternDetector) width() int { return p.maxWidth }
 
 func compileDetector(d Revision, external Evaluator) (detector, error) {
 	switch d.Type {
+	case "builtin.code_execution":
+		return compileCodeExecution(d.Configuration)
+	case "builtin.tool_permission":
+		return compileToolPermission(d.Configuration)
 	case "builtin.regex":
 		var config RegexConfig
 		if err := decodeConfig(d.Configuration, &config); err != nil {
@@ -143,12 +147,18 @@ func compileDetector(d Revision, external Evaluator) (detector, error) {
 			t.schemas[name] = schema
 		}
 		return t, nil
-	case "webhook", "bedrock", "azure.content_safety", "azure.prompt_shields", "model_armor", "lakera", "presidio", "model", "plugin":
+	case "webhook", "bedrock", "azure.content_safety", "azure.prompt_shields", "model_armor", "lakera", "presidio", "model", "semantic_guard", "decision_model", "plugin":
 		if err := ValidateExternal(d); err != nil {
 			return nil, err
 		}
 		return externalDetector{definition: d, evaluator: external}, nil
 	default:
+		if _, ok := lookupNamedVendor(d.Type); ok {
+			if err := ValidateExternal(d); err != nil {
+				return nil, err
+			}
+			return externalDetector{definition: d, evaluator: external}, nil
+		}
 		return nil, errors.New("unknown guardrail type")
 	}
 }

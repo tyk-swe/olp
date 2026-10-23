@@ -18,7 +18,7 @@ are stable identifiers; independent work can proceed in parallel.
 
 | Workstream | Next implementation | Dependencies |
 | --- | --- | --- |
-| Guardrail integrations | Remaining named adapters in RM2 | Existing engine, credential and egress contracts |
+| Guardrail integrations | Implemented RM2; live qualification tracked separately | Existing engine, credential and egress contracts |
 | Retained APIs and retrieval | RM5.1–RM5.9, independently by family | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | RM7.1 direct Streamable HTTP execution | Implemented RM4 accounting and agent contracts, plus existing tool governance |
@@ -35,7 +35,7 @@ identifies implementation boundaries and owners.
 | Milestone | Status | Implementation scope |
 | --- | --- | --- |
 | [RM1: Existing gateway](#rm1-existing-gateway) | Done | Provider routing, access, operations, billing, exports and code mode |
-| [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | In progress | Core implementation complete; additional named integrations remain |
+| [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | Done | Named text integrations, local/model filters, capture and caching; MCP/agent hooks assigned to RM7/RM8 |
 | [RM3: Current APIs](#rm3-current-apis) | Done | Current completions, text Decisions, OCR/search, files and batches |
 | [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Done | Operation contracts, durable debits, recovery, settlement and agent contracts |
 | [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Planned | Fine-tuning, vector stores, retrieval and retained resource families |
@@ -56,7 +56,7 @@ CloudEvents, Stripe metering and native coding subscription integration.
 
 ### RM2: Guardrails, capture and caching
 
-**Status: In progress.** **Owners:** guardrail, connector, export and cache
+**Status: Done.** **Owners:** guardrail, connector, export and cache
 maintainers. **Dependencies:** existing immutable revision, scope and inspection
 contracts.
 
@@ -69,14 +69,16 @@ contracts.
   Safety, Azure Prompt Shields, Model Armor, Lakera v2 and Presidio.
 - [x] Implement exact and semantic response caching, guarded replay, scoped
   cache identity, purge, eviction and provider prompt-cache controls.
-- [ ] Implement the remaining named integrations in the
+- [x] Implement the remaining named text integrations and local/model filters in the
   [vendor inventory](develop/plans/guardrails.md#vendor-inventory), including
   each adapter's authentication, request/response mapping, supported actions,
   replacement handling, deadlines and failure policies.
 
-Each additional adapter can be implemented independently using the existing
-engine contracts. RM2 is Done when the remaining integration backlog is
-implemented.
+The inventory records every mapping and five explicit MCP/agent execution
+boundaries. Those hooks require RM7/RM8 authority or tool-history contracts and
+are owned there. Native text adapters preserve shared credential, egress,
+revision, deadline and failure-policy contracts. Live-service and deployment
+qualification remains tracked separately in the guardrail plan.
 
 ### RM3: Current APIs
 
@@ -191,7 +193,9 @@ guardrail argument/result execution.
   dispatch state. Repeated call IDs must not repeat effects.
 - [ ] **RM7.2 — OAuth and per-user grants:** implement server/client/audience/
   scope/project/user binding, single-flight refresh, expiry, revocation and
-  isolated credentials. Missing grants must refuse execution.
+  isolated credentials. Missing grants must refuse execution. Include the
+  inventory's `mcp_security`, `mcp_end_user_permission`, `mcp_jwt_signer` and
+  `agent_365` hooks only after server authority and caller identity are available.
 - [ ] **RM7.3 — Legacy HTTP+SSE:** implement the explicit `2024-11-05`
   transport while preserving modern sessions' selected transport.
 - [ ] **RM7.4 — Experimental stdio:** implement operator-installed executable
@@ -210,7 +214,9 @@ A2A. Retrieval-backed tools also use their selected RM5 backend.
 - [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
   dialects plus Responses projections, iteration/time/concurrency/cost bounds,
   per-step accounting, approvals, digest-bound continuation, revocation and
-  durable handling of cancellation, restart and unknown effects.
+  durable handling of cancellation, restart and unknown effects. Include
+  `typesafe` ordered tool-exchange pruning and compression recovery/tool
+  reinjection from the guardrail inventory.
 - [ ] **RM8.2 — Prompt publication and rendering:** implement immutable
   revisions, labels and bounded string substitution across API, playground
   and import, with fixed in-flight revisions, variable handling, input guards

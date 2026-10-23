@@ -65,6 +65,9 @@ func guardrailError(err error) *Error {
 func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	x.guardrailMetadata = x.request.guardrailMetadata
 	x.guardrailEngine = x.snapshot().GuardrailEngine(x.route.Slug, x.keyID).WithEvaluator(s.GuardrailEvaluator)
+	if x.internalGuardrail {
+		x.guardrailEngine = x.guardrailEngine.WithoutModelGuardrails()
+	}
 	if x.guardrailEngine == nil {
 		return nil
 	}
@@ -504,7 +507,8 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 		}()
 	}
 	var config guardrails.ExternalConfig
-	if json.Unmarshal(d.Configuration, &config) != nil || config.Rule == nil {
+	semantic := d.Type == "semantic_guard"
+	if json.Unmarshal(d.Configuration, &config) != nil || (!semantic && config.Rule == nil) || (semantic && guardrails.ValidateSemantic(config.Semantic) != nil) {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
 	// A retained serving snapshot contains only its pinned route/provider.
@@ -519,8 +523,23 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 	if parent.keyID != "" && !parent.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
-	segments, _ := json.Marshal(e.Segments)
-	text := config.Rule.Prompt + "\n" + string(segments)
+	var text string
+	var embeddingInputs []string
+	if semantic {
+		if !slices.Contains(route.Operations, "embeddings") {
+			return guardrails.Verdict{}, guardrails.ErrSurface
+		}
+		embeddingInputs, err = guardrails.SemanticInputs(e, *config.Semantic)
+		if err != nil {
+			return guardrails.Verdict{}, err
+		}
+		if len(embeddingInputs) == 0 {
+			return guardrails.Verdict{Action: "pass"}, nil
+		}
+	} else {
+		segments, _ := json.Marshal(e.Segments)
+		text = config.Rule.Prompt + "\n" + string(segments)
+	}
 	x := &call{
 		request:              request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
 		actor:                parent.actor,
@@ -544,7 +563,50 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 	defer s.settleAdmission(context.WithoutCancel(ctx), x)
 	var raw []byte
 	var out *outcome
-	if slices.Contains(route.Operations, "classification") || slices.Contains(route.Operations, "moderation") {
+	if semantic {
+		body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": embeddingInputs, "encoding_format": "float"})
+		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.family, x.mode = wire.Embeddings, "unary"
+		if route.Fidelity.Strict() {
+			codec, _ := operationregistry.Lookup("openai-embeddings")
+			source, parseErr := operationplan.Parse("openai-embeddings", body, int(s.cfg.MaxBodyBytes))
+			if parseErr != nil {
+				return guardrails.Verdict{}, guardrails.ErrSurface
+			}
+			x.unary = &unaryCall{source: source, dialect: codec, route: route.Slug, surface: "openai"}
+			if prepareErr := s.prepareUnary(ctx, x); prepareErr != nil {
+				out = &outcome{err: prepareErr}
+			} else {
+				embeddingCtx, cancel := x.routeContext(ctx)
+				defer cancel()
+				if admissionErr := s.admitClassifier(embeddingCtx, x); admissionErr != nil {
+					out = &outcome{err: admissionErr}
+				} else {
+					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+						return s.unaryAttempt(attemptCtx, x, a, p, slot, fact)
+					}})
+					raw = result.result.Body
+					out = &outcome{err: result.err, committed: result.committed, cancelled: result.cancelled}
+				}
+			}
+		} else {
+			parsed, parseErr := protocols.Parse(wire.Embeddings, body, "")
+			if parseErr != nil {
+				return guardrails.Verdict{}, guardrails.ErrSurface
+			}
+			x.generation.parsed = parsed
+			if prepareErr := s.prepare(ctx, x, guardrailAuthorizer(s, x)); prepareErr != nil {
+				out = &outcome{err: prepareErr}
+			} else if admissionErr := s.admitClassifier(ctx, x); admissionErr != nil {
+				out = &outcome{err: admissionErr}
+			} else {
+				out = s.execute(ctx, x)
+				if out.completion != nil {
+					raw = out.completion.Body
+				}
+			}
+		}
+	} else if slices.Contains(route.Operations, "classification") || slices.Contains(route.Operations, "moderation") {
 		dialect := "tei-classification"
 		body, _ := json.Marshal(map[string]string{"inputs": text})
 		if slices.Contains(route.Operations, "moderation") {
@@ -595,6 +657,9 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 	s.finish(x, out, max(200, errorStatus(out.err)))
 	if out.err != nil {
 		return guardrails.Verdict{}, out.err
+	}
+	if semantic {
+		return guardrails.SemanticVerdict(raw, *config.Semantic, len(embeddingInputs)-len(config.Semantic.Utterances))
 	}
 	return guardrails.ModelVerdict(raw, *config.Rule)
 }

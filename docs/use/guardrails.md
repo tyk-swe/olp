@@ -144,6 +144,8 @@ or authority to execute tools. Confined guardrail WASM calls have no HTTP access
 | `builtin.secrets` | Optional `categories`, `patterns`, and `replacement`. |
 | `builtin.keywords` | `words`, optional `substrings`, and `replacement`; Unicode case folding and one compiled automaton. |
 | `builtin.schema` | `schema`; JSON Schema with remote-reference loading disabled. |
+| `builtin.code_execution` | Optional `blocked_languages`, `confidence_threshold` (default 0.5), `detect_execution_intent` (default true). Input checks execution intent; output checks fenced code. |
+| `builtin.tool_permission` | Ordered `rules` with `id`, `tool_name`/`tool_type` RE2 patterns, `decision`, optional `allowed_param_patterns`; `default_action` defaults to deny. Captured function definitions/calls only; block or annotate. |
 | `builtin.tools` | `allow`, `deny`, `privileged`, `untrusted` glob lists, and `schemas` keyed by tool name. Deny wins over allow. |
 
 PII categories are `pii.email`, `pii.phone`, `pii.payment_card`, `pii.iban`,
@@ -172,7 +174,7 @@ after five failures and permits one probe after 30 seconds.
 
 Credentials are created through `POST /api/v1/guardrail-credentials` and sealed
 with the `guardrail_credential` purpose. The credential document can contain
-`api_key`, `signing_key`, or AWS `access_key_id`, `secret_access_key`, and optional
+`api_key`, `signing_key`, OAuth `client_id` and `client_secret`, or AWS `access_key_id`, `secret_access_key`, and optional
 `session_token`. Network credential references use the same project-owned
 credential mechanism. The `network` object supports the provider network
 settings, including mutual TLS and an approved proxy. Secrets never enter
@@ -195,11 +197,25 @@ Presidio accepts `language` (default `en`). Azure Content Safety accepts a sever
 [Model Armor](https://docs.cloud.google.com/model-armor/sanitize-prompts-responses),
 [Lakera](https://docs.lakera.ai/api-reference/lakera-api/guard/screen-content).
 
-A `model` configuration specifies `route` and `rule: {pointer, equals, category,
+The [named integration reference](guardrail-integrations.md) documents all
+additional native text adapters, their exact operation endpoints, authentication,
+validated `parameters`, transformations and phase restrictions. A single
+revision deadline covers credential loading and every segment request.
+
+A `semantic_guard` configuration specifies an embedding `route` and
+`semantic: {category, similarity_threshold, utterances}`. It embeds the inspected
+segments and reference utterances in one accounted batch, then compares validated
+vectors by cosine similarity. At most 128 segments, 64 reference utterances and
+4,096 dimensions are supported. References are bounded to 64 KiB in total.
+Threshold must be greater than zero and at most one. Its actions are block and
+annotate; it uses the same caller authorization, budgets and recursion protection
+as the model evaluator.
+
+A `model` (or `decision_model`) configuration specifies `route` and `rule: {pointer, equals, category,
 prompt?}`. The evaluator uses a generation, classification or moderation route
 under the caller's authorization, deadlines and budgets. Its usage is a child
 request attributed to the parent and guardrail. Internal evaluator requests skip
-model guardrails to prevent recursion.
+model, decision and semantic guardrails to prevent recursion.
 Evaluator routes resolve from the request's full pinned release, including for
 retained continuations. Evaluator usage preserves the caller's resolved end-user
 identity. Keyless playground evaluations reserve installation, organization and

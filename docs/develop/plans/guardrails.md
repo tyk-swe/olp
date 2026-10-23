@@ -1,7 +1,8 @@
 # Guardrail completion plan
 
-Status: **In progress**. The engine and capture-redaction implementation exist;
-release acceptance, live adapters and broader vendor coverage remain open.
+Status: **Implementation complete; release qualification pending**. Named text
+adapters, local filters and accounted model evaluation are implemented. Live
+service, deployment and hardware acceptance remain open below.
 [Guardrails](../../use/guardrails.md) owns the current engine contract;
 [Observability](../../operate/observability.md#payload-capture) owns capture.
 This plan owns [roadmap RM2](../../roadmap.md#rm2-guardrails-capture-and-caching),
@@ -37,7 +38,7 @@ implemented revision/execution contracts, not completion of RM2.3 or RM2.5.
   and retained-response exclusions through protocol, authorization/isolation,
   integration and race checks. Retain accessible console evidence and resolve
   failures before advancing the candidate.
-- [ ] **RM2.3 — Qualify all six live adapters** (connector/plugin): record each
+- [ ] **RM2.3 — Qualify every supported live adapter** (connector/plugin): record each
   adapter's authentication, API version, phases/actions, valid replacement
   spans, both failure policies and actual deadline/circuit behavior. Execute
   positive, negative and malformed/timeout cases using the qualification guide;
@@ -76,17 +77,17 @@ integration and rationale; absence of credentials or hardware is not an exclusio
   pass on the candidate, including independent capture inspection and no raw fallback.
 - [ ] Built-in/capture/streaming workloads meet the
   [performance budget](../performance.md#performance-budget) on reference hardware.
-- [ ] Each of the six named adapters has live-service evidence, distinct from fakes.
+- [ ] Every supported native adapter has live-service evidence, distinct from fakes.
 - [ ] Release review records the pinned 60-entry inventory, each support or
-  exclusion decision and an owned backlog. Coverage remains **Partial** while
-  unsupported entries remain; no overall vendor parity claim is made.
+  exclusion decision and an owned backlog. Implementation mappings and scope decisions do not imply live qualification
+  or overall upstream configuration parity.
 - [ ] The related RM2.6 cache gate has paired reference measurements and
   isolation/replay/failure evidence; any live prompt-cache claim has its own proof.
 
 ## Vendor inventory
 
-Aggregate vendor coverage: **Partial**. This inventory freezes the existing
-LiteLLM v1.105.0 comparison baseline at commit
+Aggregate vendor coverage: **Implemented within the recorded scope; live
+qualification pending**. This inventory freezes the existing LiteLLM v1.105.0 comparison baseline at commit
 `80b9556dd312d18c535ae06884faa97d1fdb8f46`, enumerating all 60 values in
 [`SupportedGuardrailIntegrations`](https://github.com/BerriAI/litellm/blob/80b9556dd312d18c535ae06884faa97d1fdb8f46/litellm/types/guardrails.py) in source order.
 The registry includes services, local filters and execution hooks; 60 registry
@@ -95,9 +96,10 @@ claim. Source file SHA-256: `6614ced8eb1db5a8845c862c4ad0b992139c3a14f5e1e955c4b
 
 The OLP mapping and action columns describe inspected local code, not a claim of
 LiteLLM configuration compatibility. No live-service qualification was performed
-in the source inventory review. Unsupported entries are an explicit backlog, with no approved
-exclusions. A generic webhook or confined WASM extension does not qualify a named
-vendor.
+in the source inventory review. Every registry entry has an implementation mapping or an explicit scope decision
+below. Five execution hooks depend on RM7/RM8 rather than the RM2 text evaluation
+contract. A generic webhook or confined WASM extension does not qualify a named
+HTTP vendor; native Python execution remains outside the confined plugin contract.
 
 Evidence keys:
 
@@ -112,7 +114,19 @@ Evidence keys:
 - **W**: [`external.go`](../../../internal/guardrails/external.go), inspected shared
   webhook implementation; [`guardrails_test.go`](../../../internal/gateway/guardrails_test.go)
   has a parallel evaluation fixture. No named third-party API compatibility proof.
-- **None**: no named adapter or qualification evidence.
+- **N**: [`vendors_a_test.go`](../../../internal/guardrails/vendors_a_test.go),
+  [`vendors_b_test.go`](../../../internal/guardrails/vendors_b_test.go),
+  [`vendors_c_test.go`](../../../internal/guardrails/vendors_c_test.go), and
+  [`vendors_test.go`](../../../internal/guardrails/vendors_test.go): native HTTP
+  authentication, phase, request, verdict, replacement and malformed-response
+  fixtures. These are local contracts, not live qualification.
+- **L**: [`tool_permission_test.go`](../../../internal/guardrails/tool_permission_test.go)
+  and [`code_execution_test.go`](../../../internal/guardrails/code_execution_test.go):
+  local ordered permission rules and executable-code detection.
+- **S**: [`semantic_test.go`](../../../internal/guardrails/semantic_test.go):
+  bounded embedding batches and validated cosine comparison; gateway regression
+  checks cover caller authorization, accounting and recursion.
+- **Scope**: explicit architectural disposition below, not vendor qualification.
 
 Actions below are engine capabilities on admitted surfaces. `mask` is synchronous
 input only; enforcing transformations require transformed serving routes. Monitor
@@ -123,78 +137,103 @@ spans with OLP's local replacement. Neither claims every upstream anonymizer opt
 
 | Registry integration | OLP mapping / status | Supported OLP actions | Local evidence | Live qualification | Follow-up owner |
 | --- | --- | --- | --- | --- | --- |
-| `aporia` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
+| `aporia` | `aporia` native text contract | block, annotate | N | Not run | Connector maintainers: aporia |
 | `bedrock` | `bedrock` (ApplyGuardrail) | block, redact, mask, annotate | V | Not run | Connector maintainers: Bedrock |
-| `dynamoai` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `guardrails_ai` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `lakera` | Unsupported legacy contract; OLP implements v2 | None | None | Unqualified; no named adapter | Connector maintainers: Lakera |
+| `dynamoai` | `dynamoai` native text contract | block, annotate | N | Not run | Connector maintainers: dynamoai |
+| `guardrails_ai` | `guardrails_ai` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: guardrails_ai |
+| `lakera` | `lakera_v1` native text contract; input phases only | block, annotate | N | Not run | Connector maintainers: lakera |
 | `lakera_v2` | `lakera` (`/v2/guard`) | block, annotate | V | Not run | Connector maintainers: Lakera |
 | `presidio` | `presidio` (analysis spans, local replacement) | block, redact, mask, annotate | V | Not run | Connector maintainers: Presidio |
 | `hide-secrets` | Local analogue: `builtin.secrets` | block, redact, mask, annotate | B | Not applicable; local comparison pending | Guardrail maintainers: corpus comparison |
-| `hiddenlayer` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `aim` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `cato_networks` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `pangea` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `crowdstrike_aidr` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `lasso` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `pillar` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `grayswan` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `panw_prisma_airs` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `cisco_ai_defense` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
+| `hiddenlayer` | `hiddenlayer` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: hiddenlayer |
+| `aim` | `aim` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: aim |
+| `cato_networks` | `cato_networks` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: cato_networks |
+| `pangea` | `pangea` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: pangea |
+| `crowdstrike_aidr` | `crowdstrike_aidr` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: crowdstrike_aidr |
+| `lasso` | `lasso` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: lasso |
+| `pillar` | `pillar` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: pillar |
+| `grayswan` | `grayswan` native text contract | block, annotate | N | Not run | Connector maintainers: grayswan |
+| `panw_prisma_airs` | `panw_prisma_airs` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: panw_prisma_airs |
+| `cisco_ai_defense` | `cisco_ai_defense` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: cisco_ai_defense |
 | `azure/prompt_shield` | `azure.prompt_shields` | block, annotate | V | Not run | Connector maintainers: Azure |
 | `azure/text_moderations` | `azure.content_safety` | block, annotate | V | Not run | Connector maintainers: Azure |
 | `model_armor` | `model_armor` (verdict only) | block, annotate | V | Not run | Connector maintainers: Google |
-| `openai_moderation` | `model` via operator-configured moderation route | block, annotate | M | Not run | Guardrail / connector maintainers: OpenAI |
-| `noma` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `noma_v2` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `tool_permission` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `zscaler_ai_guard` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `javelin` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `enkryptai` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `ibm_guardrails` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
+| `openai_moderation` | `openai_moderation` native text contract | block, annotate | N | Not run | Connector maintainers: openai_moderation |
+| `noma` | `noma` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: noma |
+| `noma_v2` | `noma_v2` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: noma_v2 |
+| `tool_permission` | `builtin.tool_permission`: ordered RE2 rules on captured function tools | block, annotate | L | Not applicable | Guardrail maintainers |
+| `zscaler_ai_guard` | `zscaler_ai_guard` native text contract | block, annotate | N | Not run | Connector maintainers: zscaler_ai_guard |
+| `javelin` | `javelin` native text contract; input phases only | block, annotate | N | Not run | Connector maintainers: javelin |
+| `enkryptai` | `enkryptai` native text contract | block, annotate | N | Not run | Connector maintainers: enkryptai |
+| `ibm_guardrails` | `ibm_guardrails` native text contract | block, annotate | N | Not run | Connector maintainers: ibm_guardrails |
 | `litellm_content_filter` | Local analogue: `builtin.keywords` / `builtin.regex` | block, redact, mask, annotate | B | Not applicable; local comparison pending | Guardrail maintainers: rule comparison |
-| `mcp_security` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `onyx` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `promptguard` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `xecguard` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `prompt_security` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `generic_guardrail_api` | `webhook` uses OLP contract; reference API compatibility unsupported | block, redact, mask, annotate (OLP contract only) | W | Not run | Guardrail maintainers: contract comparison |
-| `qualifire` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `custom_code` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `ovalix` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `microsoft_purview` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `semantic_guard` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `mcp_end_user_permission` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `block_code_execution` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `akto` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `mcp_jwt_signer` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
+| `mcp_security` | Excluded from RM2 text inspection: RM7.1: registered-server and tool-call authority | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `onyx` | `onyx` native text contract | block, annotate | N | Not run | Connector maintainers: onyx |
+| `promptguard` | `promptguard` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: promptguard |
+| `xecguard` | `xecguard` native text contract | block, annotate | N | Not run | Connector maintainers: xecguard |
+| `prompt_security` | `prompt_security` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: prompt_security |
+| `generic_guardrail_api` | `generic_guardrail_api` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: generic_guardrail_api |
+| `qualifire` | `qualifire` native text contract | block, annotate | N | Not run | Connector maintainers: qualifire |
+| `custom_code` | `plugin`: approved confined WASM; Python source requires a port | block, redact, mask, annotate | Existing plugin implementation | WASM conformance remains separate | Plugin / guardrail maintainers |
+| `ovalix` | `ovalix` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: ovalix |
+| `microsoft_purview` | `microsoft_purview` native text contract | block, annotate | N | Not run | Connector maintainers: microsoft_purview |
+| `semantic_guard` | `semantic_guard`: accounted embedding similarity against configured utterances | block, annotate | S | Not run | Guardrail / accounting maintainers |
+| `mcp_end_user_permission` | Excluded from RM2 text inspection: RM7.2: caller-bound per-user grants | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `block_code_execution` | `builtin.code_execution`: fenced languages and execution intent | block, redact, mask, annotate | L | Not applicable | Guardrail maintainers |
+| `akto` | `akto` native text contract | block, annotate | N | Not run | Connector maintainers: akto |
+| `mcp_jwt_signer` | Excluded from RM2 text inspection: RM7.2 / RM8.3: delegated audience-bound signing | None in RM2 | Scope | Not applicable | MCP / access maintainers |
 | `llm_as_a_judge` | `model` via operator-configured evaluator route | block, annotate | M | Not run | Guardrail maintainers: judge mapping |
-| `deepkeep` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `qostodian_nexus` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `rubrik` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `vigil_guard` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `repelloai` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `singulr` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `headroom` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `compresr` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `typesafe` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `straiker` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `alice` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `agent_365` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `conduct` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
-| `decision_model` | Unsupported | None | None | Unqualified; no named adapter | Guardrail / connector maintainers |
+| `deepkeep` | `deepkeep` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: deepkeep |
+| `qostodian_nexus` | `qostodian_nexus` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: qostodian_nexus |
+| `rubrik` | `rubrik` native text contract; separate input/output endpoints | block, annotate | N | Not run | Connector maintainers: rubrik |
+| `vigil_guard` | `vigil_guard` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: vigil_guard |
+| `repelloai` | `repelloai` native text contract | block, annotate | N | Not run | Connector maintainers: repelloai |
+| `singulr` | `singulr` native text contract | block, annotate | N | Not run | Connector maintainers: singulr |
+| `headroom` | `headroom` native text contract; synchronous input compression only | block, redact, mask, annotate | N | Not run | Connector maintainers: headroom |
+| `compresr` | `compresr` native text contract; synchronous input compression only | block, redact, mask, annotate | N | Not run | Connector maintainers: compresr |
+| `typesafe` | Excluded from RM2 text inspection: RM8.1: ordered tool-exchange relevance pruning | None in RM2 | Scope | Not applicable | Agent / accounting maintainers |
+| `straiker` | `straiker` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: straiker |
+| `alice` | `alice` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: alice |
+| `agent_365` | Excluded from RM2 text inspection: RM7.2: caller Entra OBO identity and MCP invocation | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `conduct` | `conduct` native text contract; input phases only | block, annotate | N | Not run | Connector maintainers: conduct |
+| `decision_model` | `decision_model`: accounted model route with explicit JSON verdict rule | block, annotate | M | Not run | Guardrail / accounting maintainers |
 
-### Owned follow-up
+### Scope decisions and owned follow-up
+
+The five excluded hooks require authority or execution state absent from a text
+segment. They are implementation dependencies, not exclusions for missing
+credentials or hardware:
+
+- `mcp_security` compares tool servers with an authorized MCP registry;
+  `mcp_end_user_permission` requires the caller's server-specific grant;
+  `mcp_jwt_signer` signs downstream calls with delegated identity. MCP/access
+  maintainers own these in RM7.1/RM7.2 and RM8.3. Evidence is the pinned
+  `mcp_security`, `mcp_end_user_permission` and `mcp_jwt_signer` hook source.
+- `agent_365` requires the caller's Entra JWT, on-behalf-of token exchange and
+  MCP invocation fields (`_build_evaluate_payload`, `_get_obo_token`). A shared
+  API-key text adapter cannot preserve that authority. MCP/access maintainers
+  own the RM7.2 integration.
+- `typesafe` constructs ordered tool exchanges and calls a paid relevance model
+  before pruning complete exchanges (`_candidate_exchanges`, `_build_state`,
+  `_call_systemone`). Agent/accounting maintainers own this in RM8.1; discarding
+  isolated text segments is not a substitute.
+
+The local code/tool filters expose explicit OLP configuration, not Python
+configuration compatibility. Semantic guardrails batch content and configured
+reference utterances through one authorized embedding route; decision and judge
+guardrails use explicit model verdict rules. Confined WASM remains the only
+native custom-code execution contract. Compression adapters provide stateless
+text replacement; recovery tools, original-content storage and tool-loop
+reinjection belong to RM8.1. Xecguard provides its scan endpoint; paired grounding
+is outside the segment contract. Purview uses an operator-rotated Graph access
+token; it does not impersonate the requesting user.
 
 Connector maintainers own live authentication, API-version, action, timeout and
-failure-policy evidence for each of the six existing adapters. Guardrail
-maintainers own prioritization of every unsupported registry entry and explicit
-support/exclusion decisions with rationale. A local analogue does not close an
-integration gap; tool governance in OLP is request-local and does not implement
-MCP authorization/signing hooks from this inventory. Native Python custom code
-is unsupported; OLP's plugin contract remains confined WASM.
-
-Release reviewers must record the inventory review and attach artifacts before
-closing the inventory acceptance gate. Aggregate coverage stays `Partial` while gaps remain.
+failure-policy qualification for every HTTP adapter. Release reviewers must
+record candidate-specific inventory review and attach artifacts before closing
+RM2.5. Implementation coverage is complete within these explicit boundaries;
+live qualification remains pending. The
+[operator adapter reference](../../use/guardrail-integrations.md) lists endpoints,
+credentials, parameters and phase/action restrictions.
 [Qualification](../qualification.md#guardrail-and-capture-qualification) tracks
 commands and outstanding acceptance.

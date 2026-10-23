@@ -79,6 +79,28 @@ func (e *Engine) WithEvaluator(external Evaluator) *Engine {
 	return e
 }
 
+// WithoutModelGuardrails removes recursive evaluator calls before the gateway
+// inspects native request surfaces. Local and external policy entries remain
+// active, and the immutable release engine is never changed.
+func (e *Engine) WithoutModelGuardrails() *Engine {
+	if e == nil {
+		return nil
+	}
+	entries := make([]compiledEntry, 0, len(e.entries))
+	for _, entry := range e.entries {
+		if !isModelGuardrail(entry.definition.Type) {
+			entries = append(entries, entry)
+		}
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if len(entries) == len(e.entries) {
+		return e
+	}
+	return &Engine{entries: entries}
+}
+
 // Compile copies configuration before compiling it. No live management object
 // or PostgreSQL handle is reachable from a compiled engine.
 func Compile(entries []Entry, definitions map[string]Revision, external Evaluator) (*Engine, error) {
@@ -100,7 +122,10 @@ func Compile(entries []Entry, definitions map[string]Revision, external Evaluato
 		if entry.Action == Redact && entry.Phase == InputParallel && !entry.Monitor {
 			return nil, errors.New("parallel input cannot transform a dispatched request")
 		}
-		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !slices.Contains([]string{"builtin.regex", "builtin.pii", "builtin.secrets", "builtin.keywords", "webhook", "presidio", "bedrock", "plugin"}, d.Type) {
+		if vendor, ok := lookupNamedVendor(d.Type); ok && len(vendor.phases) > 0 && !slices.Contains(vendor.phases, entry.Phase) {
+			return nil, errors.New("this vendor does not support the configured phase")
+		}
+		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !supportsTransformation(d.Type) {
 			return nil, errors.New("this detector does not supply transformation spans")
 		}
 		if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || (d.OnError != FailOpen && d.OnError != FailClosed) {
@@ -267,7 +292,7 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			continue
 		}
 		ev := Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: request.Phase, Action: r.entry.Action, Outcome: "passed"}
-		if request.InternalModel && r.definition.Type == "model" {
+		if request.InternalModel && isModelGuardrail(r.definition.Type) {
 			ev.Outcome = "skipped"
 			result.Decisions = append(result.Decisions, ev)
 			continue
