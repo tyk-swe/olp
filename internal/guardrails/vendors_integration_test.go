@@ -44,7 +44,7 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 }
 
 func TestVendorInterventionWithoutReplacement(t *testing.T) {
-	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus"} {
+	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus", "noma_v2", "straiker"} {
 		for _, action := range []string{Block, Redact} {
 			for _, policy := range []string{FailClosed, FailOpen} {
 				t.Run(kind+"/"+action+"/"+policy, func(t *testing.T) {
@@ -67,6 +67,44 @@ func TestVendorInterventionWithoutReplacement(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestConductIdentityFailuresRemainPolicyBlocks(t *testing.T) {
+	for _, reply := range []string{"error", "structured", "unavailable"} {
+		for _, policy := range []string{FailOpen, FailClosed} {
+			t.Run(reply+"/"+policy, func(t *testing.T) {
+				runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
+					var request map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					response := map[string]any{"jsonrpc": "2.0", "id": request["id"]}
+					switch reply {
+					case "error":
+						response["error"] = map[string]any{"code": -32000, "data": map[string]bool{"identity_required": true}}
+					case "structured":
+						response["result"] = map[string]any{"structuredContent": map[string]bool{"identity_required": true}}
+					case "unavailable":
+						response["result"] = map[string]any{"content": []any{map[string]string{"type": "text", "text": "ok"}}}
+					}
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_ = json.NewEncoder(w).Encode(response)
+				})
+				config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential"})
+				definition := Revision{ID: "revision", GuardrailID: "guard", Type: "conduct", Configuration: config, TimeoutMS: 1000, OnError: policy}
+				engine, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: Block}}, map[string]Revision{"revision": definition}, runner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := evaluateText(t, engine, "content", Input, nil)
+				wantBlocked := reply != "unavailable" || policy == FailClosed
+				if result.Blocked != wantBlocked || (err == ErrBlocked) != wantBlocked || len(result.Decisions) != 1 {
+					t.Fatalf("identity failure result=%+v error=%v", result, err)
+				}
+				if reply != "unavailable" && result.Decisions[0].Outcome != "blocked" {
+					t.Fatalf("identity denial became an availability error: %+v", result.Decisions)
+				}
+			})
 		}
 	}
 }

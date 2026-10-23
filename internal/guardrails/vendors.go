@@ -59,7 +59,9 @@ func vendorReplacement(segment Segment, replacement, category string) (Verdict, 
 		return Verdict{}, errEvaluation
 	}
 	verdict := vendorBoolean(true, category)
-	verdict.Redactions = []Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: replacement}}
+	if replacement != segment.Text {
+		verdict.Redactions = []Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: replacement}}
+	}
 	return verdict, nil
 }
 

@@ -778,11 +778,11 @@ func evaluateConduct(ctx context.Context, client *http.Client, c ExternalConfig,
 		arguments["provider"] = p.Provider
 	}
 	body := map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": "guard_check_prompt", "arguments": arguments}}
-	raw, identityDenied, err := conductJSON(ctx, client, c.Endpoint, body, credential, p.WorkspaceID)
+	raw, status, err := conductJSON(ctx, client, c.Endpoint, body, credential, p.WorkspaceID)
 	if err != nil {
 		return Verdict{}, err
 	}
-	if identityDenied {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return vendorBoolean(true, "conduct.identity_required"), nil
 	}
 	var response struct {
@@ -817,6 +817,9 @@ func evaluateConduct(ctx context.Context, client *http.Client, c ExternalConfig,
 	if response.Result != nil && response.Result.Structured != nil && response.Result.Structured.IdentityRequired {
 		return vendorBoolean(true, "conduct.identity_required"), nil
 	}
+	if status < 200 || status >= 300 {
+		return Verdict{}, errEvaluation
+	}
 	if response.Result == nil || response.Result.IsError {
 		return Verdict{}, errEvaluation
 	}
@@ -846,17 +849,17 @@ func evaluateConduct(ctx context.Context, client *http.Client, c ExternalConfig,
 
 // Conduct identity denials are policy blocks even when availability failures
 // use fail-open. Retain the status until this distinction is made.
-func conductJSON(ctx context.Context, client *http.Client, endpoint string, body any, credential externalCredential, workspace string) ([]byte, bool, error) {
+func conductJSON(ctx context.Context, client *http.Client, endpoint string, body any, credential externalCredential, workspace string) ([]byte, int, error) {
 	if credential.APIKey == "" || strings.ContainsAny(credential.APIKey, "\r\n\x00") {
-		return nil, false, errEvaluation
+		return nil, 0, errEvaluation
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil || len(encoded) > MaxContentBytes {
-		return nil, false, errEvaluation
+		return nil, 0, errEvaluation
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 	if err != nil {
-		return nil, false, errEvaluation
+		return nil, 0, errEvaluation
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
@@ -867,18 +870,15 @@ func conductJSON(ctx context.Context, client *http.Client, endpoint string, body
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, false, errEvaluation
+		return nil, 0, errEvaluation
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return nil, true, nil
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, false, errEvaluation
+		return nil, response.StatusCode, nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
 	if err != nil || len(raw) > 1<<20 || !json.Valid(raw) {
-		return nil, false, errEvaluation
+		return nil, 0, errEvaluation
 	}
-	return raw, false, nil
+	return raw, response.StatusCode, nil
 }
