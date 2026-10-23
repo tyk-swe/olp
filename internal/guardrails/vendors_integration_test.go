@@ -43,6 +43,42 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 	}
 }
 
+func TestLassoTransformationRequiresEveryFinding(t *testing.T) {
+	for _, tc := range []struct {
+		name, findings string
+		blocked        bool
+	}{
+		{"mask_only", `{"pii":[{"action":"AUTO_MASKING"}]}`, false},
+		{"warning_same_category", `{"pii":[{"action":"AUTO_MASKING"},{"action":"WARN"}]}`, true},
+		{"warning_other_category", `{"pii":[{"action":"AUTO_MASKING"}],"jailbreak":[{"action":"WARN"}]}`, true},
+		{"block_other_category", `{"pii":[{"action":"AUTO_MASKING"}],"jailbreak":[{"action":"BLOCK"}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, policy := range []string{FailClosed, FailOpen} {
+				t.Run(policy, func(t *testing.T) {
+					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
+						io.WriteString(w, `{"violations_detected":true,"findings":`+tc.findings+`,"messages":[{"content":"masked"}]}`)
+					})
+					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: json.RawMessage(`{"mask":true}`)})
+					definition := Revision{ID: "revision", GuardrailID: "guard", Type: "lasso", Configuration: config, TimeoutMS: 1000, OnError: policy}
+					engine, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: Redact}}, map[string]Revision{"revision": definition}, runner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, err := evaluateText(t, engine, "private and unsafe", Input, nil)
+					if tc.blocked {
+						if err != ErrBlocked || !result.Blocked || result.Changed {
+							t.Fatalf("partial repair escaped: %+v error=%v", result, err)
+						}
+					} else if err != nil || result.Blocked || !result.Changed || result.Segments[0].Text != "masked" {
+						t.Fatalf("complete repair failed: %+v error=%v", result, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestNamedVendorPolicyCompilation(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind, phase, action string

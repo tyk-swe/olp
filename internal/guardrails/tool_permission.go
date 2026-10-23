@@ -185,8 +185,8 @@ func toolPermissionValues(raw string) (map[string][]string, error) {
 		switch typed := current.(type) {
 		case map[string]any:
 			for key, child := range typed {
-				// Literal separators would alias a different structural path.
-				if strings.ContainsAny(key, ".[]") {
+				// Empty keys and literal separators can alias another structural path.
+				if key == "" || strings.ContainsAny(key, ".[]") {
 					return errEvaluation
 				}
 				next := key

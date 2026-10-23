@@ -539,7 +539,7 @@ func aLasso(ctx context.Context, client *http.Client, c ExternalConfig, cred ext
 	if len(response.Findings) == 0 {
 		return Verdict{}, errEvaluation
 	}
-	needsMask := false
+	needsMask, unrepairable := false, false
 	for _, findings := range response.Findings {
 		for _, finding := range findings {
 			switch finding.Action {
@@ -548,16 +548,14 @@ func aLasso(ctx context.Context, client *http.Client, c ExternalConfig, cred ext
 			case "AUTO_MASKING":
 				needsMask = true
 			case "WARN":
+				unrepairable = true
 			default:
 				return Verdict{}, errEvaluation
 			}
 		}
 	}
-	if needsMask {
-		if p.Mask {
-			return aReplacement(response.Messages, s, "lasso.policy")
-		}
-		return vendorBoolean(true, "lasso.policy"), nil
+	if needsMask && p.Mask && !unrepairable {
+		return aReplacement(response.Messages, s, "lasso.policy")
 	}
 	return vendorBoolean(true, "lasso.policy"), nil
 }

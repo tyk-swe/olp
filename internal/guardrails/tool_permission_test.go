@@ -21,6 +21,7 @@ func TestToolPermissionOrderedRules(t *testing.T) {
 		{"deny-array-item", "read_file", "tool_call", `{"path":"/safe/file","options":{"scopes":["read","write"]}}`, true},
 		{"missing-parameter", "read_file", "tool_call", `{"path":"/safe/file"}`, true},
 		{"literal-path", "read_file", "tool_call", `{"path":"/safe/file","options.scopes[]":"read"}`, true},
+		{"empty-key-path", "read_file", "tool_call", `{"":{"path":"/safe/file","options":{"scopes":["read"]}}}`, true},
 		{"literal-array", "read_file", "tool_call", `{"path":"/safe/file","options":{"scopes[]":"read"}}`, true},
 		{"literal-with-unsafe-nested-value", "read_file", "tool_call", `{"path":"/safe/file","options.scopes[]":"read","options":{"scopes":["write"]}}`, true},
 		{"malformed-arguments", "read_file", "tool_call", `not-json`, true},
