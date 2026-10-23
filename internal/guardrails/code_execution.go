@@ -86,7 +86,10 @@ func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation
 			// byte offsets rather than offsets into normalized text.
 			fences = escapedCodeFence
 		}
-		spans := fences.FindAllStringSubmatchIndex(segment.Text, -1)
+		spans := fences.FindAllStringSubmatchIndex(segment.Text, MaxFindings+1)
+		if len(spans) > MaxFindings {
+			return Verdict{}, errEvaluation
+		}
 		for _, span := range spans {
 			language := ""
 			if info := strings.Fields(segment.Text[span[2]:span[3]]); len(info) > 0 {
@@ -104,12 +107,18 @@ func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation
 				}
 			}
 			if confidence >= d.threshold {
+				if len(verdict.Redactions) >= MaxFindings {
+					return Verdict{}, errEvaluation
+				}
 				verdict.Action = Block
 				verdict.Categories = []string{"code.execution"}
 				verdict.Redactions = append(verdict.Redactions, Redaction{Segment: segment.ID, Start: span[0], End: span[1], Replacement: "[CODE BLOCKED]"})
 			}
 		}
 		if input && d.intent && intent && len(spans) == 0 {
+			if len(verdict.Redactions) >= MaxFindings {
+				return Verdict{}, errEvaluation
+			}
 			verdict.Action = Block
 			verdict.Categories = []string{"code.execution"}
 			verdict.Redactions = append(verdict.Redactions, Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "[CODE BLOCKED]"})

@@ -1,10 +1,41 @@
 package guardrails
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 )
+
+func TestCodeExecutionFindingLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		phase    string
+		segments []Segment
+		wantErr  bool
+	}{
+		{"at limit", Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings)}}, false},
+		{"over limit", Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings+1)}}, true},
+		{"escaped over limit", Output, []Segment{{Text: strings.Repeat("```\\n```", MaxFindings+1)}}, true},
+		{"across segments", Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings/2)}, {Text: strings.Repeat("```\n```", MaxFindings/2+1)}}, true},
+		{"plain intent after limit", Input, []Segment{{Text: "Run this code:\n" + strings.Repeat("```\n```", MaxFindings)}, {Text: "Execute this program"}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detector, err := compileCodeExecution([]byte(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := detector.detect(context.Background(), Evaluation{Phase: tc.phase, Segments: tc.segments})
+			if tc.wantErr {
+				if !errors.Is(err, errEvaluation) {
+					t.Fatalf("expected finding limit error, got %v with %d redactions", err, len(verdict.Redactions))
+				}
+			} else if err != nil || len(verdict.Redactions) != MaxFindings {
+				t.Fatalf("expected %d findings, got %d with error %v", MaxFindings, len(verdict.Redactions), err)
+			}
+		})
+	}
+}
 
 func TestCodeExecutionBoundaries(t *testing.T) {
 	for _, tc := range []struct {
