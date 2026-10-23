@@ -111,7 +111,7 @@ func Parse(family wire.Format, data []byte, model string) (*wire.Request, error)
 			if msg.Kind() != oif.Object {
 				return nil, requestError("", "expected a JSON object")
 			}
-			// A system message between turns is the mid-conversation-system beta.
+			// A system message between turns needs no beta; it is generally available.
 			if role := chars(member(msg, "role")); role != "user" && role != "assistant" && role != "system" {
 				return nil, requestError("messages.role", "Anthropic messages require user, assistant or system roles")
 			}

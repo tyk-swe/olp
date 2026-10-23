@@ -103,14 +103,8 @@ var betaPairs = []struct {
 		}
 		return ""
 	}},
-	{"mid-conversation-system-", func(r *anthropicRequest) string {
-		for i, m := range r.Messages {
-			if m.Role == "system" {
-				return fmt.Sprintf("messages.%d.role", i)
-			}
-		}
-		return ""
-	}},
+	// A system message between turns needs no beta: mid-conversation system
+	// messages are generally available, and Claude Code sends none for them.
 }
 
 func present(raw json.RawMessage, name string) string {
