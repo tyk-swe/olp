@@ -86,29 +86,33 @@ func TestRetainedAgentNormalizationAndProjection(t *testing.T) {
 	}
 }
 
-func TestRetainedControlPricing(t *testing.T) {
+func TestRetainedControlPolicy(t *testing.T) {
 	now := time.Now()
 	project := "route-project"
 	price := usage.RoutingPrice{Price: usage.Price{ProviderKind: "gemini", Model: "agent-model", Operation: "agent_resource"}, EffectiveAt: now.Add(-time.Minute)}
 	card := usage.RoutingRateCard{ProjectID: &project, Revisions: []usage.RoutingCardRevision{{ID: "card", EffectiveAt: now.Add(-time.Minute)}}}
 	for _, tc := range []struct {
-		name   string
-		inputs *usage.RoutingInputs
-		route  *routing.Route
-		denied bool
+		name       string
+		inputs     *usage.RoutingInputs
+		route      *routing.Route
+		credential string
+		code       string
 	}{
 		{name: "unpriced", inputs: &usage.RoutingInputs{RefreshedAt: now}},
-		{name: "historical pin with effective price", inputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}}, denied: true},
-		{name: "collection route project card", inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}, route: &routing.Route{ProjectID: &project}, denied: true},
+		{name: "historical pin with effective price", inputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}}, code: "unsupported_pricing"},
+		{name: "collection route project card", inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}, route: &routing.Route{ProjectID: &project}, code: "unsupported_pricing"},
 		{name: "unrelated project card", inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}, route: &routing.Route{}},
+		{name: "missing pricing", code: "pricing_unavailable"},
+		{name: "stale pricing", inputs: &usage.RoutingInputs{RefreshedAt: now.Add(-2 * usage.PerformanceMaxAge), Prices: []usage.RoutingPrice{price}}, code: "pricing_unavailable"},
+		{name: "caller credential", inputs: &usage.RoutingInputs{RefreshedAt: now}, credential: "caller", code: "unsupported_provider_credentials"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &Server{Runtime: &fakeRuntime{inputs: tc.inputs}}
 			x := &call{operationOverride: "agent_resource", request: request{startedAt: now}}
-			p := &pin{provider: routing.Provider{ID: "provider", Kind: "gemini"}, model: "agent-model"}
-			err := s.retainedControlPricing(x, p, tc.route)
-			if (err != nil) != tc.denied || err != nil && err.Code != "unsupported_pricing" {
-				t.Fatalf("pricing error=%v, denied=%v", err, tc.denied)
+			p := &pin{provider: routing.Provider{ID: "provider", Kind: "gemini", CredentialSource: tc.credential}, model: "agent-model"}
+			err := s.retainedControlPolicy(x, p, tc.route)
+			if (err == nil) != (tc.code == "") || err != nil && err.Code != tc.code {
+				t.Fatalf("policy error=%v, expected code=%s", err, tc.code)
 			}
 			if x.route != nil {
 				t.Fatal("pricing assigned one route to a collection request")

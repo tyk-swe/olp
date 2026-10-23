@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -500,5 +501,32 @@ func TestRetainedAgentsListPropagatesResolverFailure(t *testing.T) {
 	response, body = geminiPublic(t, h, http.MethodGet, "/gemini/v1beta/agents", key, nil)
 	if response.StatusCode != http.StatusInternalServerError || strings.Contains(string(body), "next_page_token") || len(provider.captured()) != before {
 		t.Fatalf("resolver failure hidden: %d %s", response.StatusCode, body)
+	}
+}
+
+func TestRetainedAgentsQueryKeyAuthentication(t *testing.T) {
+	h := newAccessHarness(t)
+	provider := newGeminiLifecycleProvider(t)
+	t.Cleanup(provider.Close)
+	route, key, _ := provisionGeminiLifecycle(t, h, h.owner(), "gemini-agents", provider)
+	query := "?key=" + url.QueryEscape(key)
+	response, body := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/agents"+query, "", []byte(`{}`), map[string]string{"X-OLP-Route": route, "Idempotency-Key": uuid.NewString()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("query-auth create %d: %s", response.StatusCode, body)
+	}
+	id := response.Header.Get("X-OLP-Resource-ID")
+	for _, call := range []struct{ method, path string }{
+		{http.MethodGet, "/gemini/v1beta/agents"},
+		{http.MethodGet, "/gemini/v1beta/agents/" + id},
+		{http.MethodDelete, "/gemini/v1beta/agents/" + id},
+	} {
+		response, body = geminiPublic(t, h, call.method, call.path+query, "", nil)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("query-auth %s %s: %d %s", call.method, call.path, response.StatusCode, body)
+		}
+	}
+	response, body = geminiPublic(t, h, http.MethodGet, "/gemini/v1beta/agents"+query+"&unsupported=1", "", nil)
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unsupported query parameter accepted: %d %s", response.StatusCode, body)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) registerRetainedLifecycle(mux *http.ServeMux) {
@@ -55,8 +56,11 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		fail(providerStateForbidden())
 		return
 	}
-	if e.Action != "list" && len(r.URL.Query()) != 0 {
-		fail(invalidRequest("unsupported_parameter", "This resource method does not accept query parameters.", nil))
+	for name := range r.URL.Query() {
+		if name == "key" || e.Action == "list" && (name == "page_size" || name == "page_token") {
+			continue
+		}
+		fail(invalidRequest("unsupported_parameter", "This resource method does not accept that query parameter.", nil))
 		return
 	}
 	if e.Action == "list" {
@@ -163,7 +167,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			}
 		}
 		p, err = s.selectBoundPinSurface(r.Context(), x, route, e.Operation, e.Surface, "unary", base, func(provider *routing.Provider, model string) bool {
-			return provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
+			return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 		})
 		if err != nil {
 			fail(err)
@@ -220,7 +224,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
-	if err := s.retainedControlPricing(x, p, route); err != nil {
+	if err := s.retainedControlPolicy(x, p, route); err != nil {
 		fail(err)
 		return
 	}
@@ -436,12 +440,6 @@ func retainedPublicError(err *Error, p *pin, resource *resources.Resource) *Erro
 
 func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x *call, a access.Authority, e retainedapi.Endpoint, fail func(*Error)) int {
 	limit := 20
-	for name := range r.URL.Query() {
-		if name != "page_size" && name != "page_token" {
-			fail(invalidRequest("unsupported_parameter", "This listing supports page_size and page_token.", nil))
-			return 400
-		}
-	}
 	if raw := r.URL.Query().Get("page_size"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 100 {
@@ -487,7 +485,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			fail(gateErr)
 			return gateErr.Status
 		}
-		if err := s.retainedControlPricing(x, p, route); err != nil {
+		if err := s.retainedControlPolicy(x, p, route); err != nil {
 			fail(err)
 			return err.Status
 		}
@@ -650,11 +648,17 @@ func normalizeRetainedAgent(source oif.Document) (oif.Document, error) {
 	return source, nil
 }
 
-// This contract contains resource control calls, without model execution or
-// usage observations. Never admit configured fees through the unpriced path.
-func (s *Server) retainedControlPricing(x *call, p *pin, route *routing.Route) *Error {
+// Retained controls require durable credential identity and known, unpriced
+// execution because this contract has no model usage observations.
+func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *Error {
+	if p.provider.CredentialSource == "caller" {
+		return policyUnavailable("unsupported_provider_credentials", "Agent resources require managed provider credentials.")
+	}
 	if x.routingInputs == nil && s.Runtime != nil {
 		x.routingInputs = s.Runtime.RoutingInputs()
+	}
+	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > usage.PerformanceMaxAge {
+		return serverError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	if p.attempt.Price == nil {
 		p.attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
