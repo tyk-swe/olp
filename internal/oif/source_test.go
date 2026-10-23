@@ -3,6 +3,7 @@ package oif_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -70,6 +71,38 @@ func FuzzStringsDecodeAsEncodingJSONDecodesThem(f *testing.F) {
 		}
 		visit(d.Root())
 	})
+}
+
+func TestParseJSONRejectsDuplicateKeysAtAnyObjectSize(t *testing.T) {
+	for _, raw := range []string{
+		`{"a":1,"a":2}`,
+		`{"a":1,"b":{"a":1,"a":2}}`,
+		"{\"a\":1,\"\\u0061\":2}",
+	} {
+		if _, err := oif.ParseJSON([]byte(raw), oif.Limits{}); err == nil {
+			t.Fatalf("ParseJSON(%s) succeeded, want duplicate_key error", raw)
+		}
+	}
+	// An object past the small-object scan must still reject a repeat of
+	// its first member (its last member repeats it below).
+	var b strings.Builder
+	b.WriteString(`{"k0":0`)
+	for i := 1; i < 40; i++ {
+		fmt.Fprintf(&b, `,"k%d":0`, i)
+	}
+	b.WriteString(`,"k0":1}`)
+	if _, err := oif.ParseJSON([]byte(b.String()), oif.Limits{}); err == nil {
+		t.Fatal("ParseJSON of a large object with a repeated key succeeded, want duplicate_key error")
+	}
+	b.Reset()
+	b.WriteString(`{"k0":0`)
+	for i := 1; i < 40; i++ {
+		fmt.Fprintf(&b, `,"k%d":0`, i)
+	}
+	b.WriteByte('}')
+	if _, err := oif.ParseJSON([]byte(b.String()), oif.Limits{}); err != nil {
+		t.Fatalf("ParseJSON of a large object with distinct keys: %v", err)
+	}
 }
 
 // Left out of a copy, and not out of the document.
