@@ -65,10 +65,3 @@ func TestPluginDiscoveryRefusesBrokenContinuations(t *testing.T) {
 		})
 	}
 }
-
-// failingSigner is a signing hook that fails as told.
-type failingSigner struct{ err error }
-
-func (s failingSigner) Sign(context.Context, string, abi.Provider, abi.SignRequest, []string) (abi.SignResult, error) {
-	return abi.SignResult{}, s.err
-}

@@ -2,7 +2,6 @@ package agents
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -204,6 +203,3 @@ func mapConflict(err error) error {
 	}
 	return err
 }
-
-// Keep JSON bodies constrained to the typed draft even when importing config.
-func decodeStoredDraft(raw json.RawMessage) (Draft, error) { return agentcontract.DecodeDraft(raw) }

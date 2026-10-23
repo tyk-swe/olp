@@ -71,7 +71,6 @@ func captureRates(ctx context.Context, q access.Queryer) (map[string]string, err
 	// The window is covered: the import bound contains it entirely.
 	type agg struct {
 		attributed, invoiced decimal.Decimal
-		covered              bool
 	}
 	byProvider := map[string]*agg{}
 	for _, id := range providerIDs {

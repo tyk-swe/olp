@@ -100,19 +100,6 @@ func (h *harness) gemini(action string, body any) response {
 	return h.do("POST", GeminiPrefix+"/models/"+GeminiModel+":"+action, map[string]string{"X-Goog-Api-Key": testCredential}, body)
 }
 
-func (h *harness) recorded(query string) []Record {
-	h.t.Helper()
-	r := h.do("GET", RecordedPath+query, nil, nil)
-	var out struct {
-		Requests []Record `json:"requests"`
-		InFlight int      `json:"in_flight"`
-	}
-	if err := json.Unmarshal(r.body, &out); err != nil || out.InFlight != 0 {
-		h.t.Fatalf("recording %s (in flight %d): %v", r.body, out.InFlight, err)
-	}
-	return out.Requests
-}
-
 func want(t *testing.T, r response, status int) {
 	t.Helper()
 	if r.status != status {

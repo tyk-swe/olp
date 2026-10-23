@@ -14,7 +14,8 @@ unqualified.
 | --- | --- |
 | `make setup` | Download modules, install the pnpm workspace, generate contracts |
 | `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
-| `make check` | Generate contracts; check formatting, vet, ESLint, types, and local tests |
+| `make check` | Generate contracts; check formatting, vet, Go lint, ESLint, types, and local tests |
+| `make lint` | Pinned Go static analysis gate (see `staticcheck.conf`) |
 | `make test` | Go, benchmark harness, console unit/component, and script suites without containers |
 | `make test-go` | Go unit and protocol suites |
 | `make test-bench` | The benchmark harness's own tests, which need no services |
@@ -69,7 +70,7 @@ Keep feature types, validation, SQL, handlers and workflows together. The
 [architecture map](docs/develop/architecture.md) identifies backend and console owners;
 [testing](tests/README.md) covers focused runs, timeouts and qualification.
 
-Use `gofmt` and `go vet` for Go; console source uses Prettier, two spaces,
+Use `gofmt`, `go vet`, and `make lint` for Go; console source uses Prettier, two spaces,
 single quotes, no trailing commas, `camelCase` helpers and `PascalCase.svelte` components. Keep
 Svelte route components thin and use the [console design system](console/README.md#design-system).
 

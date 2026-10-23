@@ -20,15 +20,6 @@ type signing struct {
 
 func (s signing) Sign(ctx context.Context, r SignRequest) (SignResult, error) { return s.sign(ctx, r) }
 
-type routing struct {
-	manifestOnly
-	match func(RouteFeatures) bool
-}
-
-func (r routing) MatchRoute(_ context.Context, features RouteFeatures) (RouteVerdict, error) {
-	return RouteVerdict{Match: r.match(features)}, nil
-}
-
 type panicking struct{}
 
 func (panicking) Manifest() Manifest { panic("declared nothing") }

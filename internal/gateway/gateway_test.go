@@ -116,12 +116,6 @@ func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 	f.refusedGenerations = append(f.refusedGenerations, generation)
 }
 
-func (f *fakeRuntime) refusals() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.refused)
-}
-
 type capture struct {
 	mu   sync.Mutex
 	envs []Envelope
@@ -339,35 +333,6 @@ func errorCode(t *testing.T, body map[string]any) string {
 
 // The slot cooled down for the advertised interval: the next request
 // skips provider a without consuming an attempt.
-
-// unreadableSecrets serves every credential version but one, whose secret
-// the credential source can't read.
-type unreadableSecrets struct {
-	*fakeRuntime
-	credentialID string
-}
-
-func (u unreadableSecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
-	if id == u.credentialID {
-		return nil, 0, runtime.ErrCredentialUnavailable
-	}
-	return u.fakeRuntime.Secret(ctx, release, id)
-}
-
-// authoritySecrets serves one credential version from a secret authority that
-// answers only once the reading context ends.
-type authoritySecrets struct {
-	*fakeRuntime
-	credentialID string
-}
-
-func (a authoritySecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
-	if id != a.credentialID {
-		return a.fakeRuntime.Secret(ctx, release, id)
-	}
-	<-ctx.Done()
-	return nil, 0, fmt.Errorf("credential %s: %w: %w", id, runtime.ErrCredentialUnavailable, ctx.Err())
-}
 
 // Connection drops mid-stream without a completion marker.
 

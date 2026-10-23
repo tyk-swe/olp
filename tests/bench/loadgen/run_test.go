@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -290,13 +289,4 @@ func TestCancelingTheContextStopsTheScheduleAndInvalidatesTheRun(t *testing.T) {
 			t.Fatalf("valid %v, problems %v", report.Valid, report.Problems)
 		}
 	})
-}
-
-// sent counts calls, for tests that only need to know the server was reached.
-type sent struct{ n atomic.Int64 }
-
-func (s *sent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.n.Add(1)
-	io.Copy(io.Discard, r.Body)
-	io.WriteString(w, `{}`)
 }

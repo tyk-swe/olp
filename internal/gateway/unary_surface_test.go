@@ -1,12 +1,10 @@
 package gateway
 
 import (
-	"bytes"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -23,23 +21,6 @@ func strictEmbeddings(snapshot *routing.Snapshot) {
 }
 
 // No serving baseline is selected when the primary has no usable slot.
-
-type lockedLog struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (l *lockedLog) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.buf.Write(p)
-}
-
-func (l *lockedLog) String() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.buf.String()
-}
 
 func TestStrictGeminiEmbeddingsAcceptQueryKey(t *testing.T) {
 	h := strictHarness(t, func(snapshot *routing.Snapshot) {

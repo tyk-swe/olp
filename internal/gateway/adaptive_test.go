@@ -21,7 +21,6 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 const backupSlug = "team-backup"
@@ -58,18 +57,6 @@ func (h *harness) republish(edit func(s *routing.Snapshot, a, b routing.Provider
 	h.rt.mu.Lock()
 	h.rt.release = release
 	h.rt.mu.Unlock()
-}
-
-// provider resolves a harness provider's ID by name.
-func (h *harness) provider(name string) string {
-	h.t.Helper()
-	for _, provider := range h.rt.Release().Snapshot.Providers {
-		if provider.Name == name {
-			return provider.ID
-		}
-	}
-	h.t.Fatalf("no provider %s", name)
-	return ""
 }
 
 // splitRoutes leaves the harness route serving only provider a and adds a
@@ -224,13 +211,6 @@ func triage(s *routing.Snapshot, b routing.Provider, when routing.Predicate) {
 	classifier.ID, classifier.RoutingID, classifier.RevisionID, classifier.Slug = id, id, uuid.NewString(), classifierSlug
 	classifier.Targets = []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
 	s.Routes[routeSlug], s.Routes[classifierSlug] = route, classifier
-}
-
-// predicates answers plugin predicates in-process.
-type predicates func(digest string, input abi.RoutePredicate) (bool, error)
-
-func (p predicates) RoutePredicate(_ context.Context, digest string, input abi.RoutePredicate) (bool, error) {
-	return p(digest, input)
 }
 
 // pipelining is a limiter that admits everything and counts its round trips:

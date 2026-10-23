@@ -20,7 +20,6 @@ const filterProjectScopeSQL = `SELECT EXISTS(SELECT 1 FROM olp.projects WHERE id
 const filterRouteScopeSQL = `SELECT project_id::text FROM olp.routes WHERE slug=$1 FOR SHARE`
 const listGapsSQL = `SELECT to_jsonb(g) FROM olp.export_gaps g JOIN olp.export_sinks s ON s.id=g.sink_id
  WHERE g.sink_id=$1 AND g.id<$2::uuid AND ($3 OR s.project_id=ANY($4::uuid[])) ORDER BY g.id DESC LIMIT $5`
-const listCursorsSQL = `SELECT to_jsonb(c) FROM olp.export_cursors c WHERE c.sink_id=$1 ORDER BY c.stream`
 const sinkStatusSQL = `SELECT CASE WHEN st.stream='focus' THEN
   jsonb_build_object('stream','focus','delivered_days',COALESCE(focusd.delivered_days,0),
    'latest_delivered_date',focusd.latest_delivered_date,'last_success_at',focusd.last_success_at,

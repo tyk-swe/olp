@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -84,27 +83,6 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 		}
 	}
 }
-
-type stalledExporter struct {
-	entered  chan struct{}
-	release  chan struct{}
-	exported atomic.Int64
-}
-
-func (e *stalledExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
-	select {
-	case e.entered <- struct{}{}:
-	default:
-	}
-	select {
-	case <-e.release:
-		e.exported.Add(int64(len(spans)))
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-func (*stalledExporter) Shutdown(context.Context) error { return nil }
 
 type failingExporter struct {
 	calls chan struct{}

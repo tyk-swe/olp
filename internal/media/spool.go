@@ -11,7 +11,6 @@ package media
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -470,10 +469,4 @@ func (s *Spool) PutBytes(ctx context.Context, filename, contentType string, data
 		MaximumLength: maximum,
 		Body:          strings.NewReader(string(data)),
 	})
-}
-
-// constantTimeHandleEqual compares handles without leaking length-prefix
-// timing; primarily used by tests asserting handle hygiene.
-func constantTimeHandleEqual(a, b Handle) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

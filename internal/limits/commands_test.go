@@ -56,17 +56,14 @@ var (
 	// refusedReply is a command the server rejected before running anything.
 	refusedReply = &coordination.CommandError{Cause: errors.New("connection refused")}
 
-	costGranted  = reply(int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000))
-	costSettled  = reply(int64(1), int64(1), "ok", int64(1), int64(0))
-	costRefusing = reply(int64(1), int64(0), "daily_cost_estimate", int64(1000), int64(20_000), int64(24_000))
-	costUnopened = reply(int64(1), int64(-1), "uninitialized_daily_cost_state", int64(0), int64(20_000), int64(24_000))
+	costGranted = reply(int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000))
+	costSettled = reply(int64(1), int64(1), "ok", int64(1), int64(0))
 )
 
 // The rate replies answer costRequest(true), which limits requests to ten and
 // does not ask for the allowance, so they are the decision alone.
 var (
 	rateGranted = headReply(1, "ok", 0, 5, 0)
-	rateRefused = headReply(0, "rpm", 1000, 5, 0)
 )
 
 func allScripts() map[string]script {

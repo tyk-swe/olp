@@ -1,20 +1,10 @@
 package gateway
 
 import (
-	"encoding/json"
-
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 )
-
-// reserved is what admission reserves for a request sent to a model.
-func reserved(parsed *wire.Request, model string, defaults map[string]json.RawMessage) int64 {
-	return estimate.Walk(parsed).Estimate(estimate.ForModel(model), defaults).Tokens()
-}
 
 // "hello" is five characters, so two tokens.
 

@@ -2,12 +2,9 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 func usageFilterRange(t *testing.T, start, end string) Filters {
@@ -26,14 +23,6 @@ func usageFilterRange(t *testing.T, start, end string) Filters {
 // Both halves bind the same five dimensions plus their own bounds.
 
 // The retained half starts at the first whole bucket inside the range.
-
-type capturingQueryer struct{ sql string }
-
-func (c *capturingQueryer) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
-func (c *capturingQueryer) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-	c.sql = sql
-	return nil, errors.New("stop after capturing the statement")
-}
 
 // Requests count once per request here, so the rows sum to the range's
 // requests however many families a failover crossed.

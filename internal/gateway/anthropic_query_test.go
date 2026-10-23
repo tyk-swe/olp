@@ -50,16 +50,6 @@ type upstreamLog struct {
 	requests []upstreamRequest
 }
 
-func (l *upstreamLog) last(t *testing.T) upstreamRequest {
-	t.Helper()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if len(l.requests) == 0 {
-		t.Fatal("the upstream received nothing")
-	}
-	return l.requests[len(l.requests)-1]
-}
-
 // recordUpstream makes provider "a" answer with reply and records what each
 // request carried before reply sees it, body included.
 func recordUpstream(h *harness, reply http.HandlerFunc) *upstreamLog {
@@ -104,8 +94,6 @@ const (
 	countPath    = "/anthropic/v1/messages/count_tokens"
 	// betas is a header the way Claude Code sends it, and midSystem a request
 	// that needs it: the mid-conversation-system beta admits role "system".
-	betas     = "claude-code-20250219,mid-conversation-system-2026-04-07,context-management-2025-06-27"
-	midSystem = `{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"},{"role":"system","content":[{"type":"text","text":"note","cache_control":{"type":"ephemeral"}}]}],"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}}`
 )
 
 // Only the SDK's marker is consumed. Every other caller query setting still

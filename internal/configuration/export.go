@@ -81,7 +81,6 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	type pendingProvider struct {
 		entry *ProviderEntry
 		id    string
-		live  bool
 	}
 	var pending []pendingProvider
 	// live maps an active provider's index in doc.Providers to its ID, so its

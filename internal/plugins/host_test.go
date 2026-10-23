@@ -32,18 +32,6 @@ type pluginTable struct {
 	modules int
 }
 
-func (p *pluginTable) install(module []byte) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.module = module
-}
-
-func (p *pluginTable) read() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.reads
-}
-
 func (p *pluginTable) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -87,27 +75,10 @@ func newTestHost(t testing.TB, engine Engine, limits Limits, log *slog.Logger, m
 // The providers the fixture's and the reference plugin's signing profiles
 // sign for.
 var (
-	fixtureProvider   = abi.Provider{Profile: "fixture-chat"}
 	referenceProvider = abi.Provider{Profile: "reference-signed-chat"}
 )
 
 // A failed Fetch includes the requested URL in its error.
-
-type heldCode struct {
-	started chan struct{}
-	close   func()
-}
-
-func (c *heldCode) Call(ctx context.Context, _ Call, _ any) error {
-	c.started <- struct{}{}
-	<-ctx.Done()
-	return nil
-}
-
-func (c *heldCode) Close(context.Context) error {
-	c.close()
-	return nil
-}
 
 // BenchmarkSign measures the per-request overhead of a signing hook: the
 // reference plugin signing chat requests on instances the host keeps.

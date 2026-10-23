@@ -1,18 +1,12 @@
 package gateway
 
 import (
-	"io"
-	"net/http"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
-
-type pinnedTransportFunc func(*http.Request) (*http.Response, error)
-
-func (f pinnedTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func pinnedExchangeFixture(t *testing.T) (*harness, *call, *pin) {
 	t.Helper()
@@ -30,11 +24,3 @@ func pinnedExchangeFixture(t *testing.T) (*harness, *call, *pin) {
 }
 
 // A refused/oversized/truncated body leaves the accepted work unresolved.
-
-type pinnedFlushFailure struct{ header http.Header }
-
-func (w *pinnedFlushFailure) Header() http.Header              { return w.header }
-func (w *pinnedFlushFailure) WriteHeader(int)                  {}
-func (w *pinnedFlushFailure) Write(b []byte) (int, error)      { return len(b), nil }
-func (w *pinnedFlushFailure) SetWriteDeadline(time.Time) error { return nil }
-func (w *pinnedFlushFailure) FlushError() error                { return io.ErrClosedPipe }

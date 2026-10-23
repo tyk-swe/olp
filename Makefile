@@ -18,7 +18,7 @@ GOFMT_PATHS = \
 	tests/fixtures/fidelity tests/fixtures/research-migration tests/integration tests/samlfixture tests/sdkfixture
 
 .PHONY: \
-	help setup dev check \
+	help setup dev check lint \
 	test test-go test-bench test-console test-scripts test-race integration \
 	bench bench-compare bench-gate \
 	api build build-go catalog catalog-sign fmt
@@ -34,13 +34,17 @@ setup: ## Install Go and console dependencies and generate contracts
 dev: ## Start isolated services, Go, and Vite
 	./scripts/dev.sh
 
-check: api ## Check formatting, vet, console types/lint, and all local tests
+check: api ## Check formatting, vet, lint, console types/lint, and all local tests
 	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
 	go vet ./...
 	go vet -tags=bench ./tests/bench/...
+	$(MAKE) lint
 	pnpm --dir console format:check
 	pnpm --dir console check
 	$(MAKE) test
+
+lint: ## Run the pinned Go static analysis gate (see staticcheck.conf)
+	./scripts/check-lint.sh
 
 test: test-go test-bench test-console test-scripts ## Run Go, benchmark harness, console, and script tests without containers
 

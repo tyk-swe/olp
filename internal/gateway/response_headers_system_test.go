@@ -129,29 +129,6 @@ func (w *window) reserve(held *counters, rpm, tpm, tokens, concurrency int64, st
 	return reply(1, "ok", 0, expiry)
 }
 
-// settled waits for the reconciliations of n requests: they run after the
-// response is written, and the next request must not be admitted before them.
-func (w *window) settled(t *testing.T, n int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		w.mu.Lock()
-		done := w.reconciled >= n
-		w.mu.Unlock()
-		if done {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("%d requests were not reconciled within two seconds", n)
-}
-
-func (w *window) lastReserved() int64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.reserved[len(w.reserved)-1]
-}
-
 // admitThrough puts a limiter over a fresh window in front of the gateway.
 func admitThrough(t *testing.T, h *harness) *window {
 	t.Helper()

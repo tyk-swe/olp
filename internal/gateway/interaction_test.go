@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"testing"
 
@@ -71,12 +70,4 @@ func TestStrictFailoverCannotChangeDefaultsThroughModelAlias(t *testing.T) {
 	if resp.StatusCode != 400 || errorCode(t, body) != "upstream_rejected" || h.mock.count("a") != 1 {
 		t.Fatalf("strict defaults substituted: %d %v calls=%d", resp.StatusCode, body, h.mock.count("a"))
 	}
-}
-
-type strictPartialWriter struct{ *unaryResponseWriter }
-
-func (w *strictPartialWriter) Write(data []byte) (int, error) {
-	count := len(data) / 2
-	_, _ = w.ResponseRecorder.Write(data[:count])
-	return count, io.ErrClosedPipe
 }

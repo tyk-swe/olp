@@ -211,12 +211,6 @@ func (l *Limiter) costPrefixFor(costOwnerID string, basis Basis) string {
 	return l.namespace + ":{" + simpleUUID(costOwnerID) + "}:" + string(basis.normalized())
 }
 
-// costKeys addresses the balances of one API key. Both live under the key's own
-// cluster hash tag so every lookup that spends from it meets the same state.
-func (l *Limiter) costKeys(costOwnerID string) (string, string) {
-	prefix := l.costPrefix(costOwnerID)
-	return prefix + ":day", prefix + ":month"
-}
 func (l *Limiter) costKeysFor(costOwnerID string, basis Basis) (string, string) {
 	prefix := l.costPrefixFor(costOwnerID, basis)
 	return prefix + ":day", prefix + ":month"
