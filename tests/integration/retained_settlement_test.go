@@ -592,6 +592,65 @@ func TestRetainedLifecycleListingScopesRowsAndCursorsToRoute(t *testing.T) {
 	}
 }
 
+func TestRetainedEvalDiscoveryReusesUnknownSubmissionForSettlement(t *testing.T) {
+	f := retainedLedger(t, "eval", true)
+	parent := *f.resource
+	parent.Kind, parent.UpstreamID, parent.State = "eval", "eval-parent", "active"
+	parent.RetainedAccounting = nil
+	definition, err := f.store.Put(t.Context(), &parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.resource.ParentID = &definition.UUID
+	f.resource.Metadata = json.RawMessage(`{"upstream_model":"retained-model","authorized_models":["retained-model"]}`)
+	original, fresh, err := f.store.PrepareLifecycle(t.Context(), f.resource, "eval", "lost-run", bytes.Repeat([]byte{3}, 32))
+	if err != nil || !fresh {
+		t.Fatalf("prepare run: fresh=%v %v", fresh, err)
+	}
+	if err := f.store.DispatchLifecycle(t.Context(), original.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.UnknownLifecycle(t.Context(), original.UUID); err != nil {
+		t.Fatal(err)
+	}
+	listed := *original
+	listed.UUID, listed.ID = [16]byte{}, ""
+	listed.UpstreamID, listed.State, listed.RetainedAccounting = "eval-run-native", "running", nil
+	wrongSlot := listed
+	wrongSlot.SlotID = acctID(t)
+	if _, err := f.store.BindDiscovered(t.Context(), &wrongSlot, original.UUID); !errors.Is(err, resources.ErrContract) {
+		t.Fatalf("submission marker crossed credential-slot authority: %v", err)
+	}
+	bound, err := f.store.BindDiscovered(t.Context(), &listed, original.UUID)
+	if err != nil || bound.UUID != original.UUID {
+		t.Fatalf("listed run forked submission ownership: %+v %v", bound, err)
+	}
+	var count int
+	var hint string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='eval_run' AND api_key_id=$1`, f.Key).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("duplicate run mapping: count=%d %v", count, err)
+	}
+	if err := f.Pool.QueryRow(t.Context(), `SELECT reconciliation_hint FROM olp.retained_settlements WHERE resource_id=$1`, original.UUID).Scan(&hint); err != nil || hint != listed.UpstreamID {
+		t.Fatalf("verified run discovery did not queue recovery: %q %v", hint, err)
+	}
+	claims, err := f.store.ClaimRetained(t.Context(), 1)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim: %+v %v", claims, err)
+	}
+	recovered, err := f.store.RetainedClaimResource(t.Context(), claims[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered.UpstreamID, recovered.State = listed.UpstreamID, "running"
+	if err := f.store.CommitRetainedPoll(t.Context(), claims[0], recovered, resources.RetainedObservation{}, true); err != nil {
+		t.Fatalf("discovery blocked atomic settlement adoption: %v", err)
+	}
+	byNative, err := f.store.GetByUpstreamIncludingDeleted(t.Context(), listed.NativeIdentity())
+	if err != nil || byNative.UUID != original.UUID {
+		t.Fatalf("recovery lost the original settlement identity: %+v %v", byNative, err)
+	}
+}
+
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
 	f := retainedLedger(t, "fine_tuning", true)
 	r := f.prepare(t)

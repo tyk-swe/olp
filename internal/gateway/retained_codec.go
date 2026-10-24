@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -681,7 +682,19 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 				child.ContractVersion = nil
 				child.Metadata, _ = json.Marshal(map[string]string{"upstream_model": resourceModel(resource), "file_operation": "fine_tuning", "purpose": "fine-tune-results"})
 			}
-			bound, findErr = s.Resources.BindDiscovered(ctx, child)
+			var submission []uuid.UUID
+			if kind == "eval_run" {
+				metadata, _ := nativeItems[id].Lookup("metadata")
+				if marker, present := metadata.Lookup("olp_submission_id"); present && marker.Kind() != oif.Null {
+					text, valid := marker.Text()
+					original, err := uuid.Parse(text)
+					if !valid || err != nil || original == uuid.Nil || original.String() != text {
+						return "", resources.ErrContract
+					}
+					submission = append(submission, original)
+				}
+			}
+			bound, findErr = s.Resources.BindDiscovered(ctx, child, submission...)
 		}
 		if findErr != nil {
 			return "", findErr
