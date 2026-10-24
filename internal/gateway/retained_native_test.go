@@ -242,6 +242,44 @@ func TestRetainedEvalModelAuthority(t *testing.T) {
 	}
 }
 
+func TestRetainedEvalNativeBindingsPreserveLogicalAuthority(t *testing.T) {
+	p := &pin{model: "sample", provider: routing.Provider{ID: "provider", Kind: "openai", Bindings: map[string]connectors.Binding{"sample": {Model: "native-sample"}, "grader": {Model: "native-grader"}}, Capabilities: []routing.Capability{
+		{Model: "sample", Operation: "eval", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "eval", Surface: "openai", Mode: "unary"},
+		{Model: "sample", Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "generation", Surface: "openai", Mode: "unary"},
+	}}, slot: routing.Slot{Enabled: true}}
+	route := &routing.Route{Slug: "eval-route", Operations: []string{"eval", "generation"}, Targets: []routing.Target{{ProviderID: "provider", ProviderModel: "sample"}, {ProviderID: "provider", ProviderModel: "grader"}}}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "eval", Kind: "eval"}, Action: "create"}
+	definition := generationReferenceDocument(t, `{"metadata":{"model":"opaque"},"testing_criteria":[{"type":"multi","graders":{"metadata":{"type":"score_model","model":"grader"},"model":{"type":"score_model","model":"grader"},"a/b~c":{"type":"score_model","model":"grader"}}}]}`)
+	metadata, err := retainedInputMetadata(p, route, "owner", e, definition, nil)
+	if err != nil || strings.Join(metadata["authorized_models"].([]string), ",") != "grader" || metadata["serving_models"].(map[string]string)["grader"] != "native-grader" {
+		t.Fatalf("logical grader pins: %v %v", metadata, err)
+	}
+	native, err := bindRetainedModel(definition, e, p)
+	if err != nil || strings.Count(native.Raw(), `"model":"native-grader"`) != 3 || !strings.Contains(native.Raw(), `"model":"opaque"`) {
+		t.Fatalf("native grader bindings or opaque metadata changed: %s %v", native.Raw(), err)
+	}
+	parentMetadata, _ := json.Marshal(metadata)
+	parent := &resources.Resource{Kind: "eval", Metadata: parentMetadata}
+	e.Kind = "eval_run"
+	run := generationReferenceDocument(t, `{"data_source":{"type":"responses","model":"sample","source":{"type":"file_content","content":[{"item":{"model":"opaque"}}]}}}`)
+	metadata, err = retainedInputMetadata(p, route, "owner", e, run, parent)
+	if err != nil || strings.Join(metadata["authorized_models"].([]string), ",") != "grader,sample" {
+		t.Fatalf("logical run pins: %v %v", metadata, err)
+	}
+	native, err = bindRetainedModel(run, e, p)
+	if err != nil || !strings.Contains(native.Raw(), `"model":"native-sample"`) || !strings.Contains(native.Raw(), `"model":"opaque"`) {
+		t.Fatalf("native run binding: %s %v", native.Raw(), err)
+	}
+	legacy := &resources.Resource{Kind: "eval", Metadata: json.RawMessage(`{"authorized_models":["grader"]}`)}
+	if _, err := retainedInputMetadata(p, route, "owner", e, run, legacy); err == nil {
+		t.Fatal("unbound legacy grader alias inherited authority")
+	}
+	p.provider.Bindings["sample"] = connectors.Binding{Model: "native-grader"}
+	if _, err := retainedInputMetadata(p, route, "owner", e, run, parent); err == nil {
+		t.Fatal("ambiguous native usage alias mapping accepted")
+	}
+}
+
 func TestRetainedCorrelationCannotBeSuppliedOrReplaced(t *testing.T) {
 	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vector_store", Operation: "vector_store"}, Action: "create"}
 	r := &resources.Resource{UUID: uuid.New()}

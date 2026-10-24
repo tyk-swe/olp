@@ -142,7 +142,8 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 				return nil, resources.ErrContract
 			}
 			var prior struct {
-				Models []string `json:"authorized_models"`
+				Models        []string          `json:"authorized_models"`
+				ServingModels map[string]string `json:"serving_models"`
 			}
 			if json.Unmarshal(parent.Metadata, &prior) != nil {
 				return nil, resources.ErrContract
@@ -150,50 +151,27 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 			if prior.Models == nil {
 				return nil, errors.New("this evaluation definition has no qualified grader authority; recreate it before starting new runs")
 			}
+			for _, model := range prior.Models {
+				native := p.provider.Connector().Model(model)
+				pinned, present := prior.ServingModels[model]
+				if present && pinned != native || !present && native != model {
+					return nil, errors.New("this evaluation definition has no compatible native grader binding; recreate it before starting new runs")
+				}
+			}
 			models = append(models, prior.Models...)
 		}
 		if err := validateEvalSource(source.Root(), e); err != nil {
 			return nil, err
 		}
-		var walk func(oif.Value, string) error
-		walk = func(value oif.Value, path string) error {
-			switch value.Kind() {
-			case oif.Array:
-				for i, item := range value.Elements() {
-					if err := walk(item, path+"/"+strconv.Itoa(i)); err != nil {
-						return err
-					}
-				}
-			case oif.Object:
-				if kind, present := value.Lookup("type"); present {
-					if text, ok := kind.Text(); ok && (text == "score_model" || text == "label_model") {
-						model, present := value.Lookup("model")
-						if text, ok := model.Text(); !present || !ok || text == "" {
-							return errors.New("model-based graders require an explicitly authorized model")
-						}
-					}
-				}
-				for _, field := range value.Members() {
-					if slices.Contains([]string{"metadata", "schema", "json_schema", "item_schema", "parameters"}, field.Name) || path == "/data_source/source" && field.Name == "content" {
-						continue
-					}
-					if field.Name == "model" && field.Value.Kind() != oif.Null {
-						model, ok := field.Value.Text()
-						if !ok || !retainedEvalModelAllowed(p, route, owner, model) {
-							return errors.New("evaluation model is not authorized on this connection and route")
-						}
-						if !slices.Contains(models, model) {
-							models = append(models, model)
-						}
-					}
-					if err := walk(field.Value, path+"/"+field.Name); err != nil {
-						return err
-					}
-				}
+		if err := walkRetainedEvalModels(source.Root(), "", func(_ string, model string) error {
+			if !retainedEvalModelAllowed(p, route, owner, model) {
+				return errors.New("evaluation model is not authorized on this connection and route")
+			}
+			if !slices.Contains(models, model) {
+				models = append(models, model)
 			}
 			return nil
-		}
-		if err := walk(source.Root(), ""); err != nil {
+		}); err != nil {
 			return nil, err
 		}
 		for _, model := range models {
@@ -201,8 +179,19 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 				return nil, resources.ErrContract
 			}
 		}
+		servingModels := map[string]string{}
+		seenNative := map[string]bool{}
+		for _, model := range models {
+			native := p.provider.Connector().Model(model)
+			if seenNative[native] {
+				return nil, errors.New("evaluation aliases must have distinct native models for usage attribution")
+			}
+			seenNative[native] = true
+			servingModels[model] = native
+		}
 		slices.Sort(models)
 		meta["authorized_models"] = models
+		meta["serving_models"] = servingModels
 	}
 	if e.Kind == "container" && e.Action == "create" {
 		if _, present := source.Root().Lookup("metadata"); present {
@@ -219,6 +208,49 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 		meta["memory_tier"] = tier
 	}
 	return meta, nil
+}
+
+// Walk only native evaluation model positions; application data and schemas
+// remain opaque. Grader dictionary keys are labels, including reserved words.
+func walkRetainedEvalModels(value oif.Value, path string, visit func(string, string) error) error {
+	switch value.Kind() {
+	case oif.Array:
+		for i, item := range value.Elements() {
+			if err := walkRetainedEvalModels(item, path+"/"+strconv.Itoa(i), visit); err != nil {
+				return err
+			}
+		}
+	case oif.Object:
+		if kind, present := value.Lookup("type"); present {
+			if text, ok := kind.Text(); ok && (text == "score_model" || text == "label_model") {
+				model, present := value.Lookup("model")
+				if text, ok := model.Text(); !present || !ok || text == "" {
+					return errors.New("model-based graders require an explicitly authorized model")
+				}
+			}
+		}
+		graderMap := strings.HasSuffix(path, "/graders")
+		for _, field := range value.Members() {
+			if !graderMap && slices.Contains([]string{"metadata", "schema", "json_schema", "item_schema", "parameters"}, field.Name) || path == "/data_source/source" && field.Name == "content" {
+				continue
+			}
+			token := strings.ReplaceAll(strings.ReplaceAll(field.Name, "~", "~0"), "/", "~1")
+			pointer := path + "/" + token
+			if !graderMap && field.Name == "model" && field.Value.Kind() != oif.Null {
+				model, ok := field.Value.Text()
+				if !ok || model == "" {
+					return resources.ErrContract
+				}
+				if err := visit(pointer, model); err != nil {
+					return err
+				}
+			}
+			if err := walkRetainedEvalModels(field.Value, pointer, visit); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func retainedEvalModelAllowed(p *pin, route *routing.Route, owner, model string) bool {

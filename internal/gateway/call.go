@@ -35,6 +35,7 @@ type call struct {
 	semanticQueryInvalid bool
 	retainedMetered      bool
 	retainedAccounting   bool
+	retainedTokenless    bool
 	retainedHousekeeping bool
 	retainedFreeControl  bool
 	anthropicFilesBeta   bool

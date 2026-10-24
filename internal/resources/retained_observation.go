@@ -197,9 +197,27 @@ func ObserveRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, n
 	if perModel.Kind() != oif.Array {
 		return out, ErrContract
 	}
+	var metadata struct {
+		ServingModels map[string]string `json:"serving_models"`
+	}
+	if json.Unmarshal(r.Metadata, &metadata) != nil {
+		return out, ErrContract
+	}
 	seen := map[string]bool{}
 	for _, item := range perModel.Elements() {
 		name, ok := retainedText(item, "model_name")
+		if ok && len(metadata.ServingModels) > 0 {
+			logical := ""
+			for candidate, native := range metadata.ServingModels {
+				if native == name {
+					if logical != "" {
+						return out, errors.New("evaluation usage has an ambiguous native model binding")
+					}
+					logical = candidate
+				}
+			}
+			name = logical
+		}
 		if !ok || !slices.Contains(models, name) || seen[name] {
 			return out, errors.New("evaluation usage names an unpinned or duplicate model")
 		}

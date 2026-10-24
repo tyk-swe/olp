@@ -100,6 +100,25 @@ func TestRetainedEvalPerModelEvidence(t *testing.T) {
 	}
 }
 
+func TestRetainedEvalUsageMapsNativeModelsToLogicalPricingPins(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	r := &Resource{Kind: "eval_run", CreatedAt: now.Add(-time.Hour), Metadata: json.RawMessage(`{"upstream_model":"sample","authorized_models":["sample","grader"],"serving_models":{"sample":"native-sample","grader":"native-grader"}}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: r.Kind, Operation: "eval"}, Action: "get"}
+	raw := `{"status":"completed","per_model_usage":[{"model_name":"native-sample","invocation_count":1,"prompt_tokens":10,"completion_tokens":2,"cached_tokens":0,"total_tokens":12},{"model_name":"native-grader","invocation_count":1,"prompt_tokens":5,"completion_tokens":1,"cached_tokens":0,"total_tokens":6}]}`
+	document, _ := oif.ParseJSON([]byte(raw), oif.Limits{})
+	if err := EnrichRetained(r, e, document, now); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := ObserveRetained(r, e, document, now)
+	if err != nil || !observation.CoverageComplete || len(observation.Lines) != 2 || observation.Lines[0].Model != "sample" || observation.Lines[1].Model != "grader" {
+		t.Fatalf("native usage lost logical accounting models: %+v %v", observation, err)
+	}
+	wrong, _ := oif.ParseJSON([]byte(strings.Replace(raw, "native-sample", "sample", 1)), oif.Limits{})
+	if _, err := ObserveRetained(r, e, wrong, now); err == nil {
+		t.Fatal("unbound native usage model accepted")
+	}
+}
+
 func TestRetainedCacheAuthoritativeExpiry(t *testing.T) {
 	now := time.Date(2026, 10, 23, 12, 30, 0, 0, time.UTC)
 	r := &Resource{Kind: "context_cache", Metadata: json.RawMessage(`{"upstream_model":"cache-model"}`)}

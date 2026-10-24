@@ -467,6 +467,29 @@ func TestRetainedVectorExpirationClearingPersists(t *testing.T) {
 	}
 }
 
+func TestRetainedCheckpointDiscoveryKeepsModelsDisabled(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	parent := f.prepare(t)
+	child := *parent
+	child.UUID, child.ID = [16]byte{}, ""
+	child.Kind, child.UpstreamID = "fine_tuning_checkpoint", "checkpoint-native"
+	child.ParentID, child.RetainedAccounting = &parent.UUID, nil
+	checkpoint, err := f.store.BindDiscovered(t.Context(), &child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _ := oif.ParseJSON([]byte(`{"fine_tuned_model_checkpoint":"ft:retained-checkpoint"}`), oif.Limits{})
+	for range 2 {
+		if err := f.store.DiscoverRetainedModels(t.Context(), checkpoint, document); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	if err := f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_models WHERE provider_id=$1 AND upstream_model='ft:retained-checkpoint' AND NOT enabled AND capabilities='[]'::jsonb`, parent.ProviderID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("checkpoint discovery granted authority or lost candidate: count=%d %v", count, err)
+	}
+}
+
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
 	f := retainedLedger(t, "fine_tuning", true)
 	r := f.prepare(t)

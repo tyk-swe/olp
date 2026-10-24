@@ -162,6 +162,17 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 }
 
 func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *pin) (oif.Document, error) {
+	if e.Operation == "eval" {
+		var changes []oif.Change
+		err := walkRetainedEvalModels(source.Root(), "", func(pointer, model string) error {
+			changes = append(changes, oif.Change{Pointer: pointer, Value: strconv.Quote(p.provider.Connector().Model(model)), Origin: oif.ResourceBinding, Reason: "authorized evaluation serving model"})
+			return nil
+		})
+		if err != nil {
+			return oif.Document{}, err
+		}
+		return oif.Apply(source, changes)
+	}
 	field := "model"
 	if e.Kind == "vertex_tuning_job" {
 		field = "baseModel"
@@ -575,7 +586,7 @@ func retainedDiscoveredChild(parent *resources.Resource, kind, id string, item o
 		return nil, resources.ErrContract
 	}
 	metadata := map[string]json.RawMessage{}
-	for _, field := range []string{"upstream_model", "contract_revision", "authorized_models", "memory_tier"} {
+	for _, field := range []string{"upstream_model", "contract_revision", "authorized_models", "serving_models", "memory_tier"} {
 		if value, present := inherited[field]; present {
 			metadata[field] = value
 		}
@@ -674,6 +685,15 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 		}
 		if findErr != nil {
 			return "", findErr
+		}
+		if kind == "fine_tuning_checkpoint" && nativeItems[id].Kind() == oif.Object {
+			checkpoint, err := oif.ParseJSON([]byte(nativeItems[id].Raw()), oif.Limits{MaxBytes: retainedBodyLimit})
+			if err != nil {
+				return "", err
+			}
+			if err := s.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
+				return "", err
+			}
 		}
 		return bound.ID, nil
 	})

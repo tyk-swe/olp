@@ -74,6 +74,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	x.operationOverride, x.mode, x.actor = operation, "unary", "api_key_resource"
+	x.retainedTokenless = true
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)

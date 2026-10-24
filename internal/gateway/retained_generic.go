@@ -402,6 +402,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			var metadata map[string]json.RawMessage
 			_ = json.Unmarshal(resource.Metadata, &metadata)
 			metadata["authorized_models"], _ = json.Marshal(fields["authorized_models"])
+			metadata["serving_models"], _ = json.Marshal(fields["serving_models"])
 			resource.Metadata, _ = json.Marshal(metadata)
 		}
 		rewritten, rwErr := s.rewriteRetainedRequest(r.Context(), x, authority, p, route, source, e)
@@ -862,6 +863,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 				}
 				commitCancel()
 				if persistErr != nil {
+					s.settlePinHold(ctx, x, p.hold, nil)
 					fail(serverError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 					return 503
 				}

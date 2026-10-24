@@ -170,7 +170,7 @@ func TestRetainedGenerationFileAdmissionBoundsRequestFees(t *testing.T) {
 	price := usage.RoutingPrice{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "generation", PerRequest: new("0.01")}, EffectiveAt: now.Add(-time.Hour)}
 	x := &call{
 		request:           request{startedAt: now, release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}}},
-		operationOverride: "generation", retainedHousekeeping: true, cardPinned: true,
+		operationOverride: "generation", retainedHousekeeping: true, retainedTokenless: true, cardPinned: true,
 		routingInputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}},
 		cardRev:       &usage.RoutingCardRevision{Prices: []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "generation", PerRequest: new("0.02")}}}},
 	}
@@ -182,5 +182,15 @@ func TestRetainedGenerationFileAdmissionBoundsRequestFees(t *testing.T) {
 	charge := x.attemptChargeBound(p.attempt, cost)
 	if x.retainedFreeControl || cost.String() != "0.01" || charge.String() != "0.02" {
 		t.Fatalf("tokenless request fees bypassed admission: free=%v cost=%s charge=%s", x.retainedFreeControl, cost.String(), charge.String())
+	}
+	// Compaction uses the same generation operation but bills model tokens.
+	x.retainedTokenless = false
+	x.estimate = 1000
+	p.attempt.Price = &usage.RoutingPrice{Price: usage.Price{InputPerMillion: new("1"), OutputPerMillion: new("2")}}
+	x.cardRev = &usage.RoutingCardRevision{Prices: []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "generation", InputPerMillion: new("3"), OutputPerMillion: new("4")}}}}
+	cost = x.attemptCostBound(p.attempt)
+	charge = x.attemptChargeBound(p.attempt, cost)
+	if cost.IsZero() || charge.Cmp(cost) <= 0 {
+		t.Fatalf("compaction lost token reservations: cost=%s charge=%s", cost.String(), charge.String())
 	}
 }
