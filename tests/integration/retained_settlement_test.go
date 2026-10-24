@@ -515,6 +515,55 @@ func TestRetainedExpiredStoreCoverageEndsAtNativeExpiry(t *testing.T) {
 	}
 }
 
+func TestRetainedMutationResponseSurvivesReadObservation(t *testing.T) {
+	for _, worker := range []bool{false, true} {
+		t.Run(map[bool]string{false: "get", true: "worker"}[worker], func(t *testing.T) {
+			f := retainedLedger(t, "context_cache", false)
+			r := f.prepare(t)
+			staleRead := *r
+			if err := f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "ttl-update", bytes.Repeat([]byte{1}, 32)); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := f.store.GetByUUID(t.Context(), r.UUID, r.APIKeyID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if worker {
+				claims, claimErr := f.store.ClaimRetained(t.Context(), 1)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, claimErr)
+				}
+				err = f.store.CommitRetainedPoll(t.Context(), claims[0], observation, resources.RetainedObservation{}, false)
+			} else {
+				err = f.store.SaveRetainedResult(t.Context(), observation)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.ExpiresAt = new(time.Now().Add(time.Hour))
+			if err := f.store.SaveRetainedMutationResult(t.Context(), r); err != nil {
+				t.Fatalf("ordinary observation invalidated successful TTL response: %v", err)
+			}
+			if err := f.store.AcceptRetainedMutation(t.Context(), r.UUID, "ttl-update", "context_cache:patch"); err != nil {
+				t.Fatal(err)
+			}
+			if pending, err := f.store.HasUnresolvedRetainedMutations(t.Context(), r.UUID); err != nil || pending {
+				t.Fatalf("successful mutation retained unknown acceptance: %v %v", pending, err)
+			}
+			if err := f.store.SaveRetainedResult(t.Context(), &staleRead); !errors.Is(err, resources.ErrSubmissionConflict) {
+				t.Fatalf("stale pre-mutation read overwrote the TTL: %v", err)
+			}
+			oldMutation := *r
+			if err := f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "newer-ttl-update", bytes.Repeat([]byte{2}, 32)); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.SaveRetainedMutationResult(t.Context(), &oldMutation); !errors.Is(err, resources.ErrSubmissionConflict) {
+				t.Fatalf("older mutation crossed the newer dispatch fence: %v", err)
+			}
+		})
+	}
+}
+
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
 	f := retainedLedger(t, "fine_tuning", true)
 	r := f.prepare(t)

@@ -72,6 +72,7 @@ type Resource struct {
 	ExpiresAt          *time.Time      `json:"expires_at,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
+	MutationVersion    int64           `json:"-"`
 	ContractVersion    *string         `json:"contract_version,omitempty"`
 	ParentID           *uuid.UUID      `json:"-"`
 	SubmissionID       *string         `json:"-"`
@@ -118,7 +119,7 @@ func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
 	return s.pool.Begin(ctx)
 }
 
-const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id,target_id`
+const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id,target_id,mutation_version`
 
 func scan(row pgx.Row) (*Resource, error) {
 	var r Resource
@@ -126,7 +127,7 @@ func scan(row pgx.Row) (*Resource, error) {
 	var targetID *string
 	err := row.Scan(&r.UUID, &r.Kind, &r.APIKeyID, &r.RouteSlug, &r.ProviderID,
 		&r.ProviderRevisionID, &r.RouteRevisionID, &r.SlotID, &r.CredentialID, &r.UpstreamID,
-		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID, &targetID)
+		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID, &targetID, &r.MutationVersion)
 	if err != nil {
 		return nil, err
 	}

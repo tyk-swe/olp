@@ -419,7 +419,11 @@ func (s *Server) retainedNativeResult(ctx context.Context, r *resources.Resource
 		return err
 	}
 	if persist {
-		if err := s.Resources.SaveRetainedResult(ctx, r); err != nil {
+		save := s.Resources.SaveRetainedResult
+		if e.Metered && (e.Action == "update" || e.Action == "patch") {
+			save = s.Resources.SaveRetainedMutationResult
+		}
+		if err := save(ctx, r); err != nil {
 			return err
 		}
 	}

@@ -39,11 +39,23 @@ func (s *Store) PrepareRetainedMutation(ctx context.Context, r *Resource, operat
 	if exists {
 		return ErrSubmissionConflict
 	}
+	var version int64
+	err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET mutation_version=mutation_version+1 WHERE id=$1 AND api_key_id=$2 AND state<>'deleted' RETURNING mutation_version`, r.UUID, r.APIKeyID).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSubmissionConflict
+	}
+	if err != nil {
+		return err
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO olp.retained_mutations(api_key_id,operation,submission_key,resource_id,request_digest,state) VALUES($1,$2,$3,$4,$5,'dispatched')`, r.APIKeyID, operation, key, r.UUID, digest)
 	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	r.MutationVersion = version
+	return nil
 }
 func (s *Store) UnknownRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE olp.retained_mutations SET state='submission_unknown',updated_at=now() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, id, key, operation)
@@ -60,14 +72,27 @@ func (s *Store) AcceptRetainedMutation(ctx context.Context, id uuid.UUID, key, o
 	return nil
 }
 
-// SaveRetainedResult fences read/TTL observations by the version used for their
-// upstream request. A delayed response cannot overwrite a newer accepted expiry.
+// SaveRetainedResult fences observations against newer observations and paid
+// mutations. A delayed read cannot overwrite an accepted expiry change.
 func (s *Store) SaveRetainedResult(ctx context.Context, r *Resource) error {
+	return s.saveRetainedResult(ctx, r, false)
+}
+
+// SaveRetainedMutationResult accepts the response belonging to the latest paid
+// mutation even when a GET or worker refreshed its observation timestamp.
+func (s *Store) SaveRetainedMutationResult(ctx context.Context, r *Resource) error {
+	if r == nil || r.MutationVersion == 0 {
+		return ErrContract
+	}
+	return s.saveRetainedResult(ctx, r, true)
+}
+
+func (s *Store) saveRetainedResult(ctx context.Context, r *Resource, mutation bool) error {
 	if r == nil || len(r.Metadata) > metadataLimit {
 		return ErrContract
 	}
 	var updated time.Time
-	err := s.pool.QueryRow(ctx, `UPDATE olp.provider_resources SET metadata=metadata||$2::jsonb,expires_at=$3,state=$5,updated_at=clock_timestamp() WHERE id=$1 AND updated_at=$4 AND state<>'deleted' RETURNING updated_at`, r.UUID, r.Metadata, r.ExpiresAt, r.UpdatedAt, r.State).Scan(&updated)
+	err := s.pool.QueryRow(ctx, `UPDATE olp.provider_resources SET metadata=metadata||$2::jsonb,expires_at=$3,state=$5,updated_at=clock_timestamp() WHERE id=$1 AND mutation_version=$6 AND ($7 OR updated_at=$4) AND state<>'deleted' RETURNING updated_at`, r.UUID, r.Metadata, r.ExpiresAt, r.UpdatedAt, r.State, r.MutationVersion, mutation).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrSubmissionConflict
 	}
