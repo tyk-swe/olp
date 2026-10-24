@@ -390,3 +390,18 @@ func TestRetainedVertexUsesNativeLabelsForCorrelation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRetainedVertexRejectsCustomBaseModelSources(t *testing.T) {
+	p := &pin{model: "route-model", provider: routing.Provider{Kind: "vertex_ai", TuningDatasetURIPrefixes: []string{"gs://approved/data/"}}}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vertex_tuning_job", Operation: "fine_tuning"}, Action: "create"}
+	source := generationReferenceDocument(t, `{"supervisedTuningSpec":{"trainingDatasetUri":"gs://approved/data/train.jsonl"}}`)
+	if _, err := retainedInputMetadata(p, nil, "owner", e, source, nil); err != nil {
+		t.Fatalf("approved supervised source refused: %v", err)
+	}
+	for _, weights := range []string{"gs://unapproved/weights", "gs://approved/data/weights"} {
+		custom := generationReferenceDocument(t, `{"customBaseModel":"`+weights+`","supervisedTuningSpec":{"trainingDatasetUri":"gs://approved/data/train.jsonl"}}`)
+		if _, err := retainedInputMetadata(p, nil, "owner", e, custom, nil); err == nil {
+			t.Fatalf("custom weights replaced the pinned model: %s", weights)
+		}
+	}
+}

@@ -87,6 +87,14 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	// Retained content is read directly from the provider, outside this
 	// request's output inspection and masking lifetime.
 	retainsOutput := x.providerState && (responseStoreRequested(x.generation.parsed) || backgroundResponseRequested(x.generation.parsed))
+	if x.generation.resources != nil {
+		for _, resource := range x.generation.resources.bound {
+			if resource != nil && resource.Kind == "conversation" {
+				retainsOutput = true
+				break
+			}
+		}
+	}
 	if retainsOutput && (x.guardrailEngine.HasPhase(guardrails.Output) || x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
 		return guardrailError(guardrails.ErrSurface)
 	}

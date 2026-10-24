@@ -110,11 +110,11 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 				return nil, errors.New("validation dataset is outside the connection's configured URI prefixes")
 			}
 		}
-		// Tuning methods which select additional remote datasets or remote
-		// evaluation sources need their own owner-bound source contracts.
+		// Custom model weights and additional remote datasets or evaluation
+		// sources need their own owner-bound source contracts.
 		for _, field := range source.Root().Members() {
-			if slices.Contains([]string{"distillationSpec", "preferenceOptimizationSpec", "evaluationConfig"}, field.Name) && field.Value.Kind() != oif.Null {
-				return nil, errors.New("this tuning source cannot be mapped to configured dataset authority")
+			if slices.Contains([]string{"customBaseModel", "distillationSpec", "preferenceOptimizationSpec", "evaluationConfig"}, field.Name) && field.Value.Kind() != oif.Null {
+				return nil, errors.New("only the route's base model and configured supervised datasets are supported")
 			}
 		}
 	}

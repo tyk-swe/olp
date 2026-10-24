@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 )
@@ -51,6 +52,43 @@ func TestRetainedNativeContentHonorsCurrentGuardrails(t *testing.T) {
 		if err := x.retainedContentGate(resource, &route, retainedHousekeeping); err != nil {
 			t.Fatalf("retained %s cleanup was blocked by output policy: %v", item.kind, err)
 		}
+	}
+}
+
+func TestRetainedConversationWritesHonorOutputAndMaskingGuards(t *testing.T) {
+	for _, policy := range []struct{ phase, action, detector, config string }{
+		{guardrails.Output, guardrails.Block, "builtin.keywords", `{"words":["secret"]}`},
+		{guardrails.OutputStream, guardrails.Block, "builtin.keywords", `{"words":["secret"]}`},
+		{guardrails.Input, guardrails.Mask, "builtin.pii", `{"categories":["pii.email"]}`},
+	} {
+		t.Run(policy.phase+"/"+policy.action, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			installTestGuardrail(t, h, policy.phase, policy.action, policy.detector, policy.config)
+			route := h.rt.release.Snapshot.Routes[routeSlug]
+			for _, conversation := range []bool{false, true} {
+				kind, field := resources.KindResponse, "previous_response_id"
+				if conversation {
+					kind, field = "conversation", "conversation"
+				}
+				body := map[string]any{"model": routeSlug, "input": "hello", "store": false, field: "native-id", "stream": policy.phase == guardrails.OutputStream}
+				raw, _ := json.Marshal(body)
+				parsed, err := protocols.Parse(wire.Responses, raw, routeSlug)
+				if err != nil {
+					t.Fatal(err)
+				}
+				x := &call{request: request{release: h.rt.release}, keyID: h.keyID, family: wire.Responses, providerState: true,
+					generation: generationCall{parsed: parsed, resources: &generationResources{bound: map[string]*resources.Resource{kind + "\x00native-id": {Kind: kind}}}}}
+				x.route = &route
+				failure := h.gateway.bindGuardrails(t.Context(), x)
+				if conversation {
+					if failure == nil || failure.Code != "guardrail_surface_unavailable" {
+						t.Fatalf("conversation retention bypassed guardrail admission: %v", failure)
+					}
+				} else if failure != nil {
+					t.Fatalf("non-storing response continuation refused: %v", failure)
+				}
+			}
+		})
 	}
 }
 
