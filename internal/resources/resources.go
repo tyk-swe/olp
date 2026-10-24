@@ -267,6 +267,7 @@ func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afte
 // ListKinds joins transformed and strict resource identities without changing
 // either storage contract. The cursor belongs to this owner and one of the
 // requested kinds; an unrelated local ID cannot move the page boundary.
+// Native upload intents without confirmed identities are not SDK file entries.
 func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
 	return s.listKinds(ctx, kinds, apiKeyID, limit, afterID, false)
 }
@@ -302,12 +303,16 @@ func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID s
 	if ascending {
 		comparison, direction = ">", "ASC"
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources r
 		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
+		AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
+		 AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=r.id))
 		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(SELECT created_at,id FROM olp.provider_resources
-		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())))
+		 anchor WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())
+		 AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
+		  AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=anchor.id))))
 		ORDER BY created_at `+direction+`, id `+direction+` LIMIT $5`,
-		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor)
+		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor, KindFile)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)
 	}

@@ -418,7 +418,9 @@ func (s *Server) retainedNativeResult(ctx context.Context, r *resources.Resource
 	if err := resources.EnrichRetained(r, e, source, s.now()); err != nil {
 		return err
 	}
-	if persist {
+	// Create results were already committed with their submission identities.
+	// Empty item creations intentionally leave a deleted placeholder.
+	if persist && e.Action != "create" {
 		save := s.Resources.SaveRetainedResult
 		if e.Metered && (e.Action == "update" || e.Action == "patch") {
 			save = s.Resources.SaveRetainedMutationResult

@@ -405,3 +405,15 @@ func TestRetainedVertexRejectsCustomBaseModelSources(t *testing.T) {
 		}
 	}
 }
+
+func TestRetainedEmptyItemCreationDoesNotResaveCommittedPlaceholder(t *testing.T) {
+	s := &Server{Resources: resources.New(nil), now: time.Now}
+	r := &resources.Resource{Kind: "conversation_item", State: resources.StateDeleted, Metadata: json.RawMessage(`{"upstream_model":"m"}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: r.Kind, Operation: "conversation", Collection: "data"}, Action: "create"}
+	response := generationReferenceDocument(t, `{"data":[]}`)
+	// Any attempted second write through this store would fail. The placeholder
+	// was already committed atomically before processing the successful result.
+	if err := s.retainedNativeResult(t.Context(), r, e, response, true); err != nil || r.State != resources.StateDeleted {
+		t.Fatalf("successful empty creation changed its committed placeholder: %s %v", r.State, err)
+	}
+}
