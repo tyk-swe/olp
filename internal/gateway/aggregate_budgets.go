@@ -143,6 +143,7 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *Error {
 	x.authority.ProjectBudget = authority.ProjectBudget
 	x.authority.ProjectAttributionBudgets = authority.ProjectAttributionBudgets
 	authority.Attribution = x.attribution
+
 	if x.callerCostExempt() {
 		authority = withoutCostBudgets(authority)
 	}
@@ -159,6 +160,10 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *Error {
 
 func (x *call) admissionAuthority(authority access.Authority) access.Authority {
 	if x != nil {
+		if x.retainedFreeControl {
+			authority.Attribution = x.attribution
+			return researchRateAuthority(authority, false)
+		}
 		authority.Attribution = x.attribution
 		// Billable retained calls keep caller cost budgets even though
 		// they act on an API-key resource; only unpriced resource

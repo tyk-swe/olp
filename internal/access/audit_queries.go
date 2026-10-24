@@ -7,6 +7,7 @@ const auditInsertSQL = `WITH subject AS (
  WHEN 'project' THEN (SELECT p.id FROM olp.projects p WHERE p.id=subject.id)
  WHEN 'api_key' THEN (SELECT k.project_id FROM olp.api_keys k WHERE k.id=subject.id)
  WHEN 'budget_group' THEN (SELECT g.project_id FROM olp.budget_groups g WHERE g.id=subject.id)
+ WHEN 'provider_resource' THEN (SELECT COALESCE(k.project_id,p.project_id,rt.project_id) FROM olp.provider_resources r JOIN olp.api_keys k ON k.id=r.api_key_id JOIN olp.providers p ON p.id=r.provider_id LEFT JOIN olp.routes rt ON rt.slug=r.route_slug WHERE r.id=subject.id)
  WHEN 'provider' THEN (SELECT p.project_id FROM olp.providers p WHERE p.id=subject.id)
  WHEN 'provider_credential' THEN (SELECT p.project_id FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id WHERE c.id=subject.id)
  WHEN 'provider_slot' THEN (SELECT p.project_id FROM olp.provider_slots s JOIN olp.providers p ON p.id=s.provider_id WHERE s.id=subject.id)
@@ -19,5 +20,6 @@ const auditInsertSQL = `WITH subject AS (
  WHEN 'export_sink' THEN (SELECT s.project_id FROM olp.export_sinks s WHERE s.id=subject.id)
  WHEN 'sink' THEN (SELECT s.project_id FROM olp.managed_export_sinks s WHERE s.id=subject.id)
  WHEN 'mcp_server' THEN (SELECT s.project_id FROM olp.mcp_servers s WHERE s.id=subject.id)
+ WHEN 'retrieval_binding' THEN (SELECT b.project_id FROM olp.retrieval_bindings b WHERE b.id=subject.id)
  WHEN 'capture_policy' THEN (SELECT p.project_id FROM olp.capture_policies p WHERE p.id=subject.id)
  END) FROM subject`

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -37,6 +38,9 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 	if context.RequiredServing != nil && *context.RequiredServing != t.serving {
 		return nil, incompatible("resource_affinity", "/resources", "serving_affinity", "The resolved resource belongs to a different serving identity.")
 	}
+	if len(context.ResolvedResources) > 0 && context.RequiredServing == nil {
+		return nil, incompatible("resource_affinity", "/resources", "serving_affinity", "Verified resource references require their native serving identity.")
+	}
 	config, headerReceipt, err := t.bindSemantic(request, context)
 	if err != nil {
 		return nil, err
@@ -66,7 +70,7 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 	if err := config.ValidateCompletionRequest(effective); err != nil {
 		return nil, err
 	}
-	if err := checkAssetResources(effective, t.wire); err != nil {
+	if err := checkAssetResources(effective, t.wire, context.ResolvedResources); err != nil {
 		return nil, err
 	}
 	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
@@ -313,7 +317,13 @@ func checkState(document oif.Document, encodedWire wire.Format, context Context,
 		}
 		referenced = true
 		if name != "previous_response_id" {
-			unsupportedReference = true
+			pointer := "/" + name
+			if name == "conversation" && value.Kind() == oif.Object {
+				pointer += "/id"
+				value, _ = value.Lookup("id")
+			}
+			id, valid := value.Text()
+			unsupportedReference = unsupportedReference || !valid || context.ResolvedResources[pointer] == "" || context.ResolvedResources[pointer] != id
 		}
 		if name == "conversation" {
 			retained = true
@@ -326,19 +336,26 @@ func checkState(document oif.Document, encodedWire wire.Format, context Context,
 		return incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
 	}
 	if retained || referenced {
-		if encodedWire != wire.Responses || !context.RetainedResponses || unsupportedReference {
-			return incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
-		}
-		obligations.Lifetime = "durable"
-		obligations.Continuation = "native_response_resource"
-		if retained {
-			obligations.Effects = append(obligations.Effects, "resource_mutation")
-		}
-		if referenced {
+		if (encodedWire == wire.Gemini || encodedWire == wire.GeminiStream) && !retained && referenced && !unsupportedReference {
 			obligations.Effects = append(obligations.Effects, "resource_read")
+		} else {
+			if encodedWire != wire.Responses || !context.RetainedResponses || unsupportedReference {
+				return incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
+			}
+			obligations.Lifetime = "durable"
+			obligations.Continuation = "native_response_resource"
+			if retained {
+				obligations.Effects = append(obligations.Effects, "resource_mutation")
+			}
+			if referenced {
+				obligations.Effects = append(obligations.Effects, "resource_read")
+			}
 		}
 	}
-	tools, err := declaredClientTools(root, encodedWire)
+	if !referenced && len(context.ResolvedResources) > 0 {
+		obligations.Effects = append(obligations.Effects, "resource_read")
+	}
+	tools, err := declaredClientTools(root, encodedWire, context)
 	if err != nil {
 		return err
 	}
@@ -347,7 +364,7 @@ func checkState(document oif.Document, encodedWire wire.Format, context Context,
 	}
 	return nil
 }
-func declaredClientTools(root oif.Value, encodedWire wire.Format) (bool, error) {
+func declaredClientTools(root oif.Value, encodedWire wire.Format, context Context) (bool, error) {
 	client := false
 	reject := func() (bool, error) {
 		return false, incompatible("state_carrier", "/tools", "hosted_tool_effects", "Provider-hosted or unregistered tool effects require a separately qualified lifecycle contract.")
@@ -356,10 +373,24 @@ func declaredClientTools(root oif.Value, encodedWire wire.Format) (bool, error) 
 		if tools.Kind() != oif.Array {
 			return reject()
 		}
-		for _, tool := range tools.Elements() {
+		for index, tool := range tools.Elements() {
 			kind := valueText(member(tool, "type"))
 			switch encodedWire {
 			case wire.Chat, wire.Responses:
+				if encodedWire == wire.Responses && kind == "file_search" && context.AllowProviderState && context.RequiredServing != nil {
+					ids := member(tool, "vector_store_ids")
+					if ids.Kind() != oif.Array || len(ids.Elements()) == 0 {
+						return reject()
+					}
+					for i, id := range ids.Elements() {
+						pointer := "/tools/" + strconv.Itoa(index) + "/vector_store_ids/" + strconv.Itoa(i)
+						text, valid := id.Text()
+						if !valid || text == "" || context.ResolvedResources[pointer] != text {
+							return reject()
+						}
+					}
+					continue
+				}
 				if kind != "function" {
 					return reject()
 				}

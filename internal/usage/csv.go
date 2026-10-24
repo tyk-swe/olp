@@ -53,6 +53,7 @@ func RequestCSV(items []RequestSummary) ([]byte, error) {
 		"started_at", "completed_at", "status_code", "error_class", "total_latency_ms", "first_byte_ms", "attempt_count",
 		"input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens",
 		"audio_input_tokens", "cached_audio_input_tokens", "audio_output_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens",
+		"training_tokens", "storage_byte_seconds", "cache_token_seconds", "container_sessions",
 		"estimated_cost", "charge", "currency", "unpriced", "usage_complete", "end_user_digest", "session_id", "payload_captured",
 	}); err != nil {
 		return nil, err
@@ -70,6 +71,7 @@ func RequestCSV(items []RequestSummary) ([]byte, error) {
 			csvOptional(item.CacheWrite5MInputTokens), csvOptional(item.CacheWrite1HInputTokens),
 			csvOptional(item.AudioInputTokens), csvOptional(item.CachedAudioInputTokens), csvOptional(item.AudioOutputTokens),
 			csvOptional(item.ImageInputTokens), csvOptional(item.CachedImageInputTokens), csvOptional(item.ImageOutputTokens),
+			csvOptional(item.TrainingTokens), csvOptional(item.StorageByteSeconds), csvOptional(item.CacheTokenSeconds), containerSessionsCSV(item.ContainerSessions),
 			csvOptional(item.EstimatedCost), csvOptional(item.Charge), csvOptional(item.Currency),
 			csvOptional(item.Unpriced), csvOptional(item.UsageComplete), item.EndUserDigest, item.Attribution["session"], strconv.FormatBool(item.PayloadCaptured),
 		}
@@ -95,6 +97,7 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 		"row_type", "dimension", "dimension_value", "start", "end", "request_count", "input_tokens", "output_tokens", "cached_input_tokens",
 		"cache_write_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens",
 		"audio_input_tokens", "cached_audio_input_tokens", "audio_output_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens",
+		"training_tokens", "storage_byte_seconds", "cache_token_seconds", "container_sessions",
 		"media_units", "estimated_cost", "currency",
 		"unpriced_count", "incomplete_count", "range_complete", "approximate", "excluded_partial_aggregate_boundaries", "complete",
 		"request_metadata_gap_events", "uncertain_request_metadata_gap_count", "estimated_input_tokens", "reported_input_tokens", "estimated_attempt_count",
@@ -112,6 +115,7 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 			totals.CacheWrite5MInputTokens, totals.CacheWrite1HInputTokens,
 			totals.AudioInputTokens, totals.CachedAudioInputTokens, totals.AudioOutputTokens,
 			totals.ImageInputTokens, totals.CachedImageInputTokens, totals.ImageOutputTokens,
+			totals.TrainingTokens, totals.StorageByteSeconds, totals.CacheTokenSeconds, stringJSON(totals.ContainerSessions),
 			totals.MediaUnits, csvOptional(totals.EstimatedCost), csvOptional(totals.Currency),
 			strconv.FormatInt(totals.UnpricedCount, 10), strconv.FormatInt(totals.IncompleteCount, 10), strconv.FormatBool(coverage.RangeComplete),
 			strconv.FormatBool(coverage.Approximate), strconv.Itoa(coverage.ExcludedBoundaries), strconv.FormatBool(summary.Complete),
@@ -137,4 +141,11 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 		return nil, err
 	}
 	return buffer.Bytes(), nil
+}
+
+func containerSessionsCSV(sessions map[string]int64) string {
+	if sessions == nil {
+		return ""
+	}
+	return stringJSON(sessions)
 }

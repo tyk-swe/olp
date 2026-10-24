@@ -31,6 +31,14 @@ export const operationKinds = [
   'model_list',
   'model_get',
   'batch',
+  'fine_tuning',
+  'vector_store',
+  'conversation',
+  'container',
+  'eval',
+  'skill',
+  'context_cache',
+  'retrieval',
   'realtime',
   'bedrock_invoke'
 ] as const;

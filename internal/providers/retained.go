@@ -12,6 +12,9 @@ import (
 // certifyRetained proves a retained family with one authenticated,
 // read-only collection request, mirroring the agent-resource probe.
 func (s *Server) certifyRetained(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
+	if tuple.Operation == "retrieval" && cfg.transport().RetrievalBackend() != "" {
+		return s.certifyRetrieval(ctx, cfg, credential, model)
+	}
 	if tuple.Operation == "agent_resource" {
 		return s.certifyAgentResources(ctx, cfg, credential, model)
 	}

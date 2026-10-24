@@ -37,6 +37,9 @@ type hostingTraits struct {
 const cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
 
 var hostings = map[string]hostingTraits{
+	"azure-ai-search":          {azureScope: "https://search.azure.com/.default"},
+	"vertex-rag-engine":        {},
+	"bedrock-knowledge-bases":  {awsService: "bedrock"},
 	"azure-deployment":         {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
 	"azure-responses-legacy":   {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
 	"azure-v1":                 {baseSuffix: "/openai/v1", azureScope: "https://ai.azure.com/.default"},
@@ -72,6 +75,9 @@ func (c Config) traits() hostingTraits {
 // ValidModel reports whether model is an upstream model name the connector's
 // hosting addresses.
 func (c Config) ValidModel(model string) bool {
+	if c.RetrievalBackend() != "" {
+		return c.retrievalModelValid(model)
+	}
 	if syntax := c.traits().model; syntax != nil {
 		return syntax.MatchString(model) && !strings.Contains(model, "..")
 	}

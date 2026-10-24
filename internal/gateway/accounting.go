@@ -266,6 +266,9 @@ func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
 			BillingUncertain: fact.BillingUncertain,
 		}
 	}
+	if fact.TokenlessUsage {
+		return usage.AttemptUsage{Observed: true, Complete: fact.UsageComplete, BillingUncertain: fact.BillingUncertain}
+	}
 	evidence := observedAttemptUsage(fact.Usage, fact.UsageComplete, operation)
 	evidence.BillingUncertain = fact.BillingUncertain
 	return evidence

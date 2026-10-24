@@ -171,8 +171,27 @@ func TestRetainedAccountingPolicy(t *testing.T) {
 	if err := s.retainedAccountingPolicy(x, p, false); err != nil || p.attempt.Price == nil {
 		t.Fatalf("priced immediate operation rejected: %v", err)
 	}
-	if err := s.retainedAccountingPolicy(x, p, true); err == nil || err.Code != "unsupported_metered_operation" {
-		t.Fatalf("unowned deferred usage dispatched: %v", err)
+	x.route = &routing.Route{Slug: "retained"}
+	x.operationOverride = "vector_store"
+	if err := s.retainedAccountingPolicy(x, p, true); err != nil {
+		t.Fatalf("uncapped deferred refused: %v", err)
+	}
+	x.authority.Policy.TokensPerMinute = new(int64(100))
+	if err := s.retainedAccountingPolicy(x, p, true); err != nil {
+		t.Fatalf("token-only storage refused: %v", err)
+	}
+	x.operationOverride = "fine_tuning"
+	if err := s.retainedAccountingPolicy(x, p, true); err == nil || err.Code != "unbounded_work_budget" {
+		t.Fatalf("delayed training accepted token cap: %v", err)
+	}
+	x.operationOverride = "eval"
+	if err := s.retainedAccountingPolicy(x, p, true); err == nil || err.Code != "unbounded_work_budget" {
+		t.Fatalf("delayed eval accepted token cap: %v", err)
+	}
+	x.authority.Policy.TokensPerMinute = nil
+	x.authority.Policy.DailyCostLimit = new("1")
+	if err := s.retainedAccountingPolicy(x, p, true); err == nil || err.Code != "unbounded_work_budget" {
+		t.Fatalf("unbounded monetary liability accepted cap: %v", err)
 	}
 }
 

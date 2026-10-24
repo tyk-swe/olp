@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/signing"
@@ -78,6 +79,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	}}).Register(mux)
 	(&agents.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)

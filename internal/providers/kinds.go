@@ -19,6 +19,7 @@ const (
 	KindAnthropic        = "anthropic"
 	KindGemini           = "gemini"
 	KindAzure            = "azure_openai"
+	KindAzureAISearch    = connectors.KindAzureAISearch
 	KindVertex           = "vertex_ai"
 	KindBedrock          = "bedrock"
 	KindSageMaker        = connectors.KindSageMaker
@@ -131,6 +132,9 @@ var kinds = withPresets([]kindCapability{
 	{Kind: KindAzure, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: AuthAPIKey,
 		AuthModes: []authCapability{apiKeyAuth, {Mode: "azure_default", Label: "Microsoft Entra default credential", Credential: "forbidden"}, {Mode: "azure_client_secret", Label: "Microsoft Entra client secret", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}},
+	{Kind: KindAzureAISearch, Label: "Azure AI Search", Description: "Query-only operator-managed search indexes.", DefaultAuthMode: AuthAPIKey,
+		AuthModes: []authCapability{{Mode: "api_key", Label: "API key", Credential: "required"}, {Mode: "azure_default", Label: "Azure identity", Credential: "forbidden"}, {Mode: "azure_client_secret", Label: "Service principal JSON", Credential: "required"}},
+		Fields:    []fieldCapability{{Field: "endpoint", Label: "Search service origin", Required: true}, {Field: "api_version", Label: "API version", Required: true}, {Field: "model", Label: "Index name", Required: true}}},
 	{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc",
 		AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
@@ -308,6 +312,9 @@ func reviewedMedia(kind, vendor, operation string) bool {
 }
 
 func certifiable(kind, vendor string, c CapabilityInput) bool {
+	if c.Operation == "retrieval" && (kind == KindBedrock || kind == KindVertex || kind == KindAzureAISearch) {
+		return false
+	} // Cloud retrieval requires its dedicated profile.
 	if retainedapi.Operation(c.Operation) {
 		return connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode)
 	}

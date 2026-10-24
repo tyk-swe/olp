@@ -38,7 +38,7 @@ func TestReadinessMediaReconciliationReflectsDegradation(t *testing.T) {
 }
 
 func TestReadinessDetectsStaleFinancialWorkers(t *testing.T) {
-	for _, stopped := range []usage.Task{usage.TaskBatchSettlement, usage.TaskExecutionDebits} {
+	for _, stopped := range []usage.Task{usage.TaskBatchSettlement, usage.TaskRetainedSettlement, usage.TaskExecutionDebits} {
 		t.Run(string(stopped), func(t *testing.T) {
 			health := &WorkerTaskHealth{}
 			for _, task := range WorkerTasks {

@@ -665,6 +665,9 @@ func samePrice(a, b Price) bool {
 		{a.UnitPrice, b.UnitPrice},
 		{a.PerRequest, b.PerRequest},
 		{a.BatchMultiplier, b.BatchMultiplier},
+		{a.TrainingPerMillion, b.TrainingPerMillion},
+		{a.StoragePerGiBDay, b.StoragePerGiBDay},
+		{a.CacheStoragePerMillionTokenHour, b.CacheStoragePerMillionTokenHour},
 	}
 	for _, pair := range rates {
 		if (pair[0] == nil) != (pair[1] == nil) {
@@ -675,6 +678,7 @@ func samePrice(a, b Price) bool {
 		}
 	}
 	return a.Currency == b.Currency && sameToolCallFees(a.ToolCalls, b.ToolCalls) &&
+		sameToolCallFees(a.ContainerPerSession, b.ContainerPerSession) &&
 		sameTiers(a.Tiers, b.Tiers) && sameWindows(a.Windows, b.Windows)
 }
 
@@ -955,5 +959,7 @@ func (p Price) isRemoval() bool {
 		p.AudioOutputPerMillion == nil && p.ImageInputPerMillion == nil &&
 		p.CachedImageInputPerMillion == nil && p.ImageOutputPerMillion == nil &&
 		p.UnitPrice == nil && p.PerRequest == nil && p.BatchMultiplier == nil &&
+		p.TrainingPerMillion == nil && p.StoragePerGiBDay == nil &&
+		p.CacheStoragePerMillionTokenHour == nil && len(p.ContainerPerSession) == 0 &&
 		len(p.ToolCalls) == 0 && len(p.Tiers) == 0 && p.Windows == nil
 }

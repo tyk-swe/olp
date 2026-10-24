@@ -30,7 +30,7 @@ func TestResponseCacheNativeDialectIsolation(t *testing.T) {
 		s.Routes[routeSlug] = route
 	})
 	h.mock.set("a", status(http.StatusOK, `{"data":[{"index":0,"relevance_score":0.9}],"usage":{"total_tokens":2}}`))
-	for _, request := range []struct{ dialect, field, cache string }{
+	for i, request := range []struct{ dialect, field, cache string }{
 		{"rerank", "results", "miss"}, {"voyage-rerank", "data", "miss"},
 		{"rerank", "results", "hit"}, {"voyage-rerank", "data", "hit"},
 	} {
@@ -39,6 +39,9 @@ func TestResponseCacheNativeDialectIsolation(t *testing.T) {
 		var body map[string]json.RawMessage
 		err := json.NewDecoder(response.Body).Decode(&body)
 		response.Body.Close()
+		// Cache persistence finishes with the terminal event, which can occur
+		// after the client has read the known-length response body.
+		h.sink.nth(t, i+1)
 		if err != nil || response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != request.cache || body[request.field] == nil {
 			t.Fatalf("%s: status=%d cache=%s body=%s error=%v", request.dialect, response.StatusCode, response.Header.Get("X-OLP-Cache"), body, err)
 		}

@@ -43,6 +43,11 @@ func setPendingUsage(event *usage.Event, evidence usage.AttemptUsage) {
 	event.AudioInputTokens, event.CachedAudioInputTokens, event.AudioOutputTokens = evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens
 	event.ImageInputTokens, event.CachedImageInputTokens, event.ImageOutputTokens = evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens
 	event.ToolCalls, event.Batch = evidence.ToolCalls, evidence.Batch
+	event.TrainingTokens = evidence.TrainingTokens
+	eveStorage := evidence.StorageByteSeconds
+	event.StorageByteSeconds = eveStorage
+	event.CacheTokenSeconds = evidence.CacheTokenSeconds
+	event.ContainerSessions = evidence.ContainerSessions
 	event.MediaUnits, event.UsageComplete = evidence.MediaUnits, evidence.Complete
 }
 

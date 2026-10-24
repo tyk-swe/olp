@@ -19,7 +19,7 @@ are stable identifiers; independent work can proceed in parallel.
 | Workstream | Next implementation | Dependencies |
 | --- | --- | --- |
 | Guardrail integrations | Implemented RM2; live qualification tracked separately | Existing engine, credential and egress contracts |
-| Retained APIs and retrieval | RM5.1–RM5.8, independently by family; RM5.9 implemented | Implemented RM4 foundations and each family's ownership and pricing contracts |
+| Retained APIs and retrieval | Implemented RM5; service and live qualification tracked separately | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | RM7.1 direct Streamable HTTP execution | Implemented RM4 accounting and agent contracts, plus existing tool governance |
 | Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | RM7.1 direct execution |
@@ -38,7 +38,7 @@ identifies implementation boundaries and owners.
 | [RM2: Guardrails, capture and caching](#rm2-guardrails-capture-and-caching) | Done | Named text integrations, local/model filters, capture and caching; MCP/agent hooks assigned to RM7/RM8 |
 | [RM3: Current APIs](#rm3-current-apis) | Done | Current completions, text Decisions, OCR/search, files and batches |
 | [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Done | Operation contracts, durable debits, recovery, settlement and agent contracts |
-| [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Partial | Fine-tuning, vector stores, retrieval and retained resource families |
+| [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Done | Fine-tuning, vector stores, retrieval and retained resource families |
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Planned | Additional OCR/search transports, realtime profiles and pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution, per-user grants, HTTP+SSE and stdio |
 | [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
@@ -115,20 +115,21 @@ independently of agent work.
 
 ### RM5: Retained APIs and retrieval
 
-**Status: Partial.** **Owners:** resource and connector maintainers, with
+**Status: Done.** **Owners:** resource and connector maintainers, with
 accounting and SDK owners. **Dependencies:** RM4 operation contracts,
 owner/credential affinity and priced units; asynchronous jobs also use the
 implemented durable accounting foundation.
 
-Metered creation and storage mutations fail closed with
-`unsupported_metered_operation` until each family has a durable usage-settlement
-owner. Immediate compaction and retrieval use request accounting; read, list,
-cancel and delete remain available for existing owner-bound resources.
+Retained paid mutations have durable submission fences, immutable accounting
+pins, pending budget subjects and one provider/operator evidence ledger before
+dispatch. Unbounded paid work requires uncapped callers; delayed training/evals
+always refuse TPM caps. Immediate compaction and retrieval use request accounting,
+and zero-cost housekeeping remains available to authorized owners.
 
-- [ ] **RM5.1 — Fine-tuning:** implement OpenAI jobs, followed by the declared
+- [x] **RM5.1 — Fine-tuning:** implement OpenAI jobs, followed by the declared
   Azure and Vertex methods, including file affinity, unknown-create recovery,
   training accounting and resulting-model publication.
-- [ ] **RM5.2 — Native vector stores:** implement OpenAI/Azure lifecycle,
+- [x] **RM5.2 — Native vector stores:** implement OpenAI/Azure lifecycle,
   file attachments, batches and search, with nested-ID ownership, pagination
   and Responses `file_search` identifier rewriting.
 - [x] **RM5.3 — Query-only retrieval:** implement project-owned Bedrock
@@ -138,13 +139,13 @@ cancel and delete remain available for existing owner-bound resources.
 - [x] **RM5.4 — Conversations and compaction:** implement native lifecycle,
   items and compact methods, owner/target affinity, inspection and separately
   priced compaction without retaining local conversation history.
-- [ ] **RM5.5 — Containers:** implement the declared OpenAI and supported
+- [x] **RM5.5 — Containers:** implement the declared OpenAI and supported
   Azure lifecycle/file methods with owner isolation.
-- [ ] **RM5.6 — Evals:** implement native OpenAI definitions/runs, data-source
+- [x] **RM5.6 — Evals:** implement native OpenAI definitions/runs, data-source
   affinity, durable reservations and terminal settlement.
 - [x] **RM5.7 — Skills:** implement native Anthropic skills/versions and
   retained file/version ownership.
-- [ ] **RM5.8 — Context caches:** implement Gemini `cachedContents`, owner-bound
+- [x] **RM5.8 — Context caches:** implement Gemini `cachedContents`, owner-bound
   IDs, expiry and storage accounting/reconciliation.
 - [x] **RM5.9 — Managed-agent resources:** Gemini v1beta create/list/get/delete,
   API-key ownership, pinned credentials, persistent creation fences, metadata
@@ -153,8 +154,14 @@ cancel and delete remain available for existing owner-bound resources.
   checks pass; service integration scenarios are compiled, not yet executed,
   and live qualification remains required.
 
-Families can proceed independently. Query-only retrieval can be implemented
-before asynchronous jobs. Retrieval-backed tools need only the implemented
+Focused native, ownership, reference, retrieval, billing and console checks pass;
+management clients are regenerated. Database/process and restoration scenarios
+compile but service execution, browser, SDK-service and live qualification remain
+open in the [qualification record](develop/qualification.md#rm5-retained-apis-and-retrieval).
+Provider retirements and explicit unsupported methods are documented without
+calendar-based gateway switches.
+
+Families remain independent. Retrieval-backed tools need only the implemented
 `retrieval` operation for their selected RM5.2 or RM5.3 backend.
 
 ### RM6: Protocol and provider expansion

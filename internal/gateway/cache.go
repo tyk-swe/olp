@@ -75,7 +75,7 @@ func (s *Server) initializeCache(x *call) *Error {
 		return invalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
-	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.request.callerCredential != nil || x.providerState || x.generation.continuation != nil {
+	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
 		return nil
 	}
 	p := x.route.Cache.Effective()
@@ -138,7 +138,7 @@ func containsCacheReference(v oif.Value) bool {
 			if m.Name == "type" && slices.Contains([]string{`"image"`, `"image_url"`, `"input_image"`, `"audio"`, `"input_audio"`, `"video"`, `"document"`, `"file"`, `"input_file"`, `"item_reference"`}, m.Value.Raw()) {
 				return true
 			}
-			if m.Name == "file_id" || m.Name == "file_uri" || m.Name == "file_data" || m.Name == "image_url" || m.Name == "input_audio" || m.Name == "inlineData" || m.Name == "fileData" || m.Name == "image" || m.Name == "audio" || m.Name == "video" || m.Name == "document" {
+			if m.Name == "file_id" || m.Name == "vector_store_ids" || m.Name == "cachedContent" || m.Name == "file_uri" || m.Name == "file_data" || m.Name == "image_url" || m.Name == "input_audio" || m.Name == "inlineData" || m.Name == "fileData" || m.Name == "image" || m.Name == "audio" || m.Name == "video" || m.Name == "document" {
 				return true
 			}
 			if containsCacheReference(m.Value) {

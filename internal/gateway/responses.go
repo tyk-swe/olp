@@ -43,6 +43,8 @@ func (s *Server) responsesStateGate(ctx context.Context, x *call, authority acce
 	if raw := parsed.Field("store"); raw != nil {
 		_ = json.Unmarshal(raw, &store)
 	}
+	conversation := parsed.Field("conversation")
+	hasConversation := conversation != nil && !bytes.Equal(bytes.TrimSpace(conversation), []byte("null"))
 	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() {
 		if parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null")) {
 			// Native Responses omission requests provider retention. Strict admission
@@ -53,7 +55,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *call, authority acce
 			param := "store"
 			return invalidRequest("state_carrier", "Background generation requires retained provider state.", &param)
 		}
-		if !authority.Policy.AllowProviderState && (store || previous != "") {
+		if !authority.Policy.AllowProviderState && (store || previous != "" || hasConversation) {
 			param := "store"
 			if previous != "" {
 				param = "previous_response_id"
@@ -61,7 +63,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *call, authority acce
 			return invalidRequest("policy_conflict", "The native invocation retains provider state but this API key does not permit it.", &param)
 		}
 	}
-	if previous == "" && !background && !store {
+	if previous == "" && !background && !store && !hasConversation {
 		return nil
 	}
 	if !authority.Policy.AllowProviderState {
@@ -243,8 +245,8 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority acces
 			return nil, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed response object.")
 		}
 		projection := responseProjection{upstreamID: upstreamID, localID: res.ID, route: x.route.Slug}
-		if x.pin != nil {
-			projection.previousUpstream, projection.previousLocal = x.pin.UpstreamID, x.pin.ID
+		if previous := x.previousResponse(); previous != nil {
+			projection.previousUpstream, projection.previousLocal = previous.UpstreamID, previous.ID
 		}
 		mapped, err := projection.project(doc, "")
 		if err != nil {
@@ -453,6 +455,10 @@ func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.R
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
+	out, err = s.mapGenerationResultReferences(commitCtx, x, res.NativeIdentity(), out)
+	if err != nil {
+		return serverError(http.StatusBadGateway, "resource_affinity", "The retained provider returned an unowned result reference.")
+	}
 	if method == http.MethodPost && res.Kind == resources.KindStrictResponse {
 		current, present := x.request.release.Snapshot.Routes[res.RouteSlug]
 		if !present || retainedContract(true, current.Fidelity, retainedRetrieval) != nil || s.checkRouteFidelity(ctx, &current) != nil {
@@ -548,11 +554,16 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
-		if _, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)}); err != nil {
+		document, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
+		if err != nil {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned invalid input items.")
 		}
+		projected, err := projectResponseInputReferences(document, s.generationResultResolver(ctx, x, res.NativeIdentity()))
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
+		}
 		x.completePinned()
-		s.writeStateJSON(w, x, result)
+		s.writeStateJSON(w, x, projected.Bytes())
 		return nil
 	})
 }
@@ -713,8 +724,8 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *Atte
 	var mapped oif.Document
 	if x.strict() {
 		projection := responseProjection{upstreamID: upstreamID, localID: local, route: x.route.Slug}
-		if x.pin != nil {
-			projection.previousUpstream, projection.previousLocal = x.pin.UpstreamID, x.pin.ID
+		if previous := x.previousResponse(); previous != nil {
+			projection.previousUpstream, projection.previousLocal = previous.UpstreamID, previous.ID
 		}
 		mapped, err = projection.project(doc, "/response")
 	} else {

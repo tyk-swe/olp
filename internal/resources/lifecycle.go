@@ -71,6 +71,9 @@ func (s *Store) PrepareLifecycle(ctx context.Context, resource *Resource, operat
 	if err != nil {
 		return nil, false, err
 	}
+	if err = s.prepareRetainedTx(ctx, tx, resource); err != nil {
+		return nil, false, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, false, err
 	}
@@ -115,7 +118,7 @@ func (s *Store) CompleteLifecycleChildren(ctx context.Context, r *Resource, chil
 	if tag.RowsAffected() != 1 {
 		return ErrSubmissionConflict
 	}
-	_, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET upstream_id=$2,state=$3,metadata=$4,expires_at=$5,updated_at=now() WHERE id=$1`, r.UUID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt)
+	err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET upstream_id=$2,state=$3,metadata=$4,expires_at=$5,updated_at=clock_timestamp() WHERE id=$1 RETURNING updated_at`, r.UUID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt).Scan(&r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("complete retained resource: %w", err)
 	}
@@ -137,7 +140,9 @@ func (s *Store) GetByUUID(ctx context.Context, id uuid.UUID, owner string) (*Res
 
 // BindDiscovered is only for a provider-generated child observed through its
 // owner-authorized parent. Serializing discovery makes repeated pages stable.
-func (s *Store) BindDiscovered(ctx context.Context, child *Resource) (*Resource, error) {
+// A correlated in-flight submission keeps its original ownership and billing
+// pins; discovery queues reconciliation rather than inserting another identity.
+func (s *Store) BindDiscovered(ctx context.Context, child *Resource, submission ...uuid.UUID) (*Resource, error) {
 	if child.ParentID == nil {
 		return nil, ErrContract
 	}
@@ -155,6 +160,44 @@ func (s *Store) BindDiscovered(ctx context.Context, child *Resource) (*Resource,
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
+	}
+	if len(submission) > 0 {
+		original, lookupErr := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, submission[0], child.APIKeyID))
+		if lookupErr == nil {
+			if original.Kind != child.Kind || original.RouteSlug != child.RouteSlug || original.RouteRevisionID != child.RouteRevisionID || original.ProviderID != child.ProviderID || original.ProviderRevisionID != child.ProviderRevisionID || original.TargetID != child.TargetID || original.SlotID != child.SlotID || !sameOptional(original.CredentialID, child.CredentialID) || original.ParentID == nil || *original.ParentID != *child.ParentID || !sameOptional(original.ContractVersion, child.ContractVersion) {
+				return nil, ErrContract
+			}
+			if original.UpstreamID != child.UpstreamID {
+				if original.UpstreamID != "pending:"+original.UUID.String() || original.State == "not_accepted" {
+					return nil, ErrContract
+				}
+				var state string
+				if err := tx.QueryRow(ctx, `SELECT state FROM olp.retained_submissions WHERE resource_id=$1`, original.UUID).Scan(&state); err != nil {
+					return nil, err
+				}
+				if state == "accepted" {
+					current, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, original.UUID, child.APIKeyID))
+					if err != nil {
+						return nil, err
+					}
+					if current.UpstreamID != child.UpstreamID {
+						return nil, ErrContract
+					}
+					original = current
+				} else if state != "dispatched" && state != "submission_unknown" {
+					return nil, ErrContract
+				} else if err := s.RequestRetainedReconciliationTx(ctx, tx, original.UUID, child.UpstreamID); err != nil {
+					return nil, err
+				}
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return original, nil
+		}
+		if !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return nil, lookupErr
+		}
 	}
 	bound, err = s.PutTx(ctx, tx, child)
 	if err != nil {

@@ -1,0 +1,1 @@
+{"id":"ftjob-native","object":"fine_tuning.job","created_at":1792756800,"finished_at":1792760400,"status":"failed","model":"training-model","trained_tokens":9007199254740993,"training_file":"file-native","result_files":["file-result"],"fine_tuned_model":null}

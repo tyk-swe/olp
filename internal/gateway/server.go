@@ -685,6 +685,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				return
 			}
 		}
+		if e := s.bindGenerationReferences(r.Context(), x); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
 		if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -757,6 +762,17 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				out.err = me
 				status = me.Status
 				writeError(w, me)
+				return
+			}
+			out.completion.Body = mapped
+		}
+		if family == wire.Responses && len(x.facts) > 0 {
+			identity := responseNativeIdentity(x, &x.facts[len(x.facts)-1], "")
+			mapped, err := s.mapGenerationResultReferences(r.Context(), x, identity, out.completion.Body)
+			if err != nil {
+				out.err = serverError(http.StatusBadGateway, "resource_affinity", "The provider returned an unowned result reference.")
+				status = out.err.Status
+				writeError(w, out.err)
 				return
 			}
 			out.completion.Body = mapped

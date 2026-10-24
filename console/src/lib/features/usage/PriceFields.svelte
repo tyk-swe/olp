@@ -3,6 +3,7 @@
     rateFieldPairs,
     type TierRow,
     type ToolFeeRow,
+    type ContainerFeeRow,
     type WindowPeriodRow
   } from './priceEntry';
 
@@ -25,6 +26,10 @@
     cachedImageInputPrice = $bindable(''),
     imageOutputPrice = $bindable(''),
     perRequestPrice = $bindable(''),
+    trainingPrice = $bindable(''),
+    storagePrice = $bindable(''),
+    cacheStoragePrice = $bindable(''),
+    containerFees = $bindable<ContainerFeeRow[]>([]),
     batchMultiplier = $bindable(''),
     toolFees = $bindable<ToolFeeRow[]>([]),
     tiers = $bindable<TierRow[]>([]),
@@ -47,6 +52,10 @@
     cachedImageInputPrice?: string;
     imageOutputPrice?: string;
     perRequestPrice?: string;
+    trainingPrice?: string;
+    storagePrice?: string;
+    cacheStoragePrice?: string;
+    containerFees?: ContainerFeeRow[];
     batchMultiplier?: string;
     toolFees?: ToolFeeRow[];
     tiers?: TierRow[];
@@ -225,6 +234,39 @@
   /><small>Charged once per successful attempt.</small>
 </div>
 <div class="form-field">
+  <label for={`${idPrefix}-training-price`}>Training / million tokens</label>
+  <input
+    id={`${idPrefix}-training-price`}
+    bind:value={trainingPrice}
+    inputmode="decimal"
+    placeholder="8.00"
+    disabled={!canEdit}
+  />
+</div>
+<div class="form-field">
+  <label for={`${idPrefix}-storage-price`}>Storage / GiB-day</label>
+  <input
+    id={`${idPrefix}-storage-price`}
+    bind:value={storagePrice}
+    inputmode="decimal"
+    placeholder="0.10"
+    disabled={!canEdit}
+  />
+  <small>One GiB is 1,073,741,824 bytes.</small>
+</div>
+<div class="form-field">
+  <label for={`${idPrefix}-cache-storage-price`}
+    >Cache storage / million token-hours</label
+  >
+  <input
+    id={`${idPrefix}-cache-storage-price`}
+    bind:value={cacheStoragePrice}
+    inputmode="decimal"
+    placeholder="1.00"
+    disabled={!canEdit}
+  />
+</div>
+<div class="form-field">
   <label for={`${idPrefix}-batch-multiplier`}>Batch multiplier</label><input
     id={`${idPrefix}-batch-multiplier`}
     bind:value={batchMultiplier}
@@ -242,6 +284,47 @@
     Tool fees bill each invocation; tiers replace the per-million rate set above
     an input threshold; windows multiply the charge by time of day.
   </p>
+  <div class="component-rows" aria-label="Container session fees">
+    <p>Container session fees by memory tier</p>
+    {#each containerFees as row, index (index)}
+      <div class="component-row">
+        <label class="sr-only" for={`${idPrefix}-container-tier-${index}`}
+          >Container memory tier</label
+        >
+        <input
+          id={`${idPrefix}-container-tier-${index}`}
+          bind:value={row.tier}
+          placeholder="1g"
+          class="mono"
+        />
+        <label class="sr-only" for={`${idPrefix}-container-fee-${index}`}
+          >Fee per session</label
+        >
+        <input
+          id={`${idPrefix}-container-fee-${index}`}
+          bind:value={row.fee}
+          inputmode="decimal"
+          placeholder="0.03"
+        />
+        <button
+          type="button"
+          class="text-button"
+          onclick={() => {
+            containerFees = containerFees.filter(
+              (_: ContainerFeeRow, i: number) => i !== index
+            );
+          }}>Remove</button
+        >
+      </div>
+    {/each}
+    <button
+      type="button"
+      class="text-button"
+      onclick={() => {
+        containerFees = [...containerFees, { tier: '', fee: '' }];
+      }}>Add container tier</button
+    >
+  </div>
   <div class="component-rows" aria-label="Tool fees">
     {#each toolFees as row, index (index)}
       <div class="component-row">

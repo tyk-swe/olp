@@ -8,6 +8,7 @@ import {
 // The row shapes the shared price-fields editor binds, and helpers mapping
 // them to the price-entry fields pricing revisions and rate cards share.
 export type ToolFeeRow = { name: string; fee: string };
+export type ContainerFeeRow = { tier: string; fee: string };
 export type TierRow = { threshold: string; rates: Record<string, string> };
 export type WindowPeriodRow = {
   days: number[];
@@ -31,6 +32,10 @@ export type PriceFieldValues = {
   cachedImageInputPrice: string;
   imageOutputPrice: string;
   perRequestPrice: string;
+  trainingPrice: string;
+  storagePrice: string;
+  cacheStoragePrice: string;
+  containerFees: ContainerFeeRow[];
   batchMultiplier: string;
   toolFees: ToolFeeRow[];
   tiers: TierRow[];
@@ -54,6 +59,10 @@ export function emptyPriceFields(): PriceFieldValues {
     cachedImageInputPrice: '',
     imageOutputPrice: '',
     perRequestPrice: '',
+    trainingPrice: '',
+    storagePrice: '',
+    cacheStoragePrice: '',
+    containerFees: [],
     batchMultiplier: '',
     toolFees: [],
     tiers: [],
@@ -114,6 +123,12 @@ export function priceEntryFields(values: PriceFieldValues) {
     ),
     image_output_per_million: optionalDecimal(values.imageOutputPrice),
     per_request: optionalDecimal(values.perRequestPrice),
+    training_per_million: optionalDecimal(values.trainingPrice),
+    storage_per_gib_day: optionalDecimal(values.storagePrice),
+    cache_storage_per_million_token_hour: optionalDecimal(
+      values.cacheStoragePrice
+    ),
+    container_per_session: containerFeeRows(values.containerFees),
     batch_multiplier: optionalDecimal(values.batchMultiplier),
     tool_calls: toolFeeRows(values.toolFees),
     tiers: tierRows(
@@ -124,4 +139,27 @@ export function priceEntryFields(values: PriceFieldValues) {
     ),
     windows: windowsDraft(values.windowZone, values.windowPeriods)
   };
+}
+
+// Memory tiers are native billing keys. Keep decimal fees as source strings;
+// converting them to numbers would lose precision before server settlement.
+export function containerFeeRows(
+  rows: ContainerFeeRow[]
+): Record<string, string> | null {
+  const fees: Record<string, string> = {};
+  for (const row of rows) {
+    const tier = row.tier.trim();
+    if (!tier && !row.fee.trim()) continue;
+    if (!/^[1-9][0-9]{0,4}g$/.test(tier))
+      throw new Error('Enter a container memory tier such as 1g, 4g or 16g.');
+    if (Object.hasOwn(fees, tier))
+      throw new Error(`Container tier ${tier} is listed twice.`);
+    const fee = optionalDecimal(row.fee);
+    if (fee === null)
+      throw new Error(`Enter a session fee for container tier ${tier}.`);
+    fees[tier] = fee;
+  }
+  if (Object.keys(fees).length > 16)
+    throw new Error('At most 16 container memory tiers per price.');
+  return Object.keys(fees).length ? fees : null;
 }

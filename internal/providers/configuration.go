@@ -34,16 +34,17 @@ type Limits struct {
 
 // Options carries connector options and per-model metadata.
 type Options struct {
-	Network           *egress.ConnectionOptions        `json:"network,omitempty"`
-	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
-	QuerySettings     map[string]string                `json:"query_settings,omitempty"`
-	OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
-	Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
-	CredentialHeaders []string                         `json:"credential_headers"`
-	Limits            *Limits                          `json:"limits"`
-	Models            map[string]json.RawMessage       `json:"models"`
-	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
-	VendorID          *string                          `json:"vendor_id"`
+	TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
+	Network                  *egress.ConnectionOptions        `json:"network,omitempty"`
+	SemanticHeaders          map[string]string                `json:"semantic_headers,omitempty"`
+	QuerySettings            map[string]string                `json:"query_settings,omitempty"`
+	OperationDefaults        map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+	Bindings                 map[string]connectors.Binding    `json:"bindings,omitempty"`
+	CredentialHeaders        []string                         `json:"credential_headers"`
+	Limits                   *Limits                          `json:"limits"`
+	Models                   map[string]json.RawMessage       `json:"models"`
+	ParameterDefaults        map[string]json.RawMessage       `json:"parameter_defaults"`
+	VendorID                 *string                          `json:"vendor_id"`
 	// Commitment is the provisioned capacity the connection pays for: priced
 	// attempts on it bill nothing extra and share the amount across each UTC
 	// calendar period by list-cost weight.
@@ -213,6 +214,11 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.batch_storage", err.Error())
 	}
 	c.BatchStorage = batchStorage
+	tuningPrefixes, err := connectors.NormalizeTuningDatasetPrefixes(c.Kind, c.Options.TuningDatasetURIPrefixes)
+	if err != nil {
+		return access.Invalid("configuration.options.tuning_dataset_uri_prefixes", err.Error())
+	}
+	c.Options.TuningDatasetURIPrefixes = tuningPrefixes
 	if _, err := policy.ValidateEndpoint(*c.Endpoint); err != nil {
 		return access.Invalid("configuration.endpoint", err.Error())
 	}
@@ -355,6 +361,9 @@ func (c *Configuration) transportFingerprint() string {
 	if c.BatchStorage != nil {
 		parts = append(parts, c.BatchStorage)
 	}
+	if len(c.Options.TuningDatasetURIPrefixes) > 0 {
+		parts = append(parts, c.Options.TuningDatasetURIPrefixes)
+	}
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
@@ -382,5 +391,5 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), BatchStorage: c.BatchStorage, Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }

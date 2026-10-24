@@ -13,6 +13,10 @@
   } from '$lib/lists/pagination';
   import { formatDate } from '$lib/format';
   import AgentResources from './AgentResources.svelte';
+  import RetrievalBindings from './RetrievalBindings.svelte';
+  import NativeResources from './NativeResources.svelte';
+  import RetainedResourceControls from './RetainedResourceControls.svelte';
+  let selectedId = $state<string | null>(null);
 
   const kinds: ProviderResourceFilters['kind'][] = [
     'file',
@@ -29,7 +33,24 @@
     'gemini_file',
     'gemini_batch',
     'cloud_batch',
-    'agent_resource'
+    'agent_resource',
+    'fine_tuning_job',
+    'vertex_tuning_job',
+    'fine_tuning_event',
+    'fine_tuning_checkpoint',
+    'vector_store',
+    'vector_store_file',
+    'vector_store_batch',
+    'conversation',
+    'conversation_item',
+    'container',
+    'container_file',
+    'eval',
+    'eval_run',
+    'eval_output_item',
+    'skill',
+    'skill_version',
+    'context_cache'
   ];
 
   let kind = $state('');
@@ -46,6 +67,9 @@
     queryFn: () => listProviderResources({ ...applied, cursor: paging.cursor }),
     placeholderData: (previous) => previous
   }));
+  const selected = $derived(
+    resources.data?.items.find((item) => item.id === selectedId) ?? null
+  );
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
@@ -92,6 +116,14 @@
   >
 </div>
 <AgentResources />
+<NativeResources />
+<RetrievalBindings />
+{#if selected}{#key selected.id}<RetainedResourceControls
+      resource={selected}
+      changed={() => {
+        void resources.refetch();
+      }}
+    />{/key}{/if}
 <form
   class="card filters"
   aria-label="Provider resource filters"
@@ -171,6 +203,18 @@
               ></td
             ><td data-label="State"
               >{item.state}
+              {#if item.retained_settlement}<small
+                  >Settlement {item.retained_settlement.state}{item
+                    .retained_settlement.missing_evidence
+                    ? ' · usage evidence pending'
+                    : ''}</small
+                ><button
+                  class="button button-secondary"
+                  type="button"
+                  onclick={() => {
+                    selectedId = item.id;
+                  }}>Settlement controls</button
+                >{/if}
               {#if item.settlement}
                 <small>
                   Settlement {item.settlement.state} ·

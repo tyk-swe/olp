@@ -186,6 +186,7 @@ type parsedWindow struct {
 // numeric(24,12) in PostgreSQL, so every one has twelve fractional digits there
 // whatever its text says, which is what the division scale below depends on.
 type priceRates struct {
+	retained Price
 	// valid is false when a rate is not a decimal PostgreSQL could have stored.
 	// Such a price is treated as no price at all.
 	valid bool
@@ -231,8 +232,23 @@ func parseRateSet(dst *rateSet, input, cached, cacheWrite, cacheWrite5m, cacheWr
 }
 
 func parseRates(p *Price) *priceRates {
-	r := &priceRates{valid: true}
+	r := &priceRates{valid: true, retained: *p}
 	fail := func() *priceRates { return &priceRates{} }
+	for _, rate := range []*string{p.TrainingPerMillion, p.StoragePerGiBDay, p.CacheStoragePerMillionTokenHour} {
+		if rate != nil {
+			if _, ok := scaledDecimal(*rate, costDigits); !ok {
+				return fail()
+			}
+		}
+	}
+	for tier, fee := range p.ContainerPerSession {
+		if !memoryTierPattern.MatchString(tier) {
+			return fail()
+		}
+		if _, ok := scaledDecimal(fee, costDigits); !ok {
+			return fail()
+		}
+	}
 	if !parseRateSet(&r.rateSet, p.InputPerMillion, p.CachedInputPerMillion, p.CacheWriteInputPerMillion,
 		p.CacheWrite5MInputPerMillion, p.CacheWrite1HInputPerMillion, p.OutputPerMillion,
 		p.AudioInputPerMillion, p.CachedAudioInputPerMillion, p.AudioOutputPerMillion,
@@ -359,6 +375,11 @@ func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool, 
 	if !u.Complete || !r.valid {
 		return Cost{}, false
 	}
+	// Per-model eval totals do not reveal the individual input sizes that
+	// choose invocation tiers. Keep such costs and explicit charges unpriced.
+	if u.Deferred && u.InvocationCount != nil && *u.InvocationCount > 1 && len(r.tiers) > 0 {
+		return Cost{}, false
+	}
 	rates := r.selectRates(u.InputTokens)
 	total := new(big.Int)
 	if u.InputTokens == nil {
@@ -400,8 +421,18 @@ func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool, 
 		}
 		total.Add(total, units.Mul(units, r.unit))
 	}
-	if successful && r.perRequest != nil {
-		total.Add(total, new(big.Int).Mul(r.perRequest, perMillion))
+	invocations := int64(1)
+	if u.Deferred {
+		invocations = 0
+	}
+	if u.InvocationCount != nil {
+		invocations = *u.InvocationCount
+	}
+	if invocations < 0 {
+		return Cost{}, false
+	}
+	if successful && invocations > 0 && r.perRequest != nil {
+		total.Add(total, new(big.Int).Mul(new(big.Int).Mul(r.perRequest, perMillion), big.NewInt(invocations)))
 	}
 	for tool, calls := range u.ToolCalls {
 		if calls <= 0 {
@@ -412,6 +443,9 @@ func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool, 
 			return Cost{}, false
 		}
 		total.Add(total, new(big.Int).Mul(new(big.Int).Mul(big.NewInt(calls), fee), perMillion))
+	}
+	if retainedValues(u) {
+		return r.retainedCost(total, u, startedAt, discount)
 	}
 	window := r.windowAt(startedAt)
 	if u.Batch && r.batch == nil {

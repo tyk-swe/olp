@@ -25,15 +25,16 @@ import (
 // targets that bound nothing and fails everything else closed.
 type Admission struct {
 	// CostAccountingReady checks shared loss evidence before cost admission.
-	CostAccountingReady        func(context.Context) error
-	PendingCostAccountingReady func(context.Context, string) error
-	limiter                    *limits.Limiter
-	policy                     func() limits.OutagePolicy
-	log                        *slog.Logger
-	failOpen                   atomic.Int64
-	dailyBudgetRejections      atomic.Int64
-	monthlyBudgetRejections    atomic.Int64
-	weeklyBudgetRejections     atomic.Int64
+	CostAccountingReady         func(context.Context) error
+	PendingCostAccountingReady  func(context.Context, string) error
+	PendingTokenAccountingReady func(context.Context, string) error
+	limiter                     *limits.Limiter
+	policy                      func() limits.OutagePolicy
+	log                         *slog.Logger
+	failOpen                    atomic.Int64
+	dailyBudgetRejections       atomic.Int64
+	monthlyBudgetRejections     atomic.Int64
+	weeklyBudgetRejections      atomic.Int64
 }
 
 // NewAdmission binds a limiter to the outage policy of the installation. The
@@ -222,6 +223,9 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
 	if keyBoundariesOnly(authority) {
+		if authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
+			return nil, nil
+		}
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	}
 	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)
@@ -308,9 +312,19 @@ func keyBoundariesOnly(authority *access.Authority) bool {
 		authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil && len(authority.Policy.RouteLimits) == 0
 }
 
+func keyHasHardLimits(policy *access.KeyPolicy) bool {
+	return policy.RequestsPerMinute != nil || policy.TokensPerMinute != nil || policy.MaxConcurrency != nil ||
+		policy.DailyCostLimit != nil || policy.MonthlyCostLimit != nil || policy.WeeklyCostLimit != nil
+}
+
 func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
+		if request.TokensPerMinute != nil {
+			if e := a.checkPendingTokenAccounting(ctx, request.CostOwnerID); e != nil {
+				return nil, e
+			}
+		}
 		if request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil {
 			if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 				return nil, e
@@ -342,14 +356,18 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 		}
 		group = lease
 	}
-	policy := &authority.Policy
-	if policy.RequestsPerMinute == nil && policy.TokensPerMinute == nil && policy.MaxConcurrency == nil &&
-		policy.DailyCostLimit == nil && policy.MonthlyCostLimit == nil && policy.WeeklyCostLimit == nil {
+	if !keyHasHardLimits(&authority.Policy) {
 		// Nothing to enforce, so nothing to store: a key without hard limits
 		// reaches Valkey only for the group it belongs to.
 		return group, nil
 	}
 	request := keyRequest(*authority, estimate, ttl)
+	if request.TokensPerMinute != nil {
+		if e := a.checkPendingTokenAccounting(ctx, request.CostOwnerID); e != nil {
+			settleKey(ctx, group, false, nil, a.logger())
+			return nil, e
+		}
+	}
 	request.CostIncreases = authority.BudgetIncreases[authority.ID]
 	// The allowance is stated for a response that will report it. A surface
 	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
@@ -514,6 +532,16 @@ func slotRequest(slot *routing.Slot, estimate int64, ttl time.Duration, priority
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
 func (a *Admission) reserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) (reservation *targetReservation, rejection *attemptFailure, skip bool) {
+	if provider.Limits != nil && provider.Limits.TokensPerMinute != nil {
+		if a.checkPendingTokenAccounting(ctx, provider.ID) != nil {
+			return nil, nil, true
+		}
+	}
+	if slot.TokensPerMinute != nil {
+		if a.checkPendingTokenAccounting(ctx, slot.ID) != nil {
+			return nil, nil, true
+		}
+	}
 	connection := connectionRequest(provider, estimate, ttl, priority)
 	credential := slotRequest(slot, estimate, ttl, priority)
 	if !connection.HasHardLimits() && !credential.HasHardLimits() {
@@ -707,4 +735,16 @@ func share(supply routing.Supply, priority string) limits.Share {
 	}
 	priority = cmp.Or(priority, routing.PriorityNormal)
 	return limits.Share{Class: priority, Percent: supply.PriorityShares.Of(priority), SaturationPercent: *supply.SaturationPercent}
+}
+
+func (a *Admission) checkPendingTokenAccounting(ctx context.Context, owner string) *Error {
+	if a == nil || a.PendingTokenAccountingReady == nil {
+		return nil
+	}
+	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	defer cancel()
+	if a.PendingTokenAccountingReady(check, owner) != nil {
+		return serverError(http.StatusServiceUnavailable, "token_accounting_incomplete", "Token limits cannot admit work while token-consuming retained usage is unresolved.")
+	}
+	return nil
 }

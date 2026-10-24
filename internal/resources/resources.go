@@ -53,7 +53,8 @@ var ErrMetadataTooLarge = errors.New("provider resource metadata exceeds 16 KiB"
 const metadataLimit = 16384
 
 type Resource struct {
-	ID string `json:"id"`
+	RetainedAccounting *RetainedAccounting `json:"-"`
+	ID                 string              `json:"id"`
 
 	UUID               uuid.UUID       `json:"-"`
 	Kind               string          `json:"kind"`
@@ -71,6 +72,7 @@ type Resource struct {
 	ExpiresAt          *time.Time      `json:"expires_at,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
+	MutationVersion    int64           `json:"-"`
 	ContractVersion    *string         `json:"contract_version,omitempty"`
 	ParentID           *uuid.UUID      `json:"-"`
 	SubmissionID       *string         `json:"-"`
@@ -117,7 +119,7 @@ func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
 	return s.pool.Begin(ctx)
 }
 
-const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id,target_id`
+const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id,target_id,mutation_version`
 
 func scan(row pgx.Row) (*Resource, error) {
 	var r Resource
@@ -125,7 +127,7 @@ func scan(row pgx.Row) (*Resource, error) {
 	var targetID *string
 	err := row.Scan(&r.UUID, &r.Kind, &r.APIKeyID, &r.RouteSlug, &r.ProviderID,
 		&r.ProviderRevisionID, &r.RouteRevisionID, &r.SlotID, &r.CredentialID, &r.UpstreamID,
-		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID, &targetID)
+		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID, &targetID, &r.MutationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +245,7 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
 		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID, slices.Contains(retainedapi.Kinds(), identity.Kind)}
 	if includeDeleted {
-		statement += ` AND (expires_at IS NULL OR expires_at>now()) ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
+		statement += ` ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
 	} else {
 		statement += ` AND state<>$13 AND (expires_at IS NULL OR expires_at>now())`
 		args = append(args, StateDeleted)
@@ -265,6 +267,7 @@ func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afte
 // ListKinds joins transformed and strict resource identities without changing
 // either storage contract. The cursor belongs to this owner and one of the
 // requested kinds; an unrelated local ID cannot move the page boundary.
+// Native upload intents without confirmed identities are not SDK file entries.
 func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
 	return s.listKinds(ctx, kinds, apiKeyID, limit, afterID, false)
 }
@@ -275,15 +278,20 @@ func (s *Store) ListLifecycle(ctx context.Context, kind, apiKeyID string, limit 
 	return s.listKinds(ctx, []string{kind}, apiKeyID, limit, afterID, true)
 }
 
-func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool) ([]*Resource, error) {
-	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, after, true, ascending)
+// ListLifecycleOrdered optionally scopes rows and cursor membership to one route.
+func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool, route ...string) ([]*Resource, error) {
+	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, after, true, ascending, route...)
 }
 
 func (s *Store) listKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor bool) ([]*Resource, error) {
 	return s.listKindsOrdered(ctx, kinds, apiKeyID, limit, afterID, deletedCursor, false)
 }
 
-func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor, ascending bool) ([]*Resource, error) {
+func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor, ascending bool, route ...string) ([]*Resource, error) {
+	var routeSlug string
+	if len(route) > 0 {
+		routeSlug = route[0]
+	}
 	var after uuid.UUID
 	if afterID != "" {
 		parsed, err := parseLocal(afterID)
@@ -300,12 +308,18 @@ func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID s
 	if ascending {
 		comparison, direction = ">", "ASC"
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources r
 		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
+		AND ($8='' OR route_slug=$8)
+		AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
+		 AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=r.id))
 		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(SELECT created_at,id FROM olp.provider_resources
-		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())))
+		 anchor WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())
+		 AND ($8='' OR route_slug=$8)
+		 AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
+		  AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=anchor.id))))
 		ORDER BY created_at `+direction+`, id `+direction+` LIMIT $5`,
-		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor)
+		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor, KindFile, routeSlug)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)
 	}

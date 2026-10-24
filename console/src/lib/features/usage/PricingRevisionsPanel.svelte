@@ -7,6 +7,7 @@
     priceEntryFields,
     type TierRow,
     type ToolFeeRow,
+    type ContainerFeeRow,
     type WindowPeriodRow
   } from './priceEntry';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -46,6 +47,12 @@
       ['image_input_per_million', 'image in'],
       ['cached_image_input_per_million', 'cached image'],
       ['image_output_per_million', 'image out'],
+      ['training_per_million', 'training / million'],
+      ['storage_per_gib_day', 'storage / GiB-day'],
+      [
+        'cache_storage_per_million_token_hour',
+        'cache storage / million token-hours'
+      ],
       ['per_request', 'per request'],
       ['batch_multiplier', 'batch']
     ] as const) {
@@ -54,6 +61,9 @@
     }
     if (price.tool_calls && Object.keys(price.tool_calls).length)
       parts.push(`tools ${Object.keys(price.tool_calls).join(', ')}`);
+    if (price.container_per_session)
+      for (const [tier, fee] of Object.entries(price.container_per_session))
+        parts.push(`container ${tier} / session ${fee}`);
     if (price.tiers?.length) parts.push(`${price.tiers.length} tiers`);
     if (price.windows?.time_zone)
       parts.push(`windows ${price.windows.time_zone}`);
@@ -98,6 +108,10 @@
   let cachedImageInputPrice = $state('');
   let imageOutputPrice = $state('');
   let perRequestPrice = $state('');
+  let trainingPrice = $state('');
+  let storagePrice = $state('');
+  let cacheStoragePrice = $state('');
+  let containerFees = $state<ContainerFeeRow[]>([]);
   let batchMultiplier = $state('');
   let toolFees = $state<ToolFeeRow[]>([]);
   let tiers = $state<TierRow[]>([]);
@@ -160,6 +174,10 @@
       cachedImageInputPrice,
       imageOutputPrice,
       perRequestPrice,
+      trainingPrice,
+      storagePrice,
+      cacheStoragePrice,
+      containerFees,
       batchMultiplier,
       toolFees,
       tiers,
@@ -186,6 +204,10 @@
         !price.output_per_million &&
         !price.unit_price &&
         !price.per_request &&
+        !price.training_per_million &&
+        !price.storage_per_gib_day &&
+        !price.cache_storage_per_million_token_hour &&
+        !price.container_per_session &&
         !price.audio_input_per_million &&
         !price.audio_output_per_million &&
         !price.image_input_per_million &&
@@ -231,6 +253,11 @@
       if (imageOutputPrice === submitted.imageOutputPrice)
         imageOutputPrice = '';
       if (perRequestPrice === submitted.perRequestPrice) perRequestPrice = '';
+      if (trainingPrice === submitted.trainingPrice) trainingPrice = '';
+      if (storagePrice === submitted.storagePrice) storagePrice = '';
+      if (cacheStoragePrice === submitted.cacheStoragePrice)
+        cacheStoragePrice = '';
+      containerFees = [];
       if (batchMultiplier === submitted.batchMultiplier) batchMultiplier = '';
       toolFees = [];
       tiers = [];
@@ -350,6 +377,10 @@
           bind:cachedImageInputPrice
           bind:imageOutputPrice
           bind:perRequestPrice
+          bind:trainingPrice
+          bind:storagePrice
+          bind:cacheStoragePrice
+          bind:containerFees
           bind:batchMultiplier
           bind:toolFees
           bind:tiers

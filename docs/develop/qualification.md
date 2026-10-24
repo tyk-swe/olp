@@ -39,6 +39,34 @@ campaigns below.
   on the same candidate before a release claim. Fix failures or explicitly
   revise supported scope; historical or narrower tests cannot close them.
 
+## RM5 retained APIs and retrieval
+
+The implementation includes fine-tuning, native vector stores, query-only cloud
+retrieval, native Conversations/compaction, container lifecycle/files, Evals,
+Gemini caches, and the existing skills/managed-agent contracts. Focused fixtures
+cover codecs, nested ownership, combined references, filters, cache expiry,
+exact billing units and evidence normalization. Console pricing/resource helper
+checks and static type checking supplement these checks. Provider dependency
+locks remain unchanged.
+
+Database/process scenarios cover concurrent submission/mutation fences, atomic
+settlement rollback, unknown acceptance, revoked credentials, duplicate/overlap
+evidence, cancellation with incurred usage, late budgets, stale claims, deletion,
+whole-schema restoration and metadata-only persistence. They are compiled locally;
+service execution is still owed. Run the applicable `TestRetainedSettlement*`,
+`TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory` and recovery scenarios
+with the integration prerequisites through CI. Accessible browser journeys,
+SDK-service qualification and live provider/profile/model certification are
+also still open; compile-only results do not close them.
+
+Evals REST fixtures remain in scope despite removal from the locked SDK. Unknown
+container/cache creation cannot be adopted without provider correlation proof.
+Storage/container charges need verified interval/session evidence; snapshots and
+age do not prove charges. Native filters/ranking, eval data-source shapes and
+other methods not declared by the frozen codecs remain explicit refusals. Record
+OpenAI's announced Evals and fine-tuning availability limits with any live
+qualification evidence; the gateway has no date-based disabling logic.
+
 ## Performance and routing
 
 Benchmark/release maintainers must freeze the reference manifest and candidate
