@@ -2,10 +2,12 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -86,6 +88,75 @@ func TestRetainedConversationWritesHonorOutputAndMaskingGuards(t *testing.T) {
 					}
 				} else if failure != nil {
 					t.Fatalf("non-storing response continuation refused: %v", failure)
+				}
+			}
+		})
+	}
+}
+
+func TestRetainedOpaqueGenerationInputsRequireGuardrailCoverage(t *testing.T) {
+	for _, policy := range []struct {
+		phase, action string
+		monitor       bool
+	}{
+		{guardrails.Input, guardrails.Block, false},
+		{guardrails.InputParallel, guardrails.Block, false},
+		{guardrails.Input, guardrails.Mask, false},
+		{guardrails.Input, guardrails.Redact, false},
+		{guardrails.Input, guardrails.Annotate, false},
+		{guardrails.InputParallel, guardrails.Annotate, false},
+		{guardrails.Input, guardrails.Block, true},
+		{guardrails.InputParallel, guardrails.Block, true},
+	} {
+		t.Run(fmt.Sprintf("%s/%s/monitor=%v", policy.phase, policy.action, policy.monitor), func(t *testing.T) {
+			h := newHarness(t, Config{})
+			installTestGuardrail(t, h, policy.phase, policy.action, "builtin.pii", `{"categories":["pii.email"]}`)
+			if policy.monitor {
+				snapshot := h.rt.release.Snapshot
+				published := snapshot.Guardrails.Policies["policy-revision"]
+				published.Entries[0].Monitor = true
+				snapshot.Guardrails.Policies["policy-revision"] = published
+				if err := snapshot.Compile(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			route := h.rt.release.Snapshot.Routes[routeSlug]
+			for _, reference := range []struct {
+				kind   string
+				family wire.Format
+				fields string
+			}{
+				{resources.KindFile, wire.Responses, `"input":[{"role":"user","content":[{"type":"input_file","file_id":"native-file"}]}],"store":false`},
+				{resources.KindStrictFile, wire.Responses, `"input":[{"role":"user","content":[{"type":"input_file","file_id":"native-file"}]}],"store":false`},
+				{"vector_store", wire.Responses, `"input":"hello","tools":[{"type":"file_search","vector_store_ids":["native-store"]}],"store":false`},
+				{"context_cache", wire.Gemini, `"contents":[{"parts":[{"text":"hello"}]}],"cachedContent":"cachedContents/native"`},
+				{"conversation", wire.Responses, `"input":"hello","conversation":"native-conversation","store":false`},
+			} {
+				kind := reference.kind
+				body := `{"model":"` + routeSlug + `",` + reference.fields + `}`
+				if reference.family == wire.Gemini {
+					body = `{` + reference.fields + `}`
+				}
+				parsed, err := protocols.Parse(reference.family, []byte(body), routeSlug)
+				if err != nil {
+					t.Fatal(err)
+				}
+				x := &call{request: request{release: h.rt.release}, keyID: h.keyID, family: reference.family,
+					generation: generationCall{parsed: parsed, resources: &generationResources{bound: map[string]*resources.Resource{kind + "\x00native": {Kind: kind}}}}}
+				x.route = &route
+				failure := h.gateway.bindGuardrails(t.Context(), x)
+				outcome := "failed_closed"
+				if policy.monitor || policy.action == guardrails.Annotate {
+					outcome = "failed_open"
+					if failure != nil {
+						t.Fatalf("monitoring %s refused opaque %s: %v", policy.phase, kind, failure)
+					}
+				} else if failure == nil || failure.Code != "guardrail_surface_unavailable" {
+					t.Fatalf("enforcing %s inspected only the %s identifier: %v", policy.phase, kind, failure)
+				}
+				decisions := x.guardrailEvidence()
+				if len(decisions) != 1 || decisions[0].Outcome != outcome || !slices.Contains(decisions[0].Categories, "surface.unavailable") {
+					t.Fatalf("opaque input coverage was not recorded: %+v", decisions)
 				}
 			}
 		})
