@@ -96,7 +96,7 @@ func (x *call) retainedContentGate(resource *resources.Resource, route *routing.
 		case resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiFile, resources.KindGeminiBatch:
 			return x.guardrailSurfaceGate(route)
 		case resources.KindFile:
-			if adapter := fileAdapter(resource); adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+			if adapter := fileAdapter(resource); retainedFileOperation(resource) != "batch" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
 				return x.guardrailSurfaceGate(route)
 			}
 		case resources.KindBatch:

@@ -139,6 +139,25 @@ func TestRetainedCacheAuthoritativeExpiry(t *testing.T) {
 	}
 }
 
+func TestRetainedCacheExpirySurvivesDatabasePrecision(t *testing.T) {
+	r := &Resource{Kind: "context_cache", Metadata: json.RawMessage(`{"upstream_model":"m"}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: r.Kind, Operation: "context_cache"}, Action: "get"}
+	document, err := oif.ParseJSON([]byte(`{"model":"models/m","usageMetadata":{"totalTokenCount":2},"createTime":"2026-10-23T10:00:00Z","expireTime":"2026-10-23T10:00:01.000000123Z"}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC)
+	if err := EnrichRetained(r, e, document, now); err != nil {
+		t.Fatal(err)
+	}
+	databaseExpiry := r.ExpiresAt.Truncate(time.Microsecond)
+	r.ExpiresAt = &databaseExpiry
+	observation, err := ObserveRetainedExpiry(r, now, true)
+	if err != nil || !observation.CoverageComplete || len(observation.Lines) != 1 || *observation.Lines[0].Usage.CacheTokenSeconds != "2.000000246" {
+		t.Fatalf("timestamp reload lost exact cache usage: %+v %v", observation, err)
+	}
+}
+
 func TestRetainedStorageAndContainerSnapshotsAreNotCharges(t *testing.T) {
 	now := time.Now().UTC()
 	for _, tc := range []struct{ kind, body string }{{"vector_store", `{"usage_bytes":1024}`}, {"container", `{"memory_limit":"4g","status":"running"}`}} {

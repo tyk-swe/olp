@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -56,6 +55,9 @@ func retainedGeminiFileURI(r *resources.Resource, p *pin) (string, error) {
 // retained; native source content and grader definitions remain provider-side.
 func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retainedapi.Endpoint, source oif.Document, parent *resources.Resource) (map[string]any, error) {
 	meta := map[string]any{"upstream_model": p.model, "contract_revision": retainedapi.Revision}
+	if e.Kind == "context_cache" {
+		meta["serving_model"] = p.provider.Connector().Model(p.model)
+	}
 	if e.Kind == "container_file" && e.Action == "create" {
 		var pins struct {
 			Tier string `json:"memory_tier"`
@@ -145,9 +147,10 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 			if json.Unmarshal(parent.Metadata, &prior) != nil {
 				return nil, resources.ErrContract
 			}
-			if _, replace := source.Root().Lookup("testing_criteria"); !replace {
-				models = append(models, prior.Models...)
+			if prior.Models == nil {
+				return nil, errors.New("this evaluation definition has no qualified grader authority; recreate it before starting new runs")
 			}
+			models = append(models, prior.Models...)
 		}
 		if err := validateEvalSource(source.Root(), e); err != nil {
 			return nil, err
@@ -255,6 +258,26 @@ func validateEvalSource(root oif.Value, e retainedapi.Endpoint) error {
 				return errors.New("item-reference trajectories require a per-item resource authority contract")
 			}
 		}
+		sampling, _ := data.Lookup("sampling_params")
+		if tools, present := sampling.Lookup("tools"); present && tools.Kind() != oif.Null {
+			if tools.Kind() != oif.Array {
+				return resources.ErrContract
+			}
+			for _, tool := range tools.Elements() {
+				kind, _ := tool.Lookup("type")
+				name, _ := kind.Text()
+				if name != "function" && name != "custom" {
+					return errors.New("evaluation hosted tools require resource authority and settlement contracts")
+				}
+			}
+		}
+		if choice, present := sampling.Lookup("tool_choice"); present && choice.Kind() == oif.Object {
+			kind, _ := choice.Lookup("type")
+			name, _ := kind.Text()
+			if name != "function" && name != "custom" {
+				return errors.New("evaluation hosted tool choices are unsupported")
+			}
+		}
 	}
 	source, _ := data.Lookup("source")
 	sourceKind, _ := source.Lookup("type")
@@ -322,10 +345,6 @@ func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body
 		return nil, err
 	}
 	return bound.Bytes(), nil
-}
-
-func retainedObservation(resource *resources.Resource, e retainedapi.Endpoint, parsed oif.Document, now time.Time) (resources.RetainedObservation, error) {
-	return resources.ObserveRetained(resource, e, parsed, now)
 }
 
 func (s *Server) retainedNativeResult(ctx context.Context, r *resources.Resource, e retainedapi.Endpoint, source oif.Document, persist bool) error {

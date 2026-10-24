@@ -77,7 +77,10 @@ func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, no
 	if r.Kind == "context_cache" && e.Action != "delete" {
 		model, modelOK := retainedText(root, "model")
 		var pinned string
-		_ = json.Unmarshal(meta["upstream_model"], &pinned)
+		_ = json.Unmarshal(meta["serving_model"], &pinned)
+		if pinned == "" {
+			_ = json.Unmarshal(meta["upstream_model"], &pinned)
+		}
 		if !modelOK || strings.TrimPrefix(model, "models/") != strings.TrimPrefix(pinned, "models/") {
 			return errors.New("cache model does not match the admitted model")
 		}
@@ -234,8 +237,11 @@ func ObserveRetainedExpiry(r *Resource, now time.Time, remoteNotFound bool) (Ret
 		return out, ErrContract
 	}
 	end, err := time.Parse(time.RFC3339Nano, meta.ExpiresAt)
-	if err != nil || !end.Equal(*r.ExpiresAt) || !end.After(start) {
+	if err != nil || !end.Truncate(time.Microsecond).Equal(r.ExpiresAt.Truncate(time.Microsecond)) || !end.After(start) {
 		return out, ErrContract
+	}
+	if now.Before(end) {
+		return out, nil
 	}
 	seconds := new(big.Int).Sub(big.NewInt(end.Unix()), big.NewInt(start.Unix()))
 	nanos := new(big.Int).Add(new(big.Int).Mul(seconds, big.NewInt(1_000_000_000)), big.NewInt(int64(end.Nanosecond()-start.Nanosecond())))

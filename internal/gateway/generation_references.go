@@ -237,7 +237,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 				Tokens *int64 `json:"total_token_count"`
 			}
 			_ = json.Unmarshal(resource.Metadata, &metadata)
-			if p.provider.Kind != "gemini" || resource.ExpiresAt == nil || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != strings.TrimPrefix(p.model, "models/") || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
+			if p.provider.Kind != "gemini" || resource.ExpiresAt == nil || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.provider.Connector().Model(p.model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
 				return invalidRequest("resource_affinity", "The context cache has no valid model and expiry binding.", &ref.pointer)
 			}
 			bindings.cacheInput = *metadata.Tokens

@@ -347,6 +347,30 @@ func TestRetainedSettlementLateFinishTimestampDefinesCoverage(t *testing.T) {
 	}
 }
 
+func TestRetainedSettlementFinalEvidencePrecedesTermination(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	final := retainedTrainingObservation(r, 1_000_000)
+	final.CoverageComplete = true
+	for range 2 {
+		if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "final-operator-usage", strings.Repeat("a", 64), "operator_verified", f.User, final, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "evidence_missing" {
+		t.Fatalf("unverified termination closed liability: %s %v", state, err)
+	}
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: time.Now().UTC()}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "provider-termination", strings.Repeat("b", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("independently received final coverage and termination did not close: %s %v", state, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+}
+
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
 	f := retainedLedger(t, "fine_tuning", true)
 	r := f.prepare(t)

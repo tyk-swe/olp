@@ -269,75 +269,76 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 		if priorDigest != digest || !sameJSON(prior, document) {
 			return result, ErrEvidenceConflict
 		}
-		return result, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return result, err
 	}
-	evidenceID := uuid.Must(uuid.NewV7())
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.retained_usage_evidence(id,resource_id,idempotency_key,digest,provenance,actor,document,remote_termination_verified,verified_terminal_at) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9)`, evidenceID, id, key, digest, provenance, actor, document, observation.RemoteTerminated, verifiedTerminalTime(observation)); err != nil {
-		return result, err
-	}
-	for _, line := range observation.Lines {
-		encoded, _ := json.Marshal(line.Usage)
-		rows, e := tx.Query(ctx, `SELECT starts_at,ends_at,quantities FROM olp.retained_usage_coverage WHERE resource_id=$1 AND component=$2 AND model=$3 AND memory_tier=$4 AND starts_at<$6 AND ends_at>$5`, id, line.Component, line.Model, line.MemoryTier, line.Start, line.End)
-		if e != nil {
-			return result, e
+	if errors.Is(err, pgx.ErrNoRows) {
+		evidenceID := uuid.Must(uuid.NewV7())
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.retained_usage_evidence(id,resource_id,idempotency_key,digest,provenance,actor,document,remote_termination_verified,verified_terminal_at) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9)`, evidenceID, id, key, digest, provenance, actor, document, observation.RemoteTerminated, verifiedTerminalTime(observation)); err != nil {
+			return result, err
 		}
-		duplicate := false
-		for rows.Next() {
-			var start, end time.Time
-			var quantities []byte
-			if e = rows.Scan(&start, &end, &quantities); e != nil {
-				rows.Close()
+		for _, line := range observation.Lines {
+			encoded, _ := json.Marshal(line.Usage)
+			rows, e := tx.Query(ctx, `SELECT starts_at,ends_at,quantities FROM olp.retained_usage_coverage WHERE resource_id=$1 AND component=$2 AND model=$3 AND memory_tier=$4 AND starts_at<$6 AND ends_at>$5`, id, line.Component, line.Model, line.MemoryTier, line.Start, line.End)
+			if e != nil {
 				return result, e
 			}
-			if !start.Equal(line.Start) || !end.Equal(line.End) || !sameJSON(quantities, encoded) {
-				rows.Close()
+			duplicate := false
+			for rows.Next() {
+				var start, end time.Time
+				var quantities []byte
+				if e = rows.Scan(&start, &end, &quantities); e != nil {
+					rows.Close()
+					return result, e
+				}
+				if !start.Equal(line.Start) || !end.Equal(line.End) || !sameJSON(quantities, encoded) {
+					rows.Close()
+					return result, ErrEvidenceConflict
+				}
+				duplicate = true
+			}
+			rows.Close()
+			if e = rows.Err(); e != nil {
+				return result, e
+			}
+			if duplicate {
+				continue
+			}
+			if previousState == "closed" {
 				return result, ErrEvidenceConflict
 			}
-			duplicate = true
-		}
-		rows.Close()
-		if e = rows.Err(); e != nil {
-			return result, e
-		}
-		if duplicate {
-			continue
-		}
-		if previousState == "closed" {
-			return result, ErrEvidenceConflict
-		}
-		template, _ := json.Marshal(templates[line.Model])
-		event, e := usage.Decode(template)
-		if e != nil {
-			return result, e
-		}
-		identity := id.String() + ":" + line.Component + ":" + line.Model + ":" + line.MemoryTier + ":" + line.Start.Format(time.RFC3339Nano) + ":" + line.End.Format(time.RFC3339Nano)
-		event.RequestID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity)).String()
-		event.EventID = event.RequestID
-		event.ObservedAt = time.Now().UTC()
-		event.RequestStartedAt = event.ObservedAt
-		event.RequestCompletedAt = event.ObservedAt
-		event.HTTPOutcomePending = false
-		event.Attempts[0].ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity+":attempt")).String()
-		// Keep the accepted pricing timestamp, including time-window tariffs.
-		event.Attempts[0].CompletedAt = event.Attempts[0].StartedAt
-		setPendingUsage(event, line.Usage)
-		payload, e := usage.Encode(event)
-		if e != nil {
-			return result, e
-		}
-		persisted, e := usage.PersistRetainedEventTx(ctx, tx, event, payload)
-		if e != nil {
-			return result, e
-		}
-		if persisted.Outcome == usage.PersistOutcomeRejectedOutsideReplayWindow {
-			return result, ErrContract
-		}
-		result = persisted
-		if _, e = tx.Exec(ctx, `INSERT INTO olp.retained_usage_coverage(resource_id,evidence_id,component,model,memory_tier,starts_at,ends_at,quantities,event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, evidenceID, line.Component, line.Model, line.MemoryTier, line.Start, line.End, encoded, event.EventID); e != nil {
-			return result, e
+			template, _ := json.Marshal(templates[line.Model])
+			event, e := usage.Decode(template)
+			if e != nil {
+				return result, e
+			}
+			identity := id.String() + ":" + line.Component + ":" + line.Model + ":" + line.MemoryTier + ":" + line.Start.Format(time.RFC3339Nano) + ":" + line.End.Format(time.RFC3339Nano)
+			event.RequestID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity)).String()
+			event.EventID = event.RequestID
+			event.ObservedAt = time.Now().UTC()
+			event.RequestStartedAt = event.ObservedAt
+			event.RequestCompletedAt = event.ObservedAt
+			event.HTTPOutcomePending = false
+			event.Attempts[0].ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity+":attempt")).String()
+			// Keep the accepted pricing timestamp, including time-window tariffs.
+			event.Attempts[0].CompletedAt = event.Attempts[0].StartedAt
+			setPendingUsage(event, line.Usage)
+			payload, e := usage.Encode(event)
+			if e != nil {
+				return result, e
+			}
+			persisted, e := usage.PersistRetainedEventTx(ctx, tx, event, payload)
+			if e != nil {
+				return result, e
+			}
+			if persisted.Outcome == usage.PersistOutcomeRejectedOutsideReplayWindow {
+				return result, ErrContract
+			}
+			result = persisted
+			if _, e = tx.Exec(ctx, `INSERT INTO olp.retained_usage_coverage(resource_id,evidence_id,component,model,memory_tier,starts_at,ends_at,quantities,event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, evidenceID, line.Component, line.Model, line.MemoryTier, line.Start, line.End, encoded, event.EventID); e != nil {
+				return result, e
+			}
 		}
 	}
 	if observation.RemoteTerminated {
@@ -352,10 +353,17 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 	}
 	// Coverage is checked server-side. A terminal indicator alone is insufficient.
 	closed := false
-	if terminated && observation.CoverageComplete && terminalAt != nil {
-		closed, err = retainedCoverageComplete(ctx, tx, id, templates, started, *terminalAt)
+	if terminated && terminalAt != nil {
+		var complete bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_usage_evidence WHERE resource_id=$1 AND document @> '{"coverage_complete":true}'::jsonb)`, id).Scan(&complete)
 		if err != nil {
 			return result, err
+		}
+		if complete {
+			closed, err = retainedCoverageComplete(ctx, tx, id, templates, started, *terminalAt)
+			if err != nil {
+				return result, err
+			}
 		}
 	}
 	state := "evidence_missing"
@@ -413,6 +421,17 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 		}
 		if finished.After(start) {
 			end = finished.UTC().Truncate(time.Microsecond)
+		}
+	} else if operation == "fine_tuning" || operation == "eval" {
+		// A final evidence statement can arrive before the remote termination
+		// check. Its authoritative interval ends independently of that later
+		// check; the whole interval must still be covered for every model.
+		var finalEnd *time.Time
+		if err := tx.QueryRow(ctx, `SELECT max(c.ends_at) FROM olp.retained_usage_coverage c JOIN olp.retained_usage_evidence e ON e.id=c.evidence_id WHERE c.resource_id=$1 AND e.document @> '{"coverage_complete":true}'::jsonb`, id).Scan(&finalEnd); err != nil {
+			return false, err
+		}
+		if finalEnd != nil && finalEnd.After(start) && !finalEnd.After(end) {
+			end = *finalEnd
 		}
 	}
 	component := ""

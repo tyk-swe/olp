@@ -554,11 +554,16 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
-		if _, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)}); err != nil {
+		document, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
+		if err != nil {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned invalid input items.")
 		}
+		projected, err := projectResponseInputReferences(document, s.generationResultResolver(ctx, x, res.NativeIdentity()))
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
+		}
 		x.completePinned()
-		s.writeStateJSON(w, x, result)
+		s.writeStateJSON(w, x, projected.Bytes())
 		return nil
 	})
 }

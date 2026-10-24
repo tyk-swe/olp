@@ -30,6 +30,7 @@ func TestRetainedNativeContentHonorsCurrentGuardrails(t *testing.T) {
 		{resources.KindAnthropicBatch, wire.AnthropicBatch, ""},
 		{resources.KindGeminiFile, wire.GeminiFile, ""},
 		{resources.KindGeminiBatch, wire.GeminiBatch, ""},
+		{resources.KindFile, wire.File, ""},
 		{resources.KindFile, wire.File, "together"},
 		{resources.KindFile, wire.File, "mistral"},
 		{resources.KindFile, wire.File, "gemini_managed"},
@@ -38,7 +39,11 @@ func TestRetainedNativeContentHonorsCurrentGuardrails(t *testing.T) {
 		{resources.KindBatch, wire.Batch, "gemini_managed"},
 	} {
 		x := &call{request: request{release: h.rt.release}, keyID: h.keyID, family: item.family}
-		metadata, _ := json.Marshal(map[string]string{"adapter": item.adapter})
+		fields := map[string]string{"adapter": item.adapter}
+		if item.kind == resources.KindFile && item.adapter == "" {
+			fields["file_operation"] = "generation"
+		}
+		metadata, _ := json.Marshal(fields)
 		resource := &resources.Resource{Kind: item.kind, Metadata: metadata}
 		if err := x.retainedContentGate(resource, &route, retainedRetrieval); err == nil || err.Code != "guardrail_surface_unavailable" {
 			t.Fatalf("retained %s content bypassed enforcing output policy: %v", item.kind, err)

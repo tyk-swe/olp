@@ -5,10 +5,40 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 )
+
+// Stored input-item collections use the same documented input positions as a
+// Responses request. Resolve each native reference under the stored response's
+// owner and pin before returning a collection that callers can replay.
+func projectResponseInputReferences(source oif.Document, resolve func(string, string) (string, error)) (oif.Document, error) {
+	items, present := source.Root().Lookup("data")
+	if source.Root().Kind() != oif.Object || !present || items.Kind() != oif.Array {
+		return oif.Document{}, resources.ErrContract
+	}
+	payload := []byte(`{"input":` + items.Raw() + `}`)
+	request, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(payload)})
+	if err != nil {
+		return oif.Document{}, err
+	}
+	refs, err := generationReferences(request, wire.Responses)
+	if err != nil {
+		return oif.Document{}, err
+	}
+	var changes []oif.Change
+	for _, ref := range refs {
+		local, err := resolve(ref.kind, ref.id)
+		if err != nil || local == "" {
+			return oif.Document{}, resources.ErrNotFound
+		}
+		changes = append(changes, oif.Change{Pointer: "/data" + strings.TrimPrefix(ref.pointer, "/input"), Value: quotedResponseID(local), Origin: oif.ResourceBinding, Reason: "owned stored input reference"})
+	}
+	return oif.Apply(source, changes)
+}
 
 // projectGenerationReferences overlays documented result references, including
 // partial stream items. It never interprets function arguments or tool output

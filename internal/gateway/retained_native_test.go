@@ -10,8 +10,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -123,6 +125,57 @@ func TestRetainedEvalSourceCodecs(t *testing.T) {
 	}
 }
 
+func TestRetainedEvalHostedToolsRequireQualifiedContracts(t *testing.T) {
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "eval", Kind: "eval_run"}, Action: "create"}
+	for _, tool := range []string{
+		`{"type":"code_interpreter","container":"container-foreign"}`,
+		`{"type":"file_search","vector_store_ids":["vs-foreign"]}`,
+		`{"type":"web_search"}`,
+		`{"type":"mcp","server_url":"https://example.test"}`,
+	} {
+		document := generationReferenceDocument(t, `{"data_source":{"type":"responses","model":"m","source":{"type":"file_content","content":[]},"sampling_params":{"tools":[`+tool+`]}}}`)
+		if err := validateEvalSource(document.Root(), e); err == nil {
+			t.Fatalf("unqualified hosted tool admitted: %s", tool)
+		}
+	}
+	for _, choice := range []string{`"auto"`, `{"type":"function","name":"lookup"}`} {
+		document := generationReferenceDocument(t, `{"data_source":{"type":"responses","model":"m","source":{"type":"file_content","content":[]},"sampling_params":{"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"tool_choice":`+choice+`}}}`)
+		if err := validateEvalSource(document.Root(), e); err != nil {
+			t.Fatalf("function tool refused: %v", err)
+		}
+	}
+	document := generationReferenceDocument(t, `{"data_source":{"type":"responses","model":"m","source":{"type":"file_content","content":[]},"sampling_params":{"tool_choice":{"type":"code_interpreter"}}}}`)
+	if err := validateEvalSource(document.Root(), e); err == nil {
+		t.Fatal("hosted tool choice admitted without a qualified tool")
+	}
+}
+
+func TestRetainedCachePinsResolvedServingModel(t *testing.T) {
+	p := &pin{model: "logical-model", provider: routing.Provider{Kind: "gemini", Bindings: map[string]connectors.Binding{"logical-model": {Model: "native-model"}}}}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "context_cache", Kind: "context_cache"}, Action: "create"}
+	source := generationReferenceDocument(t, `{"model":"caller-model"}`)
+	metadata, err := retainedInputMetadata(p, nil, "key", e, source, nil)
+	if err != nil || metadata["upstream_model"] != "logical-model" || metadata["serving_model"] != "native-model" {
+		t.Fatalf("model authority not pinned: %v %v", metadata, err)
+	}
+	native, err := bindRetainedModel(source, e, p)
+	model, _ := native.Lookup("/model")
+	name, _ := model.Text()
+	if err != nil || name != "models/native-model" {
+		t.Fatalf("native request model: %s %v", native.Raw(), err)
+	}
+	raw, _ := json.Marshal(metadata)
+	r := &resources.Resource{Kind: "context_cache", Metadata: raw}
+	response := generationReferenceDocument(t, `{"model":"models/native-model","usageMetadata":{"totalTokenCount":100},"expireTime":"2026-10-24T12:00:00Z"}`)
+	if err := resources.EnrichRetained(r, e, response, time.Now()); err != nil {
+		t.Fatalf("valid bound cache rejected: %v", err)
+	}
+	wrong := generationReferenceDocument(t, `{"model":"models/other-model","usageMetadata":{"totalTokenCount":100},"expireTime":"2026-10-24T12:00:00Z"}`)
+	if err := resources.EnrichRetained(r, e, wrong, time.Now()); err == nil {
+		t.Fatal("cache accepted a different serving model")
+	}
+}
+
 func TestRetainedEvalModelAuthority(t *testing.T) {
 	p := &pin{provider: routing.Provider{ID: "provider", Kind: "openai", Capabilities: []routing.Capability{{Model: "sample", Operation: "eval", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "eval", Surface: "openai", Mode: "unary"}, {Model: "sample", Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "generation", Surface: "openai", Mode: "unary"}}}, slot: routing.Slot{Enabled: true}, model: "sample"}
 	route := &routing.Route{Slug: "eval-route", Operations: []string{"eval", "generation"}, Targets: []routing.Target{{ProviderID: "provider", ProviderModel: "sample"}, {ProviderID: "provider", ProviderModel: "grader"}}}
@@ -153,6 +206,22 @@ func TestRetainedEvalModelAuthority(t *testing.T) {
 	metadata, err = retainedInputMetadata(p, route, "key", e, run, parent)
 	if err != nil || strings.Join(metadata["authorized_models"].([]string), ",") != "grader,sample" {
 		t.Fatalf("combined run/grader pins=%v %v", metadata, err)
+	}
+	claimedCriteria, err := oif.Apply(run, []oif.Change{{Pointer: "/testing_criteria", Value: `[]`, Origin: oif.ResourceBinding, Reason: "caller attempts to replace inherited graders"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err = retainedInputMetadata(p, route, "key", e, claimedCriteria, parent)
+	if err != nil || strings.Join(metadata["authorized_models"].([]string), ",") != "grader,sample" {
+		t.Fatalf("run request dropped inherited grader authority: %v %v", metadata, err)
+	}
+	legacy := &resources.Resource{Kind: "eval", Metadata: json.RawMessage(`{"upstream_model":"sample"}`)}
+	if _, err := retainedInputMetadata(p, route, "key", e, run, legacy); err == nil {
+		t.Fatal("legacy grader definitions acquired empty authority")
+	}
+	parent.Metadata = json.RawMessage(`{"authorized_models":[]}`)
+	if _, err := retainedInputMetadata(p, route, "key", e, run, parent); err != nil {
+		t.Fatalf("qualified definition without model graders refused: %v", err)
 	}
 }
 

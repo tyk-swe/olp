@@ -42,6 +42,25 @@ func TestGenerationResourceReferencesUseDialectPositions(t *testing.T) {
 	}
 }
 
+func TestStoredResponseInputReferencesUseOwnedFileHandles(t *testing.T) {
+	document := generationReferenceDocument(t, `{"object":"list","has_more":false,"data":[{"type":"message","role":"user","content":[{"type":"input_file","file_id":"file-native"}]},{"type":"function_call","arguments":"{\"file_id\":\"opaque\"}"},{"type":"computer_call_output","output":{"type":"computer_screenshot","file_id":"screenshot-native"}}]}`)
+	projected, err := projectResponseInputReferences(document, func(kind, id string) (string, error) {
+		if kind != resources.KindFile || id != "file-native" && id != "screenshot-native" {
+			t.Fatalf("unexpected resource authority: %s %s", kind, id)
+		}
+		return "owned-" + id, nil
+	})
+	if err != nil || !strings.Contains(projected.Raw(), `"file_id":"owned-file-native"`) || !strings.Contains(projected.Raw(), `"file_id":"owned-screenshot-native"`) || !strings.Contains(projected.Raw(), `"arguments":"{\"file_id\":\"opaque\"}"`) {
+		t.Fatalf("input items lost owned handles or opaque arguments: %s %v", projected.Raw(), err)
+	}
+	if _, err := projectResponseInputReferences(document, func(string, string) (string, error) { return "", resources.ErrNotFound }); err == nil {
+		t.Fatal("foreign native file reference escaped projection")
+	}
+	if _, err := projectResponseInputReferences(generationReferenceDocument(t, `{"data":{}}`), nil); err == nil {
+		t.Fatal("malformed input collection accepted")
+	}
+}
+
 func TestGenerationResourceRawIDsRefusedWithoutDispatch(t *testing.T) {
 	for _, tc := range []struct {
 		family wire.Format

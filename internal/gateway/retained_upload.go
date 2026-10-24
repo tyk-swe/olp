@@ -76,6 +76,31 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	x.operationOverride, x.mode, x.actor = operation, "unary", "api_key_resource"
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
+	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)
+	if encodeErr != nil {
+		fail(invalidRequest("invalid_request", "The bounded native upload could not be read.", nil))
+		return
+	}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: operation, Surface: "openai", Kind: resources.KindFile, Identity: "id", Collection: "data", Path: "/v1/files"}, Action: "create", Method: http.MethodPost, Pattern: "/v1/files"}
+	digest, digestErr := s.retainedBodyDigest(e, route.Slug, body, contentType)
+	if digestErr != nil {
+		fail(digestErr)
+		return
+	}
+	prior, lookupErr := s.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
+	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
+		fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
+		return
+	}
+	if lookupErr == nil {
+		w.Header().Set("X-OLP-Resource-ID", prior.ID)
+		fail(serverError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+		return
+	}
+	if !errors.Is(lookupErr, resources.ErrNotFound) {
+		fail(serverError(503, "provider_state_unavailable", "The file submission could not be read."))
+		return
+	}
 	var err *Error
 	p, err = s.selectPinSurface(ctx, x, route, operation, "openai", "unary", func(provider *routing.Provider, model string) bool {
 		return (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.CredentialSource != "caller" && provider.Supports(model, operation, "openai", "unary") && provider.Connector().Supports(operation, "openai", "unary")
@@ -86,17 +111,6 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	}
 	if err := s.admitRetainedRequest(ctx, x, a, p, route, false); err != nil {
 		fail(err)
-		return
-	}
-	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)
-	if encodeErr != nil {
-		fail(invalidRequest("invalid_request", "The bounded native upload could not be read.", nil))
-		return
-	}
-	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: operation, Surface: "openai", Kind: resources.KindFile, Identity: "id", Collection: "data", Path: "/v1/files"}, Action: "create", Method: http.MethodPost, Pattern: "/v1/files"}
-	digest, digestErr := s.retainedBodyDigest(e, route.Slug, body, contentType)
-	if digestErr != nil {
-		fail(digestErr)
 		return
 	}
 	version := retainedapi.Revision
