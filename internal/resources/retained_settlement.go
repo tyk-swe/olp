@@ -161,15 +161,46 @@ func (s *Store) ApplyRetainedEvidence(ctx context.Context, id uuid.UUID, key, di
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	result, err := s.ApplyRetainedEvidenceTx(ctx, tx, id, key, digest, provenance, actor, observation, claim)
-	if err != nil {
+	if err != nil && !(errors.Is(err, ErrEvidenceConflict) && provenance == "provider_verified" && observation.RemoteTerminated) {
 		return result, err
 	}
-	if err = tx.Commit(ctx); err != nil {
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return usage.Persisted{}, commitErr
+	}
+	return result, err
+}
+
+// Provider termination remains valid even when its usage conflicts with earlier
+// financial coverage. On that conflict the caller must commit the termination
+// proof while reporting ErrEvidenceConflict; no conflicting charges survive.
+func (s *Store) ApplyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (usage.Persisted, error) {
+	if provenance != "provider_verified" || !observation.RemoteTerminated {
+		return s.applyRetainedEvidenceTx(ctx, tx, id, key, digest, provenance, actor, observation, claim)
+	}
+	financial, err := tx.Begin(ctx)
+	if err != nil {
 		return usage.Persisted{}, err
 	}
-	return result, nil
+	defer financial.Rollback(context.WithoutCancel(ctx))
+	result, err := s.applyRetainedEvidenceTx(ctx, financial, id, key, digest, provenance, actor, observation, claim)
+	if err == nil {
+		return result, financial.Commit(ctx)
+	}
+	if rollbackErr := financial.Rollback(ctx); rollbackErr != nil {
+		return usage.Persisted{}, rollbackErr
+	}
+	if !errors.Is(err, ErrEvidenceConflict) {
+		return usage.Persisted{}, err
+	}
+	termination := RetainedObservation{RemoteTerminated: true, ObservedAt: observation.ObservedAt}
+	terminationDigest := retainedObservationDigest(termination)
+	if _, proofErr := s.applyRetainedEvidenceTx(ctx, tx, id, "termination:"+terminationDigest, terminationDigest, provenance, actor, termination, claim); proofErr != nil {
+		return usage.Persisted{}, proofErr
+	}
+	return usage.Persisted{}, err
 }
-func (s *Store) ApplyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (usage.Persisted, error) {
+
+func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (usage.Persisted, error) {
 	result := usage.Persisted{Outcome: usage.PersistOutcomeDuplicate}
 	if len(key) < 1 || len(key) > 128 || len(digest) != 64 || digest != strings.ToLower(digest) || (provenance != "provider_verified" && provenance != "operator_verified") {
 		return result, ErrContract
@@ -353,6 +384,7 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 	var nativeMeta struct {
 		CreatedAt  string `json:"created_at"`
 		CreateTime string `json:"create_time"`
+		FinishedAt string `json:"finished_at"`
 		MemoryTier string `json:"memory_tier"`
 	}
 	var metadata []byte
@@ -369,6 +401,18 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 				return false, ErrContract
 			}
 			start = at.UTC().Truncate(time.Microsecond)
+		}
+	}
+	// terminal_at records when termination was first verified. A native finish
+	// time supplied later defines the billing endpoint independently of that
+	// observation, which may have happened well after the job actually ended.
+	if (operation == "fine_tuning" || operation == "eval") && nativeMeta.FinishedAt != "" {
+		finished, err := time.Parse(time.RFC3339Nano, nativeMeta.FinishedAt)
+		if err != nil {
+			return false, ErrContract
+		}
+		if finished.After(start) {
+			end = finished.UTC().Truncate(time.Microsecond)
 		}
 	}
 	component := ""

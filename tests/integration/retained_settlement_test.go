@@ -55,7 +55,7 @@ func retainedLedgerOnPool(t *testing.T, pool *pgxpool.Pool, operation string, to
 	}
 	price := acctPricing(t, f, revision, time.Now().Add(-time.Hour), acctPrice{Kind: "openai", Model: "retained-model", Operation: operation})
 	acctExec(t, f.Pool, `UPDATE olp.prices SET training_per_million=1,storage_per_gib_day=1,cache_storage_per_million_token_hour=1,container_per_session='{"1g":"1"}',per_request=7 WHERE pricing_revision_id=$1`, price)
-	attempt := acctAttempt(t, f.Provider, 1, "retained-model", 200, nil)
+	attempt := acctAttempt(t, f.Provider, 1, "retained-model", 200, acctUncertain())
 	attempt.Routing = &usage.Routing{ProviderRevisionID: f.Revision, CredentialSlotID: &slot, CredentialVersionID: &credential, PricingRevisionID: &price}
 	event := acctEvent(t, f, acctEventOptions{Operation: operation, Attempts: []usage.Attempt{attempt}})
 	event.Origin = usage.OriginRetainedSettlement
@@ -264,6 +264,86 @@ func TestRetainedSettlementLateBudgetsDeletionAndTokenReadiness(t *testing.T) {
 				t.Fatalf("settlement retained source content: %s %v", payload, err)
 			}
 		})
+	}
+}
+
+func TestRetainedSettlementConflictingTotalsKeepVerifiedTermination(t *testing.T) {
+	for _, worker := range []bool{false, true} {
+		t.Run(map[bool]string{false: "request", true: "worker"}[worker], func(t *testing.T) {
+			f := retainedLedger(t, "fine_tuning", true)
+			r := f.prepare(t)
+			total := retainedTrainingObservation(r, 1_000_000)
+			prefix := total
+			prefix.Lines = append([]resources.RetainedEvidenceLine(nil), total.Lines...)
+			prefix.Lines[0].End = total.Lines[0].Start.Add(total.Lines[0].End.Sub(total.Lines[0].Start) / 2).Truncate(time.Microsecond)
+			prefix.Lines[0].Usage.TrainingTokens = new(int64(400_000))
+			if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "operator-prefix", strings.Repeat("a", 64), "operator_verified", f.User, prefix, nil); err != nil {
+				t.Fatal(err)
+			}
+			total.RemoteTerminated, total.CoverageComplete = true, true
+			var err error
+			if worker {
+				claims, claimErr := f.store.ClaimRetained(t.Context(), 1)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, claimErr)
+				}
+				err = f.store.CommitRetainedPoll(t.Context(), claims[0], r, total, false)
+			} else {
+				_, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "provider-total", strings.Repeat("b", 64), "provider_verified", "", total, nil)
+			}
+			if !errors.Is(err, resources.ErrEvidenceConflict) {
+				t.Fatalf("conflicting total accepted: %v", err)
+			}
+			var terminated bool
+			var terminalAt *time.Time
+			var state string
+			if err = f.Pool.QueryRow(t.Context(), `SELECT remote_terminated,terminal_at,state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&terminated, &terminalAt, &state); err != nil || !terminated || terminalAt == nil || state != "evidence_missing" {
+				t.Fatalf("termination proof lost: %v %v %s %v", terminated, terminalAt, state, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+			tail := total
+			tail.RemoteTerminated = false
+			tail.Lines = append([]resources.RetainedEvidenceLine(nil), total.Lines...)
+			tail.Lines[0].Start = prefix.Lines[0].End
+			tail.Lines[0].Usage.TrainingTokens = new(int64(600_000))
+			if _, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "operator-tail", strings.Repeat("c", 64), "operator_verified", f.User, tail, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err = f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+				t.Fatalf("complete nonoverlapping evidence cannot close: %s %v", state, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 3, 2, 2)
+		})
+	}
+}
+
+func TestRetainedSettlementLateFinishTimestampDefinesCoverage(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	observed := time.Now().UTC().Truncate(time.Microsecond)
+	started, finished := observed.Add(-time.Hour), observed.Add(-time.Minute)
+	metadata := map[string]any{"upstream_model": "retained-model", "created_at": started.Format(time.RFC3339Nano), "terminal_observed_at": observed.Format(time.RFC3339Nano)}
+	r.Metadata, _ = json.Marshal(metadata)
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: observed}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "first-terminal", strings.Repeat("a", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	metadata["finished_at"] = finished.Format(time.RFC3339Nano)
+	r.Metadata, _ = json.Marshal(metadata)
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	complete := resources.RetainedObservation{RemoteTerminated: true, CoverageComplete: true, ObservedAt: finished, Lines: []resources.RetainedEvidenceLine{{Component: "training", Model: "retained-model", Start: started, End: finished, Usage: usage.AttemptUsage{TrainingTokens: new(int64(1_000_000))}}}}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "complete-total", strings.Repeat("b", 64), "provider_verified", "", complete, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var terminalAt time.Time
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state,terminal_at FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &terminalAt); err != nil || state != "closed" || !terminalAt.Equal(observed) {
+		t.Fatalf("native coverage did not close independently of termination observation: %s %v %v", state, terminalAt, err)
 	}
 }
 

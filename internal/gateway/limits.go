@@ -223,6 +223,9 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
 	if keyBoundariesOnly(authority) {
+		if authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
+			return nil, nil
+		}
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	}
 	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)
@@ -309,6 +312,11 @@ func keyBoundariesOnly(authority *access.Authority) bool {
 		authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil && len(authority.Policy.RouteLimits) == 0
 }
 
+func keyHasHardLimits(policy *access.KeyPolicy) bool {
+	return policy.RequestsPerMinute != nil || policy.TokensPerMinute != nil || policy.MaxConcurrency != nil ||
+		policy.DailyCostLimit != nil || policy.MonthlyCostLimit != nil || policy.WeeklyCostLimit != nil
+}
+
 func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
@@ -348,9 +356,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 		}
 		group = lease
 	}
-	policy := &authority.Policy
-	if policy.RequestsPerMinute == nil && policy.TokensPerMinute == nil && policy.MaxConcurrency == nil &&
-		policy.DailyCostLimit == nil && policy.MonthlyCostLimit == nil && policy.WeeklyCostLimit == nil {
+	if !keyHasHardLimits(&authority.Policy) {
 		// Nothing to enforce, so nothing to store: a key without hard limits
 		// reaches Valkey only for the group it belongs to.
 		return group, nil

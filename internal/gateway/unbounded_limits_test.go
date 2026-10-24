@@ -105,6 +105,47 @@ func TestHealthyAccountingIsCheckedOnceBeforeKeyAndGroupReservation(t *testing.T
 	}
 }
 
+func TestRetainedTokenAccountingChecksOnlyCappedCallerOwners(t *testing.T) {
+	for _, scope := range []string{"unlimited", "key", "group"} {
+		t.Run(scope, func(t *testing.T) {
+			authority := access.Authority{ID: benchOwner, LookupID: "lookup_test"}
+			owner := benchOwner
+			switch scope {
+			case "key":
+				authority.Policy.TokensPerMinute = new(int64(1000))
+			case "group":
+				owner = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+				authority.BudgetGroupID = &owner
+				authority.BudgetGroupTPM = new(int64(1000))
+			}
+			client := newAllowing(0, 0, 100, false)
+			a := newAdmission(t, client)
+			checks := 0
+			a.PendingTokenAccountingReady = func(ctx context.Context, got string) error {
+				checks++
+				if got != owner {
+					t.Fatalf("checked owner %s, want %s", got, owner)
+				}
+				if _, bounded := ctx.Deadline(); !bounded {
+					t.Fatal("token readiness check has no deadline")
+				}
+				return errors.New("pending training usage")
+			}
+			lease, failure := a.reserveKeyCosted(t.Context(), &authority, "openai", 100, time.Minute, costReservation{})
+			if scope == "unlimited" {
+				if failure != nil || checks != 0 {
+					t.Fatalf("unlimited key consulted accounting: %v checks=%d", failure, checks)
+				}
+			} else if failure == nil || failure.Code != "token_accounting_incomplete" || checks != 1 {
+				t.Fatalf("pending token usage bypassed: %v checks=%d", failure, checks)
+			}
+			if lease != nil || client.calls.Load() != 0 {
+				t.Fatal("unexpected reservation before token readiness")
+			}
+		})
+	}
+}
+
 type budgetRuntime struct {
 	*fakeRuntime
 	authority access.Authority

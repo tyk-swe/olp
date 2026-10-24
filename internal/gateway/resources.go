@@ -1421,6 +1421,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 			return
 		}
 		x.operationOverride = operation
+		x.retainedHousekeeping = true
 		p, route, e := s.resolveResource(r.Context(), x, authority, res, operation, use)
 		if e != nil {
 			s.stateFail(x, w, e, x.family)

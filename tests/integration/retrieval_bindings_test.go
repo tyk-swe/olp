@@ -59,3 +59,19 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 	}
 	h.want(owner, http.MethodGet, "/api/v1/retrieval-bindings/"+id+"/revisions/"+created["revision_id"].(string), nil, nil, 200)
 }
+
+func TestRetrievalAzureSearchPricingScopes(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	h.want(owner, http.MethodPost, "/api/v1/pricing/discounts", map[string]any{
+		"provider_kind": "azure_ai_search", "multiplier": "0.8",
+	}, idem(uuid.NewString()), http.StatusCreated)
+	card := h.want(owner, http.MethodPost, "/api/v1/rate-cards", map[string]any{
+		"owner": map[string]any{"kind": "installation"},
+	}, idem(uuid.NewString()), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{
+		"markup": "1", "prices": []any{map[string]any{
+			"provider_kind": "azure_ai_search", "model": "documents", "operation": "retrieval", "per_request": "0.01",
+		}},
+	}, idem(uuid.NewString()), http.StatusCreated)
+}
