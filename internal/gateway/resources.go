@@ -1447,6 +1447,10 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 			return
 		}
 		x.operationOverride = operation
+		if res.State == "submitting" || res.State == "submission_unknown" || res.State == "not_accepted" {
+			s.stateFail(x, w, serverError(http.StatusConflict, "submission_unknown", "The file upload has no reconciled native identity yet."), x.family)
+			return
+		}
 		x.retainedHousekeeping = true
 		x.retainedTokenless = true
 		p, route, e := s.resolveResource(r.Context(), x, authority, res, operation, use)

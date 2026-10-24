@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -38,6 +39,44 @@ func TestUnboundedPinObservesCurrentRouteProviderAndSlotBudgets(t *testing.T) {
 			}
 			if e := s.unboundedPinLimits(access.Authority{}, p, &route); e == nil || e.Code != "unbounded_work_budget" {
 				t.Fatalf("current %s cap bypassed by retained pin: %v", scope, e)
+			}
+		})
+	}
+}
+
+func TestUnboundedResourceWorkHonorsResolvedAttributionBudgets(t *testing.T) {
+	cost, project := "1", "project"
+	provider := routing.Provider{ID: "provider", Slots: []routing.Slot{{ID: "slot"}}}
+	route := routing.Route{Slug: "route", ProjectID: &project}
+	p := &pin{provider: provider, slot: provider.Slots[0]}
+	snapshot := &routing.Snapshot{Routes: map[string]routing.Route{route.Slug: route}, Providers: map[string]routing.Provider{provider.ID: provider}}
+	s := &Server{Runtime: &fakeRuntime{release: &runtime.Release{Snapshot: snapshot}}}
+	for _, operation := range []string{"fine_tuning", "eval", "vector_store", "context_cache", "container"} {
+		t.Run(operation, func(t *testing.T) {
+			x := &call{operationOverride: operation, routeLeg: routeLeg{route: &route},
+				authority: access.Authority{ProjectID: &project, ProjectAttributionBudgets: access.AttributionBudgets{"team": {"core": {DailyCostLimit: &cost}}}}}
+			for _, label := range []string{"other", "core"} {
+				x.attribution = map[string]string{"team": label}
+				failure := s.retainedUnboundedLimits(x, p)
+				if label == "core" {
+					if failure == nil || failure.Code != "unbounded_work_budget" {
+						t.Fatalf("resolved attribution budget bypassed: %v", failure)
+					}
+				} else if failure != nil {
+					t.Fatalf("unrelated attribution allocation blocked work: %v", failure)
+				}
+			}
+		})
+	}
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprintf("generation/runtime=%v", configured), func(t *testing.T) {
+			server := &Server{}
+			if configured {
+				server.Runtime = s.Runtime
+			}
+			x := &call{authority: access.Authority{ProjectID: &project, ProjectAttributionBudgets: access.AttributionBudgets{"team": {"core": {MonthlyCostLimit: &cost}}}}, attribution: map[string]string{"team": "core"}}
+			if failure := server.generationReferenceBudget(x, p, &route, &generationResources{unknownInput: true}); failure == nil || failure.Code != "unbounded_work_budget" {
+				t.Fatalf("opaque generation input bypassed attribution budget: %v", failure)
 			}
 		})
 	}

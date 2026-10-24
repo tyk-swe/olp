@@ -100,13 +100,15 @@ func (s *Server) retainedUnboundedLimits(x *call, p *pin) *Error {
 	if x.route == nil {
 		return serverError(503, "provider_state_unavailable", "A retained operation requires a pinned route.")
 	}
+	authority := x.authority
+	authority.Attribution = x.attribution
 	if x.operationName() == "fine_tuning" || x.operationName() == "eval" {
-		return s.unboundedPinLimits(x.authority, p, x.route)
+		return s.unboundedPinLimits(authority, p, x.route)
 	}
 	monetary := func(provider *routing.Provider, slot *routing.Slot, route *routing.Route) bool {
 		return route != nil && route.Budget != nil && (route.Budget.DailyCostLimit != nil || route.Budget.MonthlyCostLimit != nil) || provider != nil && provider.Limits != nil && provider.Limits.Costs() != nil || slot != nil && slot.Costs() != nil
 	}
-	capped := x.authority.CostBudgetedForRoute(x.route.Slug) || monetary(&p.provider, &p.slot, x.route)
+	capped := authority.CostBudgetedForRoute(x.route.Slug) || monetary(&p.provider, &p.slot, x.route)
 	if s.Runtime != nil {
 		if release := s.Runtime.Release(); release != nil {
 			var route *routing.Route

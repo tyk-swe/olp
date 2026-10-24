@@ -145,7 +145,7 @@ func ValidateAuthority(ctx context.Context, q access.Queryer, in Input) (string,
 		return "", access.Invalid("target_id", "Choose a retrieval target in this project's route or draft with the matching backend kind and resource.")
 	}
 	var count int
-	err = q.QueryRow(ctx, "SELECT count(*) FROM olp.api_keys WHERE id=ANY($1::uuid[]) AND project_id=$2 AND revoked_at IS NULL", in.KeyGrants, in.ProjectID).Scan(&count)
+	err = q.QueryRow(ctx, "SELECT count(*) FROM olp.api_keys WHERE id=ANY($1::uuid[]) AND project_id=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())", in.KeyGrants, in.ProjectID).Scan(&count)
 	if err != nil {
 		return "", err
 	}

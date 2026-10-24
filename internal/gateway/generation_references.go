@@ -283,10 +283,12 @@ func (s *Server) generationReferenceBudget(x *call, p *pin, route *routing.Route
 	if bindings == nil || !bindings.unknownInput {
 		return nil
 	}
+	authority := x.authority
+	authority.Attribution = x.attribution
 	if s.Runtime == nil {
-		return unboundedWorkLimits(x.authority, &p.provider, &p.slot, route)
+		return unboundedWorkLimits(authority, &p.provider, &p.slot, route)
 	}
-	return s.unboundedPinLimits(x.authority, p, route)
+	return s.unboundedPinLimits(authority, p, route)
 }
 
 // A connection pin can also belong to a file, conversation or vector store.

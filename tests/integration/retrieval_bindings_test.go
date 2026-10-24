@@ -37,6 +37,13 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 	input := map[string]any{"project_id": project, "name": "documents", "route": route, "target_id": target, "backend": "azure_ai_search", "backend_resource": "documents", "fields": map[string]any{"text": "content", "id": "key"}, "key_grants": []string{foreign["id"].(string)}, "enabled": true}
 	h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", input, idem(uuid.NewString()), 422)
 	input["key_grants"] = []string{key["id"].(string)}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=now()-interval '1 hour' WHERE id=$1`, key["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", input, idem(uuid.NewString()), 422)
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=NULL WHERE id=$1`, key["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
 	created := h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", input, idem(uuid.NewString()), 201)
 	id := created["id"].(string)
 	if created["provider_id"] != provider {
