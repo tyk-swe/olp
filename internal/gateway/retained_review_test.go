@@ -45,6 +45,30 @@ func TestRetainedPreviousOnlyServingAffinity(t *testing.T) {
 	}
 }
 
+func TestRetainedGenerationResourcesHonorFidelityTransitions(t *testing.T) {
+	strict := routing.RouteFidelity{Mode: routing.FidelityStrict}
+	transformed := routing.RouteFidelity{Mode: routing.FidelityTransformed}
+	for _, kind := range []string{"conversation", "vector_store", "context_cache"} {
+		t.Run(kind, func(t *testing.T) {
+			resource := &resources.Resource{Kind: kind}
+			if failure := retainedResourceContract(resource, transformed, strict, retainedNewWork); failure == nil || failure.Code != "provider_resource_unavailable" {
+				t.Fatalf("transformed resource started work under current strict route: %v", failure)
+			}
+			if failure := retainedResourceContract(resource, strict, transformed, retainedRetrieval); failure == nil || failure.Code != "provider_resource_unavailable" {
+				t.Fatalf("strict resource content read under current transformed route: %v", failure)
+			}
+			for _, current := range []routing.RouteFidelity{strict, transformed} {
+				if failure := retainedResourceContract(resource, current, current, retainedNewWork); failure != nil {
+					t.Fatalf("unchanged fidelity refused work: %v", failure)
+				}
+				if failure := retainedResourceContract(resource, transformed, current, retainedHousekeeping); failure != nil {
+					t.Fatalf("fidelity transition blocked cleanup: %v", failure)
+				}
+			}
+		})
+	}
+}
+
 func TestRetainedMixedPricePageAdmissionIgnoresLookaheadState(t *testing.T) {
 	paid := retainedListEntry{freeControl: false}
 	free := retainedListEntry{freeControl: true}
