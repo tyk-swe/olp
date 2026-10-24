@@ -16,8 +16,7 @@
   import RetrievalBindings from './RetrievalBindings.svelte';
   import NativeResources from './NativeResources.svelte';
   import RetainedResourceControls from './RetainedResourceControls.svelte';
-  import type { ProviderResource } from './api';
-  let selected = $state<ProviderResource | null>(null);
+  let selectedId = $state<string | null>(null);
 
   const kinds: ProviderResourceFilters['kind'][] = [
     'file',
@@ -68,6 +67,9 @@
     queryFn: () => listProviderResources({ ...applied, cursor: paging.cursor }),
     placeholderData: (previous) => previous
   }));
+  const selected = $derived(
+    resources.data?.items.find((item) => item.id === selectedId) ?? null
+  );
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
@@ -210,7 +212,7 @@
                   class="button button-secondary"
                   type="button"
                   onclick={() => {
-                    selected = item;
+                    selectedId = item.id;
                   }}>Settlement controls</button
                 >{/if}
               {#if item.settlement}
