@@ -358,7 +358,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 				}
 			}
 		}
-		if err != nil || !retainedAffinity(bound, p, route) || bound.State == "submitting" || bound.State == "submission_unknown" {
+		if err != nil || !retainedAffinity(bound, p, route) || bound.State == "submitting" || bound.State == "submission_unknown" || bound.State == "not_accepted" {
 			return "", resources.ErrNotFound
 		}
 		if kind == resources.KindGeminiFile {

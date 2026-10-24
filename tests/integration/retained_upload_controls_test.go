@@ -85,6 +85,15 @@ func TestRetainedNativeFileControlsPreserveUnknownUploadAcceptance(t *testing.T)
 			if err := store.RejectRetained(t.Context(), intent, "", "", true); err != nil {
 				t.Fatal(err)
 			}
+			before := fixture.respCreates.Load()
+			status, body, _ := h.gateway(http.MethodPost, "/v1/responses", secret, map[string]any{
+				"model": slug, "store": false,
+				"input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_file", "file_id": intent.ID}}}},
+			})
+			problem, _ := body["error"].(map[string]any)
+			if status != http.StatusBadRequest || problem["code"] != "invalid_resource_reference" || fixture.respCreates.Load() != before {
+				t.Fatalf("rejected upload reached generation: %d %v calls=%d want=%d", status, body, fixture.respCreates.Load(), before)
+			}
 		}
 	}
 	status, listed, _ := h.gateway(http.MethodGet, "/v1/files?limit=1", secret, nil)

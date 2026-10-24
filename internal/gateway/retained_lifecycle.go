@@ -161,7 +161,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			id, _ := value.Text()
 			var getErr error
 			base, getErr = s.Resources.Get(r.Context(), "agent_resource", x.keyID, id)
-			if getErr != nil || base.RouteSlug != route.Slug || base.RouteRevisionID != route.RevisionID || base.State == "submitting" || base.State == "submission_unknown" || base.ContractVersion == nil || *base.ContractVersion != retainedapi.Revision {
+			if getErr != nil || base.RouteSlug != route.Slug || base.RouteRevisionID != route.RevisionID || base.State == "submitting" || base.State == "submission_unknown" || base.State == "not_accepted" || base.ContractVersion == nil || *base.ContractVersion != retainedapi.Revision {
 				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 				return
 			}
@@ -176,7 +176,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		refs := map[string]string{"base_agent": "agent_resource"}
 		source, parseErr := retainedapi.Rewrite(source, refs, func(kind, id string) (string, error) {
 			bound, getErr := s.Resources.Get(r.Context(), kind, x.keyID, id)
-			if getErr != nil || !retainedAffinity(bound, p, route) || bound.State == "submitting" || bound.State == "submission_unknown" {
+			if getErr != nil || !retainedAffinity(bound, p, route) || bound.State == "submitting" || bound.State == "submission_unknown" || bound.State == "not_accepted" {
 				return "", resources.ErrNotFound
 			}
 			return bound.UpstreamID, nil
@@ -217,7 +217,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 				return
 			}
 		}
-		if resource.State == "submitting" || resource.State == "submission_unknown" {
+		if resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" {
 			fail(serverError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted."))
 			return
 		}
@@ -473,7 +473,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 	ready := make([]listedResource, 0, len(rows))
 	var overall time.Duration
 	for _, resource := range rows {
-		if resource.State == "submitting" || resource.State == "submission_unknown" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
+		if resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 			continue
 		}
 		p, route, resolveErr := s.resolveResource(r.Context(), x, a, resource, e.Operation, retainedRetrieval)

@@ -215,7 +215,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 		} else {
 			resource, err = s.Resources.Get(ctx, ref.kind, x.keyID, localID)
 		}
-		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.now()) {
+		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.now()) {
 			return invalidRequest("invalid_resource_reference", "The resource is unavailable to this key and model.", &ref.pointer)
 		}
 		if ref.kind != resources.KindFile && (resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision) {

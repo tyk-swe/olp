@@ -278,15 +278,20 @@ func (s *Store) ListLifecycle(ctx context.Context, kind, apiKeyID string, limit 
 	return s.listKinds(ctx, []string{kind}, apiKeyID, limit, afterID, true)
 }
 
-func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool) ([]*Resource, error) {
-	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, after, true, ascending)
+// ListLifecycleOrdered optionally scopes rows and cursor membership to one route.
+func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool, route ...string) ([]*Resource, error) {
+	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, after, true, ascending, route...)
 }
 
 func (s *Store) listKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor bool) ([]*Resource, error) {
 	return s.listKindsOrdered(ctx, kinds, apiKeyID, limit, afterID, deletedCursor, false)
 }
 
-func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor, ascending bool) ([]*Resource, error) {
+func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor, ascending bool, route ...string) ([]*Resource, error) {
+	var routeSlug string
+	if len(route) > 0 {
+		routeSlug = route[0]
+	}
 	var after uuid.UUID
 	if afterID != "" {
 		parsed, err := parseLocal(afterID)
@@ -305,14 +310,16 @@ func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID s
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources r
 		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
+		AND ($8='' OR route_slug=$8)
 		AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
 		 AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=r.id))
 		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(SELECT created_at,id FROM olp.provider_resources
 		 anchor WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())
+		 AND ($8='' OR route_slug=$8)
 		 AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
 		  AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=anchor.id))))
 		ORDER BY created_at `+direction+`, id `+direction+` LIMIT $5`,
-		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor, KindFile)
+		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor, KindFile, routeSlug)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)
 	}

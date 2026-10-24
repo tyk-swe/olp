@@ -630,6 +630,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		limit = parsed
 	}
 	ready := make([]retainedListEntry, 0, limit+1)
+	requestedRoute := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	cursor := r.URL.Query().Get(cursorParam)
 	exhausted := false
 	var pending []*resources.Resource
@@ -645,7 +646,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	fill := func(ctx context.Context, target int) int {
 		for len(ready) <= target && !exhausted {
 			if len(pending) == 0 {
-				rows, err := s.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc")
+				rows, err := s.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc", requestedRoute)
 				if err != nil {
 					if errors.Is(err, resources.ErrNotFound) {
 						fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))

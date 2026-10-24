@@ -564,6 +564,34 @@ func TestRetainedMutationResponseSurvivesReadObservation(t *testing.T) {
 	}
 }
 
+func TestRetainedLifecycleListingScopesRowsAndCursorsToRoute(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	otherRoute, otherRevision, otherSlug := acctID(t), acctID(t), r.RouteSlug+"-other"
+	acctExec(t, f.Pool, `INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) SELECT $1,$2,created_by,1,$3,$4,project_id FROM olp.routes WHERE slug=$5`, otherRoute, otherSlug, otherRevision, acctID(t), r.RouteSlug)
+	acctExec(t, f.Pool, `INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity) SELECT $1,$2,1,$3,operations,overall_timeout_ms,max_attempts,targets,$4,activated_by,routing_policy,fidelity FROM olp.route_revisions WHERE id=$5`, otherRevision, otherRoute, otherSlug, acctID(t), r.RouteRevisionID)
+	other := *r
+	other.UUID, other.ID = [16]byte{}, ""
+	other.RouteSlug, other.RouteRevisionID = otherSlug, otherRevision
+	other.UpstreamID, other.RetainedAccounting = "other-native", nil
+	newer, err := f.store.Put(t.Context(), &other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := f.store.ListLifecycleOrdered(t.Context(), r.Kind, r.APIKeyID, 10, "", false)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("unscoped owner listing changed: %+v %v", all, err)
+	}
+	selected, err := f.store.ListLifecycleOrdered(t.Context(), r.Kind, r.APIKeyID, 1, "", false, r.RouteSlug)
+	if err != nil || len(selected) != 1 || selected[0].ID != r.ID {
+		t.Fatalf("other route displaced the selected route page: %+v %v", selected, err)
+	}
+	selected, err = f.store.ListLifecycleOrdered(t.Context(), r.Kind, r.APIKeyID, 10, newer.ID, false, r.RouteSlug)
+	if err != nil || len(selected) != 0 {
+		t.Fatalf("other-route cursor moved the page boundary: %+v %v", selected, err)
+	}
+}
+
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
 	f := retainedLedger(t, "fine_tuning", true)
 	r := f.prepare(t)
