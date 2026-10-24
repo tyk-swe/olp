@@ -372,34 +372,58 @@ func TestRetainedSettlementFinalEvidencePrecedesTermination(t *testing.T) {
 	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
 }
 
-func TestRetainedSettlementUnknownTTLMutationPreventsAutomaticClosure(t *testing.T) {
+func TestRetainedSettlementUnknownCacheMutationPreventsAutomaticClosure(t *testing.T) {
+	for _, action := range []string{"patch", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			f := retainedLedger(t, "context_cache", false)
+			r := f.prepare(t)
+			start, end := r.CreatedAt.Add(-time.Hour), r.CreatedAt.Add(-time.Minute)
+			r.ExpiresAt = &end
+			r.Metadata, _ = json.Marshal(map[string]any{"upstream_model": "retained-model", "total_token_count": 100, "create_time": start.Format(time.RFC3339Nano), "expires_at": end.Format(time.RFC3339Nano)})
+			if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+				t.Fatal(err)
+			}
+			var prepareErr error
+			if action == "delete" {
+				prepareErr = f.store.PrepareRetainedDeletion(t.Context(), r, "lost-response", bytes.Repeat([]byte{7}, 32))
+			} else {
+				prepareErr = f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "lost-response", bytes.Repeat([]byte{7}, 32))
+			}
+			if prepareErr != nil {
+				t.Fatal(prepareErr)
+			}
+			if err := f.store.UnknownRetainedMutation(t.Context(), r.UUID, "lost-response", "context_cache:"+action); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := resources.ObserveRetainedExpiry(r, time.Now().UTC(), true)
+			if err != nil || !observation.CoverageComplete {
+				t.Fatalf("expiry fixture: %+v %v", observation, err)
+			}
+			if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "old-expiry", strings.Repeat("a", 64), "provider_verified", "", observation, nil); !errors.Is(err, resources.ErrEvidenceConflict) {
+				t.Fatalf("unresolved cache mutation accepted old expiry coverage: %v", err)
+			}
+			var state string
+			var terminated bool
+			if err := f.Pool.QueryRow(t.Context(), `SELECT state,remote_terminated FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &terminated); err != nil || state != "evidence_missing" || !terminated {
+				t.Fatalf("ambiguous cache liability or termination lost: %s %v %v", state, terminated, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 1, 0, 0)
+		})
+	}
+}
+
+func TestRetainedDeletionDefiniteRejectionClearsDispatchUncertainty(t *testing.T) {
 	f := retainedLedger(t, "context_cache", false)
 	r := f.prepare(t)
-	start, end := r.CreatedAt.Add(-time.Hour), r.CreatedAt.Add(-time.Minute)
-	r.ExpiresAt = &end
-	r.Metadata, _ = json.Marshal(map[string]any{"upstream_model": "retained-model", "total_token_count": 100, "create_time": start.Format(time.RFC3339Nano), "expires_at": end.Format(time.RFC3339Nano)})
-	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+	if err := f.store.PrepareRetainedDeletion(t.Context(), r, "delete-not-sent", bytes.Repeat([]byte{4}, 32)); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "lost-ttl-response", bytes.Repeat([]byte{7}, 32)); err != nil {
+	if err := f.store.RejectRetained(t.Context(), r, "delete-not-sent", "context_cache:delete", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.UnknownRetainedMutation(t.Context(), r.UUID, "lost-ttl-response", "context_cache:patch"); err != nil {
-		t.Fatal(err)
+	if pending, err := f.store.HasUnresolvedRetainedMutations(t.Context(), r.UUID); err != nil || pending {
+		t.Fatalf("definitively rejected deletion quarantined natural expiry: %v %v", pending, err)
 	}
-	observation, err := resources.ObserveRetainedExpiry(r, time.Now().UTC(), true)
-	if err != nil || !observation.CoverageComplete {
-		t.Fatalf("expiry fixture: %+v %v", observation, err)
-	}
-	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "old-expiry", strings.Repeat("a", 64), "provider_verified", "", observation, nil); !errors.Is(err, resources.ErrEvidenceConflict) {
-		t.Fatalf("unresolved TTL mutation accepted old expiry coverage: %v", err)
-	}
-	var state string
-	var terminated bool
-	if err := f.Pool.QueryRow(t.Context(), `SELECT state,remote_terminated FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &terminated); err != nil || state != "evidence_missing" || !terminated {
-		t.Fatalf("ambiguous TTL liability or termination lost: %s %v %v", state, terminated, err)
-	}
-	assertRetainedLedgerCounts(t, f, r, 1, 0, 0)
 }
 
 func TestRetainedSettlementDeterministicEvalClosesWithoutModelUsage(t *testing.T) {

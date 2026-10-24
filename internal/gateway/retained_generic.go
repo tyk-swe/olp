@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -454,11 +455,32 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 
 // retainedDispatch performs the pinned call and projects identities.
 func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *call, p *pin, e retainedapi.Endpoint, resource *resources.Resource, endpoint string, body []byte, contentType string, isCreate bool, fail func(*Error)) int {
+	deletionKey := ""
+	if e.Action == "delete" && resource.Kind == "context_cache" {
+		deletionKey = uuid.Must(uuid.NewV7()).String()
+		digest := sha256.Sum256([]byte(resource.ID + ":delete:" + deletionKey))
+		if err := s.Resources.PrepareRetainedDeletion(r.Context(), resource, deletionKey, digest[:]); err != nil {
+			commit, cancel := resourceCommitContext(r.Context())
+			_ = s.Resources.RejectRetained(commit, resource, deletionKey, "context_cache:delete", false)
+			cancel()
+			fail(serverError(503, "provider_state_unavailable", "The deletion intent could not be committed."))
+			return 503
+		}
+		defer func() {
+			commit, cancel := resourceCommitContext(r.Context())
+			defer cancel()
+			_ = s.Resources.UnknownRetainedMutation(commit, resource.UUID, deletionKey, "context_cache:delete")
+		}()
+	}
 	native, failure := s.pinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
 	if failure != nil {
-		if resource != nil && (isCreate || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
+		if resource != nil && (isCreate || deletionKey != "" || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
 			commit, cancel := resourceCommitContext(r.Context())
-			rejectErr := s.Resources.RejectRetained(commit, resource, r.Header.Get("Idempotency-Key"), e.Operation+":"+e.Action, isCreate)
+			key := r.Header.Get("Idempotency-Key")
+			if deletionKey != "" {
+				key = deletionKey
+			}
+			rejectErr := s.Resources.RejectRetained(commit, resource, key, e.Operation+":"+e.Action, isCreate)
 			cancel()
 			if rejectErr != nil {
 				fail(serverError(503, "provider_state_unavailable", "Provider rejection could not be committed."))
@@ -489,6 +511,12 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		if putErr := s.Resources.Tombstone(commitCtx, resource.ID); putErr != nil {
 			fail(serverError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return 503
+		}
+		if deletionKey != "" {
+			if err := s.Resources.AcceptRetainedMutation(commitCtx, resource.UUID, deletionKey, "context_cache:delete"); err != nil {
+				fail(serverError(503, "provider_state_unavailable", "The accepted deletion could not be committed."))
+				return 503
+			}
 		}
 		if native.StatusCode == http.StatusNoContent {
 			deleted, _ := oif.ParseJSON([]byte(`{}`), oif.Limits{})

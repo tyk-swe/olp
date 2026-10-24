@@ -12,6 +12,19 @@ import (
 // A dispatched paid mutation never acquires dispatch rights again, even if its
 // caller or process disappeared before acceptance could be recorded.
 func (s *Store) PrepareRetainedMutation(ctx context.Context, r *Resource, operation, key string, digest []byte) error {
+	return s.prepareRetainedMutation(ctx, r, operation, key, digest, true)
+}
+
+// Deletion can shorten the billable cache lifetime. Its dispatch must remain
+// durable even when the response is lost; housekeeping is allowed after closure.
+func (s *Store) PrepareRetainedDeletion(ctx context.Context, r *Resource, key string, digest []byte) error {
+	if r == nil || r.Kind != "context_cache" {
+		return ErrContract
+	}
+	return s.prepareRetainedMutation(ctx, r, "context_cache:delete", key, digest, false)
+}
+
+func (s *Store) prepareRetainedMutation(ctx context.Context, r *Resource, operation, key string, digest []byte, paid bool) error {
 	if len(key) < 1 || len(key) > 128 || len(digest) != 32 {
 		return ErrSubmissionConflict
 	}
@@ -23,13 +36,13 @@ func (s *Store) PrepareRetainedMutation(ctx context.Context, r *Resource, operat
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, r.APIKeyID+":"+operation+":"+key); err != nil {
 		return err
 	}
-	// Serialize new paid work with settlement's final coverage check.
+	// Serialize lifecycle mutations with settlement's final coverage check.
 	var settlementState string
 	err = tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, r.UUID).Scan(&settlementState)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	if settlementState == "closed" {
+	if paid && settlementState == "closed" {
 		return ErrSubmissionConflict
 	}
 	var exists bool
@@ -39,13 +52,15 @@ func (s *Store) PrepareRetainedMutation(ctx context.Context, r *Resource, operat
 	if exists {
 		return ErrSubmissionConflict
 	}
-	var version int64
-	err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET mutation_version=mutation_version+1 WHERE id=$1 AND api_key_id=$2 AND state<>'deleted' RETURNING mutation_version`, r.UUID, r.APIKeyID).Scan(&version)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrSubmissionConflict
-	}
-	if err != nil {
-		return err
+	version := r.MutationVersion
+	if paid {
+		err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET mutation_version=mutation_version+1 WHERE id=$1 AND api_key_id=$2 AND state<>'deleted' RETURNING mutation_version`, r.UUID, r.APIKeyID).Scan(&version)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSubmissionConflict
+		}
+		if err != nil {
+			return err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO olp.retained_mutations(api_key_id,operation,submission_key,resource_id,request_digest,state) VALUES($1,$2,$3,$4,$5,'dispatched')`, r.APIKeyID, operation, key, r.UUID, digest)
 	if err != nil {
