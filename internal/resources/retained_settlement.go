@@ -457,7 +457,9 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 		// check. Its authoritative interval ends independently of that later
 		// check; the whole interval must still be covered for every model.
 		var finalEnd *time.Time
-		if err := tx.QueryRow(ctx, `SELECT max(c.ends_at) FROM olp.retained_usage_coverage c JOIN olp.retained_usage_evidence e ON e.id=c.evidence_id WHERE c.resource_id=$1 AND e.document @> '{"coverage_complete":true}'::jsonb`, id).Scan(&finalEnd); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT max((line->>'end')::timestamptz) FROM olp.retained_usage_evidence e
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.document->'lines')='array' THEN e.document->'lines' ELSE '[]'::jsonb END) line
+WHERE e.resource_id=$1 AND e.document @> '{"coverage_complete":true}'::jsonb`, id).Scan(&finalEnd); err != nil {
 			return false, err
 		}
 		if finalEnd != nil && finalEnd.After(start) && !finalEnd.After(end) {

@@ -372,6 +372,28 @@ func TestRetainedSettlementFinalEvidencePrecedesTermination(t *testing.T) {
 	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
 }
 
+func TestRetainedSettlementDeduplicatedFinalEvidenceRefinesEndpoint(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	usage := retainedTrainingObservation(r, 1_000_000)
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "nonfinal-usage", strings.Repeat("a", 64), "operator_verified", f.User, usage, nil); err != nil {
+		t.Fatal(err)
+	}
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: time.Now().UTC()}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "later-termination", strings.Repeat("b", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	usage.CoverageComplete = true
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "final-same-usage", strings.Repeat("c", 64), "operator_verified", f.User, usage, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("deduplicated final proof lost its lifetime endpoint: %s %v", state, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 3, 1, 1)
+}
+
 func TestRetainedSettlementUnknownCacheMutationPreventsAutomaticClosure(t *testing.T) {
 	for _, action := range []string{"patch", "delete"} {
 		t.Run(action, func(t *testing.T) {

@@ -171,9 +171,42 @@ func TestRetainedCachePinsResolvedServingModel(t *testing.T) {
 	if err := resources.EnrichRetained(r, e, response, time.Now()); err != nil {
 		t.Fatalf("valid bound cache rejected: %v", err)
 	}
+	r.UpstreamID = "cachedContents/native"
+	if tokens, valid := generationCacheInput(r, p); !valid || tokens != 100 {
+		t.Fatalf("qualified cache cannot bind generation: tokens=%d valid=%v", tokens, valid)
+	}
+	var legacy map[string]json.RawMessage
+	_ = json.Unmarshal(r.Metadata, &legacy)
+	delete(legacy, "no_cached_tools")
+	r.Metadata, _ = json.Marshal(legacy)
+	if _, valid := generationCacheInput(r, p); valid {
+		t.Fatal("cache without a known tool-effect contract admitted generation")
+	}
 	wrong := generationReferenceDocument(t, `{"model":"models/other-model","usageMetadata":{"totalTokenCount":100},"expireTime":"2026-10-24T12:00:00Z"}`)
 	if err := resources.EnrichRetained(r, e, wrong, time.Now()); err == nil {
 		t.Fatal("cache accepted a different serving model")
+	}
+}
+
+func TestRetainedCacheRejectsInheritedTools(t *testing.T) {
+	p := &pin{provider: routing.Provider{Kind: "gemini"}, model: "m"}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "context_cache", Operation: "context_cache"}, Action: "create"}
+	for _, body := range []string{
+		`{"tools":[{"codeExecution":{}}]}`,
+		`{"tools":[{"googleSearch":{}}]}`,
+		`{"tools":[{"functionDeclarations":[{"name":"lookup"}]}]}`,
+		`{"toolConfig":{"functionCallingConfig":{"mode":"ANY"}}}`,
+		`{"tool_config":{}}`,
+	} {
+		if _, err := retainedInputMetadata(p, nil, "owner", e, generationReferenceDocument(t, body), nil); err == nil {
+			t.Fatalf("unqualified cached tool effects accepted: %s", body)
+		}
+	}
+	for _, body := range []string{`{}`, `{"tools":[]}`, `{"tools":null}`} {
+		metadata, err := retainedInputMetadata(p, nil, "owner", e, generationReferenceDocument(t, body), nil)
+		if err != nil || metadata["no_cached_tools"] != true {
+			t.Fatalf("cache content-only qualification lost: %v %v", metadata, err)
+		}
 	}
 }
 

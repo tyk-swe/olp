@@ -57,6 +57,17 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 	meta := map[string]any{"upstream_model": p.model, "contract_revision": retainedapi.Revision}
 	if e.Kind == "context_cache" {
 		meta["serving_model"] = p.provider.Connector().Model(p.model)
+		if e.Action == "create" {
+			if tools, present := source.Root().Lookup("tools"); present && tools.Kind() != oif.Null && (tools.Kind() != oif.Array || len(tools.Elements()) != 0) {
+				return nil, errors.New("cached tools are unsupported; declare supported client tools on each generation request")
+			}
+			for _, field := range []string{"toolConfig", "tool_config"} {
+				if config, present := source.Root().Lookup(field); present && config.Kind() != oif.Null {
+					return nil, errors.New("cached tool configuration has no qualified generation contract")
+				}
+			}
+			meta["no_cached_tools"] = true
+		}
 	}
 	if e.Kind == "container_file" && e.Action == "create" {
 		var pins struct {

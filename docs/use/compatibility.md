@@ -266,6 +266,9 @@ use gateway IDs. History stays provider-side, and compaction is separately
 priced. Gemini `cachedContent` likewise requires a gateway cache ID with a
 matching immutable model, token quantity, credential and authoritative expiry.
 Raw native cache IDs and unqualified provider file URIs refuse before dispatch.
+Cached tool declarations and configuration are unsupported; declare supported
+client tools on each generation request. Caches without a verified tool-free
+contract must be recreated before generation can use them.
 State-bearing requests bypass response-cache replay. Known cached tokens count
 in context, token and monetary admission; unknown history, file and retrieval
 input quantities refuse applicable consumption caps.

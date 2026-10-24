@@ -131,25 +131,31 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer native.Body.Close()
-	if native.StatusCode >= 200 && native.StatusCode < 300 && x.exchange != nil {
-		x.facts[x.exchange.index].observeUsage(&wire.Usage{}, true)
-	}
-	response, responseErr := readBounded(native.Body, s.retainedResponseLimit())
-	if responseErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
-		fail(serverError(502, "provider_protocol_error", "The provider returned an unsupported retrieval response."))
-		return
-	}
-	results, decodeErr := retrieval.Decode(binding.Backend, binding.Fields, response)
-	if decodeErr != nil {
-		fail(serverError(502, "provider_protocol_error", "The provider returned invalid retrieval results."))
-		return
-	}
-	projected, marshalErr := json.Marshal(map[string]any{"object": "list", "binding_id": binding.ID, "binding_revision_id": binding.RevisionID, "data": results})
-	if marshalErr != nil {
-		fail(serverError(502, "provider_protocol_error", "The provider returned invalid retrieval results."))
+	projected, processingErr := s.retrievalResult(x, binding, native)
+	if processingErr != nil {
+		fail(processingErr)
 		return
 	}
 	status = http.StatusOK
 	x.completePinned()
 	s.writeStateJSONStatus(w, x, projected, status)
+}
+
+func (s *Server) retrievalResult(x *call, binding *retrieval.Binding, native *http.Response) ([]byte, *Error) {
+	response, responseErr := readBounded(native.Body, s.retainedResponseLimit())
+	if responseErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
+		return nil, serverError(502, "provider_protocol_error", "The provider returned an unsupported retrieval response.")
+	}
+	results, decodeErr := retrieval.Decode(binding.Backend, binding.Fields, response)
+	if decodeErr != nil {
+		return nil, serverError(502, "provider_protocol_error", "The provider returned invalid retrieval results.")
+	}
+	projected, marshalErr := json.Marshal(map[string]any{"object": "list", "binding_id": binding.ID, "binding_revision_id": binding.RevisionID, "data": results})
+	if marshalErr != nil {
+		return nil, serverError(502, "provider_protocol_error", "The provider returned invalid retrieval results.")
+	}
+	// Only a validated result establishes complete tokenless usage. Local
+	// processing failures retain the accepted query's billing uncertainty.
+	_ = observeRetainedUsage(x, oif.Document{}, false)
+	return projected, nil
 }

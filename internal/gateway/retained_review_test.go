@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -192,5 +196,44 @@ func TestRetainedGenerationFileAdmissionBoundsRequestFees(t *testing.T) {
 	charge = x.attemptChargeBound(p.attempt, cost)
 	if cost.IsZero() || charge.Cmp(cost) <= 0 {
 		t.Fatalf("compaction lost token reservations: cost=%s charge=%s", cost.String(), charge.String())
+	}
+}
+
+func TestRetainedRetrievalResponseFailureKeepsBillingUnresolved(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		valid      bool
+	}{
+		{"valid", `{"value":[{"@search.score":1,"key":"doc","content":"text"}]}`, true},
+		{"invalid", `{"value":{}}`, false},
+		{"oversized", strings.Repeat("x", 256), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, x, p := pinnedExchangeFixture(t)
+			h.gateway.cfg.MaxResponseBytes = 128
+			x.operationOverride, x.retainedMetered = "retrieval", true
+			exchange := h.gateway.beginPinned(t.Context(), x, p, http.MethodPost)
+			exchange.state.accepted = true
+			x.facts[0].Status, x.facts[0].Class = 200, classProtocol
+			binding := &retrieval.Binding{Input: retrieval.Input{Backend: retrieval.Azure, Fields: retrieval.Fields{Text: "content", ID: "key"}}}
+			_, failure := h.gateway.retrievalResult(x, binding, &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tc.body))})
+			if tc.valid {
+				if failure != nil {
+					t.Fatal(failure)
+				}
+				x.completePinned()
+			} else if failure == nil {
+				t.Fatal("malformed retrieval result accepted")
+			}
+			x.finalizePinned(nil, time.Now())
+			evidence := attemptUsage(&x.facts[0], "retrieval")
+			if !tc.valid {
+				if evidence.Observed || evidence.Complete || !evidence.BillingUncertain {
+					t.Fatalf("accepted malformed query became known zero usage: %+v", evidence)
+				}
+			} else if cost, priced := (&usage.Price{PerRequest: new("0.01")}).Cost(evidence, time.Now(), attemptSuccessful(&x.facts[0])); !priced || cost.String() != "0.01" {
+				t.Fatalf("valid query lost its request fee: %s %v", cost.String(), priced)
+			}
+		})
 	}
 }

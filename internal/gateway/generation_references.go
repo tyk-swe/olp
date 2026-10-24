@@ -232,15 +232,11 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 			return invalidRequest("resource_affinity", "Generation references must share one authorized model, connection and credential.", &ref.pointer)
 		}
 		if ref.kind == "context_cache" {
-			var metadata struct {
-				Model  string `json:"model"`
-				Tokens *int64 `json:"total_token_count"`
+			tokens, valid := generationCacheInput(resource, p)
+			if !valid {
+				return invalidRequest("resource_affinity", "Recreate this cache with a qualified model, expiry and no cached tools.", &ref.pointer)
 			}
-			_ = json.Unmarshal(resource.Metadata, &metadata)
-			if p.provider.Kind != "gemini" || resource.ExpiresAt == nil || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.provider.Connector().Model(p.model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
-				return invalidRequest("resource_affinity", "The context cache has no valid model and expiry binding.", &ref.pointer)
-			}
-			bindings.cacheInput = *metadata.Tokens
+			bindings.cacheInput = tokens
 		} else {
 			// Files, history and retrieved passages have no authoritative input
 			// token bound. A finite output limit cannot bound those input costs.
@@ -268,6 +264,18 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 	}
 	x.generation.parsed, x.generation.resources = next, bindings
 	return nil
+}
+
+func generationCacheInput(resource *resources.Resource, p *pin) (int64, bool) {
+	var metadata struct {
+		Model         string `json:"model"`
+		Tokens        *int64 `json:"total_token_count"`
+		NoCachedTools bool   `json:"no_cached_tools"`
+	}
+	if json.Unmarshal(resource.Metadata, &metadata) != nil || p.provider.Kind != "gemini" || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.provider.Connector().Model(p.model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
+		return 0, false
+	}
+	return *metadata.Tokens, true
 }
 
 func (x *call) bindGenerationServing(p *pin, resource *resources.Resource, pointer string) *Error {
