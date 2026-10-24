@@ -57,6 +57,22 @@ func (r *Request) WithField(name string, value json.RawMessage) (*Request, error
 	return &out, nil
 }
 
+// WithResourceBindings overlays exact, dialect-owned reference positions. The
+// caller must establish live resource authority before invoking it; identity
+// preparation independently checks the dialect's declared pointer patterns.
+func (r *Request) WithResourceBindings(changes ...oif.Change) (*Request, error) {
+	for i := range changes {
+		changes[i].Origin = oif.ResourceBinding
+	}
+	source, err := r.source.WithChanges(changes...)
+	if err != nil {
+		return nil, err
+	}
+	out := *r
+	out.source = source
+	return &out, nil
+}
+
 func (r *Request) WithFields(fields map[string]json.RawMessage, origin oif.Origin) (*Request, error) {
 	changes := []oif.Change{}
 	for name, value := range fields {

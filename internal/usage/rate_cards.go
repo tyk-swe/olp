@@ -137,19 +137,19 @@ func insertCardPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Pr
              output_per_million, audio_input_per_million, cached_audio_input_per_million,
              audio_output_per_million, image_input_per_million, cached_image_input_per_million,
              image_output_per_million, unit_price, per_request, batch_multiplier,
-             tool_calls, tiers, windows, currency)
+             tool_calls, tiers, windows, currency, training_per_million, storage_per_gib_day, cache_storage_per_million_token_hour, container_per_session)
         VALUES ($1::uuid, $2, $3, $4, $5, $6::text::numeric, $7::text::numeric, $8::text::numeric,
                 $9::text::numeric, $10::text::numeric, $11::text::numeric, $12::text::numeric,
                 $13::text::numeric, $14::text::numeric, $15::text::numeric, $16::text::numeric,
                 $17::text::numeric, $18::text::numeric, $19::text::numeric, $20::text::numeric,
-                $21::jsonb, $22::jsonb, $23::jsonb, $24)`,
+                $21::jsonb, $22::jsonb, $23::jsonb, $24, $25::text::numeric, $26::text::numeric, $27::text::numeric, $28::jsonb)`,
 		revisionID, price.ProviderKind, price.VendorID, price.Model, price.Operation,
 		price.InputPerMillion, price.CachedInputPerMillion, price.CacheWriteInputPerMillion,
 		price.CacheWrite5MInputPerMillion, price.CacheWrite1HInputPerMillion,
 		price.OutputPerMillion, price.AudioInputPerMillion, price.CachedAudioInputPerMillion,
 		price.AudioOutputPerMillion, price.ImageInputPerMillion, price.CachedImageInputPerMillion,
 		price.ImageOutputPerMillion, price.UnitPrice, price.PerRequest, price.BatchMultiplier,
-		toolCalls, tiers, windows, price.Currency)
+		toolCalls, tiers, windows, price.Currency, price.TrainingPerMillion, price.StoragePerGiBDay, price.CacheStoragePerMillionTokenHour, optionalJSON(price.ContainerPerSession))
 	if err != nil {
 		return fmt.Errorf("store rate card price: %w", err)
 	}
@@ -190,7 +190,7 @@ func LoadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionID
         output_per_million::text, audio_input_per_million::text, cached_audio_input_per_million::text,
         audio_output_per_million::text, image_input_per_million::text, cached_image_input_per_million::text,
         image_output_per_million::text, unit_price::text, per_request::text, batch_multiplier::text,
-        tool_calls::text, tiers::text, windows::text, btrim(currency)
+        tool_calls::text, tiers::text, windows::text, btrim(currency), training_per_million::text, storage_per_gib_day::text, cache_storage_per_million_token_hour::text, container_per_session::text
     FROM olp.rate_card_prices
     WHERE rate_card_revision_id = ANY($1::uuid[])
     ORDER BY rate_card_revision_id, provider_kind, vendor_id, model, operation`, revisionIDs)
@@ -202,14 +202,17 @@ func LoadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionID
 	for rows.Next() {
 		var revisionID string
 		var p Price
-		var toolCalls, tiers, windows *string
+		var toolCalls, tiers, windows, containerSessions *string
 		if err = rows.Scan(&revisionID, &p.ProviderKind, &p.VendorID, &p.Model, &p.Operation,
 			&p.InputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion,
 			&p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion,
 			&p.OutputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion,
 			&p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion,
 			&p.ImageOutputPerMillion, &p.UnitPrice, &p.PerRequest, &p.BatchMultiplier,
-			&toolCalls, &tiers, &windows, &p.Currency); err != nil {
+			&toolCalls, &tiers, &windows, &p.Currency, &p.TrainingPerMillion, &p.StoragePerGiBDay, &p.CacheStoragePerMillionTokenHour, &containerSessions); err != nil {
+			return nil, err
+		}
+		if err = decodeContainerRates(&p, containerSessions); err != nil {
 			return nil, err
 		}
 		if err = unmarshalPriceComponents(&p, toolCalls, tiers, windows, "rate card"); err != nil {

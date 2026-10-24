@@ -21,6 +21,11 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Au
 		DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
 		CostBasis: limits.Basis(policy.CostBasis), RequestedTokens: estimate, LeaseTTL: ttl,
 	}
+	if policy.TokensPerMinute != nil {
+		if e := a.checkPendingTokenAccounting(ctx, owner); e != nil {
+			return nil, e
+		}
+	}
 	if policy.CostBudgeted() {
 		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 			return nil, e

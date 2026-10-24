@@ -278,6 +278,7 @@ func PrepareIdentity(request Request, destination Descriptor, changes []Change) 
 
 // IdentityRule is declared by a trusted dialect binding, never by a request.
 // Exact pointers prevent an origin label from blessing arbitrary semantic edits.
+// A '*' segment matches one canonical array index, never an object field.
 type IdentityRule struct {
 	Pointer  string
 	Origin   Origin
@@ -291,7 +292,7 @@ func prepareIdentity(request Request, destination Descriptor, changes []Change, 
 	}
 	allowed := func(path string, origin Origin, before, after Value) bool {
 		for _, rule := range rules {
-			if rule.Pointer == path && rule.Origin == origin && rule.Kind == after.Kind() && (rule.Validate == nil || rule.Validate(before, after)) {
+			if identityPointerMatches(rule.Pointer, path, request.Document()) && rule.Origin == origin && rule.Kind == after.Kind() && (rule.Validate == nil || rule.Validate(before, after)) {
 				return true
 			}
 		}
@@ -323,6 +324,33 @@ func prepareIdentity(request Request, destination Descriptor, changes []Change, 
 		p.provenance = append(p.provenance, Provenance{c.Pointer, c.Origin, c.Reason})
 	}
 	return p, nil
+}
+
+func identityPointerMatches(pattern, pointer string, document Document) bool {
+	if pattern == pointer && !strings.Contains(pattern, "*") {
+		return true
+	}
+	want, got := strings.Split(pattern, "/"), strings.Split(pointer, "/")
+	if len(want) != len(got) {
+		return false
+	}
+	for i := range want {
+		if want[i] != "*" && want[i] == got[i] {
+			continue
+		}
+		if want[i] != "*" {
+			return false
+		}
+		index, err := strconv.Atoi(got[i])
+		if err != nil || index < 0 || strconv.Itoa(index) != got[i] {
+			return false
+		}
+		parent, present := document.Lookup(strings.Join(got[:i], "/"))
+		if !present || parent.Kind() != Array || index >= len(parent.Elements()) {
+			return false
+		}
+	}
+	return true
 }
 
 // PrepareDestination records an admitted mapping or transformed codec result. It

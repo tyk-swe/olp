@@ -700,6 +700,13 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationAgentPublication"
               }
+            },
+            "retrieval_bindings": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "$ref": "#/$defs/ConfigurationRetrievalBinding"
+              }
             }
           },
           "required": [
@@ -1313,6 +1320,37 @@
                   "$ref": "#/$defs/PriceWindows"
                 }
               ]
+            },
+            "training_per_million": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million training tokens."
+            },
+            "storage_per_gib_day": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+            },
+            "cache_storage_per_million_token_hour": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million cached token-hours."
+            },
+            "container_per_session": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
             }
           },
           "required": [
@@ -1937,7 +1975,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -2047,6 +2086,15 @@
             },
             "commitment": {
               "$ref": "#/$defs/Commitment"
+            },
+            "tuning_dataset_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
             }
           },
           "type": "object"
@@ -4224,6 +4272,110 @@
             "template",
             "variables"
           ]
+        },
+        "ConfigurationRetrievalBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "route": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "backend": {
+              "type": "string",
+              "enum": [
+                "bedrock_knowledge_base",
+                "vertex_rag",
+                "azure_ai_search"
+              ]
+            },
+            "backend_resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "fields": {
+              "$ref": "#/$defs/RetrievalBindingFields"
+            },
+            "key_grants": {
+              "type": "array",
+              "maxItems": 2000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "description": "Exact project-local API-key names resolved independently in the destination. Missing or ambiguous keys block promotion."
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "target_provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "name",
+            "route",
+            "backend",
+            "backend_resource",
+            "fields",
+            "key_grants",
+            "enabled",
+            "project",
+            "target_provider"
+          ]
+        },
+        "RetrievalBindingFields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "title": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "search": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string"
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Explicit logical metadata keys mapped to native backend fields. Requests cannot use unmapped fields."
+            }
+          }
         },
         "ExternalCredentialReference": {
           "type": "object",
@@ -7213,7 +7365,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -7448,6 +7601,37 @@
                   "$ref": "#/$defs/PriceWindows"
                 }
               ]
+            },
+            "training_per_million": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million training tokens."
+            },
+            "storage_per_gib_day": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+            },
+            "cache_storage_per_million_token_hour": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million cached token-hours."
+            },
+            "container_per_session": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
             }
           },
           "required": [
@@ -7474,7 +7658,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -8209,7 +8394,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -8319,6 +8505,15 @@
             },
             "commitment": {
               "$ref": "#/$defs/Commitment"
+            },
+            "tuning_dataset_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
             }
           },
           "type": "object"
@@ -9171,6 +9366,37 @@
                 "string",
                 "null"
               ]
+            },
+            "training_per_million": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million training tokens."
+            },
+            "storage_per_gib_day": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+            },
+            "cache_storage_per_million_token_hour": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million cached token-hours."
+            },
+            "container_per_session": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
             }
           },
           "required": [
@@ -9196,7 +9422,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -9372,6 +9599,152 @@
             "multiplier"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_retrieval_binding",
+    "group": "retrieval-bindings",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/retrieval-bindings",
+    "description": "create retrieval binding",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/RetrievalBindingInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "RetrievalBindingInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "route": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "target_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "backend": {
+              "type": "string",
+              "enum": [
+                "bedrock_knowledge_base",
+                "vertex_rag",
+                "azure_ai_search"
+              ]
+            },
+            "backend_resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "fields": {
+              "$ref": "#/$defs/RetrievalBindingFields"
+            },
+            "key_grants": {
+              "type": "array",
+              "maxItems": 2000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Explicit active API-key UUIDs in this binding project; an empty list grants no access."
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "route",
+            "target_id",
+            "backend",
+            "backend_resource",
+            "fields",
+            "key_grants",
+            "enabled"
+          ]
+        },
+        "RetrievalBindingFields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "title": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "search": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string"
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Explicit logical metadata keys mapped to native backend fields. Requests cannot use unmapped fields."
+            }
+          }
         }
       }
     }
@@ -12887,6 +13260,77 @@
     }
   },
   {
+    "name": "delete_retrieval_binding",
+    "group": "retrieval-bindings",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/retrieval-bindings/{binding_id}",
+    "description": "delete retrieval binding",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "binding_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "binding_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_route_draft",
     "group": "routes",
     "method": "DELETE",
@@ -16005,6 +16449,111 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_retrieval_binding",
+    "group": "retrieval-bindings",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/retrieval-bindings/{binding_id}",
+    "description": "get retrieval binding",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "binding_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "binding_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_retrieval_binding_revision",
+    "group": "retrieval-bindings",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/retrieval-bindings/{binding_id}/revisions/{revision_id}",
+    "description": "get retrieval binding revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "binding_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "binding_id",
+            "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -20522,6 +21071,58 @@
     }
   },
   {
+    "name": "list_retrieval_bindings",
+    "group": "retrieval-bindings",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/retrieval-bindings",
+    "description": "list retrieval bindings",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_route_drafts",
     "group": "routes",
     "method": "GET",
@@ -21974,6 +22575,13 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationAgentPublication"
               }
+            },
+            "retrieval_bindings": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "$ref": "#/$defs/ConfigurationRetrievalBinding"
+              }
             }
           },
           "required": [
@@ -22587,6 +23195,37 @@
                   "$ref": "#/$defs/PriceWindows"
                 }
               ]
+            },
+            "training_per_million": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million training tokens."
+            },
+            "storage_per_gib_day": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+            },
+            "cache_storage_per_million_token_hour": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million cached token-hours."
+            },
+            "container_per_session": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
             }
           },
           "required": [
@@ -23211,7 +23850,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -23321,6 +23961,15 @@
             },
             "commitment": {
               "$ref": "#/$defs/Commitment"
+            },
+            "tuning_dataset_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
             }
           },
           "type": "object"
@@ -25499,6 +26148,110 @@
             "variables"
           ]
         },
+        "ConfigurationRetrievalBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "route": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "backend": {
+              "type": "string",
+              "enum": [
+                "bedrock_knowledge_base",
+                "vertex_rag",
+                "azure_ai_search"
+              ]
+            },
+            "backend_resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "fields": {
+              "$ref": "#/$defs/RetrievalBindingFields"
+            },
+            "key_grants": {
+              "type": "array",
+              "maxItems": 2000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "description": "Exact project-local API-key names resolved independently in the destination. Missing or ambiguous keys block promotion."
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "target_provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "name",
+            "route",
+            "backend",
+            "backend_resource",
+            "fields",
+            "key_grants",
+            "enabled",
+            "project",
+            "target_provider"
+          ]
+        },
+        "RetrievalBindingFields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "title": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "search": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string"
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Explicit logical metadata keys mapped to native backend fields. Requests cannot use unmapped fields."
+            }
+          }
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -26618,6 +27371,37 @@
                   "$ref": "#/$defs/PriceWindows"
                 }
               ]
+            },
+            "training_per_million": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million training tokens."
+            },
+            "storage_per_gib_day": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+            },
+            "cache_storage_per_million_token_hour": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact currency rate per million cached token-hours."
+            },
+            "container_per_session": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
             }
           },
           "required": [
@@ -26644,7 +27428,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -29642,6 +30427,69 @@
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
+        }
+      }
+    }
+  },
+  {
+    "name": "reconcile_provider_resource",
+    "group": "provider-resources",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/provider-resources/{id}/reconcile",
+    "description": "Schedule pinned reconciliation. Upstream IDs are verification hints and never authorize adoption.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "body": {
+          "$ref": "#/$defs/RetainedReconcileRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "body"
+      ],
+      "$defs": {
+        "RetainedReconcileRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "upstream_id": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Verification hint only; adoption also requires authenticated provider evidence of original intent correlation."
+            }
+          }
         }
       }
     }
@@ -35728,6 +36576,154 @@
     }
   },
   {
+    "name": "submit_provider_resource_usage_evidence",
+    "group": "provider-resources",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/provider-resources/{id}/usage-evidence",
+    "description": "Record audited operator-verified usage through the same atomic coverage ledger as provider evidence. Ownership and pricing pins are derived by the server. Requires installation settings and project change authority.",
+    "scopes": [
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "body": {
+          "$ref": "#/$defs/RetainedUsageEvidenceRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "body"
+      ],
+      "$defs": {
+        "RetainedUsageEvidenceRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency_key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "start": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Inclusive UTC interval start, canonicalized to PostgreSQL microsecond precision."
+            },
+            "end": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exclusive UTC interval end, canonicalized to PostgreSQL microsecond precision."
+            },
+            "model": {
+              "type": "string",
+              "description": "Required when acceptance pinned more than one model."
+            },
+            "terminal": {
+              "type": "boolean",
+              "description": "Requests closure only after independent remote termination and complete interval coverage."
+            },
+            "input_tokens": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "output_tokens": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "cached_input_tokens": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "description": "Required together with input and output totals for evaluation generation evidence; omission is unknown."
+            },
+            "training_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            },
+            "storage_byte_seconds": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact byte-seconds, without monetary rounding."
+            },
+            "cache_token_seconds": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact cached token-seconds."
+            },
+            "container_sessions": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            },
+            "invocation_count": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "description": "Required for per-model evaluation usage. Actual generation/grader invocations; never the original submission request."
+            }
+          },
+          "required": [
+            "idempotency_key",
+            "evidence_digest",
+            "start",
+            "end",
+            "terminal"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "update_agent",
     "group": "agents",
     "method": "PUT",
@@ -38299,7 +39295,8 @@
             "watsonx",
             "azure_openai",
             "openai_compatible",
-            "plugin"
+            "plugin",
+            "azure_ai_search"
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -38409,6 +39406,15 @@
             },
             "commitment": {
               "$ref": "#/$defs/Commitment"
+            },
+            "tuning_dataset_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
             }
           },
           "type": "object"
@@ -38791,6 +39797,184 @@
             "period"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_retrieval_binding",
+    "group": "retrieval-bindings",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/retrieval-bindings/{binding_id}",
+    "description": "update retrieval binding",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "binding_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "binding_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/RetrievalBindingInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "RetrievalBindingInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "route": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "target_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "backend": {
+              "type": "string",
+              "enum": [
+                "bedrock_knowledge_base",
+                "vertex_rag",
+                "azure_ai_search"
+              ]
+            },
+            "backend_resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "fields": {
+              "$ref": "#/$defs/RetrievalBindingFields"
+            },
+            "key_grants": {
+              "type": "array",
+              "maxItems": 2000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Explicit active API-key UUIDs in this binding project; an empty list grants no access."
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "route",
+            "target_id",
+            "backend",
+            "backend_resource",
+            "fields",
+            "key_grants",
+            "enabled"
+          ]
+        },
+        "RetrievalBindingFields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "title": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "search": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string"
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Explicit logical metadata keys mapped to native backend fields. Requests cannot use unmapped fields."
+            }
+          }
         }
       }
     }

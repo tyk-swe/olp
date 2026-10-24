@@ -59,6 +59,9 @@ type requestSummary struct {
 
 func (x *call) summarize(request *wire.Request) requestSummary {
 	prompt := estimate.Walk(request)
+	if x.generation.resources != nil && x.generation.resources.cacheInput > 0 {
+		prompt = prompt.WithRetainedInputTokens(x.generation.resources.cacheInput)
+	}
 	if x.request.counted != nil {
 		prompt.Observe(x.request.counted)
 	}
@@ -105,7 +108,7 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 		if template == nil {
 			return preparedProvider{}, &oif.Incompatibility{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
 		}
-		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState}
+		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState, ResolvedResources: x.resolvedGenerationResources()}
 		if x.generation.continuation != nil {
 			binding.ContinuationVersion = x.generation.continuation.version
 			binding.DurableContinuation = true
@@ -411,6 +414,9 @@ func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled,
 // Stateless dialects cannot represent store and must keep its omission.
 func (x *call) prepareTransformed(provider *routing.Provider, cfg connectors.Config, model string) (providerinvoke.Invocation, error) {
 	invocation, err := providerinvoke.Prepare(x.generation.parsed, cfg, model, provider.ParameterDefaults)
+	if err == nil {
+		err = x.checkGenerationResourceDestination(provider, model, invocation.Wire, invocation.Prepared.Document())
+	}
 	if err == nil && x.route != nil && x.route.PromptCache != nil {
 		invocation, err = providerinvoke.ApplyPromptCache(invocation, cfg, x.route.PromptCache, x.promptCacheKey())
 	}

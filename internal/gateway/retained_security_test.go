@@ -2,8 +2,12 @@ package gateway
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/usage"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -85,3 +89,36 @@ func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 }
 
 // A relaxed current timeout cannot loosen the pinned contract.
+
+func TestRetainedFreeControlKeepsCleanupAvailableUnderLateCaps(t *testing.T) {
+	now := time.Now()
+	s := &Server{}
+	x := &call{retainedHousekeeping: true, operationOverride: "vector_store", request: request{startedAt: now}, routingInputs: &usage.RoutingInputs{RefreshedAt: now}}
+	p := &pin{provider: routing.Provider{Kind: "openai"}, model: "m"}
+	if err := s.retainedAccountingPolicy(x, p, false); err != nil || !x.retainedFreeControl {
+		t.Fatalf("free cleanup refused: %v", err)
+	}
+	authority := access.Authority{Policy: access.KeyPolicy{TokensPerMinute: new(int64(100)), RequestsPerMinute: new(int64(5)), DailyCostLimit: new("1")}}
+	admitted := x.admissionAuthority(authority)
+	if admitted.Policy.DailyCostLimit != nil || admitted.Policy.TokensPerMinute != nil || admitted.Policy.RequestsPerMinute == nil || authority.Policy.TokensPerMinute == nil {
+		t.Fatal("cleanup did not preserve request controls and original authority")
+	}
+	x.routingInputs.Prices = []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "vector_store", PerRequest: new("1")}, EffectiveAt: now.Add(-time.Hour)}}
+	if err := s.retainedAccountingPolicy(x, p, false); err != nil || x.retainedFreeControl {
+		t.Fatalf("paid control lost cost admission: %v", err)
+	}
+}
+
+func TestRetainedRejectionsNeverClearAmbiguousAcceptance(t *testing.T) {
+	for _, status := range []int{408, 409, 500, 502, 503} {
+		if retainedRejectedWithoutWork(&attemptFailure{status: status, acceptance: upstream.Terminal}) {
+			t.Fatalf("ambiguous status %d cleared liability", status)
+		}
+	}
+	if !retainedRejectedWithoutWork(&attemptFailure{status: 400, acceptance: upstream.Terminal}) || !retainedRejectedWithoutWork(&attemptFailure{acceptance: upstream.NotSent}) {
+		t.Fatal("definitive rejection retained paid liability")
+	}
+	if retainedRejectedWithoutWork(&attemptFailure{status: 400, acceptance: upstream.Terminal, accepted: true}) {
+		t.Fatal("accepted work cleared by rejection")
+	}
+}

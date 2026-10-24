@@ -241,7 +241,16 @@ func validateResponses(fields map[string]json.RawMessage, doc oif.Value) error {
 		}
 	}
 	if raw, present := fields["conversation"]; present && !isNull(raw) {
-		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "The gateway does not hold prior conversations; conversation is not supported.", Param: "conversation"}
+		var id string
+		if json.Unmarshal(raw, &id) != nil {
+			var conversation map[string]json.RawMessage
+			if json.Unmarshal(raw, &conversation) != nil || json.Unmarshal(conversation["id"], &id) != nil {
+				return invalid("conversation", "conversation must be an identifier or an object with an identifier.")
+			}
+		}
+		if id == "" {
+			return invalid("conversation", "conversation must have a nonempty identifier.")
+		}
 	}
 	for _, name := range []string{"background", "store"} {
 		if raw, present := fields[name]; present && !isNull(raw) {
@@ -418,7 +427,9 @@ func validateResponseFileReferenceValue(part oif.Value, path string) error {
 	switch memberText(part, "type") {
 	case "input_file", "input_image", "computer_screenshot":
 		if fileID, present := part.Lookup("file_id"); present && fileID.Kind() != oif.Null {
-			return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
+			if id, ok := fileID.Text(); !ok || id == "" {
+				return invalid(path+".file_id", "file_id must be a nonempty identifier.")
+			}
 		}
 	}
 	return nil
@@ -429,7 +440,10 @@ func validateResponseFileReference(part map[string]json.RawMessage, path string)
 	switch kind {
 	case "input_file", "input_image", "computer_screenshot":
 		if raw, present := part["file_id"]; present && !isNull(raw) {
-			return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
+			var id string
+			if json.Unmarshal(raw, &id) != nil || id == "" {
+				return invalid(path+".file_id", "file_id must be a nonempty identifier.")
+			}
 		}
 	}
 	return nil

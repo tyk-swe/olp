@@ -49,24 +49,28 @@ type Coverage struct {
 // money are exact decimal strings: they are summed in PostgreSQL as `numeric`
 // and never pass through a float.
 type Totals struct {
-	RequestCount            int64   `json:"request_count"`
-	InputTokens             string  `json:"input_tokens"`
-	OutputTokens            string  `json:"output_tokens"`
-	CachedInputTokens       string  `json:"cached_input_tokens"`
-	CacheWriteInputTokens   string  `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens string  `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens string  `json:"cache_write_1h_input_tokens"`
-	AudioInputTokens        string  `json:"audio_input_tokens"`
-	CachedAudioInputTokens  string  `json:"cached_audio_input_tokens"`
-	AudioOutputTokens       string  `json:"audio_output_tokens"`
-	ImageInputTokens        string  `json:"image_input_tokens"`
-	CachedImageInputTokens  string  `json:"cached_image_input_tokens"`
-	ImageOutputTokens       string  `json:"image_output_tokens"`
-	MediaUnits              string  `json:"media_units"`
-	EstimatedCost           *string `json:"estimated_cost"`
-	Currency                *string `json:"currency"`
-	UnpricedCount           int64   `json:"unpriced_count"`
-	IncompleteCount         int64   `json:"incomplete_count"`
+	TrainingTokens          string            `json:"training_tokens"`
+	StorageByteSeconds      string            `json:"storage_byte_seconds"`
+	CacheTokenSeconds       string            `json:"cache_token_seconds"`
+	ContainerSessions       map[string]string `json:"container_sessions"`
+	RequestCount            int64             `json:"request_count"`
+	InputTokens             string            `json:"input_tokens"`
+	OutputTokens            string            `json:"output_tokens"`
+	CachedInputTokens       string            `json:"cached_input_tokens"`
+	CacheWriteInputTokens   string            `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens string            `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens string            `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        string            `json:"audio_input_tokens"`
+	CachedAudioInputTokens  string            `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       string            `json:"audio_output_tokens"`
+	ImageInputTokens        string            `json:"image_input_tokens"`
+	CachedImageInputTokens  string            `json:"cached_image_input_tokens"`
+	ImageOutputTokens       string            `json:"image_output_tokens"`
+	MediaUnits              string            `json:"media_units"`
+	EstimatedCost           *string           `json:"estimated_cost"`
+	Currency                *string           `json:"currency"`
+	UnpricedCount           int64             `json:"unpriced_count"`
+	IncompleteCount         int64             `json:"incomplete_count"`
 	// EstimatedInputTokens and ReportedInputTokens cover only the attempts that
 	// had both an admission estimate and observed usage, and EstimatedAttemptCount
 	// is how many those were. They are summed over the same attempts so the two
@@ -294,6 +298,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" COALESCE(image_input_tokens, 0)::numeric AS image_input_tokens," +
 		" COALESCE(cached_image_input_tokens, 0)::numeric AS cached_image_input_tokens," +
 		" COALESCE(image_output_tokens, 0)::numeric AS image_output_tokens," +
+		" COALESCE(training_tokens,0)::numeric AS training_tokens,COALESCE(storage_byte_seconds,0)::numeric AS storage_byte_seconds,COALESCE(cache_token_seconds,0)::numeric AS cache_token_seconds,container_sessions," +
 		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost, charge," +
 		" CASE WHEN charge_status <> 'not_billable' AND charge IS NULL THEN 1 ELSE 0 END AS uncharged_attempt_count," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
@@ -331,7 +336,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" cache_write_1h_input_tokens," +
 		" audio_input_tokens, cached_audio_input_tokens, audio_output_tokens," +
 		" image_input_tokens, cached_image_input_tokens, image_output_tokens," +
-		" media_units, estimated_cost, charge, uncharged_attempt_count, " + scope.hourlyUnpriced + ", " +
+		" training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,media_units, estimated_cost, charge, uncharged_attempt_count, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
 		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
 		" commitment_amount, commitment_period, olp.commitment_hourly_allocation(attempt_usage_hourly)," +
@@ -399,7 +404,9 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" COALESCE(SUM(estimate_attempt_count), 0)::bigint," +
 	" COALESCE(SUM(allocated_commitment), 0)::text," +
 	" SUM(charge)::text," +
-	" COALESCE(SUM(uncharged_attempt_count), 0)::bigint"
+	" COALESCE(SUM(uncharged_attempt_count), 0)::bigint," +
+	" COALESCE(SUM(training_tokens),0)::text,COALESCE(SUM(storage_byte_seconds),0)::text,COALESCE(SUM(cache_token_seconds),0)::text," +
+	" olp.container_session_string_totals(jsonb_agg(container_sessions))"
 
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
@@ -409,7 +416,7 @@ func (t *Totals) scanTargets() []any {
 		&t.ImageInputTokens, &t.CachedImageInputTokens, &t.ImageOutputTokens,
 		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency,
 		&t.EstimatedInputTokens, &t.ReportedInputTokens, &t.EstimatedAttemptCount,
-		&t.AllocatedCommitment, &t.Charge, &t.UnchargedAttemptCount}
+		&t.AllocatedCommitment, &t.Charge, &t.UnchargedAttemptCount, &t.TrainingTokens, &t.StorageByteSeconds, &t.CacheTokenSeconds, &t.ContainerSessions}
 }
 
 // valid rejects stored counts that cannot be true, so a corrupt aggregate

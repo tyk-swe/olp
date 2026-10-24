@@ -195,8 +195,8 @@ func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFa
 	}
 	metadata, _ = json.Marshal(billing)
 	r := &resources.Resource{Kind: resources.KindStrictResponse, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID, CredentialID: credential, UpstreamID: upstream, State: state, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version}
-	if x.pin != nil {
-		r.ParentID = &x.pin.UUID
+	if previous := x.previousResponse(); previous != nil {
+		r.ParentID = &previous.UUID
 	}
 	return s.Resources.PutContract(ctx, r, payload)
 }

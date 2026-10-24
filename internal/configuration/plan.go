@@ -379,6 +379,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	if err := s.validateMCPServers(doc); err != nil {
 		return nil, err
 	}
+	if err := validateRetrievalBindings(doc); err != nil {
+		return nil, err
+	}
 	if err := s.validateSinks(doc); err != nil {
 		return nil, err
 	}
@@ -903,6 +906,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	if err = s.planMCPServers(ctx, q, doc, bindings, state, result); err != nil {
+		return nil, err
+	}
+	if err = planRetrievalBindings(ctx, q, doc, result); err != nil {
 		return nil, err
 	}
 	if err = s.planSinks(ctx, q, doc, bindings, result); err != nil {

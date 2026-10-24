@@ -131,6 +131,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err := s.validateMCPServers(input.Document); err != nil {
 		return access.Reply{}, err
 	}
+	if err := validateRetrievalBindings(input.Document); err != nil {
+		return access.Reply{}, err
+	}
 	doc := input.Document
 	doc.canonicalize()
 	digest, err := Digest(doc)
@@ -213,6 +216,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if err = s.applyMCPServers(r.Context(), tx, p, doc, bindings, preparedServers); err != nil {
+		return access.Reply{}, err
+	}
+	if err = s.applyRetrievalBindings(r.Context(), tx, p, doc); err != nil {
 		return access.Reply{}, err
 	}
 	if err = s.applyAgentPublications(r.Context(), tx, p, doc, bindings); err != nil {

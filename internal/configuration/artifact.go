@@ -27,6 +27,7 @@ type Document struct {
 	GuardrailPolicies    []GuardrailPolicyEntry     `json:"guardrail_policies,omitempty"`
 	GuardrailAttachments []GuardrailAttachmentEntry `json:"guardrail_attachments,omitempty"`
 	MCPServers           []MCPServerEntry           `json:"mcp_servers,omitempty"`
+	RetrievalBindings    []RetrievalBindingEntry    `json:"retrieval_bindings,omitempty"`
 	Sinks                []SinkEntry                `json:"sinks,omitempty"`
 	Guardrails           []GuardrailEntry           `json:"guardrails,omitempty"`
 	SAML                 *access.SAMLDefinition     `json:"saml,omitempty"`
@@ -183,30 +184,34 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 }
 
 type PriceEntry struct {
-	VendorID                    *string             `json:"vendor_id"`
-	ProviderKind                string              `json:"provider_kind"`
-	Provider                    *string             `json:"provider"`
-	Model                       string              `json:"model"`
-	Operation                   string              `json:"operation"`
-	InputPerMillion             *string             `json:"input_per_million"`
-	CachedInputPerMillion       *string             `json:"cached_input_per_million"`
-	OutputPerMillion            *string             `json:"output_per_million"`
-	CacheWriteInputPerMillion   *string             `json:"cache_write_input_per_million"`
-	CacheWrite5MInputPerMillion *string             `json:"cache_write_5m_input_per_million"`
-	CacheWrite1HInputPerMillion *string             `json:"cache_write_1h_input_per_million"`
-	AudioInputPerMillion        *string             `json:"audio_input_per_million"`
-	CachedAudioInputPerMillion  *string             `json:"cached_audio_input_per_million"`
-	AudioOutputPerMillion       *string             `json:"audio_output_per_million"`
-	ImageInputPerMillion        *string             `json:"image_input_per_million"`
-	CachedImageInputPerMillion  *string             `json:"cached_image_input_per_million"`
-	ImageOutputPerMillion       *string             `json:"image_output_per_million"`
-	UnitPrice                   *string             `json:"unit_price"`
-	PerRequest                  *string             `json:"per_request"`
-	BatchMultiplier             *string             `json:"batch_multiplier"`
-	ToolCalls                   map[string]string   `json:"tool_calls"`
-	Tiers                       []usage.PriceTier   `json:"tiers"`
-	Windows                     *usage.PriceWindows `json:"windows"`
-	Currency                    string              `json:"currency"`
+	TrainingPerMillion              *string             `json:"training_per_million"`
+	StoragePerGiBDay                *string             `json:"storage_per_gib_day"`
+	CacheStoragePerMillionTokenHour *string             `json:"cache_storage_per_million_token_hour"`
+	ContainerPerSession             map[string]string   `json:"container_per_session"`
+	VendorID                        *string             `json:"vendor_id"`
+	ProviderKind                    string              `json:"provider_kind"`
+	Provider                        *string             `json:"provider"`
+	Model                           string              `json:"model"`
+	Operation                       string              `json:"operation"`
+	InputPerMillion                 *string             `json:"input_per_million"`
+	CachedInputPerMillion           *string             `json:"cached_input_per_million"`
+	OutputPerMillion                *string             `json:"output_per_million"`
+	CacheWriteInputPerMillion       *string             `json:"cache_write_input_per_million"`
+	CacheWrite5MInputPerMillion     *string             `json:"cache_write_5m_input_per_million"`
+	CacheWrite1HInputPerMillion     *string             `json:"cache_write_1h_input_per_million"`
+	AudioInputPerMillion            *string             `json:"audio_input_per_million"`
+	CachedAudioInputPerMillion      *string             `json:"cached_audio_input_per_million"`
+	AudioOutputPerMillion           *string             `json:"audio_output_per_million"`
+	ImageInputPerMillion            *string             `json:"image_input_per_million"`
+	CachedImageInputPerMillion      *string             `json:"cached_image_input_per_million"`
+	ImageOutputPerMillion           *string             `json:"image_output_per_million"`
+	UnitPrice                       *string             `json:"unit_price"`
+	PerRequest                      *string             `json:"per_request"`
+	BatchMultiplier                 *string             `json:"batch_multiplier"`
+	ToolCalls                       map[string]string   `json:"tool_calls"`
+	Tiers                           []usage.PriceTier   `json:"tiers"`
+	Windows                         *usage.PriceWindows `json:"windows"`
+	Currency                        string              `json:"currency"`
 }
 
 type PricingEntry struct {
@@ -240,6 +245,7 @@ type CardOwnerEntry struct {
 // priceEntryFromUsage carries one stored price into the configuration document.
 func priceEntryFromUsage(price usage.Price) PriceEntry {
 	return PriceEntry{
+		TrainingPerMillion: price.TrainingPerMillion, StoragePerGiBDay: price.StoragePerGiBDay, CacheStoragePerMillionTokenHour: price.CacheStoragePerMillionTokenHour, ContainerPerSession: price.ContainerPerSession,
 		VendorID: price.VendorID, ProviderKind: price.ProviderKind, Model: price.Model, Operation: price.Operation,
 		InputPerMillion: price.InputPerMillion, CachedInputPerMillion: price.CachedInputPerMillion,
 		OutputPerMillion: price.OutputPerMillion, CacheWriteInputPerMillion: price.CacheWriteInputPerMillion,
@@ -260,6 +266,7 @@ func priceEntryFromUsage(price usage.Price) PriceEntry {
 // usagePrice carries one document entry into the usage price list.
 func (e PriceEntry) usagePrice() usage.Price {
 	return usage.Price{
+		TrainingPerMillion: e.TrainingPerMillion, StoragePerGiBDay: e.StoragePerGiBDay, CacheStoragePerMillionTokenHour: e.CacheStoragePerMillionTokenHour, ContainerPerSession: e.ContainerPerSession,
 		VendorID: e.VendorID, ProviderKind: e.ProviderKind, Model: e.Model, Operation: e.Operation,
 		InputPerMillion: e.InputPerMillion, CachedInputPerMillion: e.CachedInputPerMillion,
 		OutputPerMillion: e.OutputPerMillion, CacheWriteInputPerMillion: e.CacheWriteInputPerMillion,
@@ -366,6 +373,7 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	slices.SortFunc(d.RetrievalBindings, func(a, b RetrievalBindingEntry) int { return strings.Compare(retrievalKey(a), retrievalKey(b)) })
 	slices.SortFunc(d.AgentPublications, func(a, b PublicationEntry) int { return strings.Compare(publicationKey(a), publicationKey(b)) })
 	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {
 		ka, kb := mcpKey(a), mcpKey(b)

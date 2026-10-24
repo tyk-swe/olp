@@ -35,6 +35,8 @@ type call struct {
 	semanticQueryInvalid bool
 	retainedMetered      bool
 	retainedAccounting   bool
+	retainedHousekeeping bool
+	retainedFreeControl  bool
 	anthropicFilesBeta   bool
 	anthropicFileBinary  bool
 	geminiFileBinary     bool
@@ -158,7 +160,8 @@ type routeLeg struct {
 
 // generationCall owns the source, delivery and continuation of a generation.
 type generationCall struct {
-	parsed *wire.Request
+	parsed    *wire.Request
+	resources *generationResources
 
 	emit wire.Emit
 

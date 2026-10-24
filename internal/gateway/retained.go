@@ -30,7 +30,11 @@ func (s *Server) authorizeListedResource(ctx context.Context, authority access.A
 	if s.Resolver == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable.")
 	}
-	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, "batch")
+	operation := "batch"
+	if res.Kind == resources.KindFile {
+		operation = retainedFileOperation(res)
+	}
+	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, operation)
 	if err != nil {
 		return pinUnavailable()
 	}
@@ -126,7 +130,11 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 				return nil, nil, e
 			}
 		}
-		if strict, known := strictResourceKind(res.Kind); known {
+		if res.Kind == resources.KindFile && retainedFileOperation(res) != "batch" {
+			if e := retainedContract(route.Fidelity.Strict(), current.Fidelity, use); e != nil {
+				return nil, nil, e
+			}
+		} else if strict, known := strictResourceKind(res.Kind); known {
 			if e := retainedContract(strict, current.Fidelity, use); e != nil {
 				return nil, nil, e
 			}

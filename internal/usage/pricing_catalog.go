@@ -68,6 +68,7 @@ func catalogDocument(c *catalog.Catalog, vendorKind func(string) (string, bool))
 				}
 				for _, name := range append([]string{model.ID}, model.Aliases...) {
 					doc.Prices = append(doc.Prices, Price{
+						TrainingPerMillion: catalogRate(listed.TrainingPerMillion), StoragePerGiBDay: catalogRate(listed.StoragePerGiBDay), CacheStoragePerMillionTokenHour: catalogRate(listed.CacheStoragePerMillionTokenHour), ContainerPerSession: catalogToolCalls(listed.ContainerPerSession),
 						VendorID: &vendor.ID, ProviderKind: kind, Model: name, Operation: listed.Operation, Currency: c.Currency,
 						InputPerMillion: catalogRate(listed.InputPerMillion), CachedInputPerMillion: catalogRate(listed.CachedInputPerMillion),
 						CacheWriteInputPerMillion: catalogRate(listed.CacheWriteInputPerMillion), CacheWrite5MInputPerMillion: catalogRate(listed.CacheWrite5MInputPerMillion),

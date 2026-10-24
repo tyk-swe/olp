@@ -35,6 +35,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	}
 	s.registerRetainedLifecycle(mux)
 	s.registerRetainedGeneric(mux)
+	s.registerRetrieval(mux)
 	s.registerCloudBatchState(mux)
 	if s.Media != nil {
 		s.registerAnthropicState(mux)
@@ -720,7 +721,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if slug == "" {
-		s.stateFail(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route must name a batch-enabled route.", nil), x.family)
+		s.stateFail(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route is required for file uploads.", nil), x.family)
 		return
 	}
 	snapshot := x.request.release.Snapshot
@@ -730,16 +731,12 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
-	if x.strict() && (!authority.Policy.AllowProviderState || !s.Resources.Encrypted()) {
+	if x.strict() && !authority.Policy.AllowProviderState {
 		s.stateFail(x, w, providerStateForbidden(), x.family)
 		return
 	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		s.stateFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."), x.family)
-		return
-	}
-	if !slices.Contains(route.Operations, "batch") {
-		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil), x.family)
 		return
 	}
 	if e := x.guardrailSurfaceGate(&route); e != nil {
@@ -769,6 +766,18 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	extra, mErr := form.TakeExtensions()
 	if mErr != nil {
 		s.stateFail(x, w, mediaError(mErr), x.family)
+		return
+	}
+	if purpose != "batch" {
+		s.uploadRetainedFile(w, r, x, authority, &route, file, purpose, extra)
+		return
+	}
+	if !slices.Contains(route.Operations, "batch") {
+		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil), x.family)
+		return
+	}
+	if x.strict() && !s.Resources.Encrypted() {
+		s.stateFail(x, w, providerStateForbidden(), x.family)
 		return
 	}
 	var strictSource []byte
@@ -1126,6 +1135,16 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	items := make([]json.RawMessage, 0, len(rows))
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
+		if retainedFileOperation(row) != "batch" {
+			if !authority.Policy.AllowProviderState {
+				s.stateFail(x, w, providerStateForbidden(), x.family)
+				return
+			}
+			if _, _, e := s.resolveResource(r.Context(), x, authority, row, retainedFileOperation(row), retainedHousekeeping); e != nil {
+				s.stateFail(x, w, e, x.family)
+				return
+			}
+		}
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
 			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", retainedHousekeeping) != nil {
@@ -1186,29 +1205,13 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 				return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
 			}
 		}
-		metadata, state, expires := fileMetadata(body, resourceModel(res))
-		if res.Kind != resources.KindStrictFile {
-			var prior map[string]json.RawMessage
-			_ = json.Unmarshal(res.Metadata, &prior)
-			if manifest, ok := prior["batch_manifest"]; ok {
-				var fields map[string]json.RawMessage
-				_ = json.Unmarshal(metadata, &fields)
-				fields["batch_manifest"] = manifest
-				metadata = mustJSON(fields)
-			}
-			var adapter, role string
-			_ = json.Unmarshal(prior["adapter"], &adapter)
-			_ = json.Unmarshal(prior["role"], &role)
-			if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
-				metadata = managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, role)
-			}
-		}
+		metadata, state, expires := refreshedFileMetadata(res, body)
 		var out []byte
 		if res.Kind == resources.KindStrictFile {
 			if _, _, err := strictResult(body, res.UpstreamID); err != nil {
 				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
 			}
-			x.completePinned()
+			x.completeFileControl()
 			_, contract, err := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
 			if err != nil {
 				return durableError(err)
@@ -1225,7 +1228,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 			}
 			out, err = durableProjection(body, res.ID, nil)
 		} else {
-			x.completePinned()
+			x.completeFileControl()
 			if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 				return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
 			}
@@ -1305,7 +1308,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		defer resp.Body.Close()
 		x.dispatched = true
 		// A successful DELETE status is the operation's terminal contract.
-		x.completePinned()
+		x.completeFileControl()
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		defer stopCommit()
@@ -1360,7 +1363,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 			}
 			return serverError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
-		x.completePinned()
+		x.completeFileControl()
 		defer spool.Remove(artifact.Handle)
 		opened, err := spool.Open(artifact.Handle)
 		if err != nil {
@@ -1410,6 +1413,30 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
+		return
+	}
+	if operation := retainedFileOperation(res); operation != "batch" {
+		if !authority.Policy.AllowProviderState {
+			s.stateFail(x, w, providerStateForbidden(), x.family)
+			return
+		}
+		x.operationOverride = operation
+		p, route, e := s.resolveResource(r.Context(), x, authority, res, operation, use)
+		if e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
+		x.route = route
+		ctx, cancel := s.stateDeadline(r.Context(), route)
+		defer cancel()
+		defer s.retainedSettle(ctx, x, p)
+		if e := s.admitRetainedRequest(ctx, x, authority, p, route, false); e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
+		if e := op(ctx, x, authority, res, p, route); e != nil {
+			s.stateFail(x, w, e, x.family)
+		}
 		return
 	}
 	p, route, e := s.admitDurable(r.Context(), x, authority, res, contract, "batch", use)
@@ -2190,4 +2217,36 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 	}
 	s.writeStateJSON(w, x, out)
 	return nil
+}
+
+// A refresh replaces provider-derived fields while retaining the private
+// authority that determines which native operation owns subsequent file calls.
+func refreshedFileMetadata(res *resources.Resource, body []byte) (json.RawMessage, string, *time.Time) {
+	metadata, state, expires := fileMetadata(body, resourceModel(res))
+	if res.Kind == resources.KindStrictFile {
+		return metadata, state, expires
+	}
+	var prior map[string]json.RawMessage
+	_ = json.Unmarshal(res.Metadata, &prior)
+	var adapter, role string
+	_ = json.Unmarshal(prior["adapter"], &adapter)
+	_ = json.Unmarshal(prior["role"], &role)
+	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+		metadata = managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, role)
+	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(metadata, &fields)
+	for _, name := range []string{"batch_manifest", "file_operation"} {
+		if value, present := prior[name]; present {
+			fields[name] = value
+		}
+	}
+	return mustJSON(fields), state, expires
+}
+
+func (x *call) completeFileControl() {
+	if x.retainedAccounting {
+		_ = observeRetainedUsage(x, oif.Document{}, false)
+	}
+	x.completePinned()
 }

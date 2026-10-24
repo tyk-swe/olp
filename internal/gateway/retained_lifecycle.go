@@ -627,7 +627,19 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *r
 	if x.route == nil {
 		x.route = route
 	}
-	gate := s.gateAttempt(ctx, x, p.attempt, &p.provider, &p.slot, max(resourceEstimate, x.estimate), s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	provider, slot := &p.provider, &p.slot
+	if x.retainedFreeControl {
+		copyProvider := p.provider
+		copySlot := p.slot
+		copySlot.TokensPerMinute = nil
+		if p.provider.Limits != nil {
+			copyLimits := *p.provider.Limits
+			copyLimits.TokensPerMinute = nil
+			copyProvider.Limits = &copyLimits
+		}
+		provider, slot = &copyProvider, &copySlot
+	}
+	gate := s.gateAttempt(ctx, x, p.attempt, provider, slot, max(resourceEstimate, x.estimate), s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

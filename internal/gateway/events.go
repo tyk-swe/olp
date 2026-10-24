@@ -144,8 +144,11 @@ type AttemptFact struct {
 	UsageObserved    bool
 	UsageComplete    bool
 	BillingUncertain bool
-	usageIncomplete  bool // native stream counters observed before terminal proof
-	localRefusal     bool // valid native work could not be projected or persisted locally
+	// TokenlessUsage records a control call's absence of token consumption,
+	// including file controls authorized through a generation route.
+	TokenlessUsage  bool
+	usageIncomplete bool // native stream counters observed before terminal proof
+	localRefusal    bool // valid native work could not be projected or persisted locally
 	// EstimateProvenance says how the admission estimate of this attempt's
 	// input was produced: usage.EstimateTokenizer, usage.EstimateCalibrated or
 	// usage.EstimateHeuristic. It is empty when no estimate was made, as for a
@@ -163,6 +166,7 @@ type AttemptFact struct {
 func (a *AttemptFact) observeUsage(observed *wire.Usage, complete bool) {
 	a.Usage = observed
 	a.usageIncomplete = observed != nil && !complete
+	a.TokenlessUsage = false
 }
 
 // recordEvidence records what the attempt proves about upstream billing. The

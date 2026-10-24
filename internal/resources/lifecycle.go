@@ -71,6 +71,9 @@ func (s *Store) PrepareLifecycle(ctx context.Context, resource *Resource, operat
 	if err != nil {
 		return nil, false, err
 	}
+	if err = s.prepareRetainedTx(ctx, tx, resource); err != nil {
+		return nil, false, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, false, err
 	}
@@ -115,7 +118,7 @@ func (s *Store) CompleteLifecycleChildren(ctx context.Context, r *Resource, chil
 	if tag.RowsAffected() != 1 {
 		return ErrSubmissionConflict
 	}
-	_, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET upstream_id=$2,state=$3,metadata=$4,expires_at=$5,updated_at=now() WHERE id=$1`, r.UUID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt)
+	err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET upstream_id=$2,state=$3,metadata=$4,expires_at=$5,updated_at=clock_timestamp() WHERE id=$1 RETURNING updated_at`, r.UUID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt).Scan(&r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("complete retained resource: %w", err)
 	}

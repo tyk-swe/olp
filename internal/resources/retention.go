@@ -77,6 +77,8 @@ func (s *Store) expireBatch(ctx context.Context, now time.Time, cursor *expiryCu
 	rows, err := tx.Query(ctx, `SELECT id,expires_at,
  CASE WHEN olp.resource_owns_pending_usage(kind) THEN metadata->'pending_usage' END FROM olp.provider_resources
  WHERE expires_at IS NOT NULL AND expires_at<$1
+ AND NOT EXISTS(SELECT 1 FROM olp.retained_submissions rs WHERE rs.resource_id=olp.provider_resources.id)
+ AND NOT EXISTS(SELECT 1 FROM olp.retained_settlements rs WHERE rs.resource_id=olp.provider_resources.id)
  AND ($3::timestamptz IS NULL OR (expires_at,id)>($3,$4)) ORDER BY expires_at,id
  LIMIT $2 FOR UPDATE SKIP LOCKED`, now, expiryBatch, after, id)
 	if err != nil {

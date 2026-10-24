@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +26,7 @@ type Management struct {
 
 func (m *Management) Register(mux *http.ServeMux) {
 	m.registerCodeMode(mux)
+	m.registerRetainedManagement(mux)
 	m.Access.Route(mux, "GET /api/v1/provider-resources", m.list)
 	m.Access.Route(mux, "GET /api/v1/provider-resource-contracts", m.contracts)
 }
@@ -38,7 +40,11 @@ func (m *Management) contracts(r *http.Request, p access.Principal) (access.Repl
 		}
 		items = append(items, map[string]any{"operation": family.Operation, "surface": family.Surface, "kind": family.Kind, "path": family.Path, "methods": family.Methods, "providers": family.Providers, "implemented": implemented, "metered": family.Metered})
 	}
-	return access.OK(map[string]any{"revision": retainedapi.Revision, "items": items}), nil
+	endpoints := make([]map[string]any, 0)
+	for _, e := range retainedapi.Endpoints() {
+		endpoints = append(endpoints, map[string]any{"operation": e.Operation, "surface": e.Surface, "kind": e.Kind, "action": e.Action, "method": e.Method, "pattern": e.Pattern, "ancestors": append([]string{}, e.Ancestors...), "metered": e.Metered})
+	}
+	return access.OK(map[string]any{"revision": retainedapi.Revision, "items": items, "endpoints": endpoints}), nil
 }
 
 type manageFilters struct {
@@ -89,6 +95,7 @@ type manageRecord struct {
 	expiresAt     *time.Time
 	createdAt     time.Time
 	updatedAt     time.Time
+	retained      *contract.RetainedSettlementStatus
 	settlement    *manageSettlementRecord
 }
 
@@ -198,6 +205,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 				LastErrorClass: lastError, CloseAfter: record.settlement.closeAfter, ClosedAt: closed,
 			})
 		}
+		item.RetainedSettlement = record.retained
 		items[i] = item
 	}
 	response := contract.ProviderResourceListResponse{Items: items}
@@ -214,11 +222,13 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 			COALESCE(r.metadata->>'upstream_model', '') AS upstream_model, r.state,
 			r.expires_at, r.created_at, r.updated_at,
 			bs.resource_id AS settlement_id, bs.state AS settlement_state, bs.expected_results,
-			bs.settled_results, bs.uncertain_results, bs.last_error_class, bs.close_after, bs.closed_at
+			bs.settled_results, bs.uncertain_results, bs.last_error_class, bs.close_after, bs.closed_at,
+ CASE WHEN rs.resource_id IS NULL THEN NULL ELSE jsonb_build_object('state',rs.state,'missing_evidence',rs.state<>'closed','remote_terminated',rs.remote_terminated,'terminal_at',rs.terminal_at,'last_error',rs.last_error,'next_observation_at',rs.poll_after,'models',ARRAY(SELECT jsonb_object_keys(rs.templates))) END AS retained_settlement
 		FROM olp.provider_resources r
 		JOIN olp.providers p ON p.id = r.provider_id
 		JOIN olp.api_keys k ON k.id = r.api_key_id
 		LEFT JOIN olp.batch_settlements bs ON bs.resource_id = r.id
+ LEFT JOIN olp.retained_settlements rs ON rs.resource_id=r.id
 		UNION ALL
 		SELECT bs.resource_id AS id, bs.kind, bs.api_key_id, k.name AS api_key_name,
 			bs.route_slug AS route, bs.provider_id, p.name AS provider_name,
@@ -226,7 +236,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 			COALESCE(bs.template->>'upstream_model', '') AS upstream_model, bs.state,
 			bs.close_after AS expires_at, bs.created_at, bs.updated_at,
 			bs.resource_id AS settlement_id, bs.state AS settlement_state, bs.expected_results,
-			bs.settled_results, bs.uncertain_results, bs.last_error_class, bs.close_after, bs.closed_at
+			bs.settled_results, bs.uncertain_results, bs.last_error_class, bs.close_after, bs.closed_at,NULL::jsonb AS retained_settlement
 		FROM olp.batch_settlements bs
 		LEFT JOIN olp.provider_resources r ON r.id = bs.resource_id
 		JOIN olp.providers p ON p.id = bs.provider_id
@@ -236,7 +246,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 	SELECT e.id, e.kind, e.api_key_id::text, e.api_key_name, e.route, e.provider_id::text, e.provider_name,
 		e.upstream_id, e.upstream_model, e.state, e.expires_at, e.created_at, e.updated_at,
 		e.settlement_id, e.settlement_state, e.expected_results, e.settled_results,
-		e.uncertain_results, e.last_error_class, e.close_after, e.closed_at
+		e.uncertain_results, e.last_error_class, e.close_after, e.closed_at,e.retained_settlement
 	FROM entries e WHERE TRUE`
 	var args []any
 	push := func(clause string, value any) {
@@ -275,6 +285,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 	var records []manageRecord
 	for rows.Next() {
 		var record manageRecord
+		var retainedRaw []byte
 		var settlementID *uuid.UUID
 		var settlementState *string
 		var expectedResults *int64
@@ -285,8 +296,14 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 			&record.route, &record.providerID, &record.providerName, &record.upstreamID,
 			&record.upstreamModel, &record.state, &record.expiresAt,
 			&record.createdAt, &record.updatedAt, &settlementID, &settlementState, &expectedResults,
-			&settledResults, &uncertainResults, &lastErrorClass, &closeAfter, &closedAt); err != nil {
+			&settledResults, &uncertainResults, &lastErrorClass, &closeAfter, &closedAt, &retainedRaw); err != nil {
 			return nil, nil, err
+		}
+		if len(retainedRaw) > 0 && string(retainedRaw) != "null" {
+			record.retained = &contract.RetainedSettlementStatus{}
+			if err = json.Unmarshal(retainedRaw, record.retained); err != nil {
+				return nil, nil, err
+			}
 		}
 		if settlementID != nil && settlementState != nil && closeAfter != nil {
 			record.settlement = &manageSettlementRecord{

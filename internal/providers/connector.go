@@ -223,6 +223,9 @@ type modelListing struct {
 // listingFor returns how the configured upstream lists its models, or false
 // when it has no listing and operators declare its models.
 func listingFor(cfg *Configuration) (modelListing, bool, error) {
+	if cfg.transport().RetrievalBackend() != "" {
+		return modelListing{}, false, nil
+	}
 	switch cfg.Kind {
 	case KindAzure, KindVertex:
 		return modelListing{}, false, nil

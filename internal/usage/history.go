@@ -43,6 +43,11 @@ type Cursor struct {
 // metadata plus the usage its attempts accounted for. Token totals and money
 // are absent (null) when no fact exists yet, which is different from zero.
 type RequestSummary struct {
+	TrainingTokens     *int64           `json:"training_tokens"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
+	ContainerSessions  map[string]int64 `json:"container_sessions"`
+
 	CacheResult             *string                  `json:"cache_result"`
 	EvaluatorGuardrailID    *string                  `json:"evaluator_guardrail_id,omitempty"`
 	BudgetBoundary          string                   `json:"budget_boundary,omitempty"`
@@ -89,6 +94,12 @@ type RequestSummary struct {
 // provenance that explains why this provider served it and the charge evidence
 // that explains what it cost.
 type AttemptDetail struct {
+	InvocationCount    *int64           `json:"invocation_count"`
+	TrainingTokens     *int64           `json:"training_tokens"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
+	ContainerSessions  map[string]int64 `json:"container_sessions"`
+
 	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
 	Routing                 *Routing              `json:"routing"`
 	ID                      string                `json:"id"`
@@ -151,9 +162,11 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
         u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
         u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.guardrail_decisions, r.end_user_digest,
-        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text,r.cache_result
+        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text,r.cache_result,u.training_tokens,u.storage_byte_seconds,u.cache_token_seconds,u.container_sessions
     FROM olp.requests r LEFT JOIN LATERAL (
-      SELECT SUM(f.input_tokens)::bigint AS input_tokens,
+      SELECT SUM(f.training_tokens)::bigint AS training_tokens,SUM(f.storage_byte_seconds)::text AS storage_byte_seconds,SUM(f.cache_token_seconds)::text AS cache_token_seconds,
+ (SELECT jsonb_object_agg(tier,quantity) FROM (SELECT e.key AS tier,sum(e.value::bigint) AS quantity FROM olp.attempt_usage_facts cf CROSS JOIN LATERAL jsonb_each_text(COALESCE(cf.container_sessions,'{}'::jsonb)) e WHERE cf.request_id=r.id AND cf.request_started_at=r.started_at GROUP BY e.key) counts) AS container_sessions,
+ SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
              SUM(f.cached_input_tokens)::bigint AS cached_input_tokens,
              SUM(f.cache_write_input_tokens)::bigint AS cache_write_input_tokens,
@@ -182,7 +195,7 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
 		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
 		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.GuardrailDecisions, &s.EndUserDigest,
-		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID, &s.CacheResult}
+		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID, &s.CacheResult, &s.TrainingTokens, &s.StorageByteSeconds, &s.CacheTokenSeconds, &s.ContainerSessions}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.
@@ -326,7 +339,7 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         f.estimated_cost::text, btrim(f.currency), f.unpriced,
         f.pricing_revision_id::text, f.commitment_weight::text,
         f.commitment_amount::text, f.commitment_period,
-        f.discount_id::text, f.charge::text, f.rate_card_revision_id::text,a.guardrail_decisions
+        f.discount_id::text, f.charge::text, f.rate_card_revision_id::text,a.guardrail_decisions,f.training_tokens,f.storage_byte_seconds::text,f.cache_token_seconds::text,f.container_sessions,f.invocation_count
     FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
     LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
         AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal
@@ -367,7 +380,7 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 			&attempt.EstimatedCost,
 			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID,
 			&attempt.CommitmentWeight, &attempt.CommitmentAmount, &attempt.CommitmentPeriod,
-			&attempt.DiscountID, &attempt.Charge, &attempt.RateCardRevisionID, &attempt.GuardrailDecisions); err != nil {
+			&attempt.DiscountID, &attempt.Charge, &attempt.RateCardRevisionID, &attempt.GuardrailDecisions, &attempt.TrainingTokens, &attempt.StorageByteSeconds, &attempt.CacheTokenSeconds, &attempt.ContainerSessions, &attempt.InvocationCount); err != nil {
 			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
 		}
 		if attemptToolCalls != nil {

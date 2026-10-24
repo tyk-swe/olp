@@ -100,19 +100,23 @@ type Lifecycle struct {
 // component the vendor charges that OLP cannot yet price is named in
 // Unrepresentable rather than dropped silently.
 type Price struct {
-	Operation                   string   `json:"operation"`
-	InputPerMillion             *Decimal `json:"input_per_million,omitempty"`
-	CachedInputPerMillion       *Decimal `json:"cached_input_per_million,omitempty"`
-	CacheWriteInputPerMillion   *Decimal `json:"cache_write_input_per_million,omitempty"`
-	CacheWrite5MInputPerMillion *Decimal `json:"cache_write_5m_input_per_million,omitempty"`
-	CacheWrite1HInputPerMillion *Decimal `json:"cache_write_1h_input_per_million,omitempty"`
-	OutputPerMillion            *Decimal `json:"output_per_million,omitempty"`
-	AudioInputPerMillion        *Decimal `json:"audio_input_per_million,omitempty"`
-	CachedAudioInputPerMillion  *Decimal `json:"cached_audio_input_per_million,omitempty"`
-	AudioOutputPerMillion       *Decimal `json:"audio_output_per_million,omitempty"`
-	ImageInputPerMillion        *Decimal `json:"image_input_per_million,omitempty"`
-	CachedImageInputPerMillion  *Decimal `json:"cached_image_input_per_million,omitempty"`
-	ImageOutputPerMillion       *Decimal `json:"image_output_per_million,omitempty"`
+	TrainingPerMillion              *Decimal           `json:"training_per_million,omitempty"`
+	StoragePerGiBDay                *Decimal           `json:"storage_per_gib_day,omitempty"`
+	CacheStoragePerMillionTokenHour *Decimal           `json:"cache_storage_per_million_token_hour,omitempty"`
+	ContainerPerSession             map[string]Decimal `json:"container_per_session,omitempty"`
+	Operation                       string             `json:"operation"`
+	InputPerMillion                 *Decimal           `json:"input_per_million,omitempty"`
+	CachedInputPerMillion           *Decimal           `json:"cached_input_per_million,omitempty"`
+	CacheWriteInputPerMillion       *Decimal           `json:"cache_write_input_per_million,omitempty"`
+	CacheWrite5MInputPerMillion     *Decimal           `json:"cache_write_5m_input_per_million,omitempty"`
+	CacheWrite1HInputPerMillion     *Decimal           `json:"cache_write_1h_input_per_million,omitempty"`
+	OutputPerMillion                *Decimal           `json:"output_per_million,omitempty"`
+	AudioInputPerMillion            *Decimal           `json:"audio_input_per_million,omitempty"`
+	CachedAudioInputPerMillion      *Decimal           `json:"cached_audio_input_per_million,omitempty"`
+	AudioOutputPerMillion           *Decimal           `json:"audio_output_per_million,omitempty"`
+	ImageInputPerMillion            *Decimal           `json:"image_input_per_million,omitempty"`
+	CachedImageInputPerMillion      *Decimal           `json:"cached_image_input_per_million,omitempty"`
+	ImageOutputPerMillion           *Decimal           `json:"image_output_per_million,omitempty"`
 	// UnitPrice is the price of one media unit the operation records: an
 	// image, a second of audio or video, a character of speech input, or a
 	// search unit.
@@ -308,7 +312,7 @@ var dayTime = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$|^24:00$`)
 
 func (c *Catalog) validatePrice(p Price) error {
 	priced := false
-	for _, rate := range append(priceRates(&p), p.UnitPrice, p.PerRequest, p.BatchMultiplier) {
+	for _, rate := range append(priceRates(&p), p.UnitPrice, p.PerRequest, p.BatchMultiplier, p.TrainingPerMillion, p.StoragePerGiBDay, p.CacheStoragePerMillionTokenHour) {
 		if rate != nil {
 			if !rate.Valid() {
 				return fmt.Errorf("rate %q is not a decimal", *rate)
@@ -331,6 +335,15 @@ func (c *Catalog) validatePrice(p Price) error {
 			if !fee.Valid() {
 				return fmt.Errorf("tool fee %q is not a decimal", string(fee))
 			}
+		}
+		priced = true
+	}
+	if len(p.ContainerPerSession) > 16 {
+		return errors.New("too many container tiers")
+	}
+	for tier, fee := range p.ContainerPerSession {
+		if !regexp.MustCompile(`^[1-9][0-9]{0,4}g$`).MatchString(tier) || !fee.Valid() {
+			return errors.New("invalid container tier rate")
 		}
 		priced = true
 	}

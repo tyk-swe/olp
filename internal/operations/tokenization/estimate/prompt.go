@@ -39,10 +39,25 @@ type Count struct {
 // many bytes there were. That is every count there is to make, and it is what
 // keeps a megabyte request from weighing twice.
 type Prompt struct {
-	request    *wire.Request
-	generation bool
-	in         input
-	tally      *tally
+	request       *wire.Request
+	generation    bool
+	in            input
+	tally         *tally
+	retainedInput int64
+}
+
+// WithRetainedInputTokens includes an authoritative, owner-verified provider
+// cache quantity in context, token admission and input cost estimates. It does
+// not retain the cached content or change the shared count of inline text.
+func (p *Prompt) WithRetainedInputTokens(tokens int64) *Prompt {
+	copy := *p
+	copy.retainedInput = min(max(tokens, 0), MaxTokens)
+	return &copy
+}
+
+func (p *Prompt) retainedCount(count Count, context int64) (Count, int64) {
+	count.Tokens = addBounded(count.Tokens, p.retainedInput)
+	return count, addBounded(context, p.retainedInput)
 }
 
 // tally is the counts of one prompt, which a prompt of the same text can share.
@@ -109,7 +124,7 @@ func (p *Prompt) input(c Counter) (Count, int64) {
 	defer t.mu.Unlock()
 	for _, entry := range t.counted {
 		if entry.family == family {
-			return entry.count, entry.context
+			return p.retainedCount(entry.count, entry.context)
 		}
 	}
 	var count Count
@@ -143,7 +158,7 @@ func (p *Prompt) input(c Counter) (Count, int64) {
 	if t.observe != nil {
 		t.observe(family)
 	}
-	return count, context
+	return p.retainedCount(count, context)
 }
 
 // Estimate is what admission reserves for one request on one model's counter.

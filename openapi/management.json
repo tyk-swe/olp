@@ -253,7 +253,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -328,7 +328,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -821,6 +821,47 @@
               "string",
               "null"
             ]
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "invocation_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Verified generation/grader invocation count for deferred per-model usage."
           }
         },
         "required": [
@@ -1776,6 +1817,13 @@
             "items": {
               "$ref": "#/components/schemas/ConfigurationAgentPublication"
             }
+          },
+          "retrieval_bindings": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationRetrievalBinding"
+            }
           }
         },
         "required": [
@@ -2100,6 +2148,37 @@
                 "$ref": "#/components/schemas/PriceWindows"
               }
             ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
           }
         },
         "required": [
@@ -2858,6 +2937,15 @@
           },
           "commitment": {
             "$ref": "#/components/schemas/Commitment"
+          },
+          "tuning_dataset_uri_prefixes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
           }
         },
         "type": "object"
@@ -3047,7 +3135,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -3122,7 +3210,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3511,7 +3599,7 @@
             ]
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -3538,7 +3626,7 @@
             "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
           },
           "url": {
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
             "type": "string"
           }
         },
@@ -5431,7 +5519,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "required": [
@@ -6235,6 +6323,39 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
           }
         },
         "required": [
@@ -6960,6 +7081,37 @@
                 "$ref": "#/components/schemas/PriceWindows"
               }
             ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
           }
         },
         "required": [
@@ -7134,6 +7286,37 @@
                 "$ref": "#/components/schemas/PriceWindows"
               }
             ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
           }
         },
         "required": [
@@ -8504,7 +8687,8 @@
           "watsonx",
           "azure_openai",
           "openai_compatible",
-          "plugin"
+          "plugin",
+          "azure_ai_search"
         ],
         "type": "string",
         "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
@@ -9226,6 +9410,9 @@
           },
           "upstream_model": {
             "type": "string"
+          },
+          "retained_settlement": {
+            "$ref": "#/components/schemas/RetainedSettlementStatus"
           }
         },
         "required": [
@@ -10559,6 +10746,39 @@
               "bypass",
               null
             ]
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
           }
         },
         "required": [
@@ -12269,6 +12489,37 @@
                 "$ref": "#/components/schemas/PriceWindows"
               }
             ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
           }
         },
         "required": [
@@ -13051,7 +13302,7 @@
         "type": "object"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
@@ -13162,7 +13413,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -13237,7 +13488,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -13400,7 +13651,7 @@
             "type": "string"
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -13428,7 +13679,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "type": "object",
@@ -13667,6 +13918,28 @@
             "description": "Billable attempts no charge was resolved for.",
             "format": "int64",
             "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
           }
         },
         "required": [
@@ -13882,6 +14155,28 @@
             "description": "Billable attempts no charge was resolved for.",
             "format": "int64",
             "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
           }
         },
         "required": [
@@ -14050,6 +14345,28 @@
             "description": "Billable attempts no charge was resolved for.",
             "format": "int64",
             "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
           }
         },
         "required": [
@@ -17339,7 +17656,7 @@
         "type": "object"
       },
       "RequestOrigin": {
-        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key.",
+        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key. retained_settlement: verified retained billing coverage linked to its original submission.",
         "enum": [
           "caller",
           "shadow",
@@ -17347,7 +17664,8 @@
           "cache_embedding",
           "probe",
           "playground",
-          "batch_settlement"
+          "batch_settlement",
+          "retained_settlement"
         ],
         "type": "string"
       },
@@ -18088,6 +18406,28 @@
           "unpriced_requests": {
             "format": "int64",
             "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
           }
         },
         "required": [
@@ -20738,7 +21078,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           },
           "etag": {
             "type": "string"
@@ -20761,7 +21101,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           }
         }
       },
@@ -20862,6 +21202,37 @@
                 "type": "null"
               }
             ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
           }
         },
         "required": [
@@ -23719,6 +24090,37 @@
               "string",
               "null"
             ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
           }
         },
         "required": [
@@ -26016,8 +26418,550 @@
             "items": {
               "$ref": "#/components/schemas/ProviderResourceContract"
             }
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceEndpoint"
+            }
           }
         }
+      },
+      "RetrievalBindingFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "search": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Explicit logical metadata keys mapped to native backend fields. Requests cannot use unmapped fields."
+          }
+        }
+      },
+      "RetrievalBindingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "bedrock_knowledge_base",
+              "vertex_rag",
+              "azure_ai_search"
+            ]
+          },
+          "backend_resource": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "fields": {
+            "$ref": "#/components/schemas/RetrievalBindingFields"
+          },
+          "key_grants": {
+            "type": "array",
+            "maxItems": 2000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Explicit active API-key UUIDs in this binding project; an empty list grants no access."
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "route",
+          "target_id",
+          "backend",
+          "backend_resource",
+          "fields",
+          "key_grants",
+          "enabled"
+        ]
+      },
+      "RetrievalBindingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "bedrock_knowledge_base",
+              "vertex_rag",
+              "azure_ai_search"
+            ]
+          },
+          "backend_resource": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "fields": {
+            "$ref": "#/components/schemas/RetrievalBindingFields"
+          },
+          "key_grants": {
+            "type": "array",
+            "maxItems": 2000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Explicit active API-key UUIDs in this binding project; an empty list grants no access."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "description": "Serving connection derived from the selected target; caller input cannot authorize a different connection."
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "route",
+          "target_id",
+          "backend",
+          "backend_resource",
+          "fields",
+          "key_grants",
+          "enabled",
+          "id",
+          "revision_id",
+          "revision",
+          "etag",
+          "retired_at",
+          "provider_id"
+        ]
+      },
+      "RetrievalBindingListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RetrievalBindingResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "RetrievalBindingRevisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binding_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/RetrievalBindingInput"
+          }
+        },
+        "required": [
+          "id",
+          "binding_id",
+          "revision",
+          "definition"
+        ]
+      },
+      "ConfigurationRetrievalBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "bedrock_knowledge_base",
+              "vertex_rag",
+              "azure_ai_search"
+            ]
+          },
+          "backend_resource": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "fields": {
+            "$ref": "#/components/schemas/RetrievalBindingFields"
+          },
+          "key_grants": {
+            "type": "array",
+            "maxItems": 2000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "description": "Exact project-local API-key names resolved independently in the destination. Missing or ambiguous keys block promotion."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "target_provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "name",
+          "route",
+          "backend",
+          "backend_resource",
+          "fields",
+          "key_grants",
+          "enabled",
+          "project",
+          "target_provider"
+        ]
+      },
+      "RetainedSettlementStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "evidence_missing",
+              "closed"
+            ]
+          },
+          "missing_evidence": {
+            "type": "boolean"
+          },
+          "remote_terminated": {
+            "type": "boolean"
+          },
+          "terminal_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_observation_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Models authorized and priced at original acceptance."
+          }
+        },
+        "required": [
+          "state",
+          "missing_evidence",
+          "remote_terminated",
+          "next_observation_at"
+        ]
+      },
+      "RetainedUsageEvidenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "evidence_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inclusive UTC interval start, canonicalized to PostgreSQL microsecond precision."
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exclusive UTC interval end, canonicalized to PostgreSQL microsecond precision."
+          },
+          "model": {
+            "type": "string",
+            "description": "Required when acceptance pinned more than one model."
+          },
+          "terminal": {
+            "type": "boolean",
+            "description": "Requests closure only after independent remote termination and complete interval coverage."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cached_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Required together with input and output totals for evaluation generation evidence; omission is unknown."
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "invocation_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Required for per-model evaluation usage. Actual generation/grader invocations; never the original submission request."
+          }
+        },
+        "required": [
+          "idempotency_key",
+          "evidence_digest",
+          "start",
+          "end",
+          "terminal"
+        ]
+      },
+      "RetainedReconcileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "upstream_id": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Verification hint only; adoption also requires authenticated provider evidence of original intent correlation."
+          }
+        }
+      },
+      "RetainedActionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "settlement_status": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "ProviderResourceEndpoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "ancestors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation",
+          "surface",
+          "kind",
+          "action",
+          "method",
+          "pattern",
+          "ancestors",
+          "metered"
+        ]
       }
     },
     "securitySchemes": {
@@ -26034,7 +26978,7 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_…). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
+        "description": "Management automation token (olpm_\u2026). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -34314,7 +35258,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -34482,7 +35426,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -61906,6 +62850,760 @@
           {
             "managementToken": [
               "read"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/retrieval-bindings": {
+      "get": {
+        "operationId": "list_retrieval_bindings",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "list retrieval bindings",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "create retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Binding created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalBindingInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/retrieval-bindings/{binding_id}": {
+      "get": {
+        "operationId": "get_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "get retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "update retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalBindingInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "delete retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Binding retired; immutable history preserved"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/retrieval-bindings/{binding_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_retrieval_binding_revision",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "get retrieval binding revision",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingRevisionResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/provider-resources/{id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_provider_resource",
+        "description": "Schedule pinned reconciliation. Upstream IDs are verification hints and never authorize adoption.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainedReconcileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retained operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/provider-resources/{id}/usage-evidence": {
+      "post": {
+        "operationId": "submit_provider_resource_usage_evidence",
+        "description": "Record audited operator-verified usage through the same atomic coverage ledger as provider evidence. Ownership and pricing pins are derived by the server. Requires installation settings and project change authority.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainedUsageEvidenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retained operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
             ]
           }
         ],

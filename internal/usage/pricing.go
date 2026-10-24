@@ -30,7 +30,7 @@ const MaxRevisionPrices = 10000
 // the database CHECK, so an unknown kind is refused with a field error rather
 // than a constraint violation.
 var providerKinds = []string{"openai", "anthropic", "gemini", "vertex_ai", "bedrock", "sagemaker", "watsonx",
-	"azure_openai", "openai_compatible", "plugin"}
+	"azure_openai", "azure_ai_search", "openai_compatible", "plugin"}
 
 // priceOperations are the operations a price may be scoped to, and the
 // operations a usage filter may name.
@@ -52,15 +52,19 @@ func validProviderKind(value string) bool {
 }
 
 // Price is one rate in a pricing revision. Rates are exact decimal strings:
-// they are stored as `numeric` and multiplied by token counts in PostgreSQL, so
-// no rounding ever happens in Go.
+// stored as numeric. PostgreSQL and the Go admission mirror round money once
+// at settlement precision after applying all quantities and multipliers.
 type Price struct {
-	VendorID        *string `json:"vendor_id"`
-	ProviderKind    string  `json:"provider_kind"`
-	ProviderID      *string `json:"provider_id"`
-	Model           string  `json:"model"`
-	Operation       string  `json:"operation"`
-	InputPerMillion *string `json:"input_per_million"`
+	TrainingPerMillion              *string           `json:"training_per_million"`
+	StoragePerGiBDay                *string           `json:"storage_per_gib_day"`
+	CacheStoragePerMillionTokenHour *string           `json:"cache_storage_per_million_token_hour"`
+	ContainerPerSession             map[string]string `json:"container_per_session"`
+	VendorID                        *string           `json:"vendor_id"`
+	ProviderKind                    string            `json:"provider_kind"`
+	ProviderID                      *string           `json:"provider_id"`
+	Model                           string            `json:"model"`
+	Operation                       string            `json:"operation"`
+	InputPerMillion                 *string           `json:"input_per_million"`
 	// CachedInputPerMillion rates the cached share of the input tokens. Absent
 	// means cached tokens bill at the full input rate.
 	CachedInputPerMillion *string `json:"cached_input_per_million"`
@@ -277,13 +281,13 @@ func insertPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Price)
              audio_input_per_million, cached_audio_input_per_million, audio_output_per_million,
              image_input_per_million, cached_image_input_per_million, image_output_per_million,
              per_request, batch_multiplier, tool_calls, tiers, windows,
-             unit_price, currency, vendor_id)
+             unit_price, currency, vendor_id, training_per_million, storage_per_gib_day, cache_storage_per_million_token_hour, container_per_session)
         VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7::text::numeric, $8::text::numeric,
                 $9::text::numeric, $10::text::numeric, $11::text::numeric, $12::text::numeric,
                 $13::text::numeric, $14::text::numeric, $15::text::numeric, $16::text::numeric,
                 $17::text::numeric, $18::text::numeric, $19::text::numeric,
                 $20::jsonb, $21::jsonb, $22::jsonb,
-                $23, $24, $25)`,
+                $23, $24, $25, $26::text::numeric, $27::text::numeric, $28::text::numeric, $29::jsonb)`,
 		revisionID, price.ProviderKind, price.ProviderID, price.Model, price.Operation,
 		price.InputPerMillion, price.CachedInputPerMillion, price.OutputPerMillion,
 		price.CacheWriteInputPerMillion, price.CacheWrite5MInputPerMillion,
@@ -292,7 +296,7 @@ func insertPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Price)
 		price.ImageInputPerMillion, price.CachedImageInputPerMillion, price.ImageOutputPerMillion,
 		price.PerRequest, price.BatchMultiplier,
 		toolCalls, tiers, windows,
-		price.UnitPrice, price.Currency, price.VendorID)
+		price.UnitPrice, price.Currency, price.VendorID, price.TrainingPerMillion, price.StoragePerGiBDay, price.CacheStoragePerMillionTokenHour, optionalJSON(price.ContainerPerSession))
 	if err != nil {
 		return fmt.Errorf("store price: %w", err)
 	}
@@ -389,6 +393,10 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 	entry.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
 	// Validation writes normalized values back into the entry, so clone the
 	// structured components rather than writing through to the caller's.
+	entry.ContainerPerSession = maps.Clone(price.ContainerPerSession)
+	if err := normalizeContainerRates(entry.ContainerPerSession); err != nil {
+		return Price{}, err
+	}
 	if price.ToolCalls != nil {
 		entry.ToolCalls = maps.Clone(price.ToolCalls)
 	}
@@ -441,7 +449,7 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 			"Pricing entries require a model and a three-letter ISO currency.")
 	}
 	if entry.InputPerMillion == nil && entry.OutputPerMillion == nil && entry.UnitPrice == nil &&
-		entry.PerRequest == nil && len(entry.ToolCalls) == 0 &&
+		entry.PerRequest == nil && len(entry.ToolCalls) == 0 && entry.TrainingPerMillion == nil && entry.StoragePerGiBDay == nil && entry.CacheStoragePerMillionTokenHour == nil && len(entry.ContainerPerSession) == 0 &&
 		entry.AudioInputPerMillion == nil && entry.AudioOutputPerMillion == nil &&
 		entry.ImageInputPerMillion == nil && entry.ImageOutputPerMillion == nil {
 		return Price{}, access.Invalid("prices", "Pricing entries require at least one rate.")
@@ -462,7 +470,7 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		entry.CacheWrite5MInputPerMillion, entry.CacheWrite1HInputPerMillion,
 		entry.AudioInputPerMillion, entry.CachedAudioInputPerMillion, entry.AudioOutputPerMillion,
 		entry.ImageInputPerMillion, entry.CachedImageInputPerMillion, entry.ImageOutputPerMillion,
-		entry.PerRequest, entry.BatchMultiplier} {
+		entry.PerRequest, entry.BatchMultiplier, entry.TrainingPerMillion, entry.StoragePerGiBDay, entry.CacheStoragePerMillionTokenHour} {
 		if amount == nil {
 			continue
 		}
@@ -689,7 +697,7 @@ const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.create
         p.image_output_per_million::text,
         p.per_request::text, p.batch_multiplier::text,
         p.tool_calls::text, p.tiers::text, p.windows::text,
-        p.unit_price::text, btrim(p.currency)
+        p.unit_price::text, btrim(p.currency), p.training_per_million::text, p.storage_per_gib_day::text, p.cache_storage_per_million_token_hour::text, p.container_per_session::text
     FROM olp.pricing_revisions r
     LEFT JOIN olp.pricing_source_snapshots snap ON snap.id = r.source_snapshot_id
     LEFT JOIN olp.pricing_sources src ON src.id = snap.source_id
@@ -718,7 +726,7 @@ func ListRevisions(ctx context.Context, q access.Queryer, beforeRevision *int, l
 		var revision Revision
 		var price Price
 		var kind, model, operation, currency *string
-		var toolCalls, tiers, windows *string
+		var toolCalls, tiers, windows, containerSessions *string
 		if err = rows.Scan(&revision.ID, &revision.Revision, &revision.EffectiveAt,
 			&revision.CreatedBy, &revision.CreatedAt, &revision.SourceSnapshotID, &revision.SourceName,
 			&price.VendorID, &kind, &price.ProviderID,
@@ -730,8 +738,11 @@ func ListRevisions(ctx context.Context, q access.Queryer, beforeRevision *int, l
 			&price.CachedImageInputPerMillion, &price.ImageOutputPerMillion,
 			&price.PerRequest, &price.BatchMultiplier,
 			&toolCalls, &tiers, &windows,
-			&price.UnitPrice, &currency); err != nil {
+			&price.UnitPrice, &currency, &price.TrainingPerMillion, &price.StoragePerGiBDay, &price.CacheStoragePerMillionTokenHour, &containerSessions); err != nil {
 			return nil, nil, fmt.Errorf("list pricing revisions: %w", err)
+		}
+		if err = decodeContainerRates(&price, containerSessions); err != nil {
+			return nil, nil, err
 		}
 		if err = unmarshalPriceComponents(&price, toolCalls, tiers, windows, "pricing"); err != nil {
 			return nil, nil, err

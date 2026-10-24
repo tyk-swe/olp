@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -62,6 +63,8 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		Limiter: limiter, Log: log,
 	}
 	wg.Go(func() { batchWorker.Run(ctx) })
+	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: mediaService.Credentials, Auth: batchAuth, Egress: policy, Log: log}
+	wg.Go(func() { retained.Run(ctx) })
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })

@@ -30,10 +30,12 @@ type Config struct {
 	MaxBodyBytes, MaxEventBytes   int
 }
 type Context struct {
-	Headers             http.Header
-	Query               url.Values
-	AllowProviderState  bool
-	RequiredServing     *oif.ServingIdentity
+	Headers            http.Header
+	Query              url.Values
+	AllowProviderState bool
+	RequiredServing    *oif.ServingIdentity
+	// ResolvedResources contains only live gateway-verified dialect positions.
+	ResolvedResources   map[string]string
 	ContinuationVersion string
 	DurableContinuation bool
 	RetainedResponses   bool

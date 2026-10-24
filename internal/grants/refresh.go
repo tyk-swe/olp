@@ -179,7 +179,7 @@ func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID st
 // using is the configuration a grant refreshes on behalf of, as a column of a
 // query over the grant's credential version c. Selection prefers a published
 // code route, then the provider's active revision, its draft, and finally an
-// unexpired retained resource's revision. Each must select the credential and
+// retained resource's revision while it is accessible or owes settlement. Each must select the credential and
 // pin its enrolling build and profile. An unused grant is retired.
 const using = `coalesce(
 	(SELECT (v.connections->c.provider_id::text)::json
@@ -198,8 +198,9 @@ const using = `coalesce(
 		  AND a.provider_id=c.provider_id AND a.principal=c.principal AND a.project_id=p.project_id))),
 	(SELECT r.configuration FROM olp.provider_resources x
 		JOIN olp.provider_revisions r ON r.id=x.provider_revision_id AND r.provider_id=x.provider_id
-		WHERE x.provider_id=c.provider_id AND x.credential_id=c.id AND x.state<>'deleted'
-		AND (x.expires_at IS NULL OR x.expires_at>now())
+		WHERE x.provider_id=c.provider_id AND x.credential_id=c.id
+ AND ((x.state<>'deleted' AND (x.expires_at IS NULL OR x.expires_at>now()))
+ OR EXISTS(SELECT 1 FROM olp.retained_settlements rs WHERE rs.resource_id=x.id AND rs.state<>'closed'))
 		AND r.configuration->>'profile_revision'=c.plugin_digest AND r.configuration->>'profile_id'=c.profile_id
 		AND r.slots @> jsonb_build_array(jsonb_build_object('id',x.slot_id,'credential_id',c.id))
 		ORDER BY x.created_at DESC,x.id DESC LIMIT 1))`

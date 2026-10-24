@@ -53,6 +53,12 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Autho
 				return nil, e
 			}
 		}
+		if policy.TokensPerMinute != nil {
+			if e := a.checkPendingTokenAccounting(ctx, owner); e != nil {
+				settleKey(ctx, chain, false, nil, a.logger())
+				return nil, e
+			}
+		}
 		if !a.ready() {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, limitsUnavailable()

@@ -53,7 +53,8 @@ var ErrMetadataTooLarge = errors.New("provider resource metadata exceeds 16 KiB"
 const metadataLimit = 16384
 
 type Resource struct {
-	ID string `json:"id"`
+	RetainedAccounting *RetainedAccounting `json:"-"`
+	ID                 string              `json:"id"`
 
 	UUID               uuid.UUID       `json:"-"`
 	Kind               string          `json:"kind"`
@@ -243,7 +244,7 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
 		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID, slices.Contains(retainedapi.Kinds(), identity.Kind)}
 	if includeDeleted {
-		statement += ` AND (expires_at IS NULL OR expires_at>now()) ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
+		statement += ` ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
 	} else {
 		statement += ` AND state<>$13 AND (expires_at IS NULL OR expires_at>now())`
 		args = append(args, StateDeleted)
