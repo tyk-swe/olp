@@ -46,8 +46,16 @@ func (s *Store) prepareRetainedTx(ctx context.Context, tx pgx.Tx, r *Resource) e
 	if a == nil {
 		return nil
 	}
-	if a.Operation == "" || len(a.Templates) == 0 {
+	if a.Operation == "" || a.Templates == nil {
 		return ErrContract
+	}
+	if len(a.Templates) == 0 {
+		var metadata struct {
+			Models []string `json:"authorized_models"`
+		}
+		if a.Operation != "eval" || a.TokenConsuming || json.Unmarshal(r.Metadata, &metadata) != nil || metadata.Models == nil || len(metadata.Models) != 0 {
+			return ErrContract
+		}
 	}
 	for model, event := range a.Templates {
 		if event == nil || len(event.Attempts) != 1 || event.APIKeyID != r.APIKeyID || event.Attempts[0].ProviderID != r.ProviderID || event.Attempts[0].UpstreamModel != model {
@@ -226,6 +234,15 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 	if claim != nil && (storedClaim == nil || *storedClaim != *claim || !leaseActive) {
 		return result, ErrSubmissionConflict
 	}
+	var pendingMutation bool
+	if operation == "context_cache" {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_mutations WHERE resource_id=$1 AND state IN ('dispatched','submission_unknown'))`, id).Scan(&pendingMutation); err != nil {
+			return result, err
+		}
+		if pendingMutation && provenance == "provider_verified" && len(observation.Lines) > 0 {
+			return result, ErrEvidenceConflict
+		}
+	}
 	var templates map[string]*usage.Event
 	if err = json.Unmarshal(raw, &templates); err != nil {
 		return result, err
@@ -353,7 +370,7 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 	}
 	// Coverage is checked server-side. A terminal indicator alone is insufficient.
 	closed := false
-	if terminated && terminalAt != nil {
+	if terminated && terminalAt != nil && !(pendingMutation && provenance == "provider_verified") {
 		var complete bool
 		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_usage_evidence WHERE resource_id=$1 AND document @> '{"coverage_complete":true}'::jsonb)`, id).Scan(&complete)
 		if err != nil {
@@ -390,10 +407,11 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 		return false, err
 	}
 	var nativeMeta struct {
-		CreatedAt  string `json:"created_at"`
-		CreateTime string `json:"create_time"`
-		FinishedAt string `json:"finished_at"`
-		MemoryTier string `json:"memory_tier"`
+		CreatedAt  string   `json:"created_at"`
+		CreateTime string   `json:"create_time"`
+		FinishedAt string   `json:"finished_at"`
+		MemoryTier string   `json:"memory_tier"`
+		Models     []string `json:"authorized_models"`
 	}
 	var metadata []byte
 	if err := tx.QueryRow(ctx, `SELECT metadata FROM olp.provider_resources WHERE id=$1`, id).Scan(&metadata); err != nil {
@@ -401,6 +419,9 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 	}
 	if json.Unmarshal(metadata, &nativeMeta) != nil {
 		return false, ErrContract
+	}
+	if len(templates) == 0 {
+		return operation == "eval" && nativeMeta.Models != nil && len(nativeMeta.Models) == 0, nil
 	}
 	for _, raw := range []string{nativeMeta.CreatedAt, nativeMeta.CreateTime} {
 		if raw != "" {

@@ -23,6 +23,15 @@ func (s *Store) PrepareRetainedMutation(ctx context.Context, r *Resource, operat
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, r.APIKeyID+":"+operation+":"+key); err != nil {
 		return err
 	}
+	// Serialize new paid work with settlement's final coverage check.
+	var settlementState string
+	err = tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, r.UUID).Scan(&settlementState)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if settlementState == "closed" {
+		return ErrSubmissionConflict
+	}
 	var exists bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_mutations WHERE api_key_id=$1 AND operation=$2 AND submission_key=$3)`, r.APIKeyID, operation, key).Scan(&exists); err != nil {
 		return err
@@ -58,7 +67,7 @@ func (s *Store) SaveRetainedResult(ctx context.Context, r *Resource) error {
 		return ErrContract
 	}
 	var updated time.Time
-	err := s.pool.QueryRow(ctx, `UPDATE olp.provider_resources SET metadata=metadata||$2::jsonb,expires_at=COALESCE($3,expires_at),state=$5,updated_at=clock_timestamp() WHERE id=$1 AND updated_at=$4 AND state<>'deleted' RETURNING updated_at`, r.UUID, r.Metadata, r.ExpiresAt, r.UpdatedAt, r.State).Scan(&updated)
+	err := s.pool.QueryRow(ctx, `UPDATE olp.provider_resources SET metadata=metadata||$2::jsonb,expires_at=$3,state=$5,updated_at=clock_timestamp() WHERE id=$1 AND updated_at=$4 AND state<>'deleted' RETURNING updated_at`, r.UUID, r.Metadata, r.ExpiresAt, r.UpdatedAt, r.State).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrSubmissionConflict
 	}
@@ -67,6 +76,12 @@ func (s *Store) SaveRetainedResult(ctx context.Context, r *Resource) error {
 	}
 	r.UpdatedAt = updated
 	return nil
+}
+
+func (s *Store) HasUnresolvedRetainedMutations(ctx context.Context, id uuid.UUID) (bool, error) {
+	var pending bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_mutations WHERE resource_id=$1 AND state IN ('dispatched','submission_unknown'))`, id).Scan(&pending)
+	return pending, err
 }
 
 // RejectRetained records definitive transport/provider non-acceptance, never a

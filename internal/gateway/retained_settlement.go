@@ -23,7 +23,7 @@ func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route
 		AuthorizedModels []string `json:"authorized_models"`
 	}
 	_ = json.Unmarshal(r.Metadata, &metadata)
-	if len(metadata.AuthorizedModels) > 0 {
+	if metadata.AuthorizedModels != nil {
 		models = metadata.AuthorizedModels
 	}
 	templates := map[string]*usage.Event{}
@@ -51,7 +51,7 @@ func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route
 		template.Attempts[0].Routing.Budgets = append(template.Attempts[0].Routing.Budgets, p.provider.ID, p.slot.ID, route.ID)
 		templates[model] = template
 	}
-	r.RetainedAccounting = &resources.RetainedAccounting{Operation: e.Operation, Templates: templates, TokenConsuming: e.Operation == "fine_tuning" || e.Operation == "eval"}
+	r.RetainedAccounting = &resources.RetainedAccounting{Operation: e.Operation, Templates: templates, TokenConsuming: e.Operation == "fine_tuning" || e.Operation == "eval" && len(models) > 0}
 	return nil
 }
 

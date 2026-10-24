@@ -158,6 +158,20 @@ func TestRetainedCacheExpirySurvivesDatabasePrecision(t *testing.T) {
 	}
 }
 
+func TestRetainedVectorExpirationCanBeCleared(t *testing.T) {
+	expiry := time.Now().Add(time.Hour)
+	r := &Resource{Kind: "vector_store", State: "active", ExpiresAt: &expiry, Metadata: json.RawMessage(`{"upstream_model":"m"}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: r.Kind, Operation: "vector_store"}, Action: "get"}
+	omitted, _ := oif.ParseJSON([]byte(`{"status":"completed"}`), oif.Limits{})
+	if err := EnrichRetained(r, e, omitted, time.Now()); err != nil || r.ExpiresAt == nil || !r.ExpiresAt.Equal(expiry) {
+		t.Fatalf("omission cleared expiry: %v %v", r.ExpiresAt, err)
+	}
+	cleared, _ := oif.ParseJSON([]byte(`{"expires_at":null}`), oif.Limits{})
+	if err := EnrichRetained(r, e, cleared, time.Now()); err != nil || r.ExpiresAt != nil || !strings.Contains(string(r.Metadata), `"expires_at":null`) {
+		t.Fatalf("explicit null retained expiry: %v %s %v", r.ExpiresAt, r.Metadata, err)
+	}
+}
+
 func TestRetainedStorageAndContainerSnapshotsAreNotCharges(t *testing.T) {
 	now := time.Now().UTC()
 	for _, tc := range []struct{ kind, body string }{{"vector_store", `{"usage_bytes":1024}`}, {"container", `{"memory_limit":"4g","status":"running"}`}} {

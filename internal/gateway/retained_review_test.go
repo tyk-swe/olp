@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -149,5 +150,37 @@ func TestRetainedEvalAdmissionRejectsInvocationTiers(t *testing.T) {
 		if failure == nil || failure.Code != "unsupported_metered_operation" || r.RetainedAccounting != nil {
 			t.Fatalf("tiered eval reached submission: charge=%v failure=%v", chargeTiered, failure)
 		}
+	}
+}
+
+func TestRetainedDeterministicEvalHasNoPhantomModel(t *testing.T) {
+	r := &resources.Resource{Metadata: json.RawMessage(`{"upstream_model":"route-model","authorized_models":[]}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "eval", Metered: true}}
+	if failure := (&Server{}).prepareRetainedAccounting(&call{}, &pin{model: "route-model"}, &routing.Route{}, r, e, generationReferenceDocument(t, `{}`)); failure != nil {
+		t.Fatal(failure)
+	}
+	if r.RetainedAccounting == nil || r.RetainedAccounting.Templates == nil || len(r.RetainedAccounting.Templates) != 0 || r.RetainedAccounting.TokenConsuming {
+		t.Fatalf("deterministic graders acquired model liability: %+v", r.RetainedAccounting)
+	}
+}
+
+func TestRetainedGenerationFileAdmissionBoundsRequestFees(t *testing.T) {
+	now := time.Now()
+	provider := routing.Provider{ID: "provider", Kind: "openai"}
+	price := usage.RoutingPrice{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "generation", PerRequest: new("0.01")}, EffectiveAt: now.Add(-time.Hour)}
+	x := &call{
+		request:           request{startedAt: now, release: &runtime.Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}}},
+		operationOverride: "generation", retainedHousekeeping: true, cardPinned: true,
+		routingInputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}},
+		cardRev:       &usage.RoutingCardRevision{Prices: []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "generation", PerRequest: new("0.02")}}}},
+	}
+	p := &pin{provider: provider, model: "m", attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: "m"}}
+	if failure := (&Server{}).retainedAccountingPolicy(x, p, false); failure != nil {
+		t.Fatal(failure)
+	}
+	cost := x.attemptCostBound(p.attempt)
+	charge := x.attemptChargeBound(p.attempt, cost)
+	if x.retainedFreeControl || cost.String() != "0.01" || charge.String() != "0.02" {
+		t.Fatalf("tokenless request fees bypassed admission: free=%v cost=%s charge=%s", x.retainedFreeControl, cost.String(), charge.String())
 	}
 }

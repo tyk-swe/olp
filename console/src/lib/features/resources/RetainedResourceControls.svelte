@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { apiClient } from '$lib/api/client';
-  import type { components } from '$lib/api/schema';
-  import { errorMessage, unwrap } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
   import {
@@ -9,7 +7,11 @@
     parseNativeJSON,
     stringifyNativeJSON
   } from '$lib/json/nativeJson';
-  import type { ProviderResource } from './api';
+  import {
+    requestRetainedReconciliation,
+    submitRetainedEvidence,
+    type ProviderResource
+  } from './api';
 
   let {
     resource,
@@ -74,12 +76,7 @@
     problem = '';
     notice = '';
     try {
-      unwrap(
-        await apiClient.POST('/api/v1/provider-resources/{id}/reconcile', {
-          params: { path: { id: selectedId } },
-          body: hint.trim() ? { upstream_id: hint.trim() } : {}
-        })
-      );
+      await requestRetainedReconciliation(selectedId, hint);
       if (!currentOwner() || resource.id !== selectedId) return;
       notice =
         'Reconciliation scheduled. Refresh to inspect settlement progress.';
@@ -106,13 +103,7 @@
         throw new Error('Enter one usage evidence object.');
       // Keep int64 quantities exact through the management transport.
       const serialized = stringifyNativeJSON(value);
-      const result = unwrap(
-        await apiClient.POST('/api/v1/provider-resources/{id}/usage-evidence', {
-          params: { path: { id: selectedId } },
-          body: {} as components['schemas']['RetainedUsageEvidenceRequest'],
-          bodySerializer: () => serialized
-        })
-      );
+      const result = await submitRetainedEvidence(selectedId, serialized);
       if (!currentOwner() || resource.id !== selectedId) return;
       notice = `Usage evidence recorded. Settlement ${result.settlement_status ?? 'pending'}.`;
       changed();

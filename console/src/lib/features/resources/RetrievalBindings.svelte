@@ -15,7 +15,7 @@
     retireRetrievalBinding,
     type RetrievalBinding,
     type RetrievalBindingInput
-  } from './retrievalApi';
+  } from './api/retrieval';
 
   const access = useRole();
   const client = useQueryClient();

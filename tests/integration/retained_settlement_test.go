@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/retainedworker"
@@ -369,6 +370,101 @@ func TestRetainedSettlementFinalEvidencePrecedesTermination(t *testing.T) {
 		t.Fatalf("independently received final coverage and termination did not close: %s %v", state, err)
 	}
 	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+}
+
+func TestRetainedSettlementUnknownTTLMutationPreventsAutomaticClosure(t *testing.T) {
+	f := retainedLedger(t, "context_cache", false)
+	r := f.prepare(t)
+	start, end := r.CreatedAt.Add(-time.Hour), r.CreatedAt.Add(-time.Minute)
+	r.ExpiresAt = &end
+	r.Metadata, _ = json.Marshal(map[string]any{"upstream_model": "retained-model", "total_token_count": 100, "create_time": start.Format(time.RFC3339Nano), "expires_at": end.Format(time.RFC3339Nano)})
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "lost-ttl-response", bytes.Repeat([]byte{7}, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.UnknownRetainedMutation(t.Context(), r.UUID, "lost-ttl-response", "context_cache:patch"); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := resources.ObserveRetainedExpiry(r, time.Now().UTC(), true)
+	if err != nil || !observation.CoverageComplete {
+		t.Fatalf("expiry fixture: %+v %v", observation, err)
+	}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "old-expiry", strings.Repeat("a", 64), "provider_verified", "", observation, nil); !errors.Is(err, resources.ErrEvidenceConflict) {
+		t.Fatalf("unresolved TTL mutation accepted old expiry coverage: %v", err)
+	}
+	var state string
+	var terminated bool
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state,remote_terminated FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &terminated); err != nil || state != "evidence_missing" || !terminated {
+		t.Fatalf("ambiguous TTL liability or termination lost: %s %v %v", state, terminated, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 1, 0, 0)
+}
+
+func TestRetainedSettlementDeterministicEvalClosesWithoutModelUsage(t *testing.T) {
+	f := retainedLedger(t, "eval", false)
+	f.resource.Metadata = json.RawMessage(`{"upstream_model":"retained-model","authorized_models":[]}`)
+	f.resource.RetainedAccounting.Templates = map[string]*usage.Event{}
+	r := f.prepare(t)
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "eval_run", Operation: "eval"}, Action: "get"}
+	document, err := oif.ParseJSON([]byte(`{"status":"completed","per_model_usage":[]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resources.EnrichRetained(r, e, document, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := resources.ObserveRetained(r, e, document, time.Now().UTC())
+	if err != nil || !observation.CoverageComplete || len(observation.Lines) != 0 {
+		t.Fatalf("zero-model terminal evidence: %+v %v", observation, err)
+	}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "deterministic-terminal", strings.Repeat("a", 64), "provider_verified", "", observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("phantom model prevented settlement: %s %v", state, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 1, 0, 0)
+}
+
+func TestRetainedVectorExpirationClearingPersists(t *testing.T) {
+	for _, worker := range []bool{false, true} {
+		t.Run(map[bool]string{false: "request", true: "worker"}[worker], func(t *testing.T) {
+			f := retainedLedger(t, "vector_store", false)
+			r := f.prepare(t)
+			r.ExpiresAt = new(time.Now().Add(time.Hour))
+			if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+				t.Fatal(err)
+			}
+			document, _ := oif.ParseJSON([]byte(`{"expires_at":null}`), oif.Limits{})
+			e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vector_store", Operation: "vector_store"}, Action: "get"}
+			if err := resources.EnrichRetained(r, e, document, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if worker {
+				claims, claimErr := f.store.ClaimRetained(t.Context(), 1)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, claimErr)
+				}
+				err = f.store.CommitRetainedPoll(t.Context(), claims[0], r, resources.RetainedObservation{}, false)
+			} else {
+				err = f.store.SaveRetainedResult(t.Context(), r)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := f.store.Get(t.Context(), r.Kind, r.APIKeyID, r.ID)
+			if err != nil || loaded.ExpiresAt != nil {
+				t.Fatalf("cleared expiry did not persist: %+v %v", loaded, err)
+			}
+		})
+	}
 }
 
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {

@@ -176,6 +176,23 @@ func TestRetainedCachePinsResolvedServingModel(t *testing.T) {
 	}
 }
 
+func TestRetainedDiscoveredChildHasIndependentLifecycleMetadata(t *testing.T) {
+	parent := &resources.Resource{UUID: uuid.New(), Kind: "vector_store", Metadata: json.RawMessage(`{"upstream_model":"m","created_at":"2026-10-23T10:00:00Z","terminal_observed_at":"2026-10-23T11:00:00Z","usage_bytes":1000}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vector_store_file", Operation: "vector_store"}, Action: "list"}
+	item := generationReferenceDocument(t, `{"id":"file-native","created_at":1792749900,"status":"completed"}`)
+	child, err := retainedDiscoveredChild(parent, e.Kind, "file-native", item.Root(), e, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resources.EnrichRetained(child, e, item, time.Now()) != nil {
+		t.Fatal("child inherited an incompatible parent timestamp")
+	}
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal(child.Metadata, &metadata) != nil || metadata["upstream_model"] == nil || metadata["terminal_observed_at"] != nil || metadata["usage_bytes"] != nil || bytes.Contains(child.Metadata, []byte(`2026-10-23T10:00:00Z`)) {
+		t.Fatalf("child inherited parent lifecycle facts: %s", child.Metadata)
+	}
+}
+
 func TestRetainedEvalModelAuthority(t *testing.T) {
 	p := &pin{provider: routing.Provider{ID: "provider", Kind: "openai", Capabilities: []routing.Capability{{Model: "sample", Operation: "eval", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "eval", Surface: "openai", Mode: "unary"}, {Model: "sample", Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "generation", Surface: "openai", Mode: "unary"}}}, slot: routing.Slot{Enabled: true}, model: "sample"}
 	route := &routing.Route{Slug: "eval-route", Operations: []string{"eval", "generation"}, Targets: []routing.Target{{ProviderID: "provider", ProviderModel: "sample"}, {ProviderID: "provider", ProviderModel: "grader"}}}

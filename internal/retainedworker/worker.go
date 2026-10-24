@@ -195,7 +195,11 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 			return "remote_termination_unverified"
 		}
 		// Storage disappearance verifies termination, never its usage.
-		canExpire := !c.RemoteTerminated || c.TerminalAt != nil && r.ExpiresAt != nil && !c.TerminalAt.Before(*r.ExpiresAt)
+		pendingMutation, mutationErr := w.Store.HasUnresolvedRetainedMutations(ctx, r.UUID)
+		if mutationErr != nil {
+			return "mutation_evidence_unavailable"
+		}
+		canExpire := !pendingMutation && (!c.RemoteTerminated || c.TerminalAt != nil && r.ExpiresAt != nil && !c.TerminalAt.Before(*r.ExpiresAt))
 		observation, expiryErr := resources.ObserveRetainedExpiry(r, time.Now().UTC(), canExpire && r.State != resources.StateDeleted)
 		if expiryErr != nil {
 			return "invalid_expiry_evidence"

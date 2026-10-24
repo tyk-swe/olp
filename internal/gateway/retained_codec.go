@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -560,6 +561,38 @@ func retainedCreateIDs(e retainedapi.Endpoint, body []byte) ([]string, error) {
 	return ids, nil
 }
 
+// Children inherit serving authority, while lifecycle facts belong to the
+// native child observed under that parent.
+func retainedDiscoveredChild(parent *resources.Resource, kind, id string, item oif.Value, e retainedapi.Endpoint, now time.Time) (*resources.Resource, error) {
+	child := *parent
+	child.UUID, child.ID = [16]byte{}, ""
+	child.Kind, child.UpstreamID, child.State = kind, id, "active"
+	child.ParentID, child.SubmissionID = &parent.UUID, nil
+	child.ExpiresAt, child.RetainedAccounting = nil, nil
+	child.CreatedAt, child.UpdatedAt = time.Time{}, time.Time{}
+	var inherited map[string]json.RawMessage
+	if json.Unmarshal(parent.Metadata, &inherited) != nil {
+		return nil, resources.ErrContract
+	}
+	metadata := map[string]json.RawMessage{}
+	for _, field := range []string{"upstream_model", "contract_revision", "authorized_models", "memory_tier"} {
+		if value, present := inherited[field]; present {
+			metadata[field] = value
+		}
+	}
+	child.Metadata, _ = json.Marshal(metadata)
+	if item.Kind() == oif.Object {
+		document, err := oif.ParseJSON([]byte(item.Raw()), oif.Limits{MaxBytes: retainedBodyLimit})
+		if err != nil {
+			return nil, err
+		}
+		if err := resources.EnrichRetained(&child, e, document, now); err != nil {
+			return nil, err
+		}
+	}
+	return &child, nil
+}
+
 // Project only declared identities. Primary children observed under an
 // authorized parent may be discovered; unrelated references must already exist.
 func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources.Resource, e retainedapi.Endpoint, body []byte) ([]byte, error) {
@@ -571,6 +604,16 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 		return nil, err
 	}
 	refs := retainedResponseRefs(e, source)
+	nativeItems := map[string]oif.Value{}
+	if e.Action == "list" {
+		items, _ := source.Root().Lookup(e.Collection)
+		for _, item := range items.Elements() {
+			identity, _ := item.Lookup(e.Identity)
+			if id, valid := identity.Text(); valid {
+				nativeItems[id] = item
+			}
+		}
+	}
 	resultFiles := map[string]bool{}
 	if e.Operation == "fine_tuning" {
 		if files, present := source.Root().Lookup("result_files"); present && files.Kind() == oif.Array {
@@ -619,16 +662,15 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 		}
 		resultFile := kind == resources.KindFile && resultFiles[id]
 		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill" || resultFile) {
-			child := *resource
-			child.UUID, child.ID = [16]byte{}, ""
-			child.Kind, child.UpstreamID, child.State = kind, id, "active"
-			child.ParentID, child.SubmissionID = &resource.UUID, nil
-			child.ExpiresAt = nil
+			child, childErr := retainedDiscoveredChild(resource, kind, id, nativeItems[id], e, s.now())
+			if childErr != nil {
+				return "", childErr
+			}
 			if resultFile {
 				child.ContractVersion = nil
 				child.Metadata, _ = json.Marshal(map[string]string{"upstream_model": resourceModel(resource), "file_operation": "fine_tuning", "purpose": "fine-tune-results"})
 			}
-			bound, findErr = s.Resources.BindDiscovered(ctx, &child)
+			bound, findErr = s.Resources.BindDiscovered(ctx, child)
 		}
 		if findErr != nil {
 			return "", findErr

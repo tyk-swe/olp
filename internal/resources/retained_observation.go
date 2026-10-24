@@ -112,13 +112,18 @@ func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, no
 			}
 			put("usage_bytes", bytes)
 		}
-		if value, present := root.Lookup("expires_at"); present && value.Kind() != oif.Null {
-			expiry, err := retainedTime(value)
-			if err != nil {
-				return err
+		if value, present := root.Lookup("expires_at"); present {
+			if value.Kind() == oif.Null {
+				r.ExpiresAt = nil
+				put("expires_at", nil)
+			} else {
+				expiry, err := retainedTime(value)
+				if err != nil {
+					return err
+				}
+				r.ExpiresAt = &expiry
+				put("expires_at", expiry.UTC().Format(time.RFC3339Nano))
 			}
-			r.ExpiresAt = &expiry
-			put("expires_at", expiry.UTC().Format(time.RFC3339Nano))
 		}
 	}
 	if r.Kind == "container" {

@@ -92,7 +92,7 @@ func (s *Store) CommitRetainedPoll(ctx context.Context, c RetainedClaim, r *Reso
 			return ErrSubmissionConflict
 		}
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET upstream_id=CASE WHEN $5 THEN $6 ELSE upstream_id END,state=CASE WHEN state='deleted' THEN state ELSE $2 END,metadata=metadata||$3::jsonb,expires_at=COALESCE($4,expires_at),updated_at=clock_timestamp() WHERE id=$1 AND updated_at=$7`, r.UUID, r.State, r.Metadata, r.ExpiresAt, adopt, r.UpstreamID, r.UpdatedAt)
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET upstream_id=CASE WHEN $5 THEN $6 ELSE upstream_id END,state=CASE WHEN state='deleted' THEN state ELSE $2 END,metadata=metadata||$3::jsonb,expires_at=$4,updated_at=clock_timestamp() WHERE id=$1 AND updated_at=$7`, r.UUID, r.State, r.Metadata, r.ExpiresAt, adopt, r.UpstreamID, r.UpdatedAt)
 	if err != nil {
 		return err
 	}

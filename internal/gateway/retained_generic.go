@@ -363,7 +363,9 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		return
 	}
 	use := retainedRetrieval
-	if e.Action == "delete" || e.Action == "cancel" || e.Action == "list" {
+	if e.Metered && (e.Action == "update" || e.Action == "patch") {
+		use = retainedNewWork
+	} else if e.Action == "delete" || e.Action == "cancel" || e.Action == "list" {
 		use = retainedHousekeeping
 	}
 	p, route, err = s.resolveResource(r.Context(), x, authority, resource, e.Operation, use)

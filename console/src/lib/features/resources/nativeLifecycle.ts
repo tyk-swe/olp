@@ -1,6 +1,5 @@
-import { apiClient } from '$lib/api/client';
+import { getProviderResourceContracts } from './api';
 import { gatewayFetch } from '$lib/api/gateway';
-import { unwrap } from '$lib/api/http';
 import {
   nativeObject,
   parseNativeJSON,
@@ -108,9 +107,7 @@ function validEndpoint(endpoint: NativeEndpoint): boolean {
 export async function listNativeEndpoints(
   signal?: AbortSignal
 ): Promise<NativeEndpoint[]> {
-  const contracts = unwrap(
-    await apiClient.GET('/api/v1/provider-resource-contracts', { signal })
-  );
+  const contracts = await getProviderResourceContracts(signal);
   const endpoints = (contracts as unknown as { endpoints?: unknown }).endpoints;
   if (!Array.isArray(endpoints)) return [];
   return endpoints
@@ -160,7 +157,7 @@ function queryParameters(raw: string): URLSearchParams {
     throw new Error('Query parameters must be a JSON object of string values.');
   const params = new URLSearchParams();
   for (const name of Object.keys(value).sort()) {
-    if (!name || /[\r\n\x00]/.test(name))
+    if (!name || /[\r\n]/.test(name) || name.includes('\0'))
       throw new Error('Enter a valid query parameter name.');
     const item = value[name];
     const values = Array.isArray(item) ? item : [item];
@@ -215,7 +212,8 @@ function requestBody(
       !name ||
       name.length > 4096 ||
       file.type.length > 256 ||
-      /[\r\n\x00]/.test(name)
+      /[\r\n]/.test(name) ||
+      name.includes('\0')
     )
       throw new Error('Choose files with bounded, valid filenames.');
     return size + file.size + new TextEncoder().encode(name).byteLength + 512;
