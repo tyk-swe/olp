@@ -52,6 +52,23 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 	if definition := history["definition"].(map[string]any); definition["enabled"] != true {
 		t.Fatal("update changed the original revision")
 	}
+	// Portable names must never turn a stale UUID grant into a replacement key.
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=now()-interval '1 hour' WHERE id=$1`, key["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "search key", "project_id": project, "scopes": []string{"inference"}, "allow_provider_state": true}, idem(uuid.NewString()), 201)
+	for _, inactive := range []string{"expired", "revoked"} {
+		if inactive == "revoked" {
+			if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=NULL,revoked_at=now() WHERE id=$1`, key["id"].(string)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		problem := h.want(owner, http.MethodGet, "/api/v1/configuration/export", nil, nil, 422)
+		fields, _ := problem["errors"].(map[string]any)
+		if fields["retrieval_bindings.key_grants"] == nil {
+			t.Fatalf("%s source grant exported as a different key: %v", inactive, problem)
+		}
+	}
 	h.want(owner, http.MethodDelete, "/api/v1/retrieval-bindings/"+id, nil, withMatch(updated, idem(uuid.NewString())), 204)
 	restored, err := retrieval.Load(t.Context(), h.Pool, id, false)
 	if err != nil || restored.RetiredAt == nil || restored.ProviderID != provider {

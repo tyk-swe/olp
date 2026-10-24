@@ -249,9 +249,18 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 				}
 			}
 		}
+		var slotQualifiers []retainedSlotQualifier
+		if e.Operation == "eval" {
+			qualify, qualifyErr := retainedEvalSlots(route, x.keyID, source, parent)
+			if qualifyErr != nil {
+				fail(invalidRequest("unsupported_parameter", qualifyErr.Error(), nil))
+				return
+			}
+			slotQualifiers = append(slotQualifiers, qualify)
+		}
 		p, err = s.selectBoundPinSurface(r.Context(), x, route, e.Operation, e.Surface, "unary", bound, func(provider *routing.Provider, model string) bool {
 			return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
-		})
+		}, slotQualifiers...)
 		if err != nil {
 			fail(err)
 			return

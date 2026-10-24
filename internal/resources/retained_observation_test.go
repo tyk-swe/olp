@@ -191,6 +191,21 @@ func TestRetainedVectorExpirationCanBeCleared(t *testing.T) {
 	}
 }
 
+func TestRetainedExpiredVectorStoreUsesNativeTerminationTime(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	expiry := now.Add(-time.Hour)
+	r := &Resource{Kind: "vector_store", State: "active", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: &expiry, Metadata: json.RawMessage(`{"upstream_model":"m"}`)}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: r.Kind, Operation: "vector_store"}, Action: "get"}
+	document, _ := oif.ParseJSON([]byte(`{"status":"expired"}`), oif.Limits{})
+	if err := EnrichRetained(r, e, document, now); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := ObserveRetained(r, e, document, now)
+	if err != nil || !observation.RemoteTerminated || !observation.ObservedAt.Equal(expiry) || observation.CoverageComplete || len(observation.Lines) != 0 {
+		t.Fatalf("expired store inferred usage or extended its lifetime: %+v %v", observation, err)
+	}
+}
+
 func TestRetainedStorageAndContainerSnapshotsAreNotCharges(t *testing.T) {
 	now := time.Now().UTC()
 	for _, tc := range []struct{ kind, body string }{{"vector_store", `{"usage_bytes":1024}`}, {"container", `{"memory_limit":"4g","status":"running"}`}} {

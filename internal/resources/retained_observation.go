@@ -166,6 +166,9 @@ func ObserveRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, n
 		state, _ = retainedText(root, "state")
 	}
 	out.RemoteTerminated = retainedTerminal(r.Kind, state)
+	if r.Kind == "vector_store" && state == "expired" && r.ExpiresAt != nil {
+		out.ObservedAt = r.ExpiresAt.UTC()
+	}
 	if !out.RemoteTerminated || (r.Kind != "fine_tuning_job" && r.Kind != "vertex_tuning_job" && r.Kind != "eval_run") {
 		return out, nil
 	}

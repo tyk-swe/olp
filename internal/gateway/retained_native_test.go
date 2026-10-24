@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -277,6 +278,45 @@ func TestRetainedEvalNativeBindingsPreserveLogicalAuthority(t *testing.T) {
 	p.provider.Bindings["sample"] = connectors.Binding{Model: "native-grader"}
 	if _, err := retainedInputMetadata(p, route, "owner", e, run, parent); err == nil {
 		t.Fatal("ambiguous native usage alias mapping accepted")
+	}
+}
+
+func TestRetainedEvalSelectionFindsSlotForEveryDeclaredModel(t *testing.T) {
+	h := newHarness(t, Config{})
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	base := route.Targets[0]
+	provider := snapshot.Providers[base.ProviderID]
+	provider.Kind = "openai"
+	provider.Capabilities = []routing.Capability{
+		{Model: base.ProviderModel, Operation: "eval", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "eval", Surface: "openai", Mode: "unary"},
+		{Model: base.ProviderModel, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: "grader", Operation: "generation", Surface: "openai", Mode: "unary"},
+	}
+	provider.Slots[0].AllowedModels = []string{base.ProviderModel}
+	complete := provider.Slots[0]
+	complete.ID = uuid.NewString()
+	complete.AllowedModels = []string{base.ProviderModel, "grader"}
+	provider.Slots = append(provider.Slots, complete)
+	snapshot.Providers[provider.ID] = provider
+	grader := base
+	grader.ID, grader.ProviderModel = uuid.NewString(), "grader"
+	route.Targets = []routing.Target{base, grader}
+	route.Operations = []string{"eval", "generation"}
+	snapshot.Routes[routeSlug] = route
+	x := &call{keyID: h.keyID, family: wire.File, request: request{release: h.rt.release, startedAt: time.Now()}}
+	x.route = &route
+	source := generationReferenceDocument(t, `{"testing_criteria":[{"type":"score_model","model":"grader"}]}`)
+	qualifySlot, err := retainedEvalSlots(&route, h.keyID, source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, failure := h.gateway.selectBoundPinSurface(t.Context(), x, &route, "eval", "openai", "unary", nil, func(_ *routing.Provider, model string) bool { return model == base.ProviderModel }, qualifySlot)
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	defer h.gateway.resourceSettle(t.Context(), x, p)
+	if p.slot.ID != complete.ID {
+		t.Fatalf("selected slot %s without grader authority, want %s", p.slot.ID, complete.ID)
 	}
 }
 

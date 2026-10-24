@@ -76,7 +76,10 @@ func exportRetrievalBindings(ctx context.Context, q access.Queryer) ([]Retrieval
 		}
 		for _, id := range b.KeyGrants {
 			var name string
-			err = q.QueryRow(ctx, "SELECT name FROM olp.api_keys WHERE id=$1 AND project_id=$2", id, b.ProjectID).Scan(&name)
+			err = q.QueryRow(ctx, "SELECT name FROM olp.api_keys WHERE id=$1 AND project_id=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())", id, b.ProjectID).Scan(&name)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, access.Invalid("retrieval_bindings.key_grants", "Remove inactive API-key grants before exporting retrieval bindings.")
+			}
 			if err != nil {
 				return nil, err
 			}

@@ -410,6 +410,8 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 		CreatedAt  string   `json:"created_at"`
 		CreateTime string   `json:"create_time"`
 		FinishedAt string   `json:"finished_at"`
+		ExpiresAt  string   `json:"expires_at"`
+		Status     string   `json:"native_status"`
 		MemoryTier string   `json:"memory_tier"`
 		Models     []string `json:"authorized_models"`
 	}
@@ -431,6 +433,13 @@ func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, temp
 			}
 			start = at.UTC().Truncate(time.Microsecond)
 		}
+	}
+	if operation == "vector_store" && nativeMeta.Status == "expired" && nativeMeta.ExpiresAt != "" {
+		expiry, err := time.Parse(time.RFC3339Nano, nativeMeta.ExpiresAt)
+		if err != nil || !expiry.After(start) {
+			return false, ErrContract
+		}
+		end = expiry.UTC().Truncate(time.Microsecond)
 	}
 	// terminal_at records when termination was first verified. A native finish
 	// time supplied later defines the billing endpoint independently of that

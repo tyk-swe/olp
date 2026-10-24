@@ -262,6 +262,38 @@ func retainedEvalModelAllowed(p *pin, route *routing.Route, owner, model string)
 	})
 }
 
+// Qualify every declared model before choosing a credential. A slot usable for
+// the route target alone need not be allowed to invoke its sampling or graders.
+func retainedEvalSlots(route *routing.Route, owner string, source oif.Document, parent *resources.Resource) (retainedSlotQualifier, error) {
+	var models []string
+	if parent != nil {
+		var metadata struct {
+			Models []string `json:"authorized_models"`
+		}
+		if json.Unmarshal(parent.Metadata, &metadata) != nil {
+			return nil, resources.ErrContract
+		}
+		models = append(models, metadata.Models...)
+	}
+	if err := walkRetainedEvalModels(source.Root(), "", func(_ string, model string) error {
+		if !slices.Contains(models, model) {
+			models = append(models, model)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return func(provider *routing.Provider, slot *routing.Slot, model string) bool {
+		candidate := &pin{provider: *provider, slot: *slot, model: model}
+		for _, declared := range models {
+			if !retainedEvalModelAllowed(candidate, route, owner, declared) {
+				return false
+			}
+		}
+		return true
+	}, nil
+}
+
 func validateEvalSource(root oif.Value, e retainedapi.Endpoint) error {
 	if source, present := root.Lookup("data_source_config"); present {
 		kind, _ := source.Lookup("type")

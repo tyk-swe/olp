@@ -490,6 +490,31 @@ func TestRetainedCheckpointDiscoveryKeepsModelsDisabled(t *testing.T) {
 	}
 }
 
+func TestRetainedExpiredStoreCoverageEndsAtNativeExpiry(t *testing.T) {
+	f := retainedLedger(t, "vector_store", false)
+	r := f.prepare(t)
+	poll := time.Now().UTC().Truncate(time.Microsecond)
+	start, expiry := poll.Add(-2*time.Hour), poll.Add(-time.Hour)
+	r.ExpiresAt, r.State = &expiry, "expired"
+	r.Metadata, _ = json.Marshal(map[string]any{"upstream_model": "retained-model", "created_at": start.Format(time.RFC3339Nano), "expires_at": expiry.Format(time.RFC3339Nano), "native_status": "expired"})
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	// An earlier poll may already have frozen the later observation timestamp.
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: poll}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "expired-poll", strings.Repeat("a", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	complete := resources.RetainedObservation{CoverageComplete: true, ObservedAt: poll, Lines: []resources.RetainedEvidenceLine{{Component: "storage", Model: "retained-model", Start: start, End: expiry, Usage: usage.AttemptUsage{StorageByteSeconds: new("1073741824")}}}}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "storage-lifetime", strings.Repeat("b", 64), "operator_verified", f.User, complete, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("complete native lifetime coverage did not close: %s %v", state, err)
+	}
+}
+
 func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
 	f := retainedLedger(t, "fine_tuning", true)
 	r := f.prepare(t)

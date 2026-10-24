@@ -151,7 +151,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.R
 	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
 }
 
-func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
+type retainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
+
+func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*pin, *Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -161,6 +163,14 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	snapshot := x.request.release.Snapshot
 	// Pinned work must select a target on this route rather than delegate.
 	x.fixed = true
+	qualifiesSlot := func(provider *routing.Provider, slot *routing.Slot, model string) bool {
+		for _, qualify := range slotQualifiers {
+			if qualify != nil && !qualify(provider, slot, model) {
+				return false
+			}
+		}
+		return true
+	}
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p routing.Provider, t routing.Target) error {
 		if bound != nil && (bound.ProviderID != p.ID || bound.ProviderRevisionID != p.RevisionID || bound.TargetID != t.ID) {
@@ -168,6 +178,19 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		}
 		if !qualified(&p, t.ProviderModel) {
 			return errors.New("provider capability unavailable")
+		}
+		if len(slotQualifiers) > 0 {
+			attempt := routing.Attempt{ProviderID: p.ID, UpstreamModel: t.ProviderModel}
+			for i := range p.Slots {
+				slot := &p.Slots[i]
+				if bound != nil && (bound.SlotID != slot.ID || !sameCredential(bound.CredentialID, slot.CredentialID)) {
+					continue
+				}
+				if qualifiesSlot(&p, slot, t.ProviderModel) && s.slotAvailable(x, attempt, slot) && !s.cooling(ctx, p.ID, slot) {
+					return nil
+				}
+			}
+			return errors.New("credential model authority unavailable")
 		}
 		return nil
 	}
@@ -215,6 +238,9 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	for i := range provider.Slots {
 		slot := &provider.Slots[i]
 		if bound != nil && (bound.SlotID != slot.ID || !sameCredential(bound.CredentialID, slot.CredentialID)) {
+			continue
+		}
+		if !qualifiesSlot(&provider, slot, attempt.UpstreamModel) {
 			continue
 		}
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
