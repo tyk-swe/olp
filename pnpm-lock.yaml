@@ -114,8 +114,8 @@ importers:
         specifier: 2.3.2
         version: 2.3.2(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))
       '@langchain/openai':
-        specifier: 1.6.2
-        version: 1.6.2(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))(undici@8.12.2)(ws@8.22.0)
+        specifier: 1.6.3
+        version: 1.6.3(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))(undici@8.12.2)(ws@8.22.0)
       '@llamaindex/anthropic':
         specifier: 0.3.27
         version: 0.3.27(@llamaindex/core@0.6.23)(@llamaindex/env@0.1.31)
@@ -157,7 +157,7 @@ importers:
         version: 0.134.0(zod@4.6.7)
       '@google/genai':
         specifier: 2.30.0
-        version: 2.30.0
+        version: 2.30.0(supports-color@10.2.2)
       openai:
         specifier: 7.34.0
         version: 7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7)
@@ -499,11 +499,11 @@ packages:
       '@langchain/core': ^1.1.48
       zod: ^3.25.32 || ^4.2.0
 
-  '@langchain/openai@1.6.2':
-    resolution: {integrity: sha512-KaXc3zjdM2/E24FdBlsk5NTT2Dyxh46vzCS2by78ehN6G5zdx+4OfVnPvyLl8r2tv2TqQCHpEhImVXgnAZaOvg==}
+  '@langchain/openai@1.6.3':
+    resolution: {integrity: sha512-vioA4Si8bIAczcsmrfV8C8KZ3QozAz2yiuTZSgR57WsjuDsuF2dzZ4tx/jTEEtyOrFzfKXnSYi32QsNz8Mah9w==}
     engines: {node: '>=22'}
     peerDependencies:
-      '@langchain/core': ^1.2.14
+      '@langchain/core': ^1.2.20
 
   '@langchain/protocol@0.0.19':
     resolution: {integrity: sha512-9hKcRrH7cBX6gfutdfXPoft1OCchHe4FEpALoDJMl5Qu+n/YG5ynZmyu8+8cxORlPwHBoKTxggvXz+76M1yX1Q==}
@@ -2492,7 +2492,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@google/genai@2.30.0':
+  '@google/genai@2.30.0(supports-color@10.2.2)':
     dependencies:
       google-auth-library: 10.9.1(supports-color@10.2.2)
       p-retry: 4.6.2
@@ -2599,7 +2599,7 @@ snapshots:
       - react
       - react-dom
 
-  '@langchain/openai@1.6.2(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))(undici@8.12.2)(ws@8.22.0)':
+  '@langchain/openai@1.6.3(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))(undici@8.12.2)(ws@8.22.0)':
     dependencies:
       '@langchain/core': 1.2.17(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0)
       js-tiktoken: 1.0.21

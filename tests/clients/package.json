@@ -15,7 +15,7 @@
     "@langchain/anthropic": "1.5.12",
     "@langchain/core": "1.2.17",
     "@langchain/google-genai": "2.3.2",
-    "@langchain/openai": "1.6.2",
+    "@langchain/openai": "1.6.3",
     "@llamaindex/anthropic": "0.3.27",
     "@llamaindex/core": "0.6.23",
     "@llamaindex/env": "0.1.31",
