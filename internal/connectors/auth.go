@@ -322,7 +322,7 @@ func (*Auth) authenticateAPIKey(_ context.Context, req *http.Request, c Config, 
 		req.Header.Set("X-Api-Key", string(secret))
 	case "gemini":
 		req.Header.Set("X-Goog-Api-Key", string(secret))
-	case "azure_openai":
+	case "azure_openai", KindAzureAISearch:
 		req.Header.Set("Api-Key", string(secret))
 	default:
 		if placement, ok := vendors.CredentialFor(c.VendorID); ok {

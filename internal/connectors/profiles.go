@@ -66,6 +66,9 @@ const anthropicMessagesRevision = "2023-06-01"
 var profileMu sync.RWMutex
 
 var profileRegistry = []Profile{
+	{ID: "bedrock-knowledge-bases", Label: "Bedrock Knowledge Bases retrieval", Kind: "bedrock", Dialect: "bedrock-knowledge-bases", DialectRevision: "2023-09-30", Hosting: "bedrock-knowledge-bases"},
+	{ID: "vertex-rag-engine", Label: "Vertex RAG Engine retrieval", Kind: "vertex_ai", Dialect: "vertex-rag-engine", DialectRevision: "v1", Hosting: "vertex-rag-engine"},
+	{ID: "azure-ai-search", Label: "Azure AI Search retrieval", Kind: KindAzureAISearch, Dialect: "azure-ai-search", DialectRevision: "2025-09-01", Hosting: "azure-ai-search"},
 	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
 	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
 	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
@@ -177,6 +180,22 @@ func init() {
 			}
 		}
 		switch p.ID {
+		case "bedrock-knowledge-bases", "vertex-rag-engine", "azure-ai-search":
+			p.Operations = []string{"retrieval"}
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.Strict = false
+			switch p.ID {
+			case "bedrock-knowledge-bases":
+				p.Authentication = []string{"static", "default_chain"}
+				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html"
+			case "vertex-rag-engine":
+				p.Authentication = []string{"adc", "service_account"}
+				p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations/retrieveContexts"
+			case "azure-ai-search":
+				p.Authentication = []string{"api_key", "azure_default", "azure_client_secret"}
+				p.Documentation = "https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post?view=rest-searchservice-2025-09-01"
+			}
 		case "vertex-batch-prediction":
 			p.Authentication = []string{"adc", "service_account"}
 			p.Operations = []string{"batch"}
@@ -367,6 +386,9 @@ func (c Config) ValidateProfile() error {
 	if p.Kind != c.Kind || !slices.Contains(p.Authentication, c.AuthMode) {
 		return errors.New("profile, connector kind and authentication are not a supported composition")
 	}
+	if c.RetrievalBackend() != "" && (len(c.OperationDefaults) > 0 || len(c.Bindings) > 0) {
+		return errors.New("retrieval profiles take resource and filter configuration from their explicit retrieval bindings")
+	}
 	if p.Dialect == "gemini-interactions" || p.Dialect == "gemini-live" || p.Dialect == "gemini-agents" {
 		if len(c.OperationDefaults) > 0 {
 			return errors.New("Gemini lifecycle profile does not admit unimplemented provider defaults")
@@ -517,6 +539,12 @@ func generationFamily(dialect string) (wire.Format, bool) {
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {
+	if c.RetrievalBackend() != "" {
+		return operation == "retrieval" && surface == "openai" && mode == "unary"
+	}
+	if operation == "retrieval" && (c.Kind == "bedrock" || c.Kind == "vertex_ai" || c.Kind == KindAzureAISearch) {
+		return false
+	}
 	if retainedapi.Operation(operation) {
 		if operation == "agent_resource" {
 			return retainedapi.Supports(c.Kind, operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
@@ -657,6 +685,16 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
 	switch c.Hosting() {
+	case "vertex-rag-engine":
+		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
+			return errors.New("Vertex RAG endpoint must match its configured project and location")
+		}
+		return nil
+	case "bedrock-knowledge-bases":
+		if u.Path != "" {
+			return errors.New("Knowledge Bases endpoint must be a service origin")
+		}
+		return nil
 	case pluginHosting:
 		if c.Endpoint != c.Plugin.Address(c.PluginOptions) {
 			return errors.New("a plugin provider's endpoint is its profile's address, with its options in place")

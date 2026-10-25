@@ -207,7 +207,7 @@ const rollupSQL = `WITH candidates AS (
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
                 attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
                 commitment_weight, commitment_amount, commitment_period, charge,
-                list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, response_cache
+                list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, response_cache,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -224,7 +224,7 @@ const rollupSQL = `WITH candidates AS (
          model_family, estimate_provenance, estimated_input_tokens,
          estimate_reported_input_tokens, estimate_attempt_count,
          commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count,
-         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count)
+         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt,
@@ -263,7 +263,8 @@ const rollupSQL = `WITH candidates AS (
              SUM(COALESCE(list_cost, estimated_cost + COALESCE(commitment_weight, 0))),
              SUM(COALESCE(contracted_cost, estimated_cost + COALESCE(commitment_weight, 0))),
              SUM(cache_budget_cost), SUM(cache_budget_charge),
-             COUNT(*) FILTER (WHERE response_cache AND provider_request_counted)
+             COUNT(*) FILTER (WHERE response_cache AND provider_request_counted),
+ COALESCE(SUM(training_tokens),0),COALESCE(SUM(storage_byte_seconds),0),COALESCE(SUM(cache_token_seconds),0),COALESCE(olp.container_session_totals(jsonb_agg(container_sessions)),'{}'::jsonb)
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -274,7 +275,11 @@ const rollupSQL = `WITH candidates AS (
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
         model_request_count = attempt_usage_hourly.model_request_count + EXCLUDED.model_request_count,
         target_request_count = attempt_usage_hourly.target_request_count + EXCLUDED.target_request_count,
-        input_tokens = attempt_usage_hourly.input_tokens + EXCLUDED.input_tokens,
+        training_tokens=attempt_usage_hourly.training_tokens+EXCLUDED.training_tokens,
+ storage_byte_seconds=attempt_usage_hourly.storage_byte_seconds+EXCLUDED.storage_byte_seconds,
+ cache_token_seconds=attempt_usage_hourly.cache_token_seconds+EXCLUDED.cache_token_seconds,
+ container_sessions=COALESCE(olp.container_session_totals(jsonb_build_array(attempt_usage_hourly.container_sessions,EXCLUDED.container_sessions)),'{}'::jsonb),
+ input_tokens = attempt_usage_hourly.input_tokens + EXCLUDED.input_tokens,
         output_tokens = attempt_usage_hourly.output_tokens + EXCLUDED.output_tokens,
         cached_input_tokens = attempt_usage_hourly.cached_input_tokens + EXCLUDED.cached_input_tokens,
         cache_write_input_tokens = attempt_usage_hourly.cache_write_input_tokens + EXCLUDED.cache_write_input_tokens,

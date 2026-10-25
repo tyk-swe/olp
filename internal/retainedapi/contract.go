@@ -17,6 +17,10 @@ const Revision = "retained-resources-1"
 // Literal declares a documented identifier that is not a retained resource.
 const Literal = "@literal"
 
+// Opaque declares a provider-defined data value whose keys are user content.
+// Only exact codec paths may use it; it must not mask resource control fields.
+const Opaque = "@opaque"
+
 type Family struct {
 	Operation  string   `json:"operation"`
 	Surface    string   `json:"surface"`
@@ -51,7 +55,7 @@ var families = []Family{
 	{Operation: "fine_tuning", Surface: "openai", Path: "/v1/fine_tuning/jobs", Kind: "fine_tuning_job", Identity: "id", Collection: "data", Providers: []string{"openai", "azure_openai"}, Methods: []string{"create", "list", "get", "cancel"}, Metered: true,
 		Children: []Family{{Path: "events", Kind: "fine_tuning_event", Identity: "id", Collection: "data", Methods: []string{"list"}}, {Path: "checkpoints", Kind: "fine_tuning_checkpoint", Identity: "id", Collection: "data", Methods: []string{"list"}}}},
 	{Operation: "vector_store", Surface: "openai", Path: "/v1/vector_stores", Kind: "vector_store", Identity: "id", Collection: "data", Providers: []string{"openai", "azure_openai"}, Methods: []string{"create", "list", "get", "update", "delete"}, Metered: true,
-		Children: []Family{{Path: "files", Kind: "vector_store_file", Identity: "id", Collection: "data", Methods: []string{"create", "list", "get", "delete"}, Metered: true}, {Path: "file_batches", Kind: "vector_store_batch", Identity: "id", Collection: "data", Methods: []string{"create", "get", "cancel"}, Metered: true}}},
+		Children: []Family{{Path: "files", Kind: "vector_store_file", Identity: "id", Collection: "data", Methods: []string{"create", "list", "get", "delete"}, Metered: true}, {Path: "file_batches", Kind: "vector_store_batch", Identity: "id", Collection: "data", Methods: []string{"create", "get", "cancel"}, Metered: true, Children: []Family{{Path: "files", Kind: "vector_store_file", Identity: "id", Collection: "data", Methods: []string{"list"}}}}}},
 	{Operation: "conversation", Surface: "openai", Path: "/v1/conversations", Kind: "conversation", Identity: "id", Collection: "data", Providers: []string{"openai"}, Methods: []string{"create", "get", "update", "delete"},
 		Children: []Family{{Path: "items", Kind: "conversation_item", Identity: "id", Collection: "data", Methods: []string{"create", "list", "get", "delete"}}}},
 	{Operation: "container", Surface: "openai", Path: "/v1/containers", Kind: "container", Identity: "id", Collection: "data", Providers: []string{"openai", "azure_openai"}, Methods: []string{"create", "list", "get", "delete"}, Metered: true,
@@ -91,10 +95,7 @@ func Supports(kind, operation, surface, mode string) bool {
 	case "conversation", "eval":
 		return kind == "openai" && surface == "openai"
 	case "retrieval":
-		// Only the OpenAI-style vector-store search has an executable
-		// native path. Cloud knowledge-base tuples stay unsupported
-		// until their own binding and transport exist.
-		return openAI
+		return openAI || surface == "openai" && slices.Contains([]string{"bedrock", "vertex_ai", "azure_ai_search"}, kind)
 	}
 	return false
 }
@@ -104,7 +105,9 @@ func Kinds() []string {
 	var add func([]Family)
 	add = func(fs []Family) {
 		for _, f := range fs {
-			out = append(out, f.Kind)
+			if !slices.Contains(out, f.Kind) {
+				out = append(out, f.Kind)
+			}
 			add(f.Children)
 		}
 	}
@@ -189,7 +192,7 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 					}
 					continue
 				}
-				if slices.Contains([]string{"metadata", "attributes", "schema", "json_schema", "parameters", "input_schema", "item_schema"}, field.Name) {
+				if slices.Contains([]string{"metadata", "labels", "attributes", "schema", "json_schema", "parameters", "input_schema", "item_schema"}, field.Name) {
 					continue
 				}
 				kind, reference := refs[p]
@@ -200,6 +203,9 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 					if field.Value.Kind() != oif.String && field.Value.Kind() != oif.Null {
 						return errors.New("literal identifier must be a string")
 					}
+					continue
+				}
+				if reference && kind == Opaque {
 					continue
 				}
 				if reference && field.Value.Kind() != oif.Null {

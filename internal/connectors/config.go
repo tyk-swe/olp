@@ -33,6 +33,7 @@ type Config struct {
 	Bindings                                                                              map[string]Binding
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
 	BatchStorage                                                                          *BatchStorage
+	TuningDatasetURIPrefixes                                                              []string
 	// SigningService overrides the SigV4 signing name of one call to an AWS
 	// service beside the connector's own, such as Amazon Polly's.
 	SigningService    string `json:"-"`
@@ -49,6 +50,12 @@ type Config struct {
 // is served at.
 func DefaultProfileEndpoint(kind, profileID, region, project string) string {
 	endpoint := DefaultEndpoint(kind, region, project)
+	if profileID == "bedrock-knowledge-bases" {
+		return strings.Replace(endpoint, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
+	}
+	if profileID == "vertex-rag-engine" {
+		return strings.TrimSuffix(endpoint, "/publishers/google")
+	}
 	if path := hostings[profileHosting(profileID)].vertexPath; kind == "vertex_ai" && path != "" {
 		return strings.TrimSuffix(endpoint, hostings["vertex-google"].vertexPath) + path
 	}
@@ -125,6 +132,10 @@ func (c Config) Validate(policy *egress.Policy) error {
 		return nil
 	}
 	switch c.Kind {
+	case KindAzureAISearch:
+		if c.ProfileID != "azure-ai-search" || u.Path != "" || c.CloudRegion != "" || c.CloudProject != "" || c.Deployment != "" || c.APIVersion != "2025-09-01" {
+			return errors.New("Azure AI Search requires its dedicated profile, a service origin and api_version 2025-09-01")
+		}
 	case "azure_openai":
 		if u.Path != "" {
 			return errors.New("Azure endpoint must be a resource origin")

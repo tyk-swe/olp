@@ -296,6 +296,9 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	}
 	emit := func(frame []byte) error {
 		projected, _, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse, previous)
+		if err == nil {
+			projected, err = s.mapGenerationReferenceFrame(ctx, x, res.NativeIdentity(), projected)
+		}
 		if err != nil || len(projected) > limit {
 			return errors.New("retained response event could not be projected")
 		}

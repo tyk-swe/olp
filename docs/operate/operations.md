@@ -67,6 +67,7 @@ or `all`; configured capability flags do not establish live worker health.
 
 | Task | Schedule/authority |
 | --- | --- |
+| Retained settlement | Five-second wake; sixteen claims, four concurrent polls, two-minute leases and thirty-second heartbeats; sixty-second observations with backoff; also without Valkey |
 | Media reconciliation | Durable claims; historical pins and live revocation; also without Valkey |
 | Plugin grant refresh | Five-second scan; per-grant advisory lock; record answered refresh during shutdown; also without Valkey |
 | Active probes | 15-second scan; fleet claim per configured interval/model; low-priority accounted system work |
@@ -497,8 +498,9 @@ rate cards; running an agent is outside this API.
 The provider-resources console supports create, list, inspect and delete using
 an inference key held in page memory. The management API's
 `GET /api/v1/provider-resource-contracts` exposes implemented capability metadata
-to the generated management SDK, CLI and MCP. Other declared families remain
-unavailable until their provider and accounting implementations are complete.
+to the generated management SDK, CLI and MCP. The same console also exposes
+the declared fine-tuning, vector-store, conversation, container, eval, skill and
+context-cache methods, including typed nested parent identifiers.
 
 Creates require `X-OLP-Route` and a stable `Idempotency-Key`. A successful or
 ambiguous create returns `X-OLP-Resource-ID`. Recovery compares the original
@@ -525,6 +527,69 @@ tool content or provider results are stored in resource metadata.
 Before release, run the service-backed retained-agent ownership, route-limit,
 replay-recovery and deletion scenarios and live qualification against the pinned Gemini
 contract. The local implementation checks do not establish those results.
+
+## Retained work and evidence
+
+Paid retained creation, uploads and expiry mutations commit their owner, immutable
+connection/credential/pricing pins, accounting templates and submission fence
+before dispatch. Unknown acceptance never authorizes another dispatch. Recovery
+can adopt only an authenticated provider result correlated with the original
+intent; an upstream ID alone grants no authority. Containers and Gemini caches
+have no qualified native create-correlation field, so unknown acceptance stays
+pending rather than being guessed. A durable intent proven never dispatched may
+close without inventing usage.
+
+Unbounded retained paid work requires an uncapped caller and uncapped applicable
+supply owners. Delayed training and eval work always refuse applicable TPM caps.
+A monetary hold cannot enforce a token rate. Storage-only liabilities block
+monetary admission; unresolved token-consuming work also blocks token admission,
+including owners added after acceptance. Zero-cost housekeeping remains available
+under late caps. Credential revocation, polling errors and missing usage preserve
+liability. Unsettled retained resources keep their original refreshable grant
+reference through deletion and expiry; explicit credential revocation still wins.
+
+The provider-resources inventory shows settlement state, pinned models, expiry
+and missing evidence. Use `POST /api/v1/provider-resources/{id}/reconcile` with
+configuration permission and project-change authority to schedule a poll. Its
+optional `upstream_id` is only a correlation-verification hint.
+
+An installation settings administrator with project-change authority can submit
+`POST /api/v1/provider-resources/{id}/usage-evidence`. Supply `idempotency_key`,
+a lowercase SHA-256 `evidence_digest`, UTC `start`/`end`, applicable exact
+quantities and `terminal`. Choose an originally pinned `model` when more than
+one exists. Evaluation evidence includes explicit input, output, cached-input
+and invocation counts. Interval boundaries use microsecond precision; raw
+quantities remain exact. Ownership, price revisions and credentials come from
+the original acceptance, and provenance is recorded as `operator_verified`.
+Do not allocate an aggregate invoice to one resource or infer storage/session
+charges from snapshots or elapsed age.
+
+Automatic and operator evidence share one atomic coverage ledger. Exact duplicate
+coverage cannot charge twice, and overlapping or conflicting intervals return
+409. Omitted applicable quantities are unknown. Terminal evidence closes liability
+only after independent remote-termination verification and complete coverage of
+all billed models/components. A missing asynchronous job alone cannot prove
+that its execution stopped. Store deletion preserves underlying files; native
+history, training examples, cache contents and eval samples remain provider-side.
+Keep retained settlements, mutations, coverage, evidence and minimal tombstones
+in the normal whole-schema backup, independently of request-history retention.
+
+Project-owned retrieval bindings are revisioned operator-managed references to
+Bedrock Knowledge Bases, Vertex RAG corpora or Azure AI Search indexes. Grant
+specific project API keys explicitly and configure backend field mappings.
+Bindings promote with configuration; queries enforce their current grant and
+certified route/target/credential. Index creation and synchronization are outside
+this API. Unsupported filters or ranking controls refuse before dispatch.
+
+OpenAI availability limits remain provider qualification concerns. The
+[announced deprecations](https://developers.openai.com/api/docs/deprecations)
+restrict new fine-tuning customers from May 7, 2026, further restrict inactive
+customers from July 2, 2026, and end new jobs for active customers on January 6,
+2027. Evals become read-only on October 31, 2026 and its API shuts down November
+30, 2026. The frozen endpoint scope remains implemented without calendar-based
+gateway switches. The locked OpenAI SDK has removed Evals methods; frozen REST
+fixtures support local qualification. Service, SDK-service, browser and live
+qualification remain separate release gates.
 
 ## Response cache
 

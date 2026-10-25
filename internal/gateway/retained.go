@@ -30,7 +30,11 @@ func (s *Server) authorizeListedResource(ctx context.Context, authority access.A
 	if s.Resolver == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable.")
 	}
-	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, "batch")
+	operation := "batch"
+	if res.Kind == resources.KindFile {
+		operation = retainedFileOperation(res)
+	}
+	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, operation)
 	if err != nil {
 		return pinUnavailable()
 	}
@@ -86,13 +90,29 @@ func strictResourceKind(kind string) (strict, known bool) {
 	return false, false
 }
 
+func retainedResourceContract(res *resources.Resource, original, current routing.RouteFidelity, use retainedUse) *Error {
+	if res.Kind == resources.KindFile && retainedFileOperation(res) != "batch" {
+		return retainedContract(original.Strict(), current, use)
+	}
+	if strict, known := strictResourceKind(res.Kind); known {
+		return retainedContract(strict, current, use)
+	}
+	switch res.Kind {
+	case resources.KindInteraction, "conversation", "vector_store", "context_cache":
+		// These kinds share a name under either fidelity. Their creation
+		// route supplies the contract before a historical pin is restored.
+		return retainedContract(original.Strict(), current, use)
+	}
+	return nil
+}
+
 func (x *call) retainedContentGate(resource *resources.Resource, route *routing.Route, use retainedUse) *Error {
 	if use == retainedRetrieval {
 		switch resource.Kind {
 		case resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiFile, resources.KindGeminiBatch:
 			return x.guardrailSurfaceGate(route)
 		case resources.KindFile:
-			if adapter := fileAdapter(resource); adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
+			if adapter := fileAdapter(resource); retainedFileOperation(resource) != "batch" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
 				return x.guardrailSurfaceGate(route)
 			}
 		case resources.KindBatch:
@@ -126,16 +146,8 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 				return nil, nil, e
 			}
 		}
-		if strict, known := strictResourceKind(res.Kind); known {
-			if e := retainedContract(strict, current.Fidelity, use); e != nil {
-				return nil, nil, e
-			}
-		} else if res.Kind == resources.KindInteraction {
-			// An interaction's contract is the fidelity of the route that
-			// created it, so the pinned route supplies its strict side.
-			if e := retainedContract(route.Fidelity.Strict(), current.Fidelity, use); e != nil {
-				return nil, nil, e
-			}
+		if e := retainedResourceContract(res, route.Fidelity, current.Fidelity, use); e != nil {
+			return nil, nil, e
 		}
 	}
 	if e := x.retainedContentGate(res, route, use); e != nil {

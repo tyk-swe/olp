@@ -238,7 +238,8 @@ the API sunsets on 2027-01-01.
 
 The file, batch, and realtime rows are qualified to official OpenAI and Azure
 OpenAI targets only. `POST /v1/files` carries no model field, so it requires an
-`X-OLP-Route` header naming a batch-enabled allowed route; every other endpoint
+`X-OLP-Route` header naming a route allowed for the file purpose (batch,
+fine-tuning, eval or vector-store source files); every other endpoint
 resolves the route through the resource mapping or the `model` field. Uploads
 stream multipart bodies to the provider under the shared request and spool
 bounds; file bytes are never stored in the gateway. Every file, batch, and
@@ -257,6 +258,20 @@ state may retain user content upstream. `previous_response_id` must reference a
 response stored under the same key and route and is rewritten to the pinned
 upstream identifier. Streaming terminal events are rewritten so callers only
 ever see gateway-owned response IDs.
+
+Conversations, owned files, vector stores and prior Responses must share one
+compatible historical owner/route/target/connection/model/credential contract.
+Native Responses `file_search` inputs, result references and streaming citations
+use gateway IDs. History stays provider-side, and compaction is separately
+priced. Gemini `cachedContent` likewise requires a gateway cache ID with a
+matching immutable model, token quantity, credential and authoritative expiry.
+Raw native cache IDs and unqualified provider file URIs refuse before dispatch.
+Cached tool declarations and configuration are unsupported; declare supported
+client tools on each generation request. Caches without a verified tool-free
+contract must be recreated before generation can use them.
+State-bearing requests bypass response-cache replay. Known cached tokens count
+in context, token and monetary admission; unknown history, file and retrieval
+input quantities refuse applicable consumption caps.
 
 `GET /v1/realtime` is a WebSocket endpoint; WebRTC is not supported. The `model`
 query parameter is an OLP route slug, the route must allow `realtime`, and the

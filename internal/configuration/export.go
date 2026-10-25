@@ -238,6 +238,10 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	if doc.AgentPublications, err = exportAgentPublications(ctx, q); err != nil {
 		return nil, err
 	}
+	doc.RetrievalBindings, err = exportRetrievalBindings(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	doc.MCPServers, err = exportMCPServers(ctx, q)
 	if err != nil {
 		return nil, err

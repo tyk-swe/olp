@@ -544,7 +544,9 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	fact.Carried = cfg.CarriedByPlugin()
 	// A plugin that carries the request reports only whether it was sent, so
 	// the attempt must not risk repeating work it may have done.
-	retainedResponse := x.family == wire.Responses && x.providerState && responseStoreRequested(x.generation.parsed)
+	resolved := x.resolvedGenerationResources()
+	conversationBound := resolved["/conversation"] != "" || resolved["/conversation/id"] != ""
+	retainedResponse := x.family == wire.Responses && x.providerState && (responseStoreRequested(x.generation.parsed) || conversationBound)
 	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || fact.Carried || retainedResponse, Declared: cfg.Classification()}}
 	var parallel *parallelGuardrail
 	nativeDeliveryClass := ""
@@ -753,6 +755,13 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame, encodedWire != wire.Responses)
 				if mapErr != nil {
 					return mapErr
+				}
+				frame = mapped
+			}
+			if x.family == wire.Responses {
+				mapped, mapErr := s.mapGenerationReferenceFrame(ctx, x, responseNativeIdentity(x, &fact, ""), frame)
+				if mapErr != nil {
+					return &responseLocalRefusal{cause: mapErr}
 				}
 				frame = mapped
 			}

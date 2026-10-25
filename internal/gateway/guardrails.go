@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -87,6 +88,31 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	// Retained content is read directly from the provider, outside this
 	// request's output inspection and masking lifetime.
 	retainsOutput := x.providerState && (responseStoreRequested(x.generation.parsed) || backgroundResponseRequested(x.generation.parsed))
+	opaqueInput := false
+	if x.generation.resources != nil {
+		for _, resource := range x.generation.resources.bound {
+			if resource == nil {
+				continue
+			}
+			if resource.Kind == "conversation" {
+				retainsOutput = true
+			}
+			// Prior Responses retain their existing continuation contract.
+			// Newly supplied provider resources have no content inspection path.
+			if resource.Kind != resources.KindResponse && resource.Kind != resources.KindStrictResponse {
+				opaqueInput = true
+			}
+		}
+	}
+	if opaqueInput {
+		for _, phase := range []string{guardrails.Input, guardrails.InputParallel} {
+			result, err := x.guardrailEngine.Unavailable(phase)
+			x.recordGuardrails(result.Decisions)
+			if err != nil {
+				return guardrailError(err)
+			}
+		}
+	}
 	if retainsOutput && (x.guardrailEngine.HasPhase(guardrails.Output) || x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask)) {
 		return guardrailError(guardrails.ErrSurface)
 	}

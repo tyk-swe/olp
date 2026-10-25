@@ -299,15 +299,19 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
  audio_input_per_million::text,cached_audio_input_per_million::text,audio_output_per_million::text,
  image_input_per_million::text,cached_image_input_per_million::text,image_output_per_million::text,
  per_request::text,batch_multiplier::text,tool_calls::text,tiers::text,windows::text,
- unit_price::text,btrim(currency)
+ unit_price::text,btrim(currency), training_per_million::text, storage_per_gib_day::text, cache_storage_per_million_token_hour::text, container_per_session::text
  FROM ranked WHERE rank=1 OR effective_at>$1 LIMIT 100001`, now)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var p RoutingPrice
-		var toolCalls, tiers, windows *string
-		if err = rows.Scan(&p.RevisionID, &p.Revision, &p.EffectiveAt, &p.ProviderKind, &p.ProviderID, &p.VendorID, &p.Model, &p.Operation, &p.InputPerMillion, &p.OutputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion, &p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion, &p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion, &p.ImageOutputPerMillion, &p.PerRequest, &p.BatchMultiplier, &toolCalls, &tiers, &windows, &p.UnitPrice, &p.Currency); err != nil {
+		var toolCalls, tiers, windows, containerSessions *string
+		if err = rows.Scan(&p.RevisionID, &p.Revision, &p.EffectiveAt, &p.ProviderKind, &p.ProviderID, &p.VendorID, &p.Model, &p.Operation, &p.InputPerMillion, &p.OutputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion, &p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion, &p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion, &p.ImageOutputPerMillion, &p.PerRequest, &p.BatchMultiplier, &toolCalls, &tiers, &windows, &p.UnitPrice, &p.Currency, &p.TrainingPerMillion, &p.StoragePerGiBDay, &p.CacheStoragePerMillionTokenHour, &containerSessions); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err = decodeContainerRates(&p.Price, containerSessions); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -494,7 +498,7 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, now time.Time, 
  output_per_million::text,audio_input_per_million::text,cached_audio_input_per_million::text,
  audio_output_per_million::text,image_input_per_million::text,cached_image_input_per_million::text,
  image_output_per_million::text,unit_price::text,per_request::text,batch_multiplier::text,
- tool_calls::text,tiers::text,windows::text,btrim(currency)
+ tool_calls::text,tiers::text,windows::text,btrim(currency), training_per_million::text, storage_per_gib_day::text, cache_storage_per_million_token_hour::text, container_per_session::text
  FROM olp.rate_card_prices WHERE rate_card_revision_id=ANY($1::uuid[]) LIMIT 100001`, revisionIDs)
 	if err != nil {
 		return err
@@ -504,14 +508,18 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, now time.Time, 
 		priceCount++
 		var revisionID string
 		var p RoutingPrice
-		var toolCalls, tiers, windows *string
+		var toolCalls, tiers, windows, containerSessions *string
 		if err = rows.Scan(&revisionID, &p.ProviderKind, &p.VendorID, &p.Model, &p.Operation,
 			&p.InputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion,
 			&p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion,
 			&p.OutputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion,
 			&p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion,
 			&p.ImageOutputPerMillion, &p.UnitPrice, &p.PerRequest, &p.BatchMultiplier,
-			&toolCalls, &tiers, &windows, &p.Currency); err != nil {
+			&toolCalls, &tiers, &windows, &p.Currency, &p.TrainingPerMillion, &p.StoragePerGiBDay, &p.CacheStoragePerMillionTokenHour, &containerSessions); err != nil {
+			rows.Close()
+			return err
+		}
+		if err = decodeContainerRates(&p.Price, containerSessions); err != nil {
 			rows.Close()
 			return err
 		}

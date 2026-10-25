@@ -41,7 +41,12 @@ func buildContracts() *oif.Registry {
 				oif.IdentityRule{Pointer: "/stream_options/include_usage", Origin: oif.TransportOption, Kind: oif.Boolean, Validate: func(_, after oif.Value) bool { return after.Raw() == "true" }})
 		}
 		if family == wire.Responses {
-			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/previous_response_id", Origin: oif.ResourceBinding, Kind: oif.String})
+			for _, pointer := range []string{"/previous_response_id", "/conversation", "/conversation/id", "/input/*/file_id", "/input/*/content/*/file_id", "/input/*/output/file_id", "/input/*/output/*/file_id", "/tools/*/vector_store_ids/*"} {
+				binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: pointer, Origin: oif.ResourceBinding, Kind: oif.String})
+			}
+		}
+		if family == wire.Gemini {
+			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/cachedContent", Origin: oif.ResourceBinding, Kind: oif.String})
 		}
 		if d.Operation == generation.Contract() {
 			adapter := generationAdapter{family}

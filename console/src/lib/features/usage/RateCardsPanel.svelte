@@ -390,6 +390,10 @@
                           bind:cachedImageInputPrice={row.cachedImageInputPrice}
                           bind:imageOutputPrice={row.imageOutputPrice}
                           bind:perRequestPrice={row.perRequestPrice}
+                          bind:trainingPrice={row.trainingPrice}
+                          bind:storagePrice={row.storagePrice}
+                          bind:cacheStoragePrice={row.cacheStoragePrice}
+                          bind:containerFees={row.containerFees}
                           bind:batchMultiplier={row.batchMultiplier}
                           bind:toolFees={row.toolFees}
                           bind:tiers={row.tiers}

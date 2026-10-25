@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"maps"
 	"os"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
@@ -44,6 +48,35 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Durable obligations and allocation evidence survive a full replacement restore.
+	retained := retainedLedgerOnPool(t, h.Pool, "fine_tuning", true)
+	retainedResource := retained.prepare(t)
+	retainedResource, err = retained.store.GetByUUID(t.Context(), retainedResource.UUID, retained.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Native source fields are deliberately excluded from retained metadata.
+	nativeSource, err := oif.ParseJSON([]byte(`{"id":"provider-resource","status":"running","training_examples":[{"text":"private-retained-training-canary"}],"evaluation_samples":["private-retained-eval-canary"],"conversation_history":["private-retained-conversation-canary"]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = resources.EnrichRetained(retainedResource, retainedapi.Endpoint{}, nativeSource, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err = retained.store.SaveRetainedResult(t.Context(), retainedResource); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = retained.store.ApplyRetainedEvidence(t.Context(), retainedResource.UUID, "restore-evidence", strings.Repeat("a", 64), "operator_verified", retained.User, retainedTrainingObservation(retainedResource, 1_000_000), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = retained.store.PrepareRetainedMutation(t.Context(), retainedResource, "fine_tuning:patch", "restore-mutation", bytes.Repeat([]byte{4}, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if err = retained.store.UnknownRetainedMutation(t.Context(), retainedResource.UUID, "restore-mutation", "fine_tuning:patch"); err != nil {
+		t.Fatal(err)
+	}
+	if err = retained.store.Tombstone(t.Context(), retainedResource.ID); err != nil {
+		t.Fatal(err)
+	}
 	debitID, debitKey, debitProject := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	acctExec(t, h.Pool, `INSERT INTO olp.projects(id,name,etag,created_by) SELECT $1,'Outstanding execution',$2,id FROM olp.users ORDER BY id LIMIT 1`, debitProject, uuid.NewString())
 	acctExec(t, h.Pool, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id) SELECT $1,$2,$3,'Outstanding execution',id,'{}',$4,$5 FROM olp.users ORDER BY id LIMIT 1`, debitKey, strings.ReplaceAll(debitKey, "-", "")[:16], make([]byte, 32), uuid.NewString(), debitProject)
@@ -88,6 +121,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 		c.Env = testutil.Environment(env)
 		return c.CombinedOutput()
 	}
+	acctExec(t, h.Pool, `UPDATE olp.request_metadata_consumer_health SET checked_at=clock_timestamp() WHERE singleton`)
 	out, err := run("backup.sh", filepath.Join(dir, "backups"))
 	if err != nil {
 		t.Fatalf("backup: %v: %s", err, out)
@@ -188,6 +222,15 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 				var exposure string
 				if err := target.QueryRow(t.Context(), `SELECT state||':'||cost_bound::text||':'||charge_bound::text FROM olp.execution_debits WHERE id=$1 AND closed_at IS NULL`, debitID).Scan(&exposure); err != nil || exposure != "outcome_unknown:2.000000000000:3.000000000000" {
 					t.Fatalf("outstanding exposure lost through restore/restart: %s %v", exposure, err)
+				}
+				var retainedState, mutationState, retainedPayload string
+				var coverage, evidence int
+				var pending, acceptedFence bool
+				if err := target.QueryRow(t.Context(), `SELECT s.state,m.state,(s.templates::text||r.metadata::text||(SELECT document::text FROM olp.retained_usage_evidence WHERE resource_id=r.id LIMIT 1)),(SELECT count(*) FROM olp.retained_usage_coverage WHERE resource_id=r.id),(SELECT count(*) FROM olp.retained_usage_evidence WHERE resource_id=r.id),olp.has_pending_resource_usage(r.api_key_id),EXISTS(SELECT 1 FROM olp.retained_submissions WHERE resource_id=r.id AND state='accepted') FROM olp.retained_settlements s JOIN olp.provider_resources r ON r.id=s.resource_id JOIN olp.retained_mutations m ON m.resource_id=r.id WHERE r.id=$1 AND r.state='deleted'`, retainedResource.UUID).Scan(&retainedState, &mutationState, &retainedPayload, &coverage, &evidence, &pending, &acceptedFence); err != nil || retainedState == "closed" || mutationState != "submission_unknown" || coverage != 1 || evidence != 1 || !pending || !acceptedFence {
+					t.Fatalf("retained evidence/liability/fence lost through restore/restart: state=%s mutation=%s coverage=%d evidence=%d pending=%v fence=%v error=%v", retainedState, mutationState, coverage, evidence, pending, acceptedFence, err)
+				}
+				if strings.Contains(retainedPayload, "private-retained-") || strings.Contains(retainedPayload, "training_examples") || strings.Contains(retainedPayload, "evaluation_samples") || strings.Contains(retainedPayload, "conversation_history") {
+					t.Fatal("native retained source content persisted through backup")
 				}
 				return
 			}

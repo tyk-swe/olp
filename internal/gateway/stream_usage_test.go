@@ -49,9 +49,10 @@ func TestResponsesClientWriteFailureBeforeTerminalRetainsPartialEvidence(t *test
 }
 
 func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
-	for _, retained := range []bool{true, false} {
+	for _, mode := range []string{"stored", "stateless", "conversation"} {
+		retained := mode == "stored"
 		for _, phase := range []string{"completed", "failed", "partial"} {
-			t.Run(fmt.Sprintf("retained=%t/%s", retained, phase), func(t *testing.T) {
+			t.Run(mode+"/"+phase, func(t *testing.T) {
 				h := newHarness(t, Config{})
 				kind, status := phase, phase
 				if phase == "partial" {
@@ -66,7 +67,11 @@ func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
 					w.Header().Set("Content-Type", "text/event-stream")
 					io.WriteString(w, encodedWire)
 				})
-				parsed, err := openai.Parse(wire.Responses, fmt.Appendf(nil, `{"model":"team-chat","input":"hi","stream":true,"store":%t}`, retained))
+				reference := ""
+				if mode == "conversation" {
+					reference = `,"conversation":"conversation-native"`
+				}
+				parsed, err := openai.Parse(wire.Responses, fmt.Appendf(nil, `{"model":"team-chat","input":"hi","stream":true,"store":%t%s}`, retained, reference))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -81,6 +86,13 @@ func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
 					providerState: true, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed,
 
 						emit: func([]byte) error { return errClientWrite }},
+				}
+				if mode == "conversation" {
+					// This test begins at an already authorized attempt; resource
+					// ownership itself is covered by generation reference tests.
+					x.generation.resources = &generationResources{resolved: map[string]string{"/conversation": "conversation-native"}}
+					serving := provider.Connector().ServingIdentity(provider.ID, provider.RevisionID, target.ProviderModel)
+					x.serving = &serving
 				}
 				attempt := routing.Attempt{ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel, Timeout: 2 * time.Second}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -98,8 +110,8 @@ func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
 				if failure.acceptance != wantAcceptance || fact.Class != wantClass {
 					t.Fatalf("native outcome changed retry evidence: failure=%+v fact=%+v", failure, fact)
 				}
-				if failure.noRetry != retained {
-					t.Fatalf("accepted retained invocation lost its retry fence: retained=%t phase=%s noRetry=%t", retained, phase, failure.noRetry)
+				if failure.noRetry != (retained || mode == "conversation") {
+					t.Fatalf("accepted retained invocation lost its retry fence: mode=%s phase=%s noRetry=%t", mode, phase, failure.noRetry)
 				}
 			})
 		}

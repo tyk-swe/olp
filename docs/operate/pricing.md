@@ -17,7 +17,8 @@ stored cost stays explicable in the terms it was charged under.
 ## Price components
 
 Every rate, fee and multiplier is a decimal string with no redundant zeros.
-All components are optional; an absent component is simply not billed.
+All components are optional. Every reported billing dimension needs its rate;
+an omitted applicable quantity remains unknown.
 
 | Member | Charges |
 | --- | --- |
@@ -33,14 +34,19 @@ All components are optional; an absent component is simply not billed.
 | `cached_image_input_per_million` | Cached image input. Falls back to cached input, then input. |
 | `image_output_per_million` | The image share of output. Falls back to the output rate. |
 | `unit_price` | A fixed amount per media unit. |
-| `per_request` | A fixed fee charged once per successful attempt. |
+| `per_request` | A fixed fee charged once per successful attempt; verified deferred eval invocations use their actual count. |
+| `training_per_million` | `training_tokens`, per million training tokens. |
+| `storage_per_gib_day` | Exact `storage_byte_seconds` divided by `2^30 × 86400`. |
+| `cache_storage_per_million_token_hour` | Exact `cache_token_seconds` divided by `1000000 × 3600`. |
+| `container_per_session` | `container_sessions`, keyed by native memory tier such as `1g`, `4g`, `16g`, or `64g`. |
 | `batch_multiplier` | Multiplies the whole usage charge of attempts marked batch. |
 | `tool_calls` | Fees per metered server-side tool invocation, `{tool: fee}`, 1–16 names matching `^[a-z][a-z0-9_]{0,63}$`. |
 | `tiers` | Input-token tiers; see below. |
 | `windows` | Time-of-day multipliers in a named IANA zone; see below. |
 
 An entry must name at least one of input, output, any audio or image rate,
-unit price, per-request, or tool fees.
+unit price, per-request, tool fees, training, retained storage, cache storage,
+or container-session rates.
 
 ## Modality shares
 
@@ -64,6 +70,11 @@ entry's whole per-million rate set for that attempt. A tier therefore names
 exactly the per-million fields its entry names. Per-request fees, tool fees,
 windows and the batch multiplier are entry-level and apply regardless of tier.
 
+Eval runs provide per-model totals rather than per-invocation input sizes.
+Their admission rejects input tiers on provider prices and explicit rate-card
+prices. Existing aggregate observations with more than one invocation remain
+unpriced under such tariffs; a sum of invocation inputs cannot choose a tier.
+
 ## Windows
 
 `windows` is `{time_zone, periods}` with 1–32 periods, each
@@ -85,8 +96,9 @@ one.
 positive invocation count and no configured fee makes the attempt unpriced;
 zero-count tools are ignored.
 
-Usage is marked `batch` only by batch-result settlement, which no surface
-produces yet, so the marker and its multiplier are inert until one does.
+Usage is marked `batch` by batch-result settlement. Retained training, storage,
+cache and container evidence use their explicit units and preserve the original
+acceptance pricing, discounts, rate card and tariff-window instant.
 
 ## The bill
 
@@ -96,9 +108,16 @@ For a complete attempt the billed cost is
 input_charge/1e6 + output_charge/1e6 + media_units × unit_price
   + per_request (successful attempts only)
   + Σ count × tool_fee
+  + training_tokens × training_per_million / 1e6
+  + storage_byte_seconds × storage_per_gib_day / (2^30 × 86400)
+  + cache_token_seconds × cache_storage_per_million_token_hour / (1e6 × 3600)
+  + Σ container_sessions[tier] × container_per_session[tier]
 ```
 
-each side divided by a million once, then scaled by window × batch. Amounts are stored `numeric(24,12)`, rounded half away from zero at
+Retained quantities stay exact until the final monetary rounding. Deferred
+facts do not repeat their submission request fee. Eval generation and grader
+facts use verified `invocation_count` with each model's generation price.
+Amounts are then scaled by window × batch. Amounts are stored `numeric(24,12)`, rounded half away from zero at
 the twelfth decimal — the same figure the gateway's Go mirror computes for
 admission reservations and settlement.
 

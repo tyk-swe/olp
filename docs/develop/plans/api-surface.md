@@ -112,10 +112,29 @@ declared candidate model to its owner's connection discovery. It becomes
 servable only after exact-tuple certification and publication; job completion
 never mutates a published route or grants model access to another project.
 
+The retained implementation exposes the declared OpenAI/Azure create, list,
+get, cancel, event and checkpoint methods and Vertex create, list, get and
+cancel. Native `trained_tokens` and Vertex billable training tokens settle
+terminal jobs, including paid usage from failures and cancellations. Missing
+usage preserves liability. Supervised and DPO training are accepted where the
+native provider supports them; reinforcement billing units, pause/resume and
+Vertex distillation, preference and external evaluation sources are refused.
+Vertex supervised datasets must fall under the connection's operator-configured
+`options.tuning_dataset_uri_prefixes`; an empty list grants no dataset access.
+Vertex creation correlation uses native labels, and terminal intervals use the
+authoritative native `endTime`.
+
+Native `/v1/files` uploads for `fine-tune`, `evals`, `assistants` and `user_data`
+use the corresponding route operation, a bounded multipart upload and an
+`Idempotency-Key`. Result files discovered through an owned tuning job retain
+that job's connection and credential authority. Unknown upload acceptance never
+authorizes redispatch. These native file uploads have immediate request
+accounting; billable vector storage belongs to the store settlement owner.
+
 ## Vector stores and retrieval
 
 OpenAI and Azure receive native vector-store create/list/retrieve/update/delete,
-file attach/list/retrieve/delete, file-batch create/retrieve/cancel/list and
+file attach/list/retrieve/delete, file-batch create/retrieve/cancel, nested batch-file listing and
 search methods present in each pinned contract. New operation `retrieval`
 authorizes search; `vector_store` authorizes resource lifecycle calls. All
 objects are owner-scoped and require provider-state permission.
@@ -124,6 +143,12 @@ Native Responses rewrites gateway vector-store IDs inside `file_search` and
 result references. A store can attach only files with matching ownership and
 provider affinity. Deleting a store follows provider semantics; it does not
 implicitly delete separately owned files or erase settlement evidence.
+
+Nested `/file_batches/{batch_id}/files` lists are implemented. A batch filters
+the store attachment collection, so its returned file identifiers and cursors
+remain children of the store and work with the store's file methods. Attachment
+updates and attachment-content methods outside the declared registry are
+explicitly unsupported.
 
 Bedrock Knowledge Bases, Vertex AI RAG Engine and Azure AI Search provide
 transformed `/v1/vector_stores/{id}/search` through operator-configured,
@@ -135,10 +160,46 @@ Reject filters/ranking controls without a faithful mapping; retain provider
 score meaning without inventing cross-vendor calibrated scores. The agent gateway consumes
 this certified `retrieval` operation rather than accessing indexes directly.
 
+The query handler also accepts `POST /v1/retrieval/{binding_id}/query`.
+Cloud binding IDs are UUIDs; the vector-store search alias accepts the same
+binding UUID. Manage bindings with revisioned `/api/v1/retrieval-bindings`
+CRUD and revision reads. Writes require configuration permission and project
+change authority, an idempotency key, and an observed ETag for updates or
+retirement. The connection identity is derived from the selected target and
+persisted with the binding revision. Queries check the explicit key grants,
+owning project and current published route, target, model and credential
+authority before dispatch.
+
+Use the dedicated `bedrock-knowledge-bases`, `vertex-rag-engine` or
+`azure-ai-search` provider profile, with the native Knowledge Base ID, full
+RAG corpus name or search index name as the target model. The Azure provider
+kind is `azure_ai_search`, using API version `2025-09-01`; its Entra scope is
+`https://search.azure.com/.default`. Existing credential pools and egress
+policies apply. Metadata certification performs a cost-free native resource
+read; live qualification must also establish query permissions.
+
+Queries accept `query` and `max_num_results` from 1 to 100 (default 10).
+Bedrock and Azure accept `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in` and `nin`
+metadata filters with `and`/`or` composition, only for explicitly mapped
+logical fields. Azure string values are escaped as OData literals. The pinned
+Vertex contract supports `vector_distance_threshold` or
+`vector_similarity_threshold`; arbitrary metadata filters are refused.
+Ranking models, index mutation and controls without a faithful mapping are
+refused before dispatch. Results preserve text, native score precision and
+score meaning (`score` or `distance`), citations and attributes. These
+bindings charge the immediate `retrieval` request through normal request
+accounting. Configuration promotion resolves the destination provider,
+route target and exact project-local API-key names; absent or ambiguous
+grants block promotion.
+
+Native query contracts are pinned to [Bedrock Retrieve](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html),
+[Vertex retrieveContexts](https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations/retrieveContexts)
+and [Azure document search](https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post?view=rest-searchservice-2025-09-01).
+
 ## Responses completion
 
-Add OpenAI Conversations create/list/retrieve/update/delete and item lifecycle
-methods defined by the pinned contract, all under `allow_provider_state` and
+Implement OpenAI Conversations create/retrieve/update/delete and item lifecycle
+methods defined by the pinned contract (root listing is unsupported), all under `allow_provider_state` and
 owner-scoped gateway IDs. Combining conversation, file, vector-store or prior
 response references requires the same owner and compatible target. Never create
 a local history copy or translate a conversation to a different provider.
@@ -196,6 +257,37 @@ Unsupported regional/profile methods stay excluded; a generic `/native` prefix
 does not waive authorization, retention, accounting or ID rewriting. Async
 runs reuse the shared retained-resource foundation submission/settlement infrastructure. Periodic storage charges
 need an explicit pricing usage unit and reconciliation contract before enablement.
+
+Containers expose the declared create/list/get/delete and file
+create/list/get/delete/content methods. File uploads accept a bounded multipart
+file or an owned JSON/multipart `file_id`; downloads return bounded binary bytes. Memory
+tiers are pinned at creation. Native lifecycle observations do not create
+session charges from elapsed time; verified billing evidence owns those charges.
+
+Evals expose custom definitions, name/metadata updates, runs, cancellation,
+deletion and output items. Runs accept owned JSONL files or inline file content.
+Every generation and model-based grader names an explicitly authorized model
+on the same connection, route and credential slot, with separate pinned pricing.
+Model-based runs require the route's `generation` operation and certified
+generation capabilities for every sampling and grader model.
+Native logs and stored-completions sources, implicit models and testing-criteria
+updates are refused. Dynamic item-reference trajectories also require a
+per-item resource authority contract and are refused. Terminal per-model usage settles incurred work even when
+the run fails or is cancelled; absent model quantities remain unresolved.
+
+Gemini caches persist their native model, immutable token quantity, creation
+time and authoritative expiration. PATCH accepts only expiration controls.
+Generation binds a gateway cache identifier before unary or streaming dispatch;
+raw provider IDs and incompatible model or content transformations are refused.
+Verified remote expiry can settle the exact immutable token quantity over its
+authoritative lifetime. Early deletion or disappearance cannot establish usage
+coverage by itself and retains the outstanding accounting owner.
+
+Native family methods have focused fixture coverage. The endpoint ledger keeps
+live qualification required for every provider/profile/model tuple; these local
+checks do not establish service, SDK-service or live-provider qualification.
+The locked OpenAI SDK v3.78.0 has no Evals client; Evals uses the frozen REST
+fixtures documented in `internal/resources/testdata/retained/README.md`.
 
 ## Governed pass-through
 
@@ -332,21 +424,24 @@ implementation and qualification explicitly support changing them.
 
 ### RM5: Retained APIs and retrieval
 
-**State:** Partial; live qualification remains separate. **Accountable:** resource/connector maintainers, with
+**State:** Done (implementation); service and live qualification remain separate. **Accountable:** resource/connector maintainers, with
 accounting and SDK owners. **Entry:** RM4.1 per operation, owner/credential
 affinity and defined priced units. Bounded asynchronous jobs/runs additionally
 require RM4.2–RM4.3; query-only retrieval does not wait for those jobs.
 
-Metered creation and storage mutations fail closed with
-`unsupported_metered_operation` until each family has a durable usage-settlement
-owner. Immediate compaction and retrieval use request accounting; read, list,
-cancel and delete remain available for existing owner-bound resources.
+Paid retained families use durable pre-dispatch settlement owners, immutable
+price/connection/credential pins and one atomic provider/operator evidence ledger.
+Unbounded work refuses applicable consumption caps; delayed training/evals always
+refuse TPM caps. Immediate compaction and retrieval use request accounting.
+Zero-cost housekeeping remains available for owner-bound resources.
+See [retained operations](../../operate/operations.md#retained-work-and-evidence)
+for evidence, recovery and provider-retirement constraints.
 
-- [ ] **RM5.1 — Add fine-tuning:** implement the OpenAI jobs family first,
+- [x] **RM5.1 — Add fine-tuning:** implement the OpenAI jobs family first,
   followed by the pinned Azure and native Vertex methods in the [contract](#fine-tuning).
   Verify file affinity, unknown-create recovery, priced training settlement and
   certification/publication before any resulting model becomes servable.
-- [ ] **RM5.2 — Add native vector stores:** implement the pinned OpenAI/Azure
+- [x] **RM5.2 — Add native vector stores:** implement the pinned OpenAI/Azure
   lifecycle, file attachments/batches and search. Test nested IDs, pagination,
   provider-state permissions and Responses `file_search` identifier rewriting.
 - [x] **RM5.3 — Add certified query-only retrieval:** implement project-owned
@@ -359,13 +454,13 @@ cancel and delete remain available for existing owner-bound resources.
   lifecycle/items and native compact methods. Test cross-resource owner/target
   affinity, inspection and independently priced compaction; do not retain a local
   conversation history or substitute a summary prompt.
-- [ ] **RM5.5 — Add containers:** implement the declared OpenAI and supported
+- [x] **RM5.5 — Add containers:** implement the declared OpenAI and supported
   Azure lifecycle/file methods; verify owner isolation without gateway shell execution.
-- [ ] **RM5.6 — Add evals:** implement native OpenAI definitions/runs; test
+- [x] **RM5.6 — Add evals:** implement native OpenAI definitions/runs; test
   data-source affinity, durable run reservations and terminal settlement.
 - [x] **RM5.7 — Add skills:** implement native Anthropic skills/versions;
   verify retained file/version ownership without local code execution.
-- [ ] **RM5.8 — Add context caches:** implement Gemini `cachedContents`;
+- [x] **RM5.8 — Add context caches:** implement Gemini `cachedContents`;
   verify owner-bound IDs, expiry and explicit storage pricing/reconciliation.
 - [x] **RM5.9 — Add managed-agent resources:** Gemini v1beta create/list/get/delete
   with owner-scoped IDs, immutable affinity, submission fences and console
@@ -374,7 +469,11 @@ cancel and delete remain available for existing owner-bound resources.
   Service integration scenarios compile; execution and live qualification remain
   required. RM8 A2A/tool execution remains separate.
 
-**Exit:** each family passes the [shared exit criteria](#exit-criteria), including
+Focused implementation checks pass and generated clients are current.
+Database/process and restoration scenarios compile; their execution and the
+SDK-service/browser/live gates remain open in the [qualification record](../qualification.md#rm5-retained-apis-and-retrieval).
+
+**Release exit:** each family passes the [shared exit criteria](#exit-criteria), including
 local lifecycle/failure evidence and separately recorded live qualification.
 The [family contracts](#provider-retained-resource-families) govern methods and
 versions; neither implementation nor a generic native prefix widens that scope.

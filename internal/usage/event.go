@@ -32,13 +32,14 @@ var ErrUnsupportedVersion = errors.New("unsupported request metadata version")
 // request it routes or matches. Batch settlement records deferred work for its
 // caller's key and links each result to the batch creation request.
 const (
-	OriginCaller          = "caller"
-	OriginShadow          = "shadow"
-	OriginClassifier      = "classifier"
-	OriginCacheEmbedding  = "cache_embedding"
-	OriginProbe           = "probe"
-	OriginPlayground      = "playground"
-	OriginBatchSettlement = "batch_settlement"
+	OriginCaller             = "caller"
+	OriginShadow             = "shadow"
+	OriginClassifier         = "classifier"
+	OriginCacheEmbedding     = "cache_embedding"
+	OriginProbe              = "probe"
+	OriginPlayground         = "playground"
+	OriginBatchSettlement    = "batch_settlement"
+	OriginRetainedSettlement = "retained_settlement"
 )
 
 // Keyless reports whether requests of an origin carry no API key.
@@ -49,6 +50,11 @@ func Keyless(origin string) bool {
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
+	TrainingTokens     *int64           `json:"training_tokens,omitempty"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds,omitempty"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds,omitempty"`
+	ContainerSessions  map[string]int64 `json:"container_sessions,omitempty"`
+
 	CacheResult          string  `json:"cache_result,omitempty"`
 	EvaluatorGuardrailID *string `json:"evaluator_guardrail_id,omitempty"`
 	BudgetBoundary       string  `json:"budget_boundary,omitempty"`
@@ -202,6 +208,13 @@ func checkEstimate(tokens *int64, provenance, family string) error {
 // is settled, and `BillingUncertain` says the attempt may have been charged
 // upstream without the evidence ever arriving.
 type AttemptUsage struct {
+	InvocationCount    *int64           `json:"invocation_count,omitempty"`
+	TrainingTokens     *int64           `json:"training_tokens,omitempty"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds,omitempty"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds,omitempty"`
+	ContainerSessions  map[string]int64 `json:"container_sessions,omitempty"`
+	Deferred           bool             `json:"deferred,omitempty"`
+
 	Observed                bool    `json:"observed"`
 	Complete                bool    `json:"complete"`
 	BillingUncertain        bool    `json:"billing_uncertain"`
@@ -328,6 +341,11 @@ func Decode(payload []byte) (*Event, error) {
 // The wire types mirror the event shape with every required field behind a
 // pointer, so an absent field is a decode failure instead of a zero value.
 type wireEvent struct {
+	TrainingTokens     *int64           `json:"training_tokens,omitempty"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds,omitempty"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds,omitempty"`
+	ContainerSessions  map[string]int64 `json:"container_sessions,omitempty"`
+
 	CacheResult             string                `json:"cache_result,omitempty"`
 	EvaluatorGuardrailID    *string               `json:"evaluator_guardrail_id"`
 	HTTPOutcomePending      bool                  `json:"http_outcome_pending,omitempty"`
@@ -401,6 +419,13 @@ type wireAttempt struct {
 }
 
 type wireUsage struct {
+	InvocationCount    *int64           `json:"invocation_count,omitempty"`
+	TrainingTokens     *int64           `json:"training_tokens,omitempty"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds,omitempty"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds,omitempty"`
+	ContainerSessions  map[string]int64 `json:"container_sessions,omitempty"`
+	Deferred           bool             `json:"deferred,omitempty"`
+
 	Observed                *bool   `json:"observed"`
 	Complete                *bool   `json:"complete"`
 	BillingUncertain        *bool   `json:"billing_uncertain"`
@@ -467,7 +492,7 @@ var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
-var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}, OriginCacheEmbedding: {}, OriginBatchSettlement: {}}
+var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}, OriginCacheEmbedding: {}, OriginBatchSettlement: {}, OriginRetainedSettlement: {}}
 
 func (w wireEvent) decode() (*Event, error) {
 	if w.CacheResult != "" && w.CacheResult != "hit" && w.CacheResult != "semantic-hit" && w.CacheResult != "miss" && w.CacheResult != "bypass" {
@@ -503,7 +528,7 @@ func (w wireEvent) decode() (*Event, error) {
 	if event.EvaluatorGuardrailID, err = optionalUUID("evaluator_guardrail_id", w.EvaluatorGuardrailID); err != nil {
 		return nil, err
 	}
-	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.Origin == OriginCacheEmbedding || event.Origin == OriginBatchSettlement || event.EvaluatorGuardrailID != nil) {
+	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.Origin == OriginCacheEmbedding || event.Origin == OriginBatchSettlement || event.Origin == OriginRetainedSettlement || event.EvaluatorGuardrailID != nil) {
 		return nil, errors.New("request metadata field parent_request_id belongs to child work requests")
 	}
 	if w.EndUserDigest != nil {
@@ -588,6 +613,10 @@ func (w wireEvent) decode() (*Event, error) {
 	event.AudioOutputTokens = w.AudioOutputTokens
 	event.ImageInputTokens = w.ImageInputTokens
 	event.CachedImageInputTokens = w.CachedImageInputTokens
+	event.TrainingTokens = w.TrainingTokens
+	event.StorageByteSeconds = w.StorageByteSeconds
+	event.CacheTokenSeconds = w.CacheTokenSeconds
+	event.ContainerSessions = w.ContainerSessions
 	event.ImageOutputTokens = w.ImageOutputTokens
 	if event.MediaUnits, err = optionalDecimal("media_units", w.MediaUnits); err != nil {
 		return nil, err
@@ -683,6 +712,8 @@ func (w wireAttempt) decode() (*Attempt, error) {
 
 func (w wireUsage) decode() (*AttemptUsage, error) {
 	usage := &AttemptUsage{
+		InvocationCount: w.InvocationCount,
+		TrainingTokens:  w.TrainingTokens, StorageByteSeconds: w.StorageByteSeconds, CacheTokenSeconds: w.CacheTokenSeconds, ContainerSessions: w.ContainerSessions, Deferred: w.Deferred,
 		InputTokens:             w.InputTokens,
 		OutputTokens:            w.OutputTokens,
 		CachedInputTokens:       w.CachedInputTokens,
@@ -995,7 +1026,7 @@ func Validate(e *Event) (*Validated, error) {
 			e.AudioInputTokens == nil && e.CachedAudioInputTokens == nil &&
 			e.AudioOutputTokens == nil && e.ImageInputTokens == nil &&
 			e.CachedImageInputTokens == nil && e.ImageOutputTokens == nil &&
-			e.MediaUnits == nil && len(e.ToolCalls) == 0 && !e.Batch && !e.UsageComplete)
+			e.MediaUnits == nil && len(e.ToolCalls) == 0 && !e.Batch && !e.UsageComplete && e.TrainingTokens == nil && e.StorageByteSeconds == nil && e.CacheTokenSeconds == nil && len(e.ContainerSessions) == 0)
 	switch {
 	case e.RequestCompletedAt.Before(e.RequestStartedAt):
 		return nil, fmt.Errorf("%w: request completed before it started", ErrInvalidEvent)
@@ -1117,7 +1148,7 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 		usage.AudioInputTokens != nil || usage.CachedAudioInputTokens != nil ||
 		usage.AudioOutputTokens != nil || usage.ImageInputTokens != nil ||
 		usage.CachedImageInputTokens != nil || usage.ImageOutputTokens != nil ||
-		usage.MediaUnits != nil || len(usage.ToolCalls) > 0
+		usage.MediaUnits != nil || len(usage.ToolCalls) > 0 || retainedValues(*usage)
 	if !usage.Observed && hasValues {
 		return nil, fmt.Errorf("%w: attempt %d reports usage it never observed", ErrInvalidEvent, index)
 	}
@@ -1133,6 +1164,9 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
 		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
 		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens); err != nil {
+		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+	}
+	if err := validateRetainedUsage(*usage); err != nil {
 		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	if err := validateToolCalls(usage.ToolCalls); err != nil {
@@ -1205,6 +1239,9 @@ var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // invariants accounting stores. The gateway checks provider-reported usage
 // against it before billing evidence leaves the process.
 func ConsistentUsage(usage *AttemptUsage) bool {
+	if validateRetainedUsage(*usage) != nil {
+		return false
+	}
 	for _, tokens := range [12]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
 		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
 		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,

@@ -79,6 +79,7 @@ var contracts = []Contract{
 		Parameters:  []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "n", "reasoning_effort"},
 		Unsupported: []string{"logit_bias", "user", "parallel_tool_calls", "store", "metadata", "service_tier", "prediction", "modalities", "audio", "web_search_options"}},
 	{ID: "azure", Name: "Azure OpenAI", Maintainer: "Microsoft", Connector: "azure_openai", KindDefault: true, Documentation: Link{"Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: GenerationParameters},
+	{ID: "azure-ai-search", Name: "Azure AI Search", Maintainer: "Microsoft", Connector: "azure_ai_search", KindDefault: true, Documentation: Link{"Azure AI Search", "https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post?view=rest-searchservice-2025-09-01"}, Operations: []string{"retrieval"}, Dialects: []string{"azure-ai-search"}, ProbeOperation: "retrieval", Parameters: []string{"query", "max_num_results", "filters"}},
 
 	// OpenAI-compatible presets, each reviewed against the documentation it
 	// links on the date its evidence in tests/fixtures/vendors records.

@@ -81,6 +81,40 @@
     {
       "family": "files_batches",
       "reason": "Fireworks has no OpenAI-compatible files/batches API and its dataset results use provider-returned signed URLs; managed Anthropic batches require durable content staging and managed Vertex/Bedrock batches require gateway writes to operator storage; non-OpenAI/Azure families are refused on strict routes with 422 target_capability; token or non-exempt cost budgets on batch creation are refused with 422 unbounded_work_budget."
+    },
+    {
+      "family": "fine_tuning",
+      "fields": [
+        "pause/resume",
+        "reinforcement tuning",
+        "Vertex distillation/preference/evaluation source controls"
+      ],
+      "reason": "Outside the declared native method registry or unsupported training-token settlement/source authority; no cancel/recreate emulation."
+    },
+    {
+      "family": "vector_store",
+      "fields": [
+        "attachment update/content methods outside the declared registry"
+      ],
+      "reason": "Only declared lifecycle, attachment, batch and search methods are exposed; nested batch-file listing keeps store-owned file identities."
+    },
+    {
+      "family": "eval",
+      "fields": [
+        "logs/stored-completions data sources",
+        "implicit models",
+        "testing-criteria updates"
+      ],
+      "reason": "Data sources must be inline or owner-bound files; every generation and grader model must be explicitly granted; native definitions expose name/metadata updates only."
+    },
+    {
+      "family": "context_cache",
+      "fields": [
+        "model/content PATCH",
+        "raw cachedContents identifiers",
+        "unverified early disappearance"
+      ],
+      "reason": "Cache content/model is immutable; generation accepts verified gateway ownership; disappearance alone cannot establish billed storage coverage."
     }
   ],
   "endpoints": [
@@ -4204,12 +4238,19 @@
         "version": "3.78.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage",
+        "Idempotency-Key",
         "model",
         "training_file",
         "validation_file",
         "hyperparameters",
         "seed",
-        "suffix"
+        "suffix",
+        "metadata",
+        "supervised/DPO method"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4217,12 +4258,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "applicable delayed-work TPM caps",
+        "reinforcement tuning or unsupported training billing units"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4241,12 +4292,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4254,12 +4303,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4278,12 +4334,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4291,12 +4345,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4315,12 +4376,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4328,12 +4387,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4352,12 +4418,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "events and checkpoints pagination"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4365,12 +4429,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4389,12 +4460,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "events and checkpoints pagination"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4402,12 +4471,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4426,12 +4502,19 @@
         "version": "3.78.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage",
+        "Idempotency-Key",
         "model",
         "training_file",
         "validation_file",
         "hyperparameters",
         "seed",
-        "suffix"
+        "suffix",
+        "metadata",
+        "supervised/DPO method"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4439,12 +4522,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "applicable delayed-work TPM caps",
+        "reinforcement tuning or unsupported training billing units"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4463,12 +4556,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4476,12 +4567,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4500,12 +4598,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4513,12 +4609,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4537,12 +4640,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4550,12 +4651,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4574,12 +4682,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "events and checkpoints pagination"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4587,12 +4693,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4611,12 +4724,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "events and checkpoints pagination"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4624,12 +4735,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4645,12 +4763,15 @@
       "mode": "unary",
       "sdk": null,
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage",
+        "Idempotency-Key",
+        "baseModel",
+        "supervisedTuningSpec.trainingDatasetUri",
+        "supervisedTuningSpec.validationDatasetUri",
+        "operator-granted GCS prefixes"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4658,12 +4779,24 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "applicable delayed-work TPM caps",
+        "reinforcement tuning or unsupported training billing units",
+        "ungranted dataset URI prefixes",
+        "distillation/preference/evaluation source controls"
+      ],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4679,12 +4812,10 @@
       "mode": "unary",
       "sdk": null,
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4692,12 +4823,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4713,12 +4851,10 @@
       "mode": "unary",
       "sdk": null,
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4726,12 +4862,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.3",
@@ -4747,12 +4890,10 @@
       "mode": "unary",
       "sdk": null,
       "supported_fields": [
-        "model",
-        "training_file",
-        "validation_file",
-        "hyperparameters",
-        "seed",
-        "suffix"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native terminal training-token usage"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4760,12 +4901,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "unqualified: no locked SDK/reference fixture yet",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4784,8 +4932,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -4795,12 +4947,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4819,10 +4979,14 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "limit",
+        "after",
+        "before",
+        "order",
+        "store-owned attachment cursors"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4830,12 +4994,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4854,10 +5025,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4865,12 +5035,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4889,8 +5066,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -4900,12 +5081,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4924,10 +5113,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -4935,12 +5123,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4959,8 +5154,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -4970,12 +5169,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -4994,10 +5201,14 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "limit",
+        "after",
+        "before",
+        "order",
+        "store-owned attachment cursors"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5005,12 +5216,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5029,10 +5247,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5040,12 +5257,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5064,10 +5288,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5075,12 +5298,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5099,8 +5329,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5110,12 +5344,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5134,10 +5376,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5145,12 +5386,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5169,8 +5417,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5180,12 +5432,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5204,10 +5464,16 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "limit",
+        "after",
+        "before",
+        "order",
+        "store-owned attachment cursors",
+        "batch-filtered store attachment listing",
+        "store-owned file IDs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5215,12 +5481,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5239,8 +5512,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5250,12 +5527,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5274,10 +5559,14 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "limit",
+        "after",
+        "before",
+        "order",
+        "store-owned attachment cursors"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5285,12 +5574,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5309,10 +5605,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5320,12 +5615,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5344,8 +5646,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5355,12 +5661,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5379,10 +5693,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5390,12 +5703,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5414,8 +5734,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5425,12 +5749,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5449,10 +5781,14 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "limit",
+        "after",
+        "before",
+        "order",
+        "store-owned attachment cursors"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5460,12 +5796,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5484,10 +5827,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5495,12 +5837,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5519,10 +5868,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5530,12 +5878,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5554,8 +5909,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5565,12 +5924,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5589,10 +5956,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5600,12 +5966,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5624,8 +5997,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "owned file_id/file_ids",
+        "native chunking and attributes",
         "expires_after",
         "metadata"
       ],
@@ -5635,12 +6012,20 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5659,10 +6044,16 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "file_ids",
-        "expires_after",
-        "metadata"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "limit",
+        "after",
+        "before",
+        "order",
+        "store-owned attachment cursors",
+        "batch-filtered store attachment listing",
+        "store-owned file IDs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -5670,12 +6061,19 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.4",
@@ -5755,7 +6153,7 @@
       "source_dialect": "openai-vector-stores",
       "dialect_revision": "m9-baseline-1",
       "provider": "bedrock",
-      "profile": "bedrock-retrieval",
+      "profile": "bedrock-knowledge-bases",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -5766,19 +6164,26 @@
       "supported_fields": [
         "query",
         "max_num_results",
-        "filters",
-        "ranking_options"
+        "filters"
       ],
-      "status": "pending",
+      "status": "implemented",
       "expected_refusal": null,
       "evidence": [
-        "internal/retainedapi/contract.go",
-        "internal/gateway/retained_generic.go",
-        "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retrieval/codec.go",
+        "internal/retrieval/codec_test.go",
+        "internal/retrieval/bindings.go",
+        "internal/connectors/retrieval.go",
+        "internal/connectors/retrieval_test.go",
+        "internal/gateway/retrieval.go",
+        "internal/providers/retrieval_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "strict route",
+        "index creation and synchronization",
+        "unmapped metadata fields",
+        "ranking_options"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
       "admission_contract": "execution-foundations-1"
     },
@@ -5790,7 +6195,7 @@
       "source_dialect": "openai-vector-stores",
       "dialect_revision": "m9-baseline-1",
       "provider": "vertex",
-      "profile": "vertex-retrieval",
+      "profile": "vertex-rag-engine",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -5801,19 +6206,28 @@
       "supported_fields": [
         "query",
         "max_num_results",
-        "filters",
-        "ranking_options"
+        "vector_distance_threshold",
+        "vector_similarity_threshold"
       ],
-      "status": "pending",
+      "status": "implemented",
       "expected_refusal": null,
       "evidence": [
-        "internal/retainedapi/contract.go",
-        "internal/gateway/retained_generic.go",
-        "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retrieval/codec.go",
+        "internal/retrieval/codec_test.go",
+        "internal/retrieval/bindings.go",
+        "internal/connectors/retrieval.go",
+        "internal/connectors/retrieval_test.go",
+        "internal/gateway/retrieval.go",
+        "internal/providers/retrieval_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "strict route",
+        "index creation and synchronization",
+        "unmapped metadata fields",
+        "ranking_options",
+        "metadata filters"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
       "admission_contract": "execution-foundations-1"
     },
@@ -5825,7 +6239,7 @@
       "source_dialect": "openai-vector-stores",
       "dialect_revision": "m9-baseline-1",
       "provider": "azure-ai-search",
-      "profile": "azure-ai-search-retrieval",
+      "profile": "azure-ai-search",
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
@@ -5836,19 +6250,26 @@
       "supported_fields": [
         "query",
         "max_num_results",
-        "filters",
-        "ranking_options"
+        "filters"
       ],
       "status": "implemented",
       "expected_refusal": null,
       "evidence": [
-        "internal/retainedapi/contract.go",
-        "internal/gateway/retained_generic.go",
-        "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retrieval/codec.go",
+        "internal/retrieval/codec_test.go",
+        "internal/retrieval/bindings.go",
+        "internal/connectors/retrieval.go",
+        "internal/connectors/retrieval_test.go",
+        "internal/gateway/retrieval.go",
+        "internal/providers/retrieval_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "strict route",
+        "index creation and synchronization",
+        "unmapped metadata fields",
+        "ranking_options"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
       "admission_contract": "execution-foundations-1"
     },
@@ -6669,9 +7090,14 @@
         "version": "3.78.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
         "name",
+        "file_ids",
         "expires_after",
-        "file_ids"
+        "memory_limit"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6679,12 +7105,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6703,9 +7139,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6713,12 +7149,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6737,9 +7182,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6747,12 +7192,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6771,9 +7225,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6781,12 +7235,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6805,9 +7268,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "bounded multipart file",
+        "owned JSON or multipart file_id"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6815,12 +7281,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6839,9 +7315,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6849,12 +7325,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6873,9 +7358,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6883,12 +7368,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6907,9 +7401,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6917,12 +7411,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6941,9 +7444,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "bounded binary download"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6951,12 +7455,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -6975,9 +7488,14 @@
         "version": "3.78.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
         "name",
+        "file_ids",
         "expires_after",
-        "file_ids"
+        "memory_limit"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -6985,12 +7503,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7009,9 +7537,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7019,12 +7547,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7043,9 +7580,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7053,12 +7590,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7077,9 +7623,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7087,12 +7633,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7111,9 +7666,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "Idempotency-Key",
+        "bounded multipart file",
+        "owned JSON or multipart file_id"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7121,12 +7679,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7145,9 +7713,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7155,12 +7723,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7179,9 +7756,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7189,12 +7766,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7213,9 +7799,9 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7223,12 +7809,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7247,9 +7842,10 @@
         "version": "3.78.0"
       },
       "supported_fields": [
-        "name",
-        "expires_after",
-        "file_ids"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "bounded binary download"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7257,12 +7853,21 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "gateway shell execution",
+        "session counts inferred from resource age"
+      ],
       "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7276,14 +7881,18 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs",
+        "Idempotency-Key for creation",
         "name",
-        "data_source_config",
-        "testing_criteria"
+        "metadata"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7291,12 +7900,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7310,14 +7934,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7325,12 +7950,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7344,14 +7984,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7359,12 +8000,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7378,14 +8034,18 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs",
+        "Idempotency-Key for creation",
         "name",
-        "data_source_config",
-        "testing_criteria"
+        "metadata"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7393,12 +8053,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7412,14 +8087,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7427,12 +8103,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7446,14 +8137,18 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs",
+        "Idempotency-Key for creation",
         "name",
-        "data_source_config",
-        "testing_criteria"
+        "metadata"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7461,12 +8156,29 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "applicable delayed-work TPM caps",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7480,14 +8192,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7495,12 +8208,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7514,14 +8242,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7529,12 +8258,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7548,14 +8292,18 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs",
+        "Idempotency-Key for creation",
         "name",
-        "data_source_config",
-        "testing_criteria"
+        "metadata"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7563,12 +8311,29 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "applicable monetary budgets without a proven finite bound",
+        "applicable delayed-work TPM caps",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7582,14 +8347,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7597,12 +8363,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7616,14 +8397,18 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs",
+        "Idempotency-Key for creation",
         "name",
-        "data_source_config",
-        "testing_criteria"
+        "metadata"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7631,12 +8416,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7650,14 +8450,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7665,12 +8466,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7684,14 +8500,15 @@
       "profile_revision": "1",
       "transport": "http",
       "mode": "unary",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
+      "sdk": null,
       "supported_fields": [
-        "name",
-        "data_source_config",
-        "testing_criteria"
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
+        "native custom definitions",
+        "owned JSONL source files or inline file content",
+        "explicit generation and grader model grants",
+        "per-model terminal usage including failed/cancelled runs"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -7699,12 +8516,27 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go",
+        "internal/resources/testdata/retained/openai-eval-definition.json",
+        "internal/resources/testdata/retained/openai-eval-cancelled.json",
+        "internal/resources/testdata/retained/openai-eval-output.json",
+        "internal/resources/testdata/retained/README.md"
       ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "native logs or stored-completions data sources",
+        "implicit/unapproved grader or generation models",
+        "editing immutable testing criteria",
+        "dynamic item-reference trajectories without per-item resource authority"
+      ],
+      "reference_revision": "openai-evals-rest-fixtures-1",
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -7995,10 +8827,20 @@
         "version": "1.75.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
         "model",
+        "usageMetadata.totalTokenCount",
+        "authoritative expireTime",
+        "gateway cachedContent generation binding",
+        "Idempotency-Key",
         "contents",
+        "systemInstruction",
+        "tools",
+        "toolConfig",
         "ttl",
-        "display_name"
+        "expireTime"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -8006,12 +8848,23 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "cache model/content mutation",
+        "incompatible generation transformations",
+        "unverified expiry or snapshot-derived storage charges",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "google.golang.org/genai@1.75.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -8030,10 +8883,15 @@
         "version": "1.75.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
         "model",
-        "contents",
-        "ttl",
-        "display_name"
+        "usageMetadata.totalTokenCount",
+        "authoritative expireTime",
+        "gateway cachedContent generation binding",
+        "pageSize",
+        "pageToken"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -8041,12 +8899,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "cache model/content mutation",
+        "incompatible generation transformations",
+        "unverified expiry or snapshot-derived storage charges"
+      ],
       "reference_revision": "google.golang.org/genai@1.75.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -8065,10 +8933,13 @@
         "version": "1.75.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
         "model",
-        "contents",
-        "ttl",
-        "display_name"
+        "usageMetadata.totalTokenCount",
+        "authoritative expireTime",
+        "gateway cachedContent generation binding"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -8076,12 +8947,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "cache model/content mutation",
+        "incompatible generation transformations",
+        "unverified expiry or snapshot-derived storage charges"
+      ],
       "reference_revision": "google.golang.org/genai@1.75.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -8100,10 +8981,17 @@
         "version": "1.75.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
         "model",
-        "contents",
+        "usageMetadata.totalTokenCount",
+        "authoritative expireTime",
+        "gateway cachedContent generation binding",
+        "Idempotency-Key",
         "ttl",
-        "display_name"
+        "expireTime",
+        "updateMask"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -8111,12 +8999,23 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "cache model/content mutation",
+        "incompatible generation transformations",
+        "unverified expiry or snapshot-derived storage charges",
+        "applicable monetary budgets without a proven finite bound"
+      ],
       "reference_revision": "google.golang.org/genai@1.75.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",
@@ -8135,10 +9034,13 @@
         "version": "1.75.0"
       },
       "supported_fields": [
+        "owner-scoped IDs",
+        "pinned connection and credential",
+        "native lifecycle responses",
         "model",
-        "contents",
-        "ttl",
-        "display_name"
+        "usageMetadata.totalTokenCount",
+        "authoritative expireTime",
+        "gateway cachedContent generation binding"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -8146,12 +9048,22 @@
         "internal/retainedapi/contract.go",
         "internal/gateway/retained_generic.go",
         "internal/gateway/retained_generic_test.go",
-        "internal/retainedapi/supports_test.go"
+        "internal/retainedapi/supports_test.go",
+        "internal/gateway/retained_native.go",
+        "internal/gateway/retained_native_test.go",
+        "internal/resources/retained_observation.go",
+        "internal/resources/retained_observation_test.go"
       ],
       "live_qualification": "required",
-      "refusals": [],
+      "refusals": [
+        "raw native resource IDs",
+        "cross-owner or incompatible resource affinity",
+        "cache model/content mutation",
+        "incompatible generation transformations",
+        "unverified expiry or snapshot-derived storage charges"
+      ],
       "reference_revision": "google.golang.org/genai@1.75.0",
-      "admission_contract": "execution-foundations-1"
+      "admission_contract": "execution-foundations-1; retained-resources-1"
     },
     {
       "slice": "M9.8",

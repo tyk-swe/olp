@@ -52,19 +52,20 @@ type Configuration struct {
 	Deployment       string                   `json:"deployment"`
 	APIVersion       string                   `json:"api_version"`
 	Options          struct {
-		Network           *egress.ConnectionOptions        `json:"network,omitempty"`
-		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
-		QuerySettings     map[string]string                `json:"query_settings,omitempty"`
-		OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
-		Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
-		Models            map[string]json.RawMessage       `json:"models"`
-		CredentialHeaders []string                         `json:"credential_headers"`
-		Limits            *Limits                          `json:"limits"`
-		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
-		VendorID          string                           `json:"vendor_id"`
-		PluginOptions     map[string]string                `json:"plugin_options,omitempty"`
-		Commitment        *Commitment                      `json:"commitment,omitempty"`
-		HealthProbe       *HealthProbe                     `json:"health_probe,omitempty"`
+		TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
+		Network                  *egress.ConnectionOptions        `json:"network,omitempty"`
+		SemanticHeaders          map[string]string                `json:"semantic_headers,omitempty"`
+		QuerySettings            map[string]string                `json:"query_settings,omitempty"`
+		OperationDefaults        map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+		Bindings                 map[string]connectors.Binding    `json:"bindings,omitempty"`
+		Models                   map[string]json.RawMessage       `json:"models"`
+		CredentialHeaders        []string                         `json:"credential_headers"`
+		Limits                   *Limits                          `json:"limits"`
+		ParameterDefaults        map[string]json.RawMessage       `json:"parameter_defaults"`
+		VendorID                 string                           `json:"vendor_id"`
+		PluginOptions            map[string]string                `json:"plugin_options,omitempty"`
+		Commitment               *Commitment                      `json:"commitment,omitempty"`
+		HealthProbe              *HealthProbe                     `json:"health_probe,omitempty"`
 	} `json:"options"`
 }
 
@@ -124,7 +125,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
 		CredentialSource: cfg.CredentialSource, Kind: cfg.Kind, AuthMode: cfg.AuthMode, Endpoint: cfg.Endpoint,
-		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, BatchStorage: cfg.BatchStorage, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
+		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, BatchStorage: cfg.BatchStorage, TuningDatasetURIPrefixes: cfg.Options.TuningDatasetURIPrefixes, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,
 		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Commitment: cfg.Options.Commitment,

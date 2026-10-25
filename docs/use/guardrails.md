@@ -95,6 +95,10 @@ and enforcing external evaluators require unary delivery when their requirements
 cannot fit the window. Such requests return `422 guardrail_surface_unavailable`;
 there is no silent reduction in enforcement. Opaque media and retained surfaces
 without a complete inspection contract are refused in the same way.
+Generation with owned files, vector stores, conversations or context caches
+refuses enforcing `input` or `input_parallel` rules because the referenced
+content cannot be inspected. Monitoring and annotation record unavailable
+coverage for those input checks and continue.
 Chat and legacy text-completion streams requesting `logprobs` are refused before
 dispatch when output guardrails or input masking are active, including when
 provider defaults enable them. Unexpected log-probability payloads are refused

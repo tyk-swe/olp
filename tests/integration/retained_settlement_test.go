@@ -1,0 +1,861 @@
+//go:build integration
+
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/retainedworker"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+type retainedLedgerFixture struct {
+	acctFixture
+	store      *resources.Store
+	resource   *resources.Resource
+	project    string
+	credential string
+}
+
+func retainedLedger(t *testing.T, operation string, tokenConsuming bool) retainedLedgerFixture {
+	t.Helper()
+	return retainedLedgerOnPool(t, acctPool(t), operation, tokenConsuming)
+}
+
+func retainedLedgerOnPool(t *testing.T, pool *pgxpool.Pool, operation string, tokenConsuming bool) retainedLedgerFixture {
+	t.Helper()
+	f := acctSeed(t, pool)
+	acctExec(t, f.Pool, `UPDATE olp.api_keys SET lookup_id=$2,digest=$3 WHERE id=$1`, f.Key, strings.ReplaceAll(f.Key, "-", "")[:16], make([]byte, 32))
+	project, credential, slot, target := acctID(t), acctID(t), acctID(t), acctID(t)
+	acctExec(t, f.Pool, `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,'Retained project',$2,$3)`, project, acctID(t), f.User)
+	acctExec(t, f.Pool, `UPDATE olp.api_keys SET project_id=$2 WHERE id=$1`, f.Key, project)
+	acctExec(t, f.Pool, `INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,1)`, credential, f.Provider)
+	routeID, routeRevision := acctID(t), acctID(t)
+	slug := "retained-" + f.Key[:8]
+	acctExec(t, f.Pool, `INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$6,$2,1,$3,$4,$5)`, routeID, f.User, routeRevision, acctID(t), project, slug)
+	targets, _ := json.Marshal([]routing.PublishedTarget{{ID: target, ProviderID: f.Provider, ProviderModel: "retained-model", Weight: 1, TimeoutMS: 1000}})
+	operations, _ := json.Marshal([]string{operation, "generation"})
+	acctExec(t, f.Pool, `INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity) VALUES($1,$2,1,$7,$3,2000,1,$4,$5,$6,'{}','{"mode":"transformed"}')`, routeRevision, routeID, operations, targets, acctID(t), f.User, slug)
+	slots, _ := json.Marshal([]routing.RevisionSlot{{Slot: routing.Slot{ID: slot, Enabled: true, Weight: 1, CredentialID: &credential}, Default: true}})
+	acctExec(t, f.Pool, `UPDATE olp.provider_revisions SET slots=$2 WHERE id=$1`, f.Revision, slots)
+	var revision int
+	if err := f.Pool.QueryRow(t.Context(), `SELECT COALESCE(max(revision),0)+1 FROM olp.pricing_revisions`).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	price := acctPricing(t, f, revision, time.Now().Add(-time.Hour), acctPrice{Kind: "openai", Model: "retained-model", Operation: operation})
+	acctExec(t, f.Pool, `UPDATE olp.prices SET training_per_million=1,storage_per_gib_day=1,cache_storage_per_million_token_hour=1,container_per_session='{"1g":"1"}',per_request=7 WHERE pricing_revision_id=$1`, price)
+	attempt := acctAttempt(t, f.Provider, 1, "retained-model", 200, acctUncertain())
+	attempt.Routing = &usage.Routing{ProviderRevisionID: f.Revision, CredentialSlotID: &slot, CredentialVersionID: &credential, PricingRevisionID: &price}
+	event := acctEvent(t, f, acctEventOptions{Operation: operation, Attempts: []usage.Attempt{attempt}})
+	event.Origin = usage.OriginRetainedSettlement
+	event.ParentRequestID = new(event.RequestID)
+	event.RouteSlug = slug
+	kind := map[string]string{"fine_tuning": "fine_tuning_job", "vector_store": "vector_store", "container": "container", "context_cache": "context_cache", "eval": "eval_run"}[operation]
+	fields := map[string]any{"upstream_model": "retained-model"}
+	if operation == "container" {
+		fields["memory_tier"] = "1g"
+	}
+	metadata, _ := json.Marshal(fields)
+	version := retainedapi.Revision
+	r := &resources.Resource{Kind: kind, APIKeyID: f.Key, RouteSlug: slug, ProviderID: f.Provider, ProviderRevisionID: f.Revision, RouteRevisionID: routeRevision, TargetID: target, SlotID: slot, CredentialID: &credential, Metadata: metadata, ContractVersion: &version, RetainedAccounting: &resources.RetainedAccounting{Operation: operation, TokenConsuming: tokenConsuming, Templates: map[string]*usage.Event{"retained-model": event}}}
+	return retainedLedgerFixture{acctFixture: f, store: resources.New(f.Pool), resource: r, project: project, credential: credential}
+}
+
+func (f retainedLedgerFixture) prepare(t *testing.T) *resources.Resource {
+	t.Helper()
+	r, fresh, err := f.store.PrepareLifecycle(t.Context(), f.resource, f.resource.RetainedAccounting.Operation, "submission-identity", bytes.Repeat([]byte{1}, 32))
+	if err != nil || !fresh {
+		t.Fatalf("prepare retained settlement: fresh=%v error=%v", fresh, err)
+	}
+	if err = f.store.DispatchLifecycle(t.Context(), r.UUID); err != nil {
+		t.Fatal(err)
+	}
+	r.UpstreamID, r.State = "provider-resource", "active"
+	if err = f.store.CompleteLifecycle(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func retainedTrainingObservation(r *resources.Resource, tokens int64) resources.RetainedObservation {
+	now := time.Now().UTC()
+	return resources.RetainedObservation{ObservedAt: now, Lines: []resources.RetainedEvidenceLine{{Component: "training", Model: "retained-model", Start: r.CreatedAt.UTC().Add(-time.Second), End: now, Usage: usage.AttemptUsage{TrainingTokens: &tokens}}}}
+}
+
+func assertRetainedLedgerCounts(t *testing.T, f retainedLedgerFixture, r *resources.Resource, evidence, coverage, facts int) {
+	t.Helper()
+	var a, b, c int
+	err := f.Pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM olp.retained_usage_evidence WHERE resource_id=$1),(SELECT count(*) FROM olp.retained_usage_coverage WHERE resource_id=$1),(SELECT count(*) FROM olp.attempt_usage_facts WHERE request_id IN (SELECT event_id FROM olp.retained_usage_coverage WHERE resource_id=$1))`, r.UUID).Scan(&a, &b, &c)
+	if err != nil || a != evidence || b != coverage || c != facts {
+		t.Fatalf("retained atomic counts evidence=%d coverage=%d facts=%d: %v", a, b, c, err)
+	}
+}
+
+func TestRetainedSettlementSubmissionAndMutationFencesSurviveRestart(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	const callers = 8
+	type result struct {
+		r     *resources.Resource
+		fresh bool
+		err   error
+	}
+	results := make(chan result, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Go(func() {
+			candidate := *f.resource
+			r, fresh, err := f.store.PrepareLifecycle(t.Context(), &candidate, "fine_tuning", "same-submission", bytes.Repeat([]byte{1}, 32))
+			results <- result{r, fresh, err}
+		})
+	}
+	wg.Wait()
+	close(results)
+	var accepted *resources.Resource
+	winners := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if accepted != nil && accepted.ID != result.r.ID {
+			t.Fatal("concurrent submissions acquired different resources")
+		}
+		accepted = result.r
+		if result.fresh {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("dispatch rights acquired %d times", winners)
+	}
+	if err := f.store.DispatchLifecycle(t.Context(), accepted.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.DispatchLifecycle(t.Context(), accepted.UUID); !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("repeat dispatch rights: %v", err)
+	}
+	if err := f.store.UnknownLifecycle(t.Context(), accepted.UUID); err != nil {
+		t.Fatal(err)
+	}
+	restarted := resources.New(f.Pool)
+	recovered, err := restarted.LookupLifecycle(t.Context(), f.Key, "fine_tuning", "same-submission", bytes.Repeat([]byte{1}, 32))
+	if err != nil || recovered.State != "submission_unknown" || recovered.ID != accepted.ID {
+		t.Fatalf("unknown acceptance lost across restart: %+v %v", recovered, err)
+	}
+	if _, err = restarted.LookupLifecycle(t.Context(), f.Key, "fine_tuning", "same-submission", bytes.Repeat([]byte{2}, 32)); !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("conflicting submission reused intent: %v", err)
+	}
+	mutations := make(chan error, callers)
+	for range callers {
+		wg.Go(func() {
+			mutations <- restarted.PrepareRetainedMutation(t.Context(), accepted, "fine_tuning:patch", "same-mutation", bytes.Repeat([]byte{3}, 32))
+		})
+	}
+	wg.Wait()
+	close(mutations)
+	winners = 0
+	for err := range mutations {
+		if err == nil {
+			winners++
+		} else if !errors.Is(err, resources.ErrSubmissionConflict) {
+			t.Fatal(err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("mutation dispatch rights acquired %d times", winners)
+	}
+	if err = restarted.UnknownRetainedMutation(t.Context(), accepted.UUID, "same-mutation", "fine_tuning:patch"); err != nil {
+		t.Fatal(err)
+	}
+	if err = resources.New(f.Pool).PrepareRetainedMutation(t.Context(), accepted, "fine_tuning:patch", "same-mutation", bytes.Repeat([]byte{3}, 32)); !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("mutation redispatched after restart: %v", err)
+	}
+}
+
+func TestRetainedSettlementAtomicEvidenceAcrossSources(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	observation := retainedTrainingObservation(r, 1_000_000)
+	digest := strings.Repeat("a", 64)
+	// Simulate a process dying after evidence/facts are written but before its
+	// transaction commits. Neither side of the accounting boundary may survive.
+	tx, err := f.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.store.ApplyRetainedEvidenceTx(t.Context(), tx, r.UUID, "automatic", digest, "provider_verified", "", observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 0, 0, 0)
+	if _, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "automatic", digest, "provider_verified", "", observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 1, 1, 1)
+	// Equal administrator evidence cannot repeat an automatically observed bill.
+	if _, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "administrator", digest, "operator_verified", f.User, observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+	if _, err = resources.New(f.Pool).ApplyRetainedEvidence(t.Context(), r.UUID, "automatic", digest, "provider_verified", "", observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+	conflicting := observation
+	conflicting.Lines = append([]resources.RetainedEvidenceLine(nil), observation.Lines...)
+	conflicting.Lines[0].End = conflicting.Lines[0].End.Add(time.Microsecond)
+	if _, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "overlap", strings.Repeat("b", 64), "operator_verified", f.User, conflicting, nil); !errors.Is(err, resources.ErrEvidenceConflict) {
+		t.Fatalf("overlapping interval accepted: %v", err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+	var cost string
+	if err = f.Pool.QueryRow(t.Context(), `SELECT estimated_cost::text FROM olp.attempt_usage_facts WHERE request_id=(SELECT event_id FROM olp.retained_usage_coverage WHERE resource_id=$1)`, r.UUID).Scan(&cost); err != nil || strings.TrimRight(strings.TrimRight(cost, "0"), ".") != "1" {
+		t.Fatalf("deferred usage repeated submission fee: %s %v", cost, err)
+	}
+}
+
+func TestRetainedSettlementLateBudgetsDeletionAndTokenReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		operation string
+		token     bool
+	}{{"fine_tuning", true}, {"vector_store", false}} {
+		t.Run(tc.operation, func(t *testing.T) {
+			f := retainedLedger(t, tc.operation, tc.token)
+			r := f.prepare(t)
+			// This project owner did not exist when the paid work was accepted.
+			account := acctID(t)
+			acctExec(t, f.Pool, `INSERT INTO olp.aggregate_budget_accounts(id,project_id) VALUES($1,$2)`, account, f.project)
+			var monetary, tokens bool
+			if err := f.Pool.QueryRow(t.Context(), `SELECT olp.has_pending_resource_usage($1::uuid),olp.has_pending_retained_tokens($1::uuid)`, account).Scan(&monetary, &tokens); err != nil || !monetary || tokens != tc.token {
+				t.Fatalf("late budget liability monetary=%v tokens=%v: %v", monetary, tokens, err)
+			}
+			if err := f.store.Tombstone(t.Context(), r.ID); err != nil {
+				t.Fatal(err)
+			}
+			acctExec(t, f.Pool, `UPDATE olp.provider_resources SET expires_at=now()-interval '1 hour' WHERE id=$1`, r.UUID)
+			restarted := resources.New(f.Pool)
+			if _, err := restarted.Expire(t.Context(), time.Now().Add(48*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := restarted.Get(t.Context(), r.Kind, f.Key, r.ID); !errors.Is(err, resources.ErrNotFound) {
+				t.Fatalf("deleted resource remained usable: %v", err)
+			}
+			tombstone, err := restarted.GetByUUID(t.Context(), r.UUID, f.Key)
+			if err != nil || tombstone.State != resources.StateDeleted {
+				t.Fatalf("retained liability tombstone removed: %+v %v", tombstone, err)
+			}
+			if err = f.Pool.QueryRow(t.Context(), `SELECT olp.has_pending_resource_usage($1::uuid)`, account).Scan(&monetary); err != nil || !monetary {
+				t.Fatalf("deletion erased unresolved budget liability: %v %v", monetary, err)
+			}
+			var payload string
+			if err = f.Pool.QueryRow(t.Context(), `SELECT templates::text FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&payload); err != nil || strings.Contains(payload, "training_examples") || strings.Contains(payload, "conversation_history") {
+				t.Fatalf("settlement retained source content: %s %v", payload, err)
+			}
+		})
+	}
+}
+
+func TestRetainedSettlementConflictingTotalsKeepVerifiedTermination(t *testing.T) {
+	for _, worker := range []bool{false, true} {
+		t.Run(map[bool]string{false: "request", true: "worker"}[worker], func(t *testing.T) {
+			f := retainedLedger(t, "fine_tuning", true)
+			r := f.prepare(t)
+			total := retainedTrainingObservation(r, 1_000_000)
+			prefix := total
+			prefix.Lines = append([]resources.RetainedEvidenceLine(nil), total.Lines...)
+			prefix.Lines[0].End = total.Lines[0].Start.Add(total.Lines[0].End.Sub(total.Lines[0].Start) / 2).Truncate(time.Microsecond)
+			prefix.Lines[0].Usage.TrainingTokens = new(int64(400_000))
+			if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "operator-prefix", strings.Repeat("a", 64), "operator_verified", f.User, prefix, nil); err != nil {
+				t.Fatal(err)
+			}
+			total.RemoteTerminated, total.CoverageComplete = true, true
+			var err error
+			if worker {
+				claims, claimErr := f.store.ClaimRetained(t.Context(), 1)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, claimErr)
+				}
+				err = f.store.CommitRetainedPoll(t.Context(), claims[0], r, total, false)
+			} else {
+				_, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "provider-total", strings.Repeat("b", 64), "provider_verified", "", total, nil)
+			}
+			if !errors.Is(err, resources.ErrEvidenceConflict) {
+				t.Fatalf("conflicting total accepted: %v", err)
+			}
+			var terminated bool
+			var terminalAt *time.Time
+			var state string
+			if err = f.Pool.QueryRow(t.Context(), `SELECT remote_terminated,terminal_at,state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&terminated, &terminalAt, &state); err != nil || !terminated || terminalAt == nil || state != "evidence_missing" {
+				t.Fatalf("termination proof lost: %v %v %s %v", terminated, terminalAt, state, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+			tail := total
+			tail.RemoteTerminated = false
+			tail.Lines = append([]resources.RetainedEvidenceLine(nil), total.Lines...)
+			tail.Lines[0].Start = prefix.Lines[0].End
+			tail.Lines[0].Usage.TrainingTokens = new(int64(600_000))
+			if _, err = f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "operator-tail", strings.Repeat("c", 64), "operator_verified", f.User, tail, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err = f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+				t.Fatalf("complete nonoverlapping evidence cannot close: %s %v", state, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 3, 2, 2)
+		})
+	}
+}
+
+func TestRetainedSettlementLateFinishTimestampDefinesCoverage(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	observed := time.Now().UTC().Truncate(time.Microsecond)
+	started, finished := observed.Add(-time.Hour), observed.Add(-time.Minute)
+	metadata := map[string]any{"upstream_model": "retained-model", "created_at": started.Format(time.RFC3339Nano), "terminal_observed_at": observed.Format(time.RFC3339Nano)}
+	r.Metadata, _ = json.Marshal(metadata)
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: observed}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "first-terminal", strings.Repeat("a", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	metadata["finished_at"] = finished.Format(time.RFC3339Nano)
+	r.Metadata, _ = json.Marshal(metadata)
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	complete := resources.RetainedObservation{RemoteTerminated: true, CoverageComplete: true, ObservedAt: finished, Lines: []resources.RetainedEvidenceLine{{Component: "training", Model: "retained-model", Start: started, End: finished, Usage: usage.AttemptUsage{TrainingTokens: new(int64(1_000_000))}}}}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "complete-total", strings.Repeat("b", 64), "provider_verified", "", complete, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var terminalAt time.Time
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state,terminal_at FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &terminalAt); err != nil || state != "closed" || !terminalAt.Equal(observed) {
+		t.Fatalf("native coverage did not close independently of termination observation: %s %v %v", state, terminalAt, err)
+	}
+}
+
+func TestRetainedSettlementFinalEvidencePrecedesTermination(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	final := retainedTrainingObservation(r, 1_000_000)
+	final.CoverageComplete = true
+	for range 2 {
+		if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "final-operator-usage", strings.Repeat("a", 64), "operator_verified", f.User, final, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "evidence_missing" {
+		t.Fatalf("unverified termination closed liability: %s %v", state, err)
+	}
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: time.Now().UTC()}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "provider-termination", strings.Repeat("b", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("independently received final coverage and termination did not close: %s %v", state, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 2, 1, 1)
+}
+
+func TestRetainedSettlementDeduplicatedFinalEvidenceRefinesEndpoint(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	usage := retainedTrainingObservation(r, 1_000_000)
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "nonfinal-usage", strings.Repeat("a", 64), "operator_verified", f.User, usage, nil); err != nil {
+		t.Fatal(err)
+	}
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: time.Now().UTC()}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "later-termination", strings.Repeat("b", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	usage.CoverageComplete = true
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "final-same-usage", strings.Repeat("c", 64), "operator_verified", f.User, usage, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("deduplicated final proof lost its lifetime endpoint: %s %v", state, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 3, 1, 1)
+}
+
+func TestRetainedSettlementUnknownCacheMutationPreventsAutomaticClosure(t *testing.T) {
+	for _, action := range []string{"patch", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			f := retainedLedger(t, "context_cache", false)
+			r := f.prepare(t)
+			start, end := r.CreatedAt.Add(-time.Hour), r.CreatedAt.Add(-time.Minute)
+			r.ExpiresAt = &end
+			r.Metadata, _ = json.Marshal(map[string]any{"upstream_model": "retained-model", "total_token_count": 100, "create_time": start.Format(time.RFC3339Nano), "expires_at": end.Format(time.RFC3339Nano)})
+			if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+				t.Fatal(err)
+			}
+			var prepareErr error
+			if action == "delete" {
+				prepareErr = f.store.PrepareRetainedDeletion(t.Context(), r, "lost-response", bytes.Repeat([]byte{7}, 32))
+			} else {
+				prepareErr = f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "lost-response", bytes.Repeat([]byte{7}, 32))
+			}
+			if prepareErr != nil {
+				t.Fatal(prepareErr)
+			}
+			if err := f.store.UnknownRetainedMutation(t.Context(), r.UUID, "lost-response", "context_cache:"+action); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := resources.ObserveRetainedExpiry(r, time.Now().UTC(), true)
+			if err != nil || !observation.CoverageComplete {
+				t.Fatalf("expiry fixture: %+v %v", observation, err)
+			}
+			if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "old-expiry", strings.Repeat("a", 64), "provider_verified", "", observation, nil); !errors.Is(err, resources.ErrEvidenceConflict) {
+				t.Fatalf("unresolved cache mutation accepted old expiry coverage: %v", err)
+			}
+			var state string
+			var terminated bool
+			if err := f.Pool.QueryRow(t.Context(), `SELECT state,remote_terminated FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &terminated); err != nil || state != "evidence_missing" || !terminated {
+				t.Fatalf("ambiguous cache liability or termination lost: %s %v %v", state, terminated, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 1, 0, 0)
+		})
+	}
+}
+
+func TestRetainedDeletionDefiniteRejectionClearsDispatchUncertainty(t *testing.T) {
+	f := retainedLedger(t, "context_cache", false)
+	r := f.prepare(t)
+	if err := f.store.PrepareRetainedDeletion(t.Context(), r, "delete-not-sent", bytes.Repeat([]byte{4}, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RejectRetained(t.Context(), r, "delete-not-sent", "context_cache:delete", false); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := f.store.HasUnresolvedRetainedMutations(t.Context(), r.UUID); err != nil || pending {
+		t.Fatalf("definitively rejected deletion quarantined natural expiry: %v %v", pending, err)
+	}
+}
+
+func TestRetainedSettlementDeterministicEvalClosesWithoutModelUsage(t *testing.T) {
+	f := retainedLedger(t, "eval", false)
+	f.resource.Metadata = json.RawMessage(`{"upstream_model":"retained-model","authorized_models":[]}`)
+	f.resource.RetainedAccounting.Templates = map[string]*usage.Event{}
+	r := f.prepare(t)
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "eval_run", Operation: "eval"}, Action: "get"}
+	document, err := oif.ParseJSON([]byte(`{"status":"completed","per_model_usage":[]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resources.EnrichRetained(r, e, document, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := resources.ObserveRetained(r, e, document, time.Now().UTC())
+	if err != nil || !observation.CoverageComplete || len(observation.Lines) != 0 {
+		t.Fatalf("zero-model terminal evidence: %+v %v", observation, err)
+	}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "deterministic-terminal", strings.Repeat("a", 64), "provider_verified", "", observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("phantom model prevented settlement: %s %v", state, err)
+	}
+	assertRetainedLedgerCounts(t, f, r, 1, 0, 0)
+}
+
+func TestRetainedVectorExpirationClearingPersists(t *testing.T) {
+	for _, worker := range []bool{false, true} {
+		t.Run(map[bool]string{false: "request", true: "worker"}[worker], func(t *testing.T) {
+			f := retainedLedger(t, "vector_store", false)
+			r := f.prepare(t)
+			r.ExpiresAt = new(time.Now().Add(time.Hour))
+			if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+				t.Fatal(err)
+			}
+			document, _ := oif.ParseJSON([]byte(`{"expires_at":null}`), oif.Limits{})
+			e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vector_store", Operation: "vector_store"}, Action: "get"}
+			if err := resources.EnrichRetained(r, e, document, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if worker {
+				claims, claimErr := f.store.ClaimRetained(t.Context(), 1)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, claimErr)
+				}
+				err = f.store.CommitRetainedPoll(t.Context(), claims[0], r, resources.RetainedObservation{}, false)
+			} else {
+				err = f.store.SaveRetainedResult(t.Context(), r)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := f.store.Get(t.Context(), r.Kind, r.APIKeyID, r.ID)
+			if err != nil || loaded.ExpiresAt != nil {
+				t.Fatalf("cleared expiry did not persist: %+v %v", loaded, err)
+			}
+		})
+	}
+}
+
+func TestRetainedCheckpointDiscoveryKeepsModelsDisabled(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	parent := f.prepare(t)
+	child := *parent
+	child.UUID, child.ID = [16]byte{}, ""
+	child.Kind, child.UpstreamID = "fine_tuning_checkpoint", "checkpoint-native"
+	child.ParentID, child.RetainedAccounting = &parent.UUID, nil
+	checkpoint, err := f.store.BindDiscovered(t.Context(), &child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _ := oif.ParseJSON([]byte(`{"fine_tuned_model_checkpoint":"ft:retained-checkpoint"}`), oif.Limits{})
+	for range 2 {
+		if err := f.store.DiscoverRetainedModels(t.Context(), checkpoint, document); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	if err := f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_models WHERE provider_id=$1 AND upstream_model='ft:retained-checkpoint' AND NOT enabled AND capabilities='[]'::jsonb`, parent.ProviderID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("checkpoint discovery granted authority or lost candidate: count=%d %v", count, err)
+	}
+}
+
+func TestRetainedExpiredStoreCoverageEndsAtNativeExpiry(t *testing.T) {
+	f := retainedLedger(t, "vector_store", false)
+	r := f.prepare(t)
+	poll := time.Now().UTC().Truncate(time.Microsecond)
+	start, expiry := poll.Add(-2*time.Hour), poll.Add(-time.Hour)
+	r.ExpiresAt, r.State = &expiry, "expired"
+	r.Metadata, _ = json.Marshal(map[string]any{"upstream_model": "retained-model", "created_at": start.Format(time.RFC3339Nano), "expires_at": expiry.Format(time.RFC3339Nano), "native_status": "expired"})
+	if err := f.store.SaveRetainedResult(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	// An earlier poll may already have frozen the later observation timestamp.
+	termination := resources.RetainedObservation{RemoteTerminated: true, ObservedAt: poll}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "expired-poll", strings.Repeat("a", 64), "provider_verified", "", termination, nil); err != nil {
+		t.Fatal(err)
+	}
+	complete := resources.RetainedObservation{CoverageComplete: true, ObservedAt: poll, Lines: []resources.RetainedEvidenceLine{{Component: "storage", Model: "retained-model", Start: start, End: expiry, Usage: usage.AttemptUsage{StorageByteSeconds: new("1073741824")}}}}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "storage-lifetime", strings.Repeat("b", 64), "operator_verified", f.User, complete, nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != "closed" {
+		t.Fatalf("complete native lifetime coverage did not close: %s %v", state, err)
+	}
+}
+
+func TestRetainedMutationResponseSurvivesReadObservation(t *testing.T) {
+	for _, worker := range []bool{false, true} {
+		t.Run(map[bool]string{false: "get", true: "worker"}[worker], func(t *testing.T) {
+			f := retainedLedger(t, "context_cache", false)
+			r := f.prepare(t)
+			staleRead := *r
+			if err := f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "ttl-update", bytes.Repeat([]byte{1}, 32)); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := f.store.GetByUUID(t.Context(), r.UUID, r.APIKeyID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if worker {
+				claims, claimErr := f.store.ClaimRetained(t.Context(), 1)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, claimErr)
+				}
+				err = f.store.CommitRetainedPoll(t.Context(), claims[0], observation, resources.RetainedObservation{}, false)
+			} else {
+				err = f.store.SaveRetainedResult(t.Context(), observation)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.ExpiresAt = new(time.Now().Add(time.Hour))
+			if err := f.store.SaveRetainedMutationResult(t.Context(), r); err != nil {
+				t.Fatalf("ordinary observation invalidated successful TTL response: %v", err)
+			}
+			if err := f.store.AcceptRetainedMutation(t.Context(), r.UUID, "ttl-update", "context_cache:patch"); err != nil {
+				t.Fatal(err)
+			}
+			if pending, err := f.store.HasUnresolvedRetainedMutations(t.Context(), r.UUID); err != nil || pending {
+				t.Fatalf("successful mutation retained unknown acceptance: %v %v", pending, err)
+			}
+			if err := f.store.SaveRetainedResult(t.Context(), &staleRead); !errors.Is(err, resources.ErrSubmissionConflict) {
+				t.Fatalf("stale pre-mutation read overwrote the TTL: %v", err)
+			}
+			oldMutation := *r
+			if err := f.store.PrepareRetainedMutation(t.Context(), r, "context_cache:patch", "newer-ttl-update", bytes.Repeat([]byte{2}, 32)); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.SaveRetainedMutationResult(t.Context(), &oldMutation); !errors.Is(err, resources.ErrSubmissionConflict) {
+				t.Fatalf("older mutation crossed the newer dispatch fence: %v", err)
+			}
+		})
+	}
+}
+
+func TestRetainedLifecycleListingScopesRowsAndCursorsToRoute(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	otherRoute, otherRevision, otherSlug := acctID(t), acctID(t), r.RouteSlug+"-other"
+	acctExec(t, f.Pool, `INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) SELECT $1,$2,created_by,1,$3,$4,project_id FROM olp.routes WHERE slug=$5`, otherRoute, otherSlug, otherRevision, acctID(t), r.RouteSlug)
+	acctExec(t, f.Pool, `INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity) SELECT $1,$2,1,$3,operations,overall_timeout_ms,max_attempts,targets,$4,activated_by,routing_policy,fidelity FROM olp.route_revisions WHERE id=$5`, otherRevision, otherRoute, otherSlug, acctID(t), r.RouteRevisionID)
+	other := *r
+	other.UUID, other.ID = [16]byte{}, ""
+	other.RouteSlug, other.RouteRevisionID = otherSlug, otherRevision
+	other.UpstreamID, other.RetainedAccounting = "other-native", nil
+	newer, err := f.store.Put(t.Context(), &other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := f.store.ListLifecycleOrdered(t.Context(), r.Kind, r.APIKeyID, 10, "", false)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("unscoped owner listing changed: %+v %v", all, err)
+	}
+	selected, err := f.store.ListLifecycleOrdered(t.Context(), r.Kind, r.APIKeyID, 1, "", false, r.RouteSlug)
+	if err != nil || len(selected) != 1 || selected[0].ID != r.ID {
+		t.Fatalf("other route displaced the selected route page: %+v %v", selected, err)
+	}
+	selected, err = f.store.ListLifecycleOrdered(t.Context(), r.Kind, r.APIKeyID, 10, newer.ID, false, r.RouteSlug)
+	if err != nil || len(selected) != 0 {
+		t.Fatalf("other-route cursor moved the page boundary: %+v %v", selected, err)
+	}
+}
+
+func TestRetainedEvalDiscoveryReusesUnknownSubmissionForSettlement(t *testing.T) {
+	f := retainedLedger(t, "eval", true)
+	parent := *f.resource
+	parent.Kind, parent.UpstreamID, parent.State = "eval", "eval-parent", "active"
+	parent.RetainedAccounting = nil
+	definition, err := f.store.Put(t.Context(), &parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.resource.ParentID = &definition.UUID
+	f.resource.Metadata = json.RawMessage(`{"upstream_model":"retained-model","authorized_models":["retained-model"]}`)
+	original, fresh, err := f.store.PrepareLifecycle(t.Context(), f.resource, "eval", "lost-run", bytes.Repeat([]byte{3}, 32))
+	if err != nil || !fresh {
+		t.Fatalf("prepare run: fresh=%v %v", fresh, err)
+	}
+	if err := f.store.DispatchLifecycle(t.Context(), original.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.UnknownLifecycle(t.Context(), original.UUID); err != nil {
+		t.Fatal(err)
+	}
+	listed := *original
+	listed.UUID, listed.ID = [16]byte{}, ""
+	listed.UpstreamID, listed.State, listed.RetainedAccounting = "eval-run-native", "running", nil
+	wrongSlot := listed
+	wrongSlot.SlotID = acctID(t)
+	if _, err := f.store.BindDiscovered(t.Context(), &wrongSlot, original.UUID); !errors.Is(err, resources.ErrContract) {
+		t.Fatalf("submission marker crossed credential-slot authority: %v", err)
+	}
+	bound, err := f.store.BindDiscovered(t.Context(), &listed, original.UUID)
+	if err != nil || bound.UUID != original.UUID {
+		t.Fatalf("listed run forked submission ownership: %+v %v", bound, err)
+	}
+	var count int
+	var hint string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='eval_run' AND api_key_id=$1`, f.Key).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("duplicate run mapping: count=%d %v", count, err)
+	}
+	if err := f.Pool.QueryRow(t.Context(), `SELECT reconciliation_hint FROM olp.retained_settlements WHERE resource_id=$1`, original.UUID).Scan(&hint); err != nil || hint != listed.UpstreamID {
+		t.Fatalf("verified run discovery did not queue recovery: %q %v", hint, err)
+	}
+	claims, err := f.store.ClaimRetained(t.Context(), 1)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim: %+v %v", claims, err)
+	}
+	recovered, err := f.store.RetainedClaimResource(t.Context(), claims[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered.UpstreamID, recovered.State = listed.UpstreamID, "running"
+	if err := f.store.CommitRetainedPoll(t.Context(), claims[0], recovered, resources.RetainedObservation{}, true); err != nil {
+		t.Fatalf("discovery blocked atomic settlement adoption: %v", err)
+	}
+	byNative, err := f.store.GetByUpstreamIncludingDeleted(t.Context(), listed.NativeIdentity())
+	if err != nil || byNative.UUID != original.UUID {
+		t.Fatalf("recovery lost the original settlement identity: %+v %v", byNative, err)
+	}
+}
+
+func TestRetainedSettlementTerminalCoverageAndCancellationUsage(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	// Cancellation is remote lifecycle state; incurred training remains payable.
+	acctExec(t, f.Pool, `UPDATE olp.provider_resources SET state='cancelled' WHERE id=$1`, r.UUID)
+	complete := retainedTrainingObservation(r, 1_000_000)
+	terminated := resources.RetainedObservation{ObservedAt: complete.ObservedAt, RemoteTerminated: true}
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "verified-cancellation", strings.Repeat("a", 64), "provider_verified", "", terminated, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertState := func(want string) {
+		t.Helper()
+		var state string
+		if err := f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state); err != nil || state != want {
+			t.Fatalf("settlement state=%s want=%s error=%v", state, want, err)
+		}
+	}
+	assertState("evidence_missing")
+	// A terminal assertion omitting quantity does not supply a zero bill.
+	terminated.CoverageComplete = true
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "omitted-usage", strings.Repeat("b", 64), "operator_verified", f.User, terminated, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertState("evidence_missing")
+	complete.CoverageComplete = true
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "complete-usage", strings.Repeat("c", 64), "operator_verified", f.User, complete, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertState("closed")
+	complete.CoverageComplete = false
+	if _, err := resources.New(f.Pool).ApplyRetainedEvidence(t.Context(), r.UUID, "cross-source-duplicate", strings.Repeat("d", 64), "provider_verified", "", complete, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertState("closed")
+	var training int64
+	if err := f.Pool.QueryRow(t.Context(), `SELECT sum(training_tokens) FROM olp.attempt_usage_facts WHERE request_id IN (SELECT event_id FROM olp.retained_usage_coverage WHERE resource_id=$1)`, r.UUID).Scan(&training); err != nil || training != 1_000_000 {
+		t.Fatalf("cancelled paid usage was lost or counted twice: %d %v", training, err)
+	}
+	var pending bool
+	if err := f.Pool.QueryRow(t.Context(), `SELECT olp.has_pending_resource_usage($1::uuid)`, f.Key).Scan(&pending); err != nil || pending {
+		t.Fatalf("complete cancelled work retained unresolved liability: %v %v", pending, err)
+	}
+}
+
+func TestRetainedSettlementWorkerFencesAndRevokedCredentials(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	r := f.prepare(t)
+	claims, err := f.store.ClaimRetained(t.Context(), 1)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("initial worker claim: %+v %v", claims, err)
+	}
+	old := claims[0]
+	acctExec(t, f.Pool, `UPDATE olp.retained_settlements SET lease_until=now()-interval '1 second' WHERE resource_id=$1`, r.UUID)
+	claims, err = resources.New(f.Pool).ClaimRetained(t.Context(), 1)
+	if err != nil || len(claims) != 1 || claims[0].ClaimID == old.ClaimID {
+		t.Fatalf("replacement worker claim: %+v %v", claims, err)
+	}
+	if err = f.store.CommitRetainedPoll(t.Context(), old, r, resources.RetainedObservation{}, false); !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("stale worker committed: %v", err)
+	}
+	if err = f.store.HeartbeatRetained(t.Context(), old); !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("stale worker extended lease: %v", err)
+	}
+	if err = f.store.FinishRetainedClaim(t.Context(), claims[0], ""); err != nil {
+		t.Fatal(err)
+	}
+	acctExec(t, f.Pool, `UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1`, f.credential)
+	acctExec(t, f.Pool, `UPDATE olp.retained_settlements SET poll_after=now() WHERE resource_id=$1`, r.UUID)
+	worker := &retainedworker.Worker{Store: resources.New(f.Pool), Resolver: resources.NewResolver(f.Pool)}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err = worker.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var state, errorClass string
+	if err = f.Pool.QueryRow(t.Context(), `SELECT state,last_error FROM olp.retained_settlements WHERE resource_id=$1`, r.UUID).Scan(&state, &errorClass); err != nil || state != "evidence_missing" || errorClass != "credential_or_pin_unavailable" {
+		t.Fatalf("revocation dropped liability: %s %s %v", state, errorClass, err)
+	}
+	var pending bool
+	if err = f.Pool.QueryRow(t.Context(), `SELECT olp.has_pending_resource_usage($1::uuid)`, f.Key).Scan(&pending); err != nil || !pending {
+		t.Fatalf("revoked credential erased pending budget owner: %v %v", pending, err)
+	}
+}
+
+func TestRetainedSettlementPreparedAndRejectedIntentsCannotRedispatch(t *testing.T) {
+	for _, preparedOnly := range []bool{true, false} {
+		t.Run(map[bool]string{true: "crash_before_dispatch", false: "provider_rejection"}[preparedOnly], func(t *testing.T) {
+			f := retainedLedger(t, "fine_tuning", true)
+			r, fresh, err := f.store.PrepareLifecycle(t.Context(), f.resource, "fine_tuning", "not-accepted", bytes.Repeat([]byte{9}, 32))
+			if err != nil || !fresh {
+				t.Fatalf("prepare: %v %v", fresh, err)
+			}
+			if preparedOnly {
+				acctExec(t, f.Pool, `UPDATE olp.retained_submissions SET created_at=now()-interval '3 minutes' WHERE resource_id=$1`, r.UUID)
+				claims, err := f.store.ClaimRetained(t.Context(), 1)
+				if err != nil || len(claims) != 1 {
+					t.Fatalf("claim: %+v %v", claims, err)
+				}
+				closed, err := f.store.CloseUndispatchedRetained(t.Context(), claims[0])
+				if err != nil || !closed {
+					t.Fatalf("undispatched proof: %v %v", closed, err)
+				}
+			} else {
+				if err = f.store.DispatchLifecycle(t.Context(), r.UUID); err != nil {
+					t.Fatal(err)
+				}
+				if err = f.store.RejectRetained(t.Context(), r, "not-accepted", "fine_tuning:create", true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = f.store.DispatchLifecycle(t.Context(), r.UUID); !errors.Is(err, resources.ErrSubmissionConflict) {
+				t.Fatalf("non-accepted intent redispatched: %v", err)
+			}
+			if err = f.store.UnknownLifecycle(t.Context(), r.UUID); err != nil {
+				t.Fatal(err)
+			}
+			var state string
+			var pending bool
+			if err = f.Pool.QueryRow(t.Context(), `SELECT s.state,olp.has_pending_resource_usage(r.api_key_id) FROM olp.retained_settlements s JOIN olp.provider_resources r ON r.id=s.resource_id WHERE r.id=$1 AND r.state='not_accepted'`, r.UUID).Scan(&state, &pending); err != nil || state != "closed" || pending {
+				t.Fatalf("known absence retained liability: %s %v %v", state, pending, err)
+			}
+			assertRetainedLedgerCounts(t, f, r, 0, 0, 0)
+		})
+	}
+}
+
+func TestRetainedSettlementLateGroupAndSupplyOwnersGetDurableBalances(t *testing.T) {
+	f := retainedLedger(t, "fine_tuning", true)
+	var routeID string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT route_id::text FROM olp.route_revisions WHERE id=$1`, f.resource.RouteRevisionID).Scan(&routeID); err != nil {
+		t.Fatal(err)
+	}
+	owners := []string{f.Provider, f.resource.SlotID, routeID}
+	f.resource.RetainedAccounting.Templates["retained-model"].Attempts[0].Routing.Budgets = append([]string(nil), owners...)
+	r := f.prepare(t)
+	group := acctID(t)
+	acctExec(t, f.Pool, `INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,etag,created_by) VALUES($1,'Late retained group',$2,100,$3,$4)`, group, f.project, acctID(t), f.User)
+	acctExec(t, f.Pool, `UPDATE olp.api_keys SET budget_group_id=$2 WHERE id=$1`, f.Key, group)
+	var pending bool
+	if err := f.Pool.QueryRow(t.Context(), `SELECT olp.has_pending_resource_usage($1::uuid)`, group).Scan(&pending); err != nil || !pending {
+		t.Fatalf("late group lost pending owner: %v %v", pending, err)
+	}
+	observation := retainedTrainingObservation(r, 1_000_000)
+	observation.RemoteTerminated = true
+	observation.CoverageComplete = true
+	if _, err := f.store.ApplyRetainedEvidence(t.Context(), r.UUID, "late-owner-usage", strings.Repeat("e", 64), "provider_verified", "", observation, nil); err != nil {
+		t.Fatal(err)
+	}
+	var supplyOwners int
+	if err := f.Pool.QueryRow(t.Context(), `SELECT count(DISTINCT owner_id) FROM olp.supply_cost_windows WHERE owner_id=ANY($1::uuid[]) AND window_kind='day' AND accrued=1`, owners).Scan(&supplyOwners); err != nil || supplyOwners != 3 {
+		t.Fatalf("late supply balances=%d %v", supplyOwners, err)
+	}
+	var groupCost string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT accrued::text FROM olp.budget_group_cost_windows WHERE budget_group_id=$1 AND window_kind='day'`, group).Scan(&groupCost); err != nil || strings.TrimRight(strings.TrimRight(groupCost, "0"), ".") != "1" {
+		t.Fatalf("late group balance=%s %v", groupCost, err)
+	}
+	owners = append(owners, f.Key, group)
+	var versions int
+	if err := f.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_versions WHERE owner_id=ANY($1::uuid[]) AND version>0`, owners).Scan(&versions); err != nil || versions != 5 {
+		t.Fatalf("settlement did not fence stale limiter balances: %d %v", versions, err)
+	}
+}

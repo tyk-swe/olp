@@ -391,6 +391,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				}
 				debits := &limits.DebitStore{Pool: pool, Limiter: limiter}
 				server.Admission.PendingCostAccountingReady = debits.CheckOwnerAccounting
+				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 				server.Admission.CostAccountingReady = func(ctx context.Context) error {
 					return usage.CheckBudgetAccounting(ctx, pool, emitter)
 				}
