@@ -292,6 +292,8 @@ Destination types: webhook, Slack, Teams, Discord, PagerDuty and SMTP email.
 Secrets are sealed/write-only; URL changes require explicit replacement/removal.
 Webhook timeout is five seconds, typed channels fifteen; PagerDuty needs 202.
 Email requires SMTPS/STARTTLS. Egress is checked at creation and every dial.
+No channel follows redirects; refused redirects record `redirect`. Email is
+sent as quoted-printable text. SMTP replies record `smtp_4xx`/`smtp_5xx`.
 
 Rules subscribe to immutable events: budget thresholds/exhaustion, key expiry,
 grant lapse, circuits/error rate/credentials, latency, retirement, runtime failure,

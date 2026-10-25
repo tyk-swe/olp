@@ -107,32 +107,9 @@ func (s *Server) notificationDestination(r *http.Request, p Principal) (Reply, e
 	return Detail(json.RawMessage(data), etag), nil
 }
 
-func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id, typ string, raw *json.RawMessage) error {
-	if raw == nil {
-		return nil
-	}
+func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, secret []byte) error {
 	var secretID *string
-	if string(*raw) != "null" {
-		var secret []byte
-		if typ == "webhook" {
-			var value string
-			if err := json.Unmarshal(*raw, &value); err != nil {
-				return Invalid("secret", "Use a signing secret string or null.")
-			}
-			if value == "" || len(value) > 1024 {
-				return Invalid("secret", "Use a signing secret of 1–1024 bytes.")
-			}
-			secret = []byte(value)
-		} else {
-			if len(*raw) > 16384 {
-				return Invalid("secret", "The secret object is too large.")
-			}
-			var decoded map[string]json.RawMessage
-			if err := json.Unmarshal(*raw, &decoded); err != nil || decoded == nil {
-				return Invalid("secret", "Use the channel credential object or null.")
-			}
-			secret = *raw
-		}
+	if secret != nil {
 		stored := NewID()
 		if err := s.Keys.Store(r.Context(), tx, s.Installation, stored, secrets.NotificationSecret, secret, nil); err != nil {
 			return err
@@ -157,7 +134,7 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id, typ str
 	return err
 }
 
-func (s *Server) validateDestination(input destinationInput) error {
+func (s *Server) validateDestination(input destinationInput, secret []byte) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
@@ -166,10 +143,6 @@ func (s *Server) validateDestination(input destinationInput) error {
 	}
 	if len(input.Configuration) > 4096 {
 		return Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
-	}
-	secret, err := destinationSecret(input)
-	if err != nil {
-		return err
 	}
 	d := notifications.Destination{Type: input.Type, URL: strings.TrimSpace(input.URL), Configuration: input.Configuration}
 	if secret == nil {
@@ -187,13 +160,14 @@ func (s *Server) validateDestination(input destinationInput) error {
 	return nil
 }
 
-func destinationSecret(input destinationInput) ([]byte, error) {
-	if input.Secret == nil || string(*input.Secret) == "null" {
+// destinationSecret validates and decodes a notification destination secret.
+func destinationSecret(typ string, raw json.RawMessage) ([]byte, error) {
+	if string(raw) == "null" {
 		return nil, nil
 	}
-	if input.Type == "" || input.Type == "webhook" {
+	if typ == "webhook" {
 		var secret string
-		if err := json.Unmarshal(*input.Secret, &secret); err != nil {
+		if err := json.Unmarshal(raw, &secret); err != nil {
 			return nil, Invalid("secret", "Use a signing secret string or null.")
 		}
 		if secret == "" || len(secret) > 1024 {
@@ -201,14 +175,14 @@ func destinationSecret(input destinationInput) ([]byte, error) {
 		}
 		return []byte(secret), nil
 	}
-	if len(*input.Secret) > 16384 {
+	if len(raw) > 16384 {
 		return nil, Invalid("secret", "The secret object is too large.")
 	}
 	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(*input.Secret, &decoded); err != nil || decoded == nil {
+	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
 		return nil, Invalid("secret", "Use the channel credential object or null.")
 	}
-	return *input.Secret, nil
+	return raw, nil
 }
 
 func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Reply, error) {
@@ -243,7 +217,13 @@ func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Re
 	if input.Type == "" {
 		input.Type = "webhook"
 	}
-	if err = s.validateDestination(input); err != nil {
+	var secret []byte
+	if input.Secret != nil {
+		if secret, err = destinationSecret(input.Type, *input.Secret); err != nil {
+			return Reply{}, err
+		}
+	}
+	if err = s.validateDestination(input, secret); err != nil {
 		return Reply{}, err
 	}
 	if input.ProjectID != nil {
@@ -270,8 +250,10 @@ func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Re
 		p.UserID(), enabled, input.Type, configuration); err != nil {
 		return Reply{}, err
 	}
-	if err = s.storeNotificationSecret(r, tx, id, input.Type, input.Secret); err != nil {
-		return Reply{}, err
+	if input.Secret != nil {
+		if err = s.storeNotificationSecret(r, tx, id, secret); err != nil {
+			return Reply{}, err
+		}
 	}
 	var data []byte
 	if err = tx.QueryRow(r.Context(),
@@ -394,22 +376,14 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Re
 		return Reply{}, Fail(503, "egress_policy_unavailable", "Notification delivery is not configured on this installation.")
 	}
 	d := notifications.Destination{Type: current.Type, URL: strings.TrimSpace(current.URL), Configuration: current.Configuration}
-	if _, supplied := patch["secret"]; !supplied && current.SecretConfigured && d.URL != previousURL {
+	raw, secretSupplied := patch["secret"]
+	if !secretSupplied && current.SecretConfigured && d.URL != previousURL {
 		return Reply{}, Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
 	}
 	var effectiveSecret []byte
-	secretCleared := false
-	if raw, ok := patch["secret"]; ok {
-		if string(raw) == "null" {
-			secretCleared = true
-		} else if current.Type == "webhook" {
-			var value string
-			if err = json.Unmarshal(raw, &value); err != nil {
-				return Reply{}, Invalid("secret", "Use a signing secret string or null.")
-			}
-			effectiveSecret = []byte(value)
-		} else {
-			effectiveSecret = []byte(raw)
+	if secretSupplied {
+		if effectiveSecret, err = destinationSecret(current.Type, raw); err != nil {
+			return Reply{}, err
 		}
 	} else if current.SecretConfigured {
 		var secretID *string
@@ -422,6 +396,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Re
 			}
 		}
 	}
+	secretCleared := secretSupplied && effectiveSecret == nil
 	if len(effectiveSecret) != 0 || (!notifications.RequiresSecret(current.Type) && !secretCleared) {
 		if err = notifications.ValidateDestination(s.Egress, d, effectiveSecret); err != nil {
 			return Reply{}, Invalid("destination", "The destination, configuration or secret is invalid.")
@@ -440,8 +415,8 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Re
 		current.Type, current.Configuration); err != nil {
 		return Reply{}, err
 	}
-	if raw, ok := patch["secret"]; ok {
-		if err = s.storeNotificationSecret(r, tx, id, current.Type, &raw); err != nil {
+	if secretSupplied {
+		if err = s.storeNotificationSecret(r, tx, id, effectiveSecret); err != nil {
 			return Reply{}, err
 		}
 	}

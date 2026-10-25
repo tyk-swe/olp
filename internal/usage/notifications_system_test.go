@@ -26,6 +26,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -143,8 +144,8 @@ func TestIntegrationMovedRuleSendsToItsCurrentDestination(t *testing.T) {
 		PlainHTTPHosts:  []string{"127.0.0.1"},
 	}
 	w := &notificationWorker{
-		pool: pool, keys: ring, installation: installation, policy: policy,
-		client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		pool: pool, keys: ring, installation: installation,
+		sender: notifications.NewSender(*policy), log: slog.New(slog.DiscardHandler),
 		newID: uuid7,
 	}
 	deliveries, err := w.pending(ctx)
@@ -264,7 +265,7 @@ func newNotificationDeliveryFixture(t *testing.T, pool *pgxpool.Pool) *notificat
 		PlainHTTPHosts:  []string{"127.0.0.1"},
 	}
 	fixture.worker = &notificationWorker{
-		pool: pool, policy: policy, client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		pool: pool, sender: notifications.NewSender(*policy), log: slog.New(slog.DiscardHandler),
 	}
 	owner := uuid.NewString()
 	fixture.exec(t, "INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
@@ -389,7 +390,7 @@ func TestIntegrationIncidentLockSingleConnectionPool(t *testing.T) {
 		VALUES($1,$2,'worker.stale','olp:incident:single',true,$3,'pending')`, uuid.NewString(), ruleID, payload(true))
 
 	worker := &notificationWorker{
-		pool: single, policy: policy, client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		pool: single, sender: notifications.NewSender(*policy), log: slog.New(slog.DiscardHandler),
 		newID: uuid7,
 	}
 	deliveries, err := worker.pending(ctx)
@@ -494,7 +495,7 @@ func TestIntegrationIncidentLockRetiresBrokenConn(t *testing.T) {
 		VALUES($1,$2,'worker.stale','olp:incident:broken',false,$3,'pending')`, uuid.NewString(), ruleID, payload)
 
 	worker := &notificationWorker{
-		pool: single, policy: policy, client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		pool: single, sender: notifications.NewSender(*policy), log: slog.New(slog.DiscardHandler),
 		newID: uuid7,
 	}
 	probe, err := single.Acquire(ctx)

@@ -79,6 +79,12 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
+- Notification webhooks refuse redirects instead of following up to five,
+  because 301/302/303 turned signed POSTs into bodyless GETs that were recorded
+  as delivered; refused redirects record `redirect`. Email notifications send
+  indented evidence as quoted-printable with RFC 2047-encoded addresses.
+- Email notifications record SMTP replies as `smtp_4xx`/`smtp_5xx` instead of
+  `network`, and a failed QUIT after message acceptance no longer resends it.
 - Active health probes send a text completion to connectors whose generation
   target is a native completion profile. The `price` routing strategy uses input
   and output token prices for Decisions. Chat usage records

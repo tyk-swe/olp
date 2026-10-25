@@ -244,9 +244,9 @@ user-agent family, never request bodies, credentials, or content. See
 - Administrators of one installation are trusted. Project boundaries separate
   members' access within the installation; installation-wide principals see
   every project.
-- Notification webhooks follow up to five redirects, validating each hop with
-  the provider egress rules, and the OTLP exporter connects to its configured
-  endpoint with its own client. Notification bodies are metadata only: events,
+- Notification webhooks refuse redirects like other egress clients, and the
+  OTLP exporter connects to its configured endpoint with its own client.
+  Notification bodies are metadata only: events,
   rule subjects, windows and amounts — never request content, credentials, or
   secret material. Channel credentials (chat webhook URLs, PagerDuty routing
   keys, SMTP credentials, signing secrets) are write-only, sealed under

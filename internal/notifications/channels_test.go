@@ -2,16 +2,21 @@ package notifications
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
+	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +24,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +43,8 @@ func testBody() []byte {
 }
 
 func TestSendHTTPFailures(t *testing.T) {
-	for status, code := range map[int]string{301: "network", 403: "http_4xx", 500: "http_5xx"} {
+	sender := NewSender(*testPolicy())
+	for status, code := range map[int]string{301: redirectCode, 403: http4xxCode, 500: http5xxCode} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if status == 301 {
 				w.Header().Set("Location", "http://127.0.0.1:1/")
@@ -46,7 +53,7 @@ func TestSendHTTPFailures(t *testing.T) {
 		}))
 		d := Destination{Type: "pagerduty", URL: server.URL}
 		secret := []byte(`{"routing_key":"rk"}`)
-		err := Send(t.Context(), testPolicy(), d, secret, testBody())
+		err := sender.Send(t.Context(), d, secret, testBody())
 		server.Close()
 		if err == nil || SendErrorCode(err) != code {
 			t.Fatalf("status %d err=%v code=%q want %q", status, err, SendErrorCode(err), code)
@@ -57,6 +64,10 @@ func TestSendHTTPFailures(t *testing.T) {
 	secret := []byte(`{"routing_key":"rk"}`)
 	if err := ValidateDestination(policy, d, secret); err == nil {
 		t.Fatal("egress-denied destination accepted")
+	}
+	deniedSender := NewSender(*policy)
+	if SendErrorCode(deniedSender.Send(t.Context(), d, secret, testBody())) != invalidDestinationCode {
+		t.Fatal("egress-denied destination was not classified as invalid")
 	}
 }
 
@@ -115,6 +126,7 @@ func mustEC(t *testing.T, key *ecdsa.PrivateKey) []byte {
 }
 
 type smtpFake struct {
+	smtpFakeOptions
 	listener net.Listener
 	tls      bool
 	starttls bool
@@ -122,13 +134,18 @@ type smtpFake struct {
 	envelope chan string
 }
 
-func startSMTPFake(t *testing.T, cert *tls.Certificate, mode string) *smtpFake {
+type smtpFakeOptions struct {
+	rcptReply   string
+	closeOnQuit bool
+}
+
+func startSMTPFake(t *testing.T, cert *tls.Certificate, mode string, options smtpFakeOptions) *smtpFake {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &smtpFake{listener: listener, messages: make(chan []string, 4), envelope: make(chan string, 64), tls: mode == "smtps", starttls: mode == "starttls"}
+	f := &smtpFake{smtpFakeOptions: options, listener: listener, messages: make(chan []string, 4), envelope: make(chan string, 64), tls: mode == "smtps", starttls: mode == "starttls"}
 	go f.serve(cert)
 	t.Cleanup(func() { listener.Close() })
 	return f
@@ -189,17 +206,29 @@ func (f *smtpFake) handle(conn net.Conn, cert *tls.Certificate) {
 			reader = bufio.NewReader(conn)
 		case strings.HasPrefix(command, "AUTH"):
 			write("235 authenticated\r\n")
-		case strings.HasPrefix(command, "MAIL"), strings.HasPrefix(command, "RCPT"):
+		case strings.HasPrefix(command, "MAIL"):
 			select {
 			case f.envelope <- line:
 			default:
 			}
 			write("250 ok\r\n")
+		case strings.HasPrefix(command, "RCPT"):
+			select {
+			case f.envelope <- line:
+			default:
+			}
+			reply := f.rcptReply
+			if reply == "" {
+				reply = "250 ok"
+			}
+			write(reply + "\r\n")
 		case command == "DATA":
 			write("354 end with .\r\n")
 			inData = true
 		case command == "QUIT":
-			write("221 bye\r\n")
+			if !f.closeOnQuit {
+				write("221 bye\r\n")
+			}
 			return
 		case command == "RSET":
 			write("250 ok\r\n")
@@ -241,9 +270,8 @@ func TestSendEveryEventToAllChannels(t *testing.T) {
 	t.Cleanup(pd.Close)
 
 	caPEM, cert := caAndServerCert(t, "127.0.0.1")
-	fake := startSMTPFake(t, &cert, "smtps")
-	smtpAddr := fake.listener.Addr().String()
-	smtpMessages := fake.messages
+	smtpsFake := startSMTPFake(t, &cert, "smtps", smtpFakeOptions{})
+	starttlsFake := startSMTPFake(t, &cert, "starttls", smtpFakeOptions{})
 
 	hookSecret := func(u *url.URL) []byte {
 		return []byte(`{"webhook_url":"` + u.String() + `/hook?k=1"}`)
@@ -253,31 +281,42 @@ func TestSendEveryEventToAllChannels(t *testing.T) {
 		destination Destination
 		secret      []byte
 	}{
-		"webhook":   {Destination{Type: "webhook", URL: servers["webhook"].URL}, []byte("sig")},
-		"slack":     {Destination{Type: "slack", URL: servers["slack"].URL}, hookSecret(mustParse(t, servers["slack"].URL))},
-		"msteams":   {Destination{Type: "msteams", URL: servers["msteams"].URL}, hookSecret(mustParse(t, servers["msteams"].URL))},
-		"discord":   {Destination{Type: "discord", URL: servers["discord"].URL}, hookSecret(mustParse(t, servers["discord"].URL))},
-		"pagerduty": {Destination{Type: "pagerduty", URL: pd.URL}, []byte(`{"routing_key":"rk"}`)},
-		"email":     {Destination{Type: "email", URL: "smtps://" + smtpAddr, Configuration: config}, nil},
+		"webhook":        {Destination{Type: "webhook", URL: servers["webhook"].URL}, []byte("sig")},
+		"slack":          {Destination{Type: "slack", URL: servers["slack"].URL}, hookSecret(mustParse(t, servers["slack"].URL))},
+		"msteams":        {Destination{Type: "msteams", URL: servers["msteams"].URL}, hookSecret(mustParse(t, servers["msteams"].URL))},
+		"discord":        {Destination{Type: "discord", URL: servers["discord"].URL}, hookSecret(mustParse(t, servers["discord"].URL))},
+		"pagerduty":      {Destination{Type: "pagerduty", URL: pd.URL}, []byte(`{"routing_key":"rk"}`)},
+		"email-smtps":    {Destination{Type: emailType, URL: "smtps://" + smtpsFake.listener.Addr().String(), Configuration: config}, nil},
+		"email-starttls": {Destination{Type: emailType, URL: "smtp+starttls://" + starttlsFake.listener.Addr().String(), Configuration: config}, nil},
 	}
+	sender := NewSender(*policy)
 	for name, channel := range channels {
 		if err := ValidateDestination(policy, channel.destination, channel.secret); err != nil {
 			t.Fatalf("%s validate: %v", name, err)
 		}
 		for _, event := range Events {
 			body := []byte(`{"event":"` + event + `","rule_id":"r1","rule_name":"Alert","subject":"notification_delivery","incident":1,"incident_key":"inc:` + name + `","delivery_id":"d1"}`)
-			if err := Send(t.Context(), policy, channel.destination, channel.secret, body); err != nil {
+			if err := sender.Send(t.Context(), channel.destination, channel.secret, body); err != nil {
 				t.Fatalf("%s %s: %v", name, event, err)
 			}
-			if name == "email" {
+			if strings.HasPrefix(name, "email-") {
+				smtpMessages := smtpsFake.messages
+				if name == "email-starttls" {
+					smtpMessages = starttlsFake.messages
+				}
 				select {
 				case lines := <-smtpMessages:
 					message := strings.Join(lines, "")
-					if !strings.Contains(message, event) {
-						t.Fatalf("email for %s missing event: %q", event, message)
+					_, encodedBody, ok := strings.Cut(message, "\r\n\r\n")
+					if !ok {
+						t.Fatalf("email for %s has no body", event)
+					}
+					decoded, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encodedBody)))
+					if err != nil || !strings.Contains(string(decoded), event) {
+						t.Fatalf("email for %s missing decoded event: %q err=%v", event, decoded, err)
 					}
 				case <-time.After(5 * time.Second):
-					t.Fatalf("email for %s not received", event)
+					t.Fatalf("%s email for %s not received", name, event)
 				}
 			}
 		}
@@ -315,6 +354,56 @@ func TestSendEveryEventToAllChannels(t *testing.T) {
 	}
 }
 
+func TestEmailSMTPReplies(t *testing.T) {
+	caPEM, cert := caAndServerCert(t, "127.0.0.1")
+	config, err := json.Marshal(map[string]any{
+		"from":           "alerts@olp.test",
+		"to":             []string{"ops@olp.test"},
+		"ca_certificate": caPEM,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name        string
+		rcptReply   string
+		closeOnQuit bool
+		wantCode    string
+	}{
+		{name: "permanent recipient failure", rcptReply: "550 no such user", wantCode: smtp5xxCode},
+		{name: "temporary recipient failure", rcptReply: "451 try later", wantCode: smtp4xxCode},
+		{name: "close after acceptance", closeOnQuit: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := startSMTPFake(t, &cert, "smtps", smtpFakeOptions{
+				rcptReply: test.rcptReply, closeOnQuit: test.closeOnQuit,
+			})
+			sender := NewSender(*testPolicy())
+			destination := Destination{
+				Type: emailType, URL: "smtps://" + fake.listener.Addr().String(), Configuration: config,
+			}
+			err := sender.Send(t.Context(), destination, nil, testBody())
+			if test.wantCode != "" {
+				if got := SendErrorCode(err); got != test.wantCode {
+					t.Fatalf("SendErrorCode() = %q, want %q (err %v)", got, test.wantCode, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Send() error = %v", err)
+			}
+			select {
+			case message := <-fake.messages:
+				if len(message) == 0 {
+					t.Fatal("fake received an empty message")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("fake did not receive the accepted message")
+			}
+		})
+	}
+}
+
 func mustParse(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	u, err := url.Parse(raw)
@@ -323,9 +412,6 @@ func mustParse(t *testing.T, raw string) *url.URL {
 	}
 	return u
 }
-
-// A cancelled handshake must have closed the raw connection, so draining
-// it (including any buffered TLS bytes) must end in EOF, never a timeout.
 
 func TestSMTPSecretStrictness(t *testing.T) {
 	for _, tc := range []struct {
@@ -356,5 +442,201 @@ func TestSMTPSecretStrictness(t *testing.T) {
 		if err != nil || user != tc.wantUser || (user == "") != (pass == "") {
 			t.Fatalf("%s = %q/%q %v", tc.raw, user, pass, err)
 		}
+	}
+}
+
+func TestValidateDestination(t *testing.T) {
+	emailConfig, _ := json.Marshal(map[string]any{"from": "alerts@olp.test", "to": []string{"ops@olp.test"}})
+	tests := []struct {
+		name        string
+		destination Destination
+		secret      []byte
+		nilPolicy   bool
+		wantShapeOK bool
+		wantFullOK  bool
+	}{
+		{
+			name:        "webhook without secret",
+			destination: Destination{URL: "http://127.0.0.1:1"},
+			wantShapeOK: true,
+			wantFullOK:  true,
+		},
+		{
+			name:        "webhook with configuration",
+			destination: Destination{URL: "http://127.0.0.1:1", Configuration: json.RawMessage(`{"x":1}`)},
+		},
+		{
+			name:        "webhook secret too large",
+			destination: Destination{URL: "http://127.0.0.1:1"},
+			secret:      []byte(strings.Repeat("x", 1025)),
+			wantShapeOK: true,
+		},
+		{
+			name:        "chat origin has path",
+			destination: Destination{Type: slackType, URL: "http://127.0.0.1:1/x"},
+			secret:      []byte(`{"webhook_url":"http://127.0.0.1:1/hook"}`),
+		},
+		{
+			name:        "chat without secret",
+			destination: Destination{Type: slackType, URL: "http://127.0.0.1:1"},
+			wantShapeOK: true,
+		},
+		{
+			name:        "chat hook on another origin",
+			destination: Destination{Type: slackType, URL: "http://127.0.0.1:1"},
+			secret:      []byte(`{"webhook_url":"http://127.0.0.1:2/hook"}`),
+			wantShapeOK: true,
+		},
+		{
+			name:        "pagerduty empty routing key",
+			destination: Destination{Type: pagerDutyType, URL: "http://127.0.0.1:1"},
+			secret:      []byte(`{"routing_key":""}`),
+			wantShapeOK: true,
+		},
+		{
+			name:        "email without configuration",
+			destination: Destination{Type: emailType, URL: "smtps://127.0.0.1:25"},
+		},
+		{
+			name:        "email with partial credentials",
+			destination: Destination{Type: emailType, URL: "smtps://127.0.0.1:25", Configuration: emailConfig},
+			secret:      []byte(`{"username":"u"}`),
+			wantShapeOK: true,
+		},
+		{
+			name:        "unknown type",
+			destination: Destination{Type: "sms", URL: "http://127.0.0.1:1"},
+		},
+		{
+			name:        "nil policy",
+			destination: Destination{URL: "http://127.0.0.1:1"},
+			nilPolicy:   true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := testPolicy()
+			if test.nilPolicy {
+				policy = nil
+			}
+			shapeErr := ValidateDestinationShape(policy, test.destination)
+			fullErr := ValidateDestination(policy, test.destination, test.secret)
+			if (shapeErr == nil) != test.wantShapeOK {
+				t.Errorf("shape error = %v, want success %v", shapeErr, test.wantShapeOK)
+			}
+			if (fullErr == nil) != test.wantFullOK {
+				t.Errorf("full error = %v, want success %v", fullErr, test.wantFullOK)
+			}
+		})
+	}
+}
+
+func TestWebhookSignsAndRefusesRedirects(t *testing.T) {
+	body := testBody()
+	secret := []byte("signing-key")
+	type webhookRequest struct {
+		body        []byte
+		signature   string
+		contentType string
+	}
+	received := make(chan webhookRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ := io.ReadAll(r.Body)
+		received <- webhookRequest{
+			body:        receivedBody,
+			signature:   r.Header.Get("X-OLP-Signature"),
+			contentType: r.Header.Get("Content-Type"),
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sender := NewSender(*testPolicy())
+	destination := Destination{URL: server.URL}
+	if err := sender.Send(t.Context(), destination, secret, body); err != nil {
+		t.Fatal(err)
+	}
+	signed := <-received
+	sum := hmac.New(sha256.New, secret)
+	_, _ = sum.Write(signed.body)
+	wantSignature := "sha256=" + hex.EncodeToString(sum.Sum(nil))
+	if signed.signature != wantSignature || !bytes.Equal(signed.body, body) || signed.contentType != "application/json" {
+		t.Fatalf("received signature %q body %q type %q", signed.signature, signed.body, signed.contentType)
+	}
+
+	if err := sender.Send(t.Context(), destination, nil, body); err != nil {
+		t.Fatal(err)
+	}
+	unsigned := <-received
+	if unsigned.signature != "" {
+		t.Fatalf("unsigned webhook had signature %q", unsigned.signature)
+	}
+
+	var secondRequests atomic.Int32
+	second := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		secondRequests.Add(1)
+	}))
+	defer second.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", second.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	err := sender.Send(t.Context(), Destination{URL: redirect.URL}, nil, body)
+	if SendErrorCode(err) != redirectCode {
+		t.Fatalf("redirect error = %v, code %q", err, SendErrorCode(err))
+	}
+	if got := secondRequests.Load(); got != 0 {
+		t.Fatalf("redirect target received %d requests", got)
+	}
+}
+
+func TestEmailMessage(t *testing.T) {
+	config, _ := json.Marshal(map[string]any{
+		"from": "Équipe <alerts@olp.test>",
+		"to":   []string{"Ops <ops@olp.test>"},
+	})
+	opened, err := open(testPolicy(), Destination{
+		Type: emailType, URL: "smtps://127.0.0.1:25", Configuration: config,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := opened.(email)
+	value := strings.Repeat("x", 3000)
+	body, err := json.Marshal(map[string]string{"event": "large", "evidence": value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := channel.message(body, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	header, encodedBody, ok := strings.Cut(string(message), "\r\n\r\n")
+	if !ok {
+		t.Fatal("message has no body")
+	}
+	if !strings.Contains(header, "From: =?") {
+		t.Fatalf("From was not RFC 2047 encoded: %q", header)
+	}
+	if strings.IndexFunc(header, func(r rune) bool { return r > 127 }) >= 0 {
+		t.Fatalf("header contains raw non-ASCII bytes: %q", header)
+	}
+	if !strings.Contains(header, "Content-Transfer-Encoding: quoted-printable") {
+		t.Fatalf("quoted-printable header missing: %q", header)
+	}
+	var messageID string
+	for _, line := range strings.Split(header, "\r\n") {
+		if strings.HasPrefix(line, "Message-ID:") {
+			messageID = strings.TrimPrefix(line, "Message-ID: ")
+		}
+	}
+	if !strings.HasSuffix(messageID, "@olp.test>") {
+		t.Fatalf("Message-ID = %q, want From domain", messageID)
+	}
+	for _, line := range strings.Split(string(message), "\r\n") {
+		if len(line) > 998 {
+			t.Fatalf("message line has %d bytes", len(line))
+		}
+	}
+	decoded, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encodedBody)))
+	if err != nil || !strings.Contains(string(decoded), value) {
+		t.Fatalf("decoded body does not contain evidence: err=%v", err)
 	}
 }

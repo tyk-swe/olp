@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strconv"
 
@@ -43,6 +44,40 @@ type RuleConfiguration struct {
 	LeadDays          int    `json:"lead_days,omitempty"`
 }
 
+var signalFields = []string{"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds"}
+
+var ruleFields = map[string][]string{
+	"provider.error_rate":         signalFields,
+	"provider.credential.failing": signalFields,
+	"route.latency":               {"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds", "metric"},
+	"key.expiring":                {"lead_time_seconds"},
+	"model.retirement":            {"lead_days", "cooldown_seconds"},
+	"report.spend":                {"period"},
+	"budget.exhausted":            {"cooldown_seconds"},
+	"provider.circuit.open":       {"cooldown_seconds"},
+	"provider.circuit.closed":     {"cooldown_seconds"},
+	"runtime.install_failed":      {"cooldown_seconds"},
+	"worker.stale":                {"cooldown_seconds"},
+}
+
+var intFields = []struct {
+	name               string
+	min, max, fallback int
+	field              func(*RuleConfiguration) *int
+}{
+	{"window_seconds", 60, 86400, 300, func(c *RuleConfiguration) *int { return &c.WindowSeconds }},
+	{"minimum_samples", 1, 10000, 20, func(c *RuleConfiguration) *int { return &c.MinimumSamples }},
+	{"cooldown_seconds", 60, 86400, 900, func(c *RuleConfiguration) *int { return &c.CooldownSeconds }},
+	{"lead_time_seconds", 60, 2678400, 86400, func(c *RuleConfiguration) *int { return &c.LeadTimeSeconds }},
+	{"lead_days", 1, 366, 30, func(c *RuleConfiguration) *int { return &c.LeadDays }},
+}
+
+var thresholdDefaults = map[string]struct{ threshold, recovery string }{
+	"provider.error_rate":         {"0.1", "0.05"},
+	"route.latency":               {"1000", "800"},
+	"provider.credential.failing": {"3", "0"},
+}
+
 func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguration, error) {
 	var c RuleConfiguration
 	if !slices.Contains(Events, event) {
@@ -55,23 +90,8 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return c, errors.New("configuration must be an object")
 	}
-	allowed := []string{}
-	switch event {
-	case "provider.error_rate", "route.latency", "provider.credential.failing":
-		allowed = []string{"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds"}
-		if event == "route.latency" {
-			allowed = append(allowed, "metric")
-		}
-	case "key.expiring":
-		allowed = []string{"lead_time_seconds"}
-	case "model.retirement":
-		allowed = []string{"lead_days", "cooldown_seconds"}
-	case "report.spend":
-		allowed = []string{"period"}
-	case "budget.exhausted", "provider.circuit.open", "provider.circuit.closed", "runtime.install_failed", "worker.stale":
-		allowed = []string{"cooldown_seconds"}
-	}
-	for field := range fields {
+	allowed := ruleFields[event]
+	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if !slices.Contains(allowed, field) {
 			return c, fmt.Errorf("configuration.%s is not supported for %s", field, event)
 		}
@@ -81,70 +101,40 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 	if err := d.Decode(&c); err != nil || d.Decode(new(any)) != io.EOF {
 		return c, errors.New("configuration fields have invalid types")
 	}
-	for key, bounds := range map[string][3]int{
-		"window_seconds":    {60, 86400, 300},
-		"minimum_samples":   {1, 10000, 20},
-		"cooldown_seconds":  {60, 86400, 900},
-		"lead_time_seconds": {60, 2678400, 86400},
-		"lead_days":         {1, 366, 30},
-	} {
-		if !slices.Contains(allowed, key) {
+
+	provided := func(name string) bool {
+		_, ok := fields[name]
+		return ok
+	}
+	for _, field := range intFields {
+		if !slices.Contains(allowed, field.name) {
 			continue
 		}
-		value := 0
-		switch key {
-		case "window_seconds":
-			value = c.WindowSeconds
-		case "minimum_samples":
-			value = c.MinimumSamples
-		case "cooldown_seconds":
-			value = c.CooldownSeconds
-		case "lead_time_seconds":
-			value = c.LeadTimeSeconds
-		case "lead_days":
-			value = c.LeadDays
+		value := field.fallback
+		if provided(field.name) {
+			value = *field.field(&c)
+		} else if event == "provider.credential.failing" && field.name == "minimum_samples" {
+			value = 3
 		}
-		if _, provided := fields[key]; !provided {
-			value = bounds[2]
-			if event == "provider.credential.failing" && key == "minimum_samples" {
-				value = 3
-			}
+		if value < field.min || value > field.max {
+			return c, fmt.Errorf("configuration.%s must be from %d to %d", field.name, field.min, field.max)
 		}
-		if value < bounds[0] || value > bounds[1] {
-			return c, fmt.Errorf("configuration.%s must be from %d to %d", key, bounds[0], bounds[1])
-		}
-		switch key {
-		case "window_seconds":
-			c.WindowSeconds = value
-		case "minimum_samples":
-			c.MinimumSamples = value
-		case "cooldown_seconds":
-			c.CooldownSeconds = value
-		case "lead_time_seconds":
-			c.LeadTimeSeconds = value
-		case "lead_days":
-			c.LeadDays = value
-		}
+		*field.field(&c) = value
 	}
-	if slices.Contains(allowed, "threshold") {
-		defaults := map[string][2]string{"provider.error_rate": {"0.1", "0.05"}, "route.latency": {"1000", "800"}, "provider.credential.failing": {"3", "0"}}
-		if _, provided := fields["threshold"]; !provided {
-			c.Threshold = defaults[event][0]
-		}
-		if _, provided := fields["recovery_threshold"]; !provided {
-			if _, custom := fields["threshold"]; custom {
-				threshold, err := boundedThreshold(event, c.Threshold)
-				if err != nil {
-					return c, err
-				}
-				c.RecoveryThreshold = threshold.Mul(decimal.RequireFromString("0.8")).String()
-			} else {
-				c.RecoveryThreshold = defaults[event][1]
-			}
+	if defaults, ok := thresholdDefaults[event]; ok {
+		if !provided("threshold") {
+			c.Threshold = defaults.threshold
 		}
 		threshold, err := boundedThreshold(event, c.Threshold)
 		if err != nil {
 			return c, err
+		}
+		if !provided("recovery_threshold") {
+			if provided("threshold") {
+				c.RecoveryThreshold = threshold.Mul(decimal.New(8, -1)).String()
+			} else {
+				c.RecoveryThreshold = defaults.recovery
+			}
 		}
 		recovery, err := decimal.NewFromString(c.RecoveryThreshold)
 		if err != nil || len(c.RecoveryThreshold) > 32 || recovery.Exponent() < -12 || recovery.Exponent() > 12 || recovery.IsNegative() || recovery.Cmp(threshold) >= 0 {
@@ -152,7 +142,7 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 		}
 	}
 	if event == "route.latency" {
-		if _, provided := fields["metric"]; !provided {
+		if !provided("metric") {
 			c.Metric = "latency"
 		}
 		if c.Metric != "latency" && c.Metric != "ttft" {
@@ -160,7 +150,7 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 		}
 	}
 	if event == "report.spend" {
-		if _, provided := fields["period"]; !provided {
+		if !provided("period") {
 			c.Period = "daily"
 		}
 		if c.Period != "daily" && c.Period != "weekly" && c.Period != "monthly" {

@@ -1,18 +1,10 @@
 package usage
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,11 +23,8 @@ const (
 	budgetAlertLockID   = int64(0x4f4c505f414c5254)
 	notificationEvery   = time.Minute
 	notificationTimeout = 2 * time.Minute
-	webhookTimeout      = 5 * time.Second
 
-	webhookDrainBytes   = 64 << 10
 	maxDeliveryAttempts = 5
-	maxWebhookRedirects = 5
 
 	deliveriesPerPass = 200
 )
@@ -136,8 +125,7 @@ type notificationWorker struct {
 	pool         *pgxpool.Pool
 	keys         *secrets.KeyRing
 	installation string
-	policy       *egress.Policy
-	client       *http.Client
+	sender       *notifications.Sender
 	log          *slog.Logger
 	newID        func() string
 	now          func() time.Time
@@ -155,8 +143,7 @@ func RunNotificationDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secr
 		pool:         pool,
 		keys:         keys,
 		installation: installation,
-		policy:       policy,
-		client:       webhookClient(policy),
+		sender:       notifications.NewSender(*policy),
 		log:          log,
 		newID:        uuid7,
 		now:          time.Now,
@@ -177,20 +164,6 @@ func RunNotificationDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secr
 		case <-ticker.C:
 		}
 	}
-}
-
-func webhookClient(policy *egress.Policy) *http.Client {
-	client := policy.Client(webhookTimeout)
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= maxWebhookRedirects {
-			return errors.New("too many redirects")
-		}
-		if _, err := policy.ValidateEndpoint(req.URL.String()); err != nil {
-			return fmt.Errorf("redirect target refused: %w", err)
-		}
-		return nil
-	}
-	return client
 }
 
 var errLockNotHeld = errors.New("another replica holds the budget alert lock")
@@ -471,14 +444,6 @@ func (w *notificationWorker) notificationDestination(ctx context.Context, tx pgx
 	return d, secret, err
 }
 
-func deliveryErrorCode(err error) string {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.Timeout() || errors.Is(err, context.DeadlineExceeded) {
-		return "timeout"
-	}
-	return "network"
-}
-
 // deliver makes one attempt to deliver d and records how it ended, reporting
 // whether it made one. The attempt and its enabled destination are claimed in
 // one transaction. A disabled rule or destination leaves the attempt untouched;
@@ -614,54 +579,9 @@ func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
 }
 
 func (w *notificationWorker) send(ctx context.Context, d delivery, destination notifications.Destination, secret []byte) string {
-	if destination.Type != "" && destination.Type != "webhook" {
-		body, err := webhookBody(d)
-		if err != nil {
-			return "invalid_destination"
-		}
-		if err := notifications.Send(ctx, w.policy, destination, secret, body); err != nil {
-			return notifications.SendErrorCode(err)
-		}
-		return ""
-	}
-	return w.sendWebhook(ctx, d, destination.URL, secret)
-}
-
-func (w *notificationWorker) sendWebhook(ctx context.Context, d delivery, destination string, secret []byte) string {
-	if w.policy == nil {
-		return "invalid_destination"
-	}
-	target, err := w.policy.ValidateEndpoint(destination)
-	if err != nil {
-		return "invalid_destination"
-	}
 	body, err := webhookBody(d)
 	if err != nil {
 		return "invalid_destination"
 	}
-	sendCtx, cancel := context.WithTimeout(ctx, webhookTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, target.String(), bytes.NewReader(body))
-	if err != nil {
-		return "invalid_destination"
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if secret != nil {
-		sum := hmac.New(sha256.New, secret)
-		sum.Write(body)
-		req.Header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
-	}
-	resp, err := w.client.Do(req)
-	if err != nil {
-		return deliveryErrorCode(err)
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, webhookDrainBytes))
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return ""
-	}
-	if resp.StatusCode < 500 {
-		return "http_4xx"
-	}
-	return "http_5xx"
+	return notifications.SendErrorCode(w.sender.Send(ctx, destination, secret, body))
 }

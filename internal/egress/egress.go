@@ -23,6 +23,8 @@ var ErrUnsafeDestination = errors.New("destination address is not allowed for pr
 // gateway never follows one because the target was validated ahead of time.
 var ErrRedirect = errors.New("upstream redirects are refused")
 
+var pinnedDialer = &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+
 // Policy holds the operator exceptions applied to every provider destination.
 type Policy struct {
 	AllowedNetworks []netip.Prefix
@@ -138,7 +140,7 @@ func Blocked(addr netip.Addr) bool {
 		}
 	}
 	// Only the currently allocated global unicast range is reachable.
-	return !netip.MustParsePrefix("2000::/3").Contains(addr)
+	return !globalUnicastV6.Contains(addr)
 }
 
 var blockedV4 = []netip.Prefix{
@@ -172,6 +174,8 @@ var blockedV6 = []netip.Prefix{
 	netip.MustParsePrefix("ff00::/8"),
 }
 
+var globalUnicastV6 = netip.MustParsePrefix("2000::/3")
+
 // Resolve answers the addresses the dialer may use for host. Every DNS answer
 // must be permitted; one unsafe answer rejects the whole destination so a
 // rebinding resolver cannot smuggle a private address into a public name.
@@ -201,35 +205,37 @@ func (p Policy) Resolve(ctx context.Context, host string) ([]netip.Addr, error) 
 	return addrs, nil
 }
 
+// DialContext resolves and pins a TCP connection to a validated address.
+func (p Policy) DialContext(ctx context.Context, _ string, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := p.Resolve(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var last error
+	for _, addr := range addrs {
+		conn, err := pinnedDialer.DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		last = err
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, last
+}
+
 // Transport builds an outbound transport whose dials are pinned to validated
 // addresses and whose per-phase limits are explicit. Response body limits are
 // applied by callers because unary and streaming reads differ.
 func (p Policy) Transport(responseHeaderTimeout time.Duration) *http.Transport {
-	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
 	return &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, err
-			}
-			addrs, err := p.Resolve(ctx, host)
-			if err != nil {
-				return nil, err
-			}
-			var last error
-			for _, addr := range addrs {
-				conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), port))
-				if err == nil {
-					return conn, nil
-				}
-				last = err
-				if ctx.Err() != nil {
-					break
-				}
-			}
-			return nil, last
-		},
+		Proxy:                  nil,
+		DialContext:            p.DialContext,
 		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout:    5 * time.Second,
 		ResponseHeaderTimeout:  responseHeaderTimeout,
