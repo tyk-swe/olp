@@ -150,12 +150,7 @@ var vendors = []Vendor{
 	},
 }
 
-// Validate declarations once, before routing can accept inconsistent semantics.
-func init() {
-	if err := validate(vendors); err != nil {
-		panic(err)
-	}
-}
+func Validate() error { return validate(vendors) }
 
 func validate(registry []Vendor) error {
 	paths := map[string]Endpoint{}
@@ -272,7 +267,6 @@ func openCodeGoEndpoint(model string) codemode.Protocol {
 	return codemode.ProtocolChat
 }
 
-// Lookup returns an adapter's row.
 func Lookup(adapter codemode.Adapter) (Vendor, bool) {
 	for _, v := range vendors {
 		if v.Adapter == adapter {
@@ -309,12 +303,10 @@ func rank(adapter codemode.Adapter) int {
 	return i
 }
 
-// Serves reports whether the adapter's routes serve a protocol.
 func (v Vendor) Serves(p codemode.Protocol) bool {
 	return slices.ContainsFunc(v.endpoints, func(e Endpoint) bool { return e.Protocol == p })
 }
 
-// Supports reports whether OLP generates configuration for a client.
 func (v Vendor) Supports(client string) bool { _, ok := v.Client(client); return ok }
 
 // Reaches reports whether a client OLP generates configuration for reaches a
@@ -339,7 +331,6 @@ func (v Vendor) Protocol(client, model string) (codemode.Protocol, bool) {
 	return "", false
 }
 
-// ServesModel reports whether the adapter serves a model on a protocol.
 func (v Vendor) ServesModel(p codemode.Protocol, model string) bool {
 	if !v.Serves(p) {
 		return false

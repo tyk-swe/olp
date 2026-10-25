@@ -111,12 +111,14 @@ without ordinary translation, rewriting or inference retries. `Snapshot.CodeRout
 and `CodeConnection` freeze route/provider pairs; missing configuration refuses
 until republish, while pool/key/grant eligibility remains live.
 
-`codeadapter` owns subscription profiles, client/upstream paths, operations,
-transports, conversation identity, credentials and observation rules. Families
-sharing a client path must agree on semantics. `routing` compiles endpoint/model
-eligibility; `codexwire` and `codewire` parse/observe without changing forwarded
-bytes. `CodeLedger` / `resources.CodeStore` atomically pin conversation trees and
-own durable admission/settlement; `limits` owns hard token budgets.
+| Owner | Contract in | Invariant |
+| --- | --- | --- |
+| `codemode` | shared account, route, binding, usage and allowance types | observations never replace forwarded bytes |
+| `codeadapter`, fed by `codeplans` and `codexauth` | subscription profiles, client/upstream paths, operations, transports, conversation identity, credentials and observation rules | families sharing a client path agree on semantics, checked by `codeadapter.Validate` during snapshot validation |
+| `routing`, installed by `runtime` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
+| `codewire`, `codexwire` | native request classification and response observation on copies | parsing never reserializes the forwarded payload |
+| `gateway/code_attempt.go`, `resources.CodeStore`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched`, no silent account switching, no replay after dispatch |
+| `codeclient`, `routes`, `providers.CodeAuthorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
 
 `gateway/code_attempt.go` shares dispatch, observations, settlement and workload
 binding across HTTP/SSE and WebSockets. Transport files own copying/handshakes;

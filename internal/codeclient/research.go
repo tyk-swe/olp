@@ -10,6 +10,13 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
+type researchServer struct {
+	Type    string            `json:"type"`
+	URL     string            `json:"url"`
+	OAuth   *bool             `json:"oauth,omitempty"`
+	Headers map[string]string `json:"headers"`
+}
+
 func addResearchConfiguration(out *codemode.ClientConfiguration, tools *codemode.ResearchTools) error {
 	if tools == nil {
 		return nil
@@ -17,7 +24,7 @@ func addResearchConfiguration(out *codemode.ClientConfiguration, tools *codemode
 	if err := tools.Validate(); err != nil {
 		return err
 	}
-	servers := map[string]any{}
+	servers := map[string]researchServer{}
 	for _, service := range tools.Services {
 		name := "olp_" + out.RouteSlug + "_" + service
 		endpoint := out.BaseURL + "/mcp/" + service
@@ -25,25 +32,31 @@ func addResearchConfiguration(out *codemode.ClientConfiguration, tools *codemode
 		case codeadapter.ClientCodex:
 			out.Configuration += fmt.Sprintf("\n[mcp_servers.%s]\nurl = %s\nbearer_token_env_var = \"OLP_API_KEY\"\n", strconv.Quote(name), strconv.Quote(endpoint))
 		case codeadapter.ClientClaudeCode:
-			servers[name] = map[string]any{"type": "http", "url": endpoint, "headers": map[string]string{"Authorization": "Bearer ${OLP_API_KEY}"}}
+			servers[name] = researchServer{Type: "http", URL: endpoint, Headers: map[string]string{"Authorization": "Bearer ${OLP_API_KEY}"}}
 		case codeadapter.ClientOpenCode:
-			servers[name] = map[string]any{"type": "remote", "url": endpoint, "oauth": false, "headers": map[string]string{"Authorization": "Bearer {env:OLP_API_KEY}"}}
+			oauth := false
+			servers[name] = researchServer{Type: "remote", URL: endpoint, OAuth: &oauth, Headers: map[string]string{"Authorization": "Bearer {env:OLP_API_KEY}"}}
 		}
 	}
 	switch out.Client {
 	case codeadapter.ClientClaudeCode:
-		configuration, err := configurationJSON(map[string]any{"mcpServers": servers})
+		configuration, err := configurationJSON(struct {
+			MCPServers map[string]researchServer `json:"mcpServers"`
+		}{MCPServers: servers})
 		if err != nil {
 			return err
 		}
 		out.AdditionalFiles = []codemode.ConfigurationFile{{File: ".mcp.json", Format: "json", Configuration: configuration}}
 	case codeadapter.ClientOpenCode:
-		var document map[string]any
+		var document map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(out.Configuration), &document); err != nil {
 			return err
 		}
-		document["mcp"] = servers
-		var err error
+		encoded, err := json.Marshal(servers)
+		if err != nil {
+			return err
+		}
+		document["mcp"] = encoded
 		out.Configuration, err = configurationJSON(document)
 		return err
 	}

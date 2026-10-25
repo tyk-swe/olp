@@ -55,6 +55,9 @@ func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protoco
 }
 
 func (s *Snapshot) validateCodeMode() error {
+	if err := codeadapter.Validate(); err != nil {
+		return err
+	}
 	for slug, route := range s.CodeRoutes {
 		if err := route.Tools.Validate(); err != nil {
 			return err

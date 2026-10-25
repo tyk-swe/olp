@@ -103,22 +103,56 @@ func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, ke
 	return s.admit(ctx, CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: operation, Model: model, Identity: identity}, Providers: providers}, true)
 }
 
-func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool) (CodePermit, error) {
-	var out CodePermit
+func validateCodeAdmission(in CodeAdmission) error {
 	if err := attribution.Validate(in.Attribution); err != nil {
-		return out, codemode.Refuse(400, "code_invalid_attribution")
+		return codemode.Refuse(400, "code_invalid_attribution")
 	}
 	if in.EndUserDigest != "" && !access.ValidEndUserDigest(in.EndUserDigest) {
-		return out, codemode.Refuse(400, "code_end_user_invalid")
+		return codemode.Refuse(400, "code_end_user_invalid")
 	}
 	if err := in.Operation.Identity.Validate(); err != nil {
-		return out, err
+		return err
 	}
 	if err := access.ValidText("operation", in.Operation.Name, 100); err != nil {
-		return out, codemode.Refuse(400, "code_operation_invalid")
+		return codemode.Refuse(400, "code_operation_invalid")
 	}
 	if err := access.ValidText("model", in.Operation.Model, 200); err != nil {
-		return out, codemode.Refuse(400, "code_model_invalid")
+		return codemode.Refuse(400, "code_model_invalid")
+	}
+	return nil
+}
+
+func codeReference(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.Binding, CodeAdmission, error) {
+	var reference codemode.Binding
+	if in.PreviousResponse == "" {
+		return reference, in, nil
+	}
+	reference, err := ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_references x JOIN olp.code_bindings b ON b.id=x.binding_id
+		WHERE x.route_id=$1 AND x.api_key_id=$2 AND x.external_id=$3 AND NOT x.ambiguous`, in.Route.ID, in.APIKeyID, in.PreviousResponse))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reference, in, codemode.Refuse(409, "code_parent_unresolved")
+	}
+	if err != nil {
+		return reference, in, err
+	}
+	if in.Operation.Identity.Conversation != reference.Conversation && in.Operation.Identity.Parent == "" {
+		var exists bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation).Scan(&exists); err != nil {
+			return reference, in, err
+		}
+		if !exists {
+			updated := in
+			updated.Operation.Identity.Parent = reference.Conversation
+			return reference, updated, nil
+		}
+	}
+	return reference, in, nil
+}
+
+func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connection bool) (CodePermit, error) {
+	var out CodePermit
+	if err := validateCodeAdmission(admission); err != nil {
+		return out, err
 	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -128,31 +162,15 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 	if _, err = tx.Exec(ctx, `SELECT id FROM olp.installation WHERE singleton FOR SHARE`); err != nil {
 		return out, err
 	}
-	if err = codeAuthority(ctx, tx, in, &out.Authority); err != nil {
+	if err = codeAuthority(ctx, tx, admission, &out.Authority); err != nil {
 		return out, err
 	}
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, in.Route.ID+":"+in.APIKeyID); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, admission.Route.ID+":"+admission.APIKeyID); err != nil {
 		return out, err
 	}
-	var reference codemode.Binding
-	if in.PreviousResponse != "" {
-		reference, err = ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_references x JOIN olp.code_bindings b ON b.id=x.binding_id
-			WHERE x.route_id=$1 AND x.api_key_id=$2 AND x.external_id=$3 AND NOT x.ambiguous`, in.Route.ID, in.APIKeyID, in.PreviousResponse))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return out, codemode.Refuse(409, "code_parent_unresolved")
-		}
-		if err != nil {
-			return out, err
-		}
-		if in.Operation.Identity.Conversation != reference.Conversation && in.Operation.Identity.Parent == "" {
-			var exists bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation).Scan(&exists); err != nil {
-				return out, err
-			}
-			if !exists {
-				in.Operation.Identity.Parent = reference.Conversation
-			}
-		}
+	reference, in, err := codeReference(ctx, tx, admission)
+	if err != nil {
+		return out, err
 	}
 	out.Binding, err = s.bind(ctx, tx, in)
 	if err != nil {

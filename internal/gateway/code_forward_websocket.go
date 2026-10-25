@@ -58,6 +58,73 @@ func codeClosePeer(peer *websocket.Conn, err error) {
 	}
 }
 
+type codeWebSocketHandshake struct {
+	identity   codemode.Identity
+	labels     map[string]string
+	connection *codeAttempt
+	client     *http.Client
+	target     string
+}
+
+func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeadapter.Endpoint) (codeWebSocketHandshake, error) {
+	var handshake codeWebSocketHandshake
+	identity, err := codeConnectionIdentity(ingress, r.Header)
+	if err != nil {
+		return handshake, err
+	}
+	handshake.identity = identity
+	models := r.Header.Values("X-OLP-Code-Model")
+	if len(models) > 1 || len(models) == 1 && strings.TrimSpace(models[0]) == "" {
+		return handshake, codemode.Refuse(400, "code_model_invalid")
+	}
+	permit, err := s.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.ClientPath, codeadapter.WebSocket))
+	if err != nil {
+		return handshake, err
+	}
+	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
+		return handshake, err
+	}
+	labels, failure := s.parseAttribution(r, permit.Authority)
+	if failure != nil {
+		return handshake, codemode.Refuse(failure.Status, "code_"+failure.Code)
+	}
+	handshake.labels = labels
+	if failure := s.checkKeyAddress(r, permit.Authority); failure != nil {
+		return handshake, codemode.Refuse(failure.Status, "code_ip_not_allowed")
+	}
+	config, ok := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
+	if !ok {
+		return handshake, codemode.Refuse(503, "code_connection_unpublished")
+	}
+	vendor, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
+	endpoint, served := vendor.Endpoint(ingress.ClientPath)
+	if !known || !served || endpoint.Protocol != ingress.Protocol || !endpoint.Supports(codeadapter.WebSocket) {
+		return handshake, codemode.Refuse(503, "code_configuration_unsupported")
+	}
+	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, codemode.Dispatch{Adapter: vendor.Adapter, Protocol: endpoint.Protocol, ClientPath: ingress.ClientPath})
+	if err != nil {
+		return handshake, codemode.Refuse(503, "code_account_unavailable")
+	}
+	if err := vendor.ValidateAuthorization(endpoint, auth, permit.Pin.Principal); err != nil {
+		// Keep the handshake's existing principal-refusal envelope.
+		if codeRefusal(err).Code == "code_principal_mismatch" {
+			err = codemode.Refuse(503, "code_account_unavailable")
+		}
+		return handshake, err
+	}
+	handshake.connection = &codeAttempt{server: s, permit: permit, config: config, auth: auth, endpoint: endpoint, observer: codeObserver(endpoint)}
+	handshake.client, err = s.codeClient(r.Context(), release, config, permit.Account.ProviderID)
+	if err != nil {
+		return handshake, err
+	}
+	handshake.target, err = s.codeEndpoint(config, endpoint.UpstreamPath, r.URL.RawQuery)
+	if err != nil {
+		handshake.client.CloseIdleConnections()
+		return handshake, err
+	}
+	return handshake, nil
+}
+
 func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeadapter.Endpoint) {
 	keyID, digest := authority.ID, authority.EndUserDigest
 	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
@@ -65,70 +132,13 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		reject(codemode.Refuse(400, "code_protocol_unsupported"))
 		return
 	}
-	identity, err := codeConnectionIdentity(ingress, r.Header)
+	handshake, err := s.prepareCodeWebSocket(r, release, route, authority, ingress)
 	if err != nil {
 		reject(err)
 		return
 	}
-	models := r.Header.Values("X-OLP-Code-Model")
-	if len(models) > 1 || len(models) == 1 && strings.TrimSpace(models[0]) == "" {
-		reject(codemode.Refuse(400, "code_model_invalid"))
-		return
-	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.ClientPath, codeadapter.WebSocket))
-	if err != nil {
-		reject(err)
-		return
-	}
-	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
-		reject(err)
-		return
-	}
-	labels, failure := s.parseAttribution(r, permit.Authority)
-	if failure != nil {
-		reject(codemode.Refuse(failure.Status, "code_"+failure.Code))
-		return
-	}
-	if failure := s.checkKeyAddress(r, permit.Authority); failure != nil {
-		reject(codemode.Refuse(failure.Status, "code_ip_not_allowed"))
-		return
-	}
-	config, ok := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
-	if !ok {
-		reject(codemode.Refuse(503, "code_connection_unpublished"))
-		return
-	}
-	vendor, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
-	endpoint, served := vendor.Endpoint(ingress.ClientPath)
-	if !known || !served || endpoint.Protocol != ingress.Protocol || !endpoint.Supports(codeadapter.WebSocket) {
-		reject(codemode.Refuse(503, "code_configuration_unsupported"))
-		return
-	}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, codemode.Dispatch{Adapter: vendor.Adapter, Protocol: endpoint.Protocol, ClientPath: ingress.ClientPath})
-	if err != nil {
-		reject(codemode.Refuse(503, "code_account_unavailable"))
-		return
-	}
-	if err := vendor.ValidateAuthorization(endpoint, auth, permit.Pin.Principal); err != nil {
-		// Keep the handshake's existing principal-refusal envelope.
-		if codeRefusal(err).Code == "code_principal_mismatch" {
-			err = codemode.Refuse(503, "code_account_unavailable")
-		}
-		reject(err)
-		return
-	}
-	connection := &codeAttempt{server: s, permit: permit, config: config, auth: auth, endpoint: endpoint, observer: codeObserver(endpoint)}
-	httpClient, err := s.codeClient(r.Context(), release, config, permit.Account.ProviderID)
-	if err != nil {
-		reject(err)
-		return
-	}
+	identity, labels, connection, httpClient, target := handshake.identity, handshake.labels, handshake.connection, handshake.client, handshake.target
 	defer httpClient.CloseIdleConnections()
-	target, err := s.codeEndpoint(config, endpoint.UpstreamPath, r.URL.RawQuery)
-	if err != nil {
-		reject(err)
-		return
-	}
 	headers := connection.headers(r.Header)
 	for _, name := range []string{"Sec-Websocket-Key", "Sec-Websocket-Version", "Sec-Websocket-Extensions", "Sec-Websocket-Protocol", "Content-Length"} {
 		headers.Del(name)
@@ -182,7 +192,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			active.finish(ctx)
 		}
 	}()
-	account := permit.Account.ID
+	account := connection.permit.Account.ID
 	var generationDone <-chan time.Time
 	var generationTimer *time.Timer
 	defer func() {
