@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/plugin-index/v1",
-  "published_at": "2026-10-26T14:31:00Z",
+  "published_at": "2026-10-26T14:35:00Z",
   "plugins": [
     {
       "name": "codex",
@@ -49,8 +49,8 @@
             "kimi-code",
             "kimi-code-cn"
           ],
-          "commit": "4815a07f1ac54dc0980a5a839c1b3f33559a2e4b",
-          "reviewed_at": "2026-10-26T14:30:20Z"
+          "commit": "9e08390af588adadd6fc96954ca24fa0fcb88811",
+          "reviewed_at": "2026-10-26T14:34:18Z"
         }
       ]
     },
@@ -77,8 +77,8 @@
             "minimax-plan",
             "minimax-plan-cn"
           ],
-          "commit": "4815a07f1ac54dc0980a5a839c1b3f33559a2e4b",
-          "reviewed_at": "2026-10-26T14:30:19Z"
+          "commit": "9e08390af588adadd6fc96954ca24fa0fcb88811",
+          "reviewed_at": "2026-10-26T14:34:17Z"
         }
       ]
     },
@@ -129,8 +129,8 @@
             "qwen-token-plan",
             "qwen-token-plan-cn"
           ],
-          "commit": "4815a07f1ac54dc0980a5a839c1b3f33559a2e4b",
-          "reviewed_at": "2026-10-26T14:30:22Z"
+          "commit": "9e08390af588adadd6fc96954ca24fa0fcb88811",
+          "reviewed_at": "2026-10-26T14:34:19Z"
         }
       ]
     },
