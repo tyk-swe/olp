@@ -27,12 +27,38 @@ const (
 	BigModelProfile  = "bigmodel-coding-plan"
 	BigModelUpstream = "https://open.bigmodel.cn/api"
 	BigModelKeyPage  = "https://open.bigmodel.cn/usercenter/apikeys"
+
+	MiniMaxProfile  = "minimax-plan"
+	MiniMaxUpstream = "https://api.minimax.io"
+	MiniMaxKeyPage  = "https://platform.minimax.io/console/plan"
+
+	MiniMaxCNProfile  = "minimax-plan-cn"
+	MiniMaxCNUpstream = "https://api.minimax.cn"
+	MiniMaxCNKeyPage  = "https://platform.minimax.cn/console/plan"
+
+	KimiProfile  = "kimi-code"
+	KimiUpstream = "https://api.kimi.ai/coding"
+	KimiKeyPage  = "https://www.kimi.com/code/console"
+
+	KimiCNProfile  = "kimi-code-cn"
+	KimiCNUpstream = "https://api.kimi.com/coding"
+
+	QwenTokenPlanProfile  = "qwen-token-plan"
+	QwenTokenPlanUpstream = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+	QwenTokenPlanKeyPage  = "https://modelstudio.console.alibabacloud.com/ap-southeast-1/subscription/overview"
+
+	QwenTokenPlanCNProfile  = "qwen-token-plan-cn"
+	QwenTokenPlanCNUpstream = "https://token-plan.cn-beijing.maas.aliyuncs.com"
+	QwenTokenPlanCNKeyPage  = "https://bailian.console.aliyun.com/cn-beijing/subscription/overview"
 )
 
-// Adapter enrolls the profiles of one vendor's plugin.
+// Adapter enrolls the profiles of one vendor's plugin. keyPrefix guards the
+// pasted key where a plan's keys differ from the vendor's pay-as-you-go keys,
+// which share the host and would bill silently.
 type Adapter struct {
-	manifest func() abi.Manifest
-	keyPages map[string]string
+	manifest           func() abi.Manifest
+	keyPages           map[string]string
+	keyPrefix, keyHint string
 }
 
 // OpenCodeGo is the OpenCode Go plugin's adapter.
@@ -44,6 +70,26 @@ func OpenCodeGo() Adapter {
 // mainland China (BigModel) account systems.
 func ZAI() Adapter {
 	return Adapter{manifest: ZAIManifest, keyPages: map[string]string{ZAIProfile: ZAIKeyPage, BigModelProfile: BigModelKeyPage}}
+}
+
+// MiniMax is the MiniMax M Plan plugin's adapter, for the global and the
+// mainland China account systems.
+func MiniMax() Adapter {
+	return Adapter{manifest: MiniMaxManifest, keyPages: map[string]string{MiniMaxProfile: MiniMaxKeyPage, MiniMaxCNProfile: MiniMaxCNKeyPage},
+		keyPrefix: "sk-cp-", keyHint: "Paste the plan's Subscription Key, which starts with sk-cp-, not a pay-as-you-go API key."}
+}
+
+// Kimi is the Kimi Code plugin's adapter, for the global and the mainland
+// China account systems, which share one key page.
+func Kimi() Adapter {
+	return Adapter{manifest: KimiManifest, keyPages: map[string]string{KimiProfile: KimiKeyPage, KimiCNProfile: KimiKeyPage}}
+}
+
+// QwenTokenPlan is the Alibaba Model Studio Token Plan Team Edition plugin's
+// adapter, for the global and the mainland China (Bailian) account systems.
+func QwenTokenPlan() Adapter {
+	return Adapter{manifest: QwenTokenPlanManifest, keyPages: map[string]string{QwenTokenPlanProfile: QwenTokenPlanKeyPage, QwenTokenPlanCNProfile: QwenTokenPlanCNKeyPage},
+		keyPrefix: "sk-sp-", keyHint: "Paste the Token Plan key, which starts with sk-sp-, not a pay-as-you-go API key."}
 }
 
 // OpenCodeGoManifest declares the OpenCode Go profile. Its dialect is nominal:
@@ -64,6 +110,45 @@ func ZAIManifest() abi.Manifest {
 		Profiles: []abi.Profile{
 			profile(ZAIProfile, "GLM Coding Plan, Z.ai (code-mode only)", ZAIUpstream),
 			profile(BigModelProfile, "GLM Coding Plan, BigModel (code-mode only)", BigModelUpstream),
+		},
+	}
+}
+
+// MiniMaxManifest declares the MiniMax M Plan profiles of api.minimax.io and
+// api.minimax.cn.
+func MiniMaxManifest() abi.Manifest {
+	return abi.Manifest{
+		Name: "minimax-plan", Version: "0.1.0", Description: "MiniMax M Plan API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+		Origins: []string{"https://api.minimax.io", "https://api.minimax.cn", "https://platform.minimax.io", "https://platform.minimax.cn"},
+		Profiles: []abi.Profile{
+			profile(MiniMaxProfile, "MiniMax M Plan (code-mode only)", MiniMaxUpstream),
+			profile(MiniMaxCNProfile, "MiniMax M Plan, mainland China (code-mode only)", MiniMaxCNUpstream),
+		},
+	}
+}
+
+// KimiManifest declares the Kimi Code profiles of api.kimi.ai and
+// api.kimi.com.
+func KimiManifest() abi.Manifest {
+	return abi.Manifest{
+		Name: "kimi-code", Version: "0.1.0", Description: "Kimi Code API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+		Origins: []string{"https://api.kimi.ai", "https://api.kimi.com", "https://www.kimi.com"},
+		Profiles: []abi.Profile{
+			profile(KimiProfile, "Kimi Code (code-mode only)", KimiUpstream),
+			profile(KimiCNProfile, "Kimi Code, mainland China (code-mode only)", KimiCNUpstream),
+		},
+	}
+}
+
+// QwenTokenPlanManifest declares the Token Plan Team Edition profiles of
+// Alibaba Cloud Model Studio and Bailian.
+func QwenTokenPlanManifest() abi.Manifest {
+	return abi.Manifest{
+		Name: "qwen-token-plan", Version: "0.1.0", Description: "Alibaba Model Studio Token Plan Team Edition API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+		Origins: []string{"https://token-plan.ap-southeast-1.maas.aliyuncs.com", "https://token-plan.cn-beijing.maas.aliyuncs.com", "https://modelstudio.console.alibabacloud.com", "https://bailian.console.aliyun.com"},
+		Profiles: []abi.Profile{
+			profile(QwenTokenPlanProfile, "Qwen Token Plan Team Edition (code-mode only)", QwenTokenPlanUpstream),
+			profile(QwenTokenPlanCNProfile, "Qwen Token Plan Team Edition, mainland China (code-mode only)", QwenTokenPlanCNUpstream),
 		},
 	}
 }
@@ -102,6 +187,9 @@ func (a Adapter) ExchangeGrant(_ context.Context, exchange abi.GrantExchange) (a
 	key := strings.TrimSpace(exchange.Input)
 	if !ValidKey(key) {
 		return abi.Grant{}, &abi.Error{Code: abi.CodeInvalidRequest, Message: "Paste the API key the vendor's key page issued, not an OLP key or a URL."}
+	}
+	if a.keyPrefix != "" && !strings.HasPrefix(key, a.keyPrefix) {
+		return abi.Grant{}, &abi.Error{Code: abi.CodeInvalidRequest, Message: a.keyHint}
 	}
 	return abi.Grant{AccessToken: key, Principal: Principal(exchange.Profile, key)}, nil
 }

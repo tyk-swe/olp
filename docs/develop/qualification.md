@@ -353,9 +353,9 @@ The release-contract suite reads every embedded OpenAPI operation and checks
 concrete process registration, including client-config. The generated
 authorization golden records its read/project boundary.
 
-### Coding-plan adapters: OpenCode Go and GLM Coding Plan
+### Coding-plan adapters: OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan
 
-The same evidence class applies to the OpenCode Go and GLM Coding Plan
+The same evidence class applies to the OpenCode Go and coding-plan
 adapters: controlled fixtures only, with no live coding-plan key. Exact package
 URLs and hashes are recorded per run as described above;
 `tests/fixtures/coding-plans/evidence.json` retains historical references.
@@ -382,7 +382,8 @@ allowlist in `tests/codecli/trap.go`, runs each client with the configuration
 the public client-config endpoint generated: Claude Code sources the shell file
 and OpenCode reads the `opencode.json` from its working directory. The
 environment is an allowlist with a private home and XDG directories. A decoy
-workstation key (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `ZHIPU_API_KEY`) must
+workstation key (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `ZHIPU_API_KEY`,
+`MINIMAX_API_KEY`) must
 never reach OLP or the upstream. Proxy variables point at a trap that refuses
 and records every request leaving loopback. OpenCode asks the trap for
 `registry.npmjs.org` at startup to install its own dependencies; the trap
@@ -398,10 +399,11 @@ mode's classifier needs a real model.
 | OLP-key-only configuration | Generated Claude Code shell and OpenCode JSON run unmodified; decoy credentials overridden; no `auth.json` | Controlled only |
 | Claude Code on GLM Coding Plan and OpenCode Go | Tool loop (`Read`), subagent (`Agent`) bound beneath its session, `--continue`; every model variable on the route | Controlled only; OpenCode Go only for Messages models |
 | OpenCode on GLM Coding Plan and OpenCode Go | Tool loop (`read`), child session (`task`) bound beneath its parent, `--continue`; Chat Completions with `include_usage`, and Messages for OpenCode Go | Controlled only |
+| MiniMax M Plan, Kimi Code and Qwen Token Plan | Raw forwarding on each profile's Messages path, and Chat on the global profile: upstream host and path, plan-key prefix at enrollment where the vendor defines one, and the credential header each endpoint documents | Controlled fixed-host TLS peers |
 | Mixed subscriptions | Claude Code plans in plan mode through `opusplan` on an OpenCode Go model and implements on a GLM model; OpenCode's plan agent and build agent do the same. Each model reaches its own host with its own account's key, and the session's tree pins one account per model and holds at most one account of each subscription. Raw forwarding sends each path and model of a mixed route to its subscription; a cooling pin refuses its model while the tree's other models stay served | Controlled scripted vendors only; no live vendor has accepted another vendor's history |
 | OpenCode Go Responses | Raw forwarding through `v1/responses`, client identity, `previous_response_id` reference; OpenCode's request shape captured | Controlled only; no real-client Responses journey |
 | Payload and header fidelity | Byte-identical bodies and SSE (with pings), forwarded `anthropic-*` and client headers, `?beta=true`, OLP key consumed from `Authorization` or `X-API-Key`, the serving account's adapter's single credential header placed | Controlled only |
-| Upstream placement | `api.z.ai` and `open.bigmodel.cn` paths for Messages and Chat; `opencode.ai/zen/go/v1` for all three; Anthropic-shaped refusals on Messages paths | Controlled fixed-host TLS peers |
+| Upstream placement | `api.z.ai` and `open.bigmodel.cn` paths for Messages and Chat; `opencode.ai/zen/go/v1` for all three; `api.minimax.io`, `api.minimax.cn`, `api.kimi.ai`, `api.kimi.com`, `token-plan.ap-southeast-1.maas.aliyuncs.com` and `token-plan.cn-beijing.maas.aliyuncs.com` paths for Messages and Chat; Anthropic-shaped refusals on Messages paths | Controlled fixed-host TLS peers |
 | Conversation trees | Claude Code session, agent and nested agent; OpenCode parent and child; unresolved parent, anonymous and ambiguous identity refused before dispatch | Controlled only |
 | No replay or failover | A 429 is relayed byte for byte, cools the account, and the retry refuses without dispatch or switching accounts | Controlled only |
 | Adapter management | Mixed pools and publications accepted; account `adapter`, route and revision `adapters`, binding `pins`; client-config clients, native models per client, planning model, formats and 422s | Controlled only |
@@ -463,7 +465,7 @@ is still a release gate.
 Exercise hosted search/files, live quota reset, credential rotation during an active task and real enrollment,
 refresh/allowance/inference. Complete the console/browser suite separately.
 
-For OpenCode Go and GLM Coding Plan, live qualification needs a subscriber's
+For OpenCode Go and the coding plans, live qualification needs a subscriber's
 own key, enrolled by paste, and must record which models each vendor serves on
 which endpoint, whether it accepts the client's `anthropic-beta` values, and
 its quota and concurrency refusals.

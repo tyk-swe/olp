@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/plugin-index/v1",
-  "published_at": "2026-10-05T16:10:00Z",
+  "published_at": "2026-10-26T14:31:00Z",
   "plugins": [
     {
       "name": "codex",
@@ -28,6 +28,61 @@
       ]
     },
     {
+      "name": "kimi-code",
+      "description": "Kimi Code API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/kimi-code/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "plugins/kimi-code",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "febf61b408c6e5f3f6c4baaaa2d34986d2bb3355820c15f61719f26f7009b981",
+          "abi_version": 1,
+          "size_bytes": 5232083,
+          "origins": [
+            "https://api.kimi.ai",
+            "https://api.kimi.com",
+            "https://www.kimi.com"
+          ],
+          "profiles": [
+            "kimi-code",
+            "kimi-code-cn"
+          ],
+          "commit": "4815a07f1ac54dc0980a5a839c1b3f33559a2e4b",
+          "reviewed_at": "2026-10-26T14:30:20Z"
+        }
+      ]
+    },
+    {
+      "name": "minimax-plan",
+      "description": "MiniMax M Plan API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/minimax-plan/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "plugins/minimax-plan",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "57317ed718bd2cbae6e47f3a45f5c8a0a648137e048314e795945dd52a036514",
+          "abi_version": 1,
+          "size_bytes": 5232916,
+          "origins": [
+            "https://api.minimax.cn",
+            "https://api.minimax.io",
+            "https://platform.minimax.cn",
+            "https://platform.minimax.io"
+          ],
+          "profiles": [
+            "minimax-plan",
+            "minimax-plan-cn"
+          ],
+          "commit": "4815a07f1ac54dc0980a5a839c1b3f33559a2e4b",
+          "reviewed_at": "2026-10-26T14:30:19Z"
+        }
+      ]
+    },
+    {
       "name": "opencode-go",
       "description": "OpenCode Go API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
@@ -48,6 +103,34 @@
           ],
           "commit": "531354f829421e75b190defe406dc9049af7d111",
           "reviewed_at": "2026-10-05T16:09:39Z"
+        }
+      ]
+    },
+    {
+      "name": "qwen-token-plan",
+      "description": "Alibaba Model Studio Token Plan Team Edition API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/qwen-token-plan/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "plugins/qwen-token-plan",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "61600fd900f929f553ed55ef1541d1cee155a76ab092db1e128ed7a05d593196",
+          "abi_version": 1,
+          "size_bytes": 5233150,
+          "origins": [
+            "https://bailian.console.aliyun.com",
+            "https://modelstudio.console.alibabacloud.com",
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com"
+          ],
+          "profiles": [
+            "qwen-token-plan",
+            "qwen-token-plan-cn"
+          ],
+          "commit": "4815a07f1ac54dc0980a5a839c1b3f33559a2e4b",
+          "reviewed_at": "2026-10-26T14:30:22Z"
         }
       ]
     },

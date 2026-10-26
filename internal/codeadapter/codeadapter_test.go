@@ -1,10 +1,14 @@
 package codeadapter
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 func TestValidateAcceptsShippedTable(t *testing.T) {
@@ -32,6 +36,49 @@ func TestValidateRejectsDuplicateAdapter(t *testing.T) {
 	registry = append(registry, registry[0])
 	if err := validate(registry); err == nil {
 		t.Fatal("duplicate adapter accepted")
+	}
+}
+
+// MiniMax and Qwen place the key as a bearer token on both endpoints; Kimi
+// places it in X-Api-Key on Messages, as its Claude Code setup does, and as a
+// bearer token on Chat Completions.
+func TestCodingPlanAdaptersPlaceTheKeyInEachEndpointHeader(t *testing.T) {
+	key := "vendor-key-0123456789abcdef0"
+	secret, err := json.Marshal(connectors.GrantCredential{AccessToken: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		adapter codemode.Adapter
+		profile string
+		headers map[string]string
+	}{
+		{codemode.AdapterMiniMaxPlan, codeplans.MiniMaxProfile, map[string]string{"v1/messages": "Authorization", "v1/chat/completions": "Authorization"}},
+		{codemode.AdapterKimiCode, codeplans.KimiProfile, map[string]string{"v1/messages": "X-Api-Key", "v1/chat/completions": "Authorization"}},
+		{codemode.AdapterQwenTokenPlan, codeplans.QwenTokenPlanProfile, map[string]string{"v1/messages": "Authorization", "v1/chat/completions": "Authorization"}},
+	} {
+		vendor, ok := Lookup(test.adapter)
+		if !ok {
+			t.Fatalf("adapter %s missing", test.adapter)
+		}
+		for path, header := range test.headers {
+			endpoint, _ := vendor.Endpoint(path)
+			auth, err := vendor.Authorize(secret, test.profile, codeplans.Principal(test.profile, key),
+				codemode.Dispatch{ClientPath: path, Adapter: test.adapter, Protocol: endpoint.Protocol}, time.Now())
+			if err != nil {
+				t.Fatalf("%s %s: %v", test.adapter, path, err)
+			}
+			want := key
+			if header == "Authorization" {
+				want = "Bearer " + key
+			}
+			if got := auth.Headers.Get(header); got != want || len(auth.Headers) != 1 {
+				t.Fatalf("%s %s placed %v", test.adapter, path, auth.Headers)
+			}
+			if err := vendor.ValidateAuthorization(endpoint, auth, auth.Principal); err != nil {
+				t.Fatalf("%s %s authorization invalid: %v", test.adapter, path, err)
+			}
+		}
 	}
 }
 

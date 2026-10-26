@@ -9,6 +9,15 @@ semantic versioning and take their source from root `package.json`;
 
 ### Added
 
+- MiniMax M Plan, Kimi Code and Qwen Token Plan code-mode adapters. The
+  `minimax-plan`, `kimi-code` and `qwen-token-plan` plugins enroll a pasted
+  plan key, fingerprinted as the principal and fenced from ordinary routes.
+  MiniMax and Alibaba enrollment refuses keys without the plan prefixes their
+  vendors document, because pay-as-you-go keys share the host. Routes serve
+  Anthropic Messages and Chat Completions on each vendor's global and mainland
+  China upstreams, and client configuration generates Claude Code and OpenCode
+  setup, qualified against controlled peers.
+
 - Add opt-in code-mode research tools through an enrolled Z.ai global account,
   independently of inference models. Freeze the account and services at route
   publication, proxy bounded MCP traffic with live authorization and isolated
