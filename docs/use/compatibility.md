@@ -360,10 +360,13 @@ seconds and closes the provider session on revocation, on provider credential
 loss and at the one-hour bound. Observed provider usage settles exactly once.
 Sessions that end without trustworthy usage stay billing-uncertain, and losing
 the control channel triggers a close attempt, holds the exposure and refuses
-new WebRTC work for that key until the exposure bound passes. Session cost is
-reserved and settled through the shared realtime lease and cost-hold path, not
-the durable debit ledger, so a gateway crash can lose the control loop for its
-live sessions until provider expiry. SDP and media payloads are never logged
+new WebRTC work for that key until the exposure bound passes. Bounded session
+cost is reserved through the durable debit ledger before the provider session
+exists and settled exactly once by the usage pipeline, and request and
+concurrency capacity ride the shared realtime lease path. A gateway crash
+after dispatch leaves the reserved exposure in the ledger and inside the key
+budgets until it is reconciled, so a lost session never reads as free.
+Installations without shared state settle on the lease path alone. SDP and media payloads are never logged
 or stored. The target must hold a certified `realtime`/`openai`/`webrtc`
 capability, which is distinct from the WebSocket `realtime` mode. Azure
 WebRTC is not supported yet and stays pending until its own transport

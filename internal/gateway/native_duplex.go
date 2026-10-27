@@ -148,6 +148,16 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
+	if held, exposureErr := s.sessionExposureHeld(ctx, x.authority.ID); exposureErr != nil {
+		client.Close(websocket.StatusPolicyViolation, "exposure check unavailable")
+		x.failure, status = exposureErr, exposureErr.Status
+		return
+	} else if held {
+		heldErr := serverError(http.StatusConflict, "session_exposure_unresolved", "An earlier session for this key is still billing-uncertain; new sessions are refused until that exposure resolves.")
+		client.Close(websocket.StatusPolicyViolation, "unresolved session exposure")
+		x.failure, status = heldErr, heldErr.Status
+		return
+	}
 	x.estimate = resourceEstimate
 	if e := s.reserveState(ctx, x, x.authority, nativeDuplexSession); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
@@ -156,6 +166,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	var p *pin
 	defer func() {
+		s.finishSessionDebit(r.Context(), x, x.failure != nil)
 		settled := geminiLiveSettlement(x)
 		if p != nil {
 			s.settlePinHold(r.Context(), x, p.hold, settled)
@@ -184,6 +195,16 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, nativeDuplexSession); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "admission refused")
+		x.failure, status = e, e.Status
+		return
+	}
+	if e := s.reserveSessionDebit(ctx, x, x.authority, p.attempt); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "admission refused")
+		x.failure, status = e, e.Status
+		return
+	}
+	if e := s.markSessionDispatched(ctx, x); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
 		x.failure, status = e, e.Status
 		return

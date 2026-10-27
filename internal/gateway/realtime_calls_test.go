@@ -98,6 +98,10 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			}
 			defer conn.CloseNow()
 			_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2,"input_token_details":{"cached_tokens":1}}}}`))
+			if mode == "close" {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
 			_, _, _ = conn.Read(r.Context())
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/hangup"):
 			m.mu.Lock()
@@ -118,8 +122,13 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 
 func webrtcHarness(t *testing.T, mock *webrtcMock, withWebRTC bool) *harness {
 	t.Helper()
+	return webrtcHarnessCfg(t, mock, withWebRTC, Config{})
+}
+
+func webrtcHarnessCfg(t *testing.T, mock *webrtcMock, withWebRTC bool, cfg Config) *harness {
+	t.Helper()
 	var h *harness
-	h = strictHarness(t, func(snapshot *routing.Snapshot) {
+	h = strictHarnessCfg(t, cfg, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
 			if provider.Name != "a" {
 				continue
@@ -339,11 +348,8 @@ func TestWebRTCRefusalsDispatchNothing(t *testing.T) {
 }
 
 func TestWebRTCRevokedKeyClosesSession(t *testing.T) {
-	old := webrtcReauthInterval
-	webrtcReauthInterval = 20 * time.Millisecond
-	t.Cleanup(func() { webrtcReauthInterval = old })
 	mock := newWebRTCMock("usage")
-	h := webrtcHarness(t, mock, true)
+	h := webrtcHarnessCfg(t, mock, true, Config{WebRTCReauth: 20 * time.Millisecond, WebRTCHeartbeat: time.Hour})
 	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
@@ -445,11 +451,8 @@ func TestWebRTCBudgetExhaustionAgainstReservedBound(t *testing.T) {
 }
 
 func TestWebRTCSessionBoundClosesProviderSession(t *testing.T) {
-	old := webrtcSessionBound
-	webrtcSessionBound = 150 * time.Millisecond
-	t.Cleanup(func() { webrtcSessionBound = old })
 	mock := newWebRTCMock("usage")
-	h := webrtcHarness(t, mock, true)
+	h := webrtcHarnessCfg(t, mock, true, Config{WebRTCBound: 150 * time.Millisecond})
 	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()

@@ -215,6 +215,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 		return usage.Attempt{}, fmt.Errorf("generate usage attempt ID: %w", err)
 	}
 	attempt := usage.Attempt{
+		Execution:          fact.Execution,
 		GuardrailDecisions: fact.GuardrailDecisions,
 		ID:                 attemptID.String(),
 		// The ordinal is the position in the sequence of attempts made.

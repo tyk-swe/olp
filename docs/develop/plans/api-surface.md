@@ -234,18 +234,24 @@ until bounded provider-session expiry or reconciled completion, and refuse new
 work against that unresolved exposure. Providers without a trustworthy close/control contract
 remain unavailable for governed WebRTC.
 
-Implementation reading recorded with RM6.4: reservation and settlement run on
-the shared realtime lease and cost-hold path that WebSocket realtime already
-uses, with the session record held by the serving gateway process. The
-gateway has no `execution_debits` intent wiring today, so this slice does not
-claim durable debit-ledger settlement. Leases and cost holds live in the
-shared limits store and outlive a gateway process until their one-hour bound,
-but a process crash loses the control loop for its live sessions. Those
-sessions then end only by provider expiry or peer disconnect, and their
-settlement never reaches the usage sink. Wiring WebRTC sessions into durable
-debit intents with restart recovery remains follow-up work, and the missing
-piece is recorded in the qualification record rather than papered over. The
-capability tuple is `realtime` on the `openai` surface in the distinct
+Implementation reading recorded with RM6.4 and corrected by the RM6 review
+fix: session cost reservation and settlement run through the durable debit
+ledger, while request and concurrency capacity stay on the shared realtime
+lease path because the debit ledger owns monetary exposure only. The gateway
+prepares and admits an `execution_debits` intent for the bounded session cost
+before the provider session exists, and marks it dispatched immediately
+before the provider creation call. The terminal usage event carries the
+dispatch reference, and the usage consumer settles the debit in the same
+transaction that persists the priced facts, so settlement happens exactly
+once and a redelivery replays as a duplicate. A session that ends without
+trustworthy usage settles incomplete, the debit stays `outcome_unknown`, and
+new sessions for that key are refused while that exposure is open. A gateway
+crash after dispatch leaves the open debit behind, and the debit projection
+keeps its bound inside the key budgets until the exposure is reconciled, so
+a crashed session is never silently free. Installations without shared
+state have no ledger to write to and keep the lease-only behavior, and
+caller-cost-exempt sessions carry no gateway budget exposure and no debit.
+The capability tuple is `realtime` on the `openai` surface in the distinct
 `webrtc` mode, compiled at publication like the WebSocket contract. A
 certified WebSocket realtime tuple never implies the WebRTC tuple.
 
@@ -254,8 +260,10 @@ Sonic are native-only, separately certified protocols. Transcription-only
 sessions are admitted only on profiles that explicitly support them. No
 cross-provider reconnect/fallback occurs after session creation. Session and
 transport identifiers are owner-scoped; audio, SDP and event payloads are not
-logged. Terminal usage is settled once; missing final usage remains uncertain.
-Opaque media is not represented as guardrail text inspection.
+logged. Terminal usage is settled once through the same durable debit ledger
+path recorded for WebRTC above, with the intent prepared and dispatched
+before the provider dial. Missing final usage remains uncertain and never
+settles as zero. Opaque media is not represented as guardrail text inspection.
 
 ## Provider-retained resource families
 

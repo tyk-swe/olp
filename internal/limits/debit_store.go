@@ -227,6 +227,15 @@ func MarkDispatchedTx(ctx context.Context, tx pgx.Tx, id, claim string) error {
 	return nil
 }
 
+func (s *DebitStore) HasUnknownDebit(ctx context.Context, apiKeyID string) (bool, error) {
+	if !canonicalID(apiKeyID) {
+		return false, ErrDebitConflict
+	}
+	var held bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits WHERE api_key_id=$1 AND state='outcome_unknown' AND closed_at IS NULL)`, apiKeyID).Scan(&held)
+	return held, err
+}
+
 func (s *DebitStore) MarkUnknown(ctx context.Context, id, claim string) error {
 	tag, err := s.Pool.Exec(ctx, `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND claim_id=$2 AND state IN ('dispatched','outcome_unknown')`, id, claim)
 	if err == nil && tag.RowsAffected() != 1 {

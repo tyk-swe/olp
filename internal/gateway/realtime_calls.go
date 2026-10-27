@@ -28,12 +28,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-var (
-	webrtcSessionBound    = time.Hour
-	webrtcReauthInterval  = realtimeReauth
-	webrtcHeartbeatPeriod = realtimePing
-)
-
 const (
 	maxWebRTCSDPBytes     = 64 << 10
 	maxWebRTCSessionBytes = 64 << 10
@@ -353,11 +347,14 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(policyUnavailable("webrtc_contract_unavailable", "Governed WebRTC requires a strict route with a compiled calls contract."))
 		return
 	}
-	if s.webrtcExposureHeld(authority.ID) {
+	if held, exposureErr := s.sessionExposureHeld(r.Context(), authority.ID); exposureErr != nil {
+		fail(exposureErr)
+		return
+	} else if held {
 		fail(serverError(http.StatusConflict, "webrtc_exposure_unresolved", "An earlier WebRTC session for this key is still billing-uncertain; new sessions are refused until that exposure resolves."))
 		return
 	}
-	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), webrtcSessionBound)
+	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.cfg.WebRTCBound)
 	x.estimate = resourceEstimate
 	p, e := s.selectPinSurface(bg, x, &route, "realtime", "openai", "webrtc", func(provider *routing.Provider, model string) bool {
 		return provider.Connector().Supports("realtime", "openai", "webrtc") && provider.Supports(model, "realtime", "openai", "webrtc")
@@ -381,7 +378,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if e := s.reserveState(bg, x, authority, webrtcSessionBound); e != nil {
+	if e := s.reserveState(bg, x, authority, s.cfg.WebRTCBound); e != nil {
 		s.settlePinHold(r.Context(), x, p.hold, nil)
 		cancel()
 		fail(e)
@@ -394,7 +391,14 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil))
 		return
 	}
-	if e := s.reserveSessionCost(bg, x, authority, p.attempt, webrtcSessionBound); e != nil {
+	if e := s.reserveSessionCost(bg, x, authority, p.attempt, s.cfg.WebRTCBound); e != nil {
+		settleKey(r.Context(), x.lease, false, nil, s.log)
+		s.settlePinHold(r.Context(), x, p.hold, nil)
+		cancel()
+		fail(e)
+		return
+	}
+	if e := s.reserveSessionDebit(bg, x, authority, p.attempt); e != nil {
 		settleKey(r.Context(), x.lease, false, nil, s.log)
 		s.settlePinHold(r.Context(), x, p.hold, nil)
 		cancel()
@@ -412,7 +416,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	s.registerWebRTCSession(sess)
 	answer, status, e := s.createWebRTCCall(bg, sess, callReq.sdp, boundSession)
 	if e != nil {
-		s.settleWebRTC(sess, e, false)
+		s.settleWebRTC(sess, e)
 		writeSurfaceError(w, e, "openai")
 		return
 	}
@@ -464,13 +468,19 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		x.facts = append(x.facts, fact)
 		return nil, 0, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
+	if e := s.markSessionDispatched(reqCtx, x); e != nil {
+		fact.Class = classConnect
+		fact.Duration = s.now().Sub(fact.StartedAt)
+		x.facts = append(x.facts, fact)
+		return nil, 0, e
+	}
 	resp, err := client.Do(req)
 	x.dispatched = x.dispatched || state.dispatched.Load() || resp != nil
 	if err != nil {
 		fact.Class = classConnect
 		if state.dispatched.Load() {
 			fact.recordEvidence(true)
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
@@ -496,7 +506,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.recordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
-		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		return nil, 0, serverError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
 	}
 	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
@@ -506,7 +516,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.recordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
-		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		return nil, 0, serverError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
 	}
 	sess.callID = callID
@@ -521,7 +531,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	conn, e := s.dialWebRTCControl(ctx, sess, controlEndpoint)
 	if e != nil {
 		if herr := s.hangupWebRTCCall(ctx, sess); herr != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}
 		return nil, 0, e
 	}
@@ -618,9 +628,9 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			sess.usageMu.Unlock()
 		}
 	}()
-	reauth := time.NewTicker(webrtcReauthInterval)
+	reauth := time.NewTicker(s.cfg.WebRTCReauth)
 	defer reauth.Stop()
-	heartbeat := time.NewTicker(webrtcHeartbeatPeriod)
+	heartbeat := time.NewTicker(s.cfg.WebRTCHeartbeat)
 	defer heartbeat.Stop()
 	for {
 		select {
@@ -633,34 +643,34 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			complete := sess.haveUsage && !sess.responses.pending()
 			sess.usageMu.Unlock()
 			if closed && complete {
-				s.settleWebRTC(sess, nil, true)
+				s.settleWebRTC(sess, nil)
 			} else {
 				if !closed {
-					s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 				}
-				s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."), true)
+				s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 			}
 			sess.cancel()
 			return
 		case <-reauth.C:
 			if e := s.webrtcBudgetExhausted(sess); e != nil {
 				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-					s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 				}
-				s.settleWebRTC(sess, e, true)
+				s.settleWebRTC(sess, e)
 				sess.cancel()
 				return
 			}
 			if e := s.webrtcAuthority(sess); e != nil {
 				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-					s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 				}
-				s.settleWebRTC(sess, e, true)
+				s.settleWebRTC(sess, e)
 				sess.cancel()
 				return
 			}
 		case <-heartbeat.C:
-			pingCtx, pingCancel := context.WithTimeout(sess.ctx, webrtcReauthInterval)
+			pingCtx, pingCancel := context.WithTimeout(sess.ctx, s.cfg.WebRTCReauth)
 			err := sess.conn.Ping(pingCtx)
 			pingCancel()
 			if err != nil {
@@ -669,9 +679,9 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			}
 		case <-sess.ctx.Done():
 			if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-				s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+				s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 			}
-			s.settleWebRTC(sess, serverError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."), true)
+			s.settleWebRTC(sess, serverError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 			return
 		}
 	}
@@ -713,27 +723,28 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	pending := sess.responses.pending()
 	sess.usageMu.Unlock()
 	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
-		s.settleWebRTC(sess, nil, false)
+		s.settleWebRTC(sess, nil)
 		sess.cancel()
 		return
 	}
 	if errors.Is(sess.ctx.Err(), context.DeadlineExceeded) {
 		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}
-		s.settleWebRTC(sess, serverError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."), true)
+		s.settleWebRTC(sess, serverError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 		return
 	}
 	if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webrtcSessionBound))
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 	}
-	s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."), false)
+	s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 	sess.cancel()
 }
 
-func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error, _ bool) {
+func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 	sess.settleOnce.Do(func() {
 		x := sess.x
+		s.finishSessionDebit(sess.ctx, x, failure != nil)
 		if sess.conn != nil {
 			_ = sess.conn.CloseNow()
 		}

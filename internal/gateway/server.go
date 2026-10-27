@@ -76,6 +76,9 @@ type Config struct {
 	// MaxShadowInFlight bounds the mirrored requests in flight on this
 	// gateway; mirrors beyond it are dropped. Zero means the default.
 	MaxShadowInFlight int
+	WebRTCBound       time.Duration
+	WebRTCReauth      time.Duration
+	WebRTCHeartbeat   time.Duration
 }
 
 // Runtime is the pinned authority, release and credential source.
@@ -113,6 +116,7 @@ type Server struct {
 	// means none were configured: keys and targets that bound nothing are
 	// served, and anything that must be metered fails closed.
 	Admission *Admission
+	Debits    SessionDebitLedger
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
 	Media    *MediaDeps
@@ -150,6 +154,15 @@ type Server struct {
 const upstreamHeaderTimeout = 5 * time.Minute
 
 func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
+	if cfg.WebRTCBound <= 0 {
+		cfg.WebRTCBound = time.Hour
+	}
+	if cfg.WebRTCReauth <= 0 {
+		cfg.WebRTCReauth = realtimeReauth
+	}
+	if cfg.WebRTCHeartbeat <= 0 {
+		cfg.WebRTCHeartbeat = realtimePing
+	}
 	if cfg.MaxMediaBodyBytes <= 0 {
 		cfg.MaxMediaBodyBytes = 64 << 20
 	}

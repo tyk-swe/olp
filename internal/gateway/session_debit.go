@@ -1,0 +1,234 @@
+package gateway
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+type SessionDebitLedger interface {
+	Prepare(context.Context, limits.DebitIntent, []limits.DebitOwner) (limits.DebitState, error)
+	Admit(context.Context, string, string, []limits.Request) error
+	MarkDispatched(context.Context, string, string) error
+	MarkUnknown(context.Context, string, string) error
+	ReleaseUndispatched(context.Context, string, string) error
+	HasUnknownExposure(context.Context, string) (bool, error)
+	Currency(context.Context) (string, error)
+}
+
+type durableSessionDebits struct{ store *limits.DebitStore }
+
+func DurableSessionDebits(store *limits.DebitStore) SessionDebitLedger {
+	if store == nil || store.Pool == nil {
+		return nil
+	}
+	return durableSessionDebits{store: store}
+}
+
+func (d durableSessionDebits) Prepare(ctx context.Context, intent limits.DebitIntent, owners []limits.DebitOwner) (limits.DebitState, error) {
+	return d.store.Prepare(ctx, intent, owners)
+}
+
+func (d durableSessionDebits) Admit(ctx context.Context, id, claim string, requests []limits.Request) error {
+	return d.store.Admit(ctx, id, claim, requests)
+}
+
+func (d durableSessionDebits) MarkDispatched(ctx context.Context, id, claim string) error {
+	return d.store.MarkDispatched(ctx, id, claim)
+}
+
+func (d durableSessionDebits) MarkUnknown(ctx context.Context, id, claim string) error {
+	return d.store.MarkUnknown(ctx, id, claim)
+}
+
+func (d durableSessionDebits) ReleaseUndispatched(ctx context.Context, id, claim string) error {
+	return d.store.ReleaseUndispatched(ctx, id, claim)
+}
+
+func (d durableSessionDebits) HasUnknownExposure(ctx context.Context, keyID string) (bool, error) {
+	return d.store.HasUnknownDebit(ctx, keyID)
+}
+
+func (d durableSessionDebits) Currency(ctx context.Context) (string, error) {
+	var currency string
+	err := d.store.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&currency)
+	return currency, err
+}
+
+type sessionDebit struct {
+	id              string
+	claim           string
+	targetID        string
+	routeRevisionID string
+	dispatched      bool
+}
+
+func (d *sessionDebit) reference() *usage.ExecutionReference {
+	if d == nil {
+		return nil
+	}
+	return &usage.ExecutionReference{DispatchID: d.id, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
+}
+
+func canonicalSessionID(id string) string {
+	parsed, err := uuid.Parse(id)
+	if err != nil || parsed == uuid.Nil || parsed.String() != id {
+		return ""
+	}
+	return id
+}
+
+func newSessionDebitID() (string, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
+}
+
+func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *Error) {
+	if s.webrtcExposureHeld(keyID) {
+		return true, nil
+	}
+	if s.Debits == nil {
+		return false, nil
+	}
+	held, err := s.Debits.HasUnknownExposure(ctx, keyID)
+	if err != nil {
+		return false, serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
+	}
+	return held, nil
+}
+
+func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt) *Error {
+	if s.Debits == nil || x.callerCostExempt() {
+		return nil
+	}
+	snapshot := x.snapshot()
+	if snapshot == nil || x.route == nil {
+		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
+	}
+	releaseID := canonicalSessionID(snapshot.Generation.ID)
+	routeRevisionID := canonicalSessionID(x.route.RevisionID)
+	if releaseID == "" {
+		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
+	}
+	revisionID := routeRevisionID
+	if revisionID == "" {
+		revisionID = releaseID
+	}
+	currency := ""
+	if attempt.Price != nil {
+		currency = attempt.Price.Currency
+	}
+	if currency == "" {
+		resolved, err := s.Debits.Currency(ctx)
+		if err != nil || resolved == "" {
+			return limitsUnavailable()
+		}
+		currency = resolved
+	}
+	bound := x.attemptCostBound(attempt)
+	charge := x.attemptChargeBound(attempt, bound)
+	dispatchID, err := newSessionDebitID()
+	if err != nil {
+		return limitsUnavailable()
+	}
+	claimID, err := newSessionDebitID()
+	if err != nil {
+		return limitsUnavailable()
+	}
+	projectID := ""
+	if authority.ProjectID != nil {
+		projectID = *authority.ProjectID
+	}
+	debit := &sessionDebit{id: dispatchID, claim: claimID, targetID: canonicalSessionID(attempt.TargetID), routeRevisionID: routeRevisionID}
+	intent := limits.DebitIntent{
+		ID: dispatchID, APIKeyID: authority.ID, ProjectID: projectID, Kind: "api", ClaimID: claimID,
+		Currency: currency, CostBound: bound.String(), ChargeBound: charge.String(),
+		PreparedUntil: time.Now().Add(90 * time.Second),
+		Affinity: limits.ExecutionAffinity{
+			ReleaseID: releaseID, RevisionID: revisionID, RouteRevisionID: routeRevisionID,
+			ProviderID: canonicalSessionID(attempt.ProviderID), ProviderRevisionID: canonicalSessionID(attempt.ProviderRevisionID),
+			TargetID: debit.targetID,
+		},
+	}
+	owners := []limits.DebitOwner{{ID: authority.ID, Kind: "key", Basis: limits.Basis(authority.Policy.CostBasis)}}
+	state, err := s.Debits.Prepare(ctx, intent, owners)
+	if err != nil || state != limits.DebitPrepared {
+		return limitsUnavailable()
+	}
+	request := keyRequest(authority, x.estimate, time.Hour)
+	request.CostIncreases = authority.BudgetIncreases[authority.ID]
+	if err := s.Debits.Admit(ctx, dispatchID, claimID, []limits.Request{request}); err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
+		_ = s.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
+		cancel()
+		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
+			if s.Admission != nil {
+				s.Admission.recordRejection(exceeded.Dimension)
+			}
+			return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+		}
+		return limitsUnavailable()
+	}
+	x.sessionDebit = debit
+	return nil
+}
+
+func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
+	if x.sessionDebit == nil || s.Debits == nil {
+		return nil
+	}
+	if err := s.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim); err != nil {
+		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")
+	}
+	x.sessionDebit.dispatched = true
+	return nil
+}
+
+func (s *Server) abandonSessionDebit(ctx context.Context, x *call) {
+	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Debits == nil {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
+	if err := s.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
+		s.log.Warn("session debit release failed", "error", err.Error())
+	}
+	cancel()
+	for i := range x.facts {
+		x.facts[i].Execution = nil
+	}
+	x.sessionDebit = nil
+}
+
+func (s *Server) markSessionUnknown(ctx context.Context, x *call) {
+	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.Debits == nil {
+		return
+	}
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
+	if err := s.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
+		s.log.Warn("session debit exposure could not be marked unknown", "error", err.Error())
+	}
+	cancel()
+}
+
+func (s *Server) finishSessionDebit(ctx context.Context, x *call, failed bool) {
+	if x.sessionDebit == nil {
+		return
+	}
+	if !x.sessionDebit.dispatched {
+		s.abandonSessionDebit(ctx, x)
+		return
+	}
+	if failed {
+		s.markSessionUnknown(ctx, x)
+	}
+}

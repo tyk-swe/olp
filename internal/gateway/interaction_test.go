@@ -14,7 +14,12 @@ import (
 
 func strictHarness(t *testing.T, configure func(*routing.Snapshot)) *harness {
 	t.Helper()
-	h := newHarness(t, Config{})
+	return strictHarnessCfg(t, Config{}, configure)
+}
+
+func strictHarnessCfg(t *testing.T, cfg Config, configure func(*routing.Snapshot)) *harness {
+	t.Helper()
+	h := newHarness(t, cfg)
 	release := h.rt.release
 	snapshot := release.Snapshot
 	credentials := map[string][]byte{}
