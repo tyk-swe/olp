@@ -308,7 +308,7 @@ func (s *Server) browserOriginAllowed(r *http.Request) bool {
 	if len(values) != 1 {
 		return false
 	}
-	return slices.Contains(s.cfg.CORSAllowedOrigins, values[0]) || sameOrigin(r, values[0])
+	return slices.Contains(s.cfg.CORSAllowedOrigins, values[0]) || sameOrigin(r, values[0]) && values[0] == s.gatewayOrigin(r)
 }
 
 // cors permits browser SDK clients only from explicitly configured origins.
@@ -414,7 +414,8 @@ func (s *Server) acquirePermit(ctx context.Context) *observability.Permit {
 }
 
 // admitLater is admit for requests that resolve their key and priority
-// first: a queued permit is left waiting for awaitAdmission.
+// first: a queued permit the middleware only reserved waits for awaitAdmission.
+// Otherwise the server's own pool bounds the call.
 func (s *Server) admitLater(ctx context.Context) bool {
 	if observability.PermitFromContext(ctx) != nil {
 		return true
