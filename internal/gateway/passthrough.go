@@ -36,6 +36,10 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.bindAuthority(x, authority)
+	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
+		fail(e)
+		return
+	}
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		fail(e)
 		return

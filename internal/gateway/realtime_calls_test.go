@@ -548,6 +548,24 @@ func TestWebRTCCreationHonorsDeploymentBodyLimit(t *testing.T) {
 	}
 }
 
+func TestWebRTCCallerRoutingExclusionDispatchesNothing(t *testing.T) {
+	mock := newWebRTCMock("usage")
+	h := webrtcHarness(t, mock, true)
+	body, contentType := webrtcCreateBody(t, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/realtime/calls", fullKey, body, map[string]string{
+		"Content-Type":  contentType,
+		"X-OLP-Routing": `{"only":["provider:00000000-0000-0000-0000-000000000000"]}`,
+	})
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusCreated {
+		t.Fatal("caller-excluded provider created a session")
+	}
+	if creates, _, _ := mock.counts(); creates != 0 {
+		t.Fatal("provider session created despite caller routing exclusion")
+	}
+}
+
 func TestWebRTCEmptyUsageCountersStayUncertain(t *testing.T) {
 	mock := newWebRTCMock("emptyusage")
 	h := webrtcHarness(t, mock, true)

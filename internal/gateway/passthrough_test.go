@@ -62,6 +62,21 @@ func TestPassthroughInstallationPolicyExclusionDispatchesNothing(t *testing.T) {
 	}
 }
 
+func TestPassthroughCallerRoutingExclusionDispatchesNothing(t *testing.T) {
+	h := passthroughHarness(t)
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{
+		"X-OLP-Routing": `{"only":["provider:00000000-0000-0000-0000-000000000000"]}`,
+	})
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("caller-excluded bound connection served the request")
+	}
+	if got := h.mock.count("a"); got != 0 {
+		t.Fatalf("upstream dispatches = %d, want caller routing refusal before dispatch", got)
+	}
+}
+
 func TestPassthroughRoundTripStripsCallerCredentials(t *testing.T) {
 	h := passthroughHarness(t)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {

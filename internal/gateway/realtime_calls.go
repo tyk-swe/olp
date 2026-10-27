@@ -326,6 +326,10 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.bindAuthority(x, authority)
+	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
+		fail(e)
+		return
+	}
 	if x.attribution, e = parseAttributionValues(r.Header.Values(usage.AttributionHeader), authority); e != nil {
 		fail(e)
 		return
