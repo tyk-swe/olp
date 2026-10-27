@@ -13,6 +13,29 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+func addUsageShare(dst **int64, share *int64) {
+	if share == nil {
+		return
+	}
+	total := *share
+	if *dst != nil {
+		total = addBounded(total, **dst)
+	}
+	*dst = &total
+}
+
+func (sess *webrtcSession) accumulateUsage(u *wire.Usage) {
+	sess.usage.InputTokens = addBounded(sess.usage.InputTokens, u.InputTokens)
+	sess.usage.OutputTokens = addBounded(sess.usage.OutputTokens, u.OutputTokens)
+	addUsageShare(&sess.usage.CachedInputTokens, u.CachedInputTokens)
+	addUsageShare(&sess.usage.AudioInputTokens, u.AudioInputTokens)
+	addUsageShare(&sess.usage.CachedAudioInputTokens, u.CachedAudioInputTokens)
+	addUsageShare(&sess.usage.AudioOutputTokens, u.AudioOutputTokens)
+	addUsageShare(&sess.usage.ImageInputTokens, u.ImageInputTokens)
+	addUsageShare(&sess.usage.CachedImageInputTokens, u.CachedImageInputTokens)
+	sess.haveUsage = true
+}
+
 func (s *Server) runWebRTCControl(sess *webrtcSession) {
 	readErr := make(chan error, 1)
 	go func() {
@@ -24,16 +47,7 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			}
 			sess.usageMu.Lock()
 			if u := sess.responses.providerFrame(typ, data, true); u != nil {
-				sess.usage.InputTokens = addBounded(sess.usage.InputTokens, u.InputTokens)
-				sess.usage.OutputTokens = addBounded(sess.usage.OutputTokens, u.OutputTokens)
-				if u.CachedInputTokens != nil {
-					cached := *u.CachedInputTokens
-					if sess.usage.CachedInputTokens != nil {
-						cached = addBounded(cached, *sess.usage.CachedInputTokens)
-					}
-					sess.usage.CachedInputTokens = &cached
-				}
-				sess.haveUsage = true
+				sess.accumulateUsage(u)
 			}
 			sess.usageMu.Unlock()
 		}

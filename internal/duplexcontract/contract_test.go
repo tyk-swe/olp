@@ -104,3 +104,34 @@ func TestXAIObserverExtractsTerminalUsage(t *testing.T) {
 		t.Fatal("malformed provider frame was admitted")
 	}
 }
+
+func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
+	template, err := duplexcontract.Compile(xaiConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := template.Observer(1 << 20)
+	for _, frame := range []string{
+		`{"type":"response.created","response":{"id":"r1"}}`,
+		`{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !observer.Complete() {
+		t.Fatal("session with every response settled by terminal usage is not complete")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r2"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete while a later response has no terminal usage")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r2"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after a response ended without usage")
+	}
+}

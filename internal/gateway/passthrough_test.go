@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -68,11 +69,26 @@ func TestPassthroughRoundTripStripsCallerCredentials(t *testing.T) {
 		t.Fatalf("passthrough: %d %s", resp.StatusCode, body)
 	}
 	env := h.sink.last(t)
-	if env.Operation != "passthrough" || env.Route != routeSlug || len(env.Attempts) != 1 || env.Attempts[0].Class != "success" || !env.Attempts[0].UsageComplete || env.Attempts[0].BillingUncertain {
+	if env.Operation != "passthrough" || env.Route != routeSlug || len(env.Attempts) != 1 || env.Attempts[0].Class != "success" || !env.Attempts[0].UsageObserved || !env.Attempts[0].UsageComplete || env.Attempts[0].BillingUncertain {
 		t.Fatalf("envelope: %+v attempts %+v", env, env.Attempts)
 	}
 	if env.Attempts[0].Price != nil {
 		t.Fatalf("unpriced attempt priced: %+v", env.Attempts[0].Price)
+	}
+}
+
+func TestPassthroughCoolingSlotDispatchesNothing(t *testing.T) {
+	h := passthroughHarness(t)
+	for _, provider := range h.rt.release.Snapshot.Providers {
+		if provider.Name == "a" {
+			h.gateway.health.cooldown(provider.ID, h.slotA, time.Minute)
+		}
+	}
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || h.mock.count("a") != 0 {
+		t.Fatalf("cooling slot dispatched: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
 	}
 }
 

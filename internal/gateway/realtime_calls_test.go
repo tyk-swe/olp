@@ -24,6 +24,39 @@ const (
 	webrtcAnswerSDP = "v=0\r\no=- 3 4 IN IP4 127.0.0.1\r\ns=-\r\na=olp-test-marker-answer\r\n"
 )
 
+func TestWebRTCAccumulateUsageKeepsModalityShares(t *testing.T) {
+	share := func(v int64) *int64 { return &v }
+	sess := &webrtcSession{}
+	sess.accumulateUsage(&wire.Usage{
+		InputTokens: 100, OutputTokens: 40,
+		CachedInputTokens: share(10), AudioInputTokens: share(60),
+		CachedAudioInputTokens: share(5), AudioOutputTokens: share(30),
+		ImageInputTokens: share(8), CachedImageInputTokens: share(2),
+	})
+	sess.accumulateUsage(&wire.Usage{
+		InputTokens: 50, OutputTokens: 20,
+		CachedInputTokens: share(4), AudioInputTokens: share(25),
+		CachedAudioInputTokens: share(1), AudioOutputTokens: share(10),
+		ImageInputTokens: share(3), CachedImageInputTokens: share(1),
+	})
+	u := sess.usage
+	if !sess.haveUsage || u.InputTokens != 150 || u.OutputTokens != 60 {
+		t.Fatalf("totals = %+v haveUsage=%v", u, sess.haveUsage)
+	}
+	for name, got := range map[string]*int64{
+		"cached": u.CachedInputTokens, "audioIn": u.AudioInputTokens,
+		"cachedAudioIn": u.CachedAudioInputTokens, "audioOut": u.AudioOutputTokens,
+		"imageIn": u.ImageInputTokens, "cachedImageIn": u.CachedImageInputTokens,
+	} {
+		if got == nil {
+			t.Fatalf("%s share dropped", name)
+		}
+	}
+	if *u.AudioInputTokens != 85 || *u.AudioOutputTokens != 40 || *u.ImageInputTokens != 11 || *u.CachedAudioInputTokens != 6 || *u.CachedImageInputTokens != 3 || *u.CachedInputTokens != 14 {
+		t.Fatalf("modality shares = %+v", u)
+	}
+}
+
 type webrtcMock struct {
 	mu          sync.Mutex
 	mode        string
@@ -224,6 +257,55 @@ func sessionEnvelope(t *testing.T, envs []Envelope) Envelope {
 	}
 	t.Fatalf("no webrtc session envelope in %+v", envs)
 	return Envelope{}
+}
+
+func TestWebRTCCreateOnWebRTCOnlyTargetPublishesAndServes(t *testing.T) {
+	mock := newWebRTCMock("close")
+	var h *harness
+	h = strictHarnessCfg(t, Config{}, func(snapshot *routing.Snapshot) {
+		for id, provider := range snapshot.Providers {
+			if provider.Name != "a" {
+				continue
+			}
+			provider.Kind = "openai"
+			provider.ProfileID = "openai-responses"
+			provider.ProfileRevision = connectors.ProfileRevision
+			provider.VendorID = "openai"
+			provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: modelA, Operation: "realtime", Surface: "openai", Mode: "webrtc"})
+			snapshot.Providers[id] = provider
+		}
+		route := snapshot.Routes[routeSlug]
+		route.Operations = []string{"generation", "realtime"}
+		route.Targets = route.Targets[:1]
+		snapshot.Routes[routeSlug] = route
+	})
+	h.mock.set("a", mock.handler(t, func() bool {
+		return h != nil && h.gateway.webrtcSessionCount() > 0
+	}))
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated || string(body) != webrtcAnswerSDP {
+		t.Fatalf("webrtc-only target create status=%d body=%q", resp.StatusCode, body)
+	}
+	_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+}
+
+func TestWebRTCTokenCappedKeyRefusedBeforeDispatch(t *testing.T) {
+	mock := newWebRTCMock("usage")
+	h := webrtcHarness(t, mock, true)
+	authority := h.rt.keys[fullKey]
+	authority.Policy.TokensPerMinute = int64ptr(1000)
+	h.rt.keys[fullKey] = authority
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || !strings.Contains(string(body), "unbounded_work_budget") {
+		t.Fatalf("token-capped create status=%d body=%q", resp.StatusCode, body)
+	}
+	if creates, _, _ := mock.counts(); creates != 0 {
+		t.Fatal("provider session created for a token-capped key")
+	}
 }
 
 func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testing.T) {

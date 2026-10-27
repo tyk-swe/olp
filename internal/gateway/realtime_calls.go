@@ -366,6 +366,12 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
+	if e := sessionTokenCaps(x.admissionAuthority(authority), p, &route); e != nil {
+		s.settlePinHold(r.Context(), x, p.hold, nil)
+		cancel()
+		fail(e)
+		return
+	}
 	if e := s.reserveState(bg, x, authority, s.cfg.WebRTCBound); e != nil {
 		s.settlePinHold(r.Context(), x, p.hold, nil)
 		cancel()
@@ -379,14 +385,15 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil))
 		return
 	}
-	if e := s.reserveSessionCost(bg, x, authority, p.attempt, s.cfg.WebRTCBound); e != nil {
+	if e := s.reserveSessionDebit(bg, x, authority, p.attempt); e != nil {
 		settleKey(r.Context(), x.lease, false, nil, s.log)
 		s.settlePinHold(r.Context(), x, p.hold, nil)
 		cancel()
 		fail(e)
 		return
 	}
-	if e := s.reserveSessionDebit(bg, x, authority, p.attempt); e != nil {
+	if e := s.reserveSessionCost(bg, x, authority, p.attempt, s.cfg.WebRTCBound); e != nil {
+		s.abandonSessionDebit(r.Context(), x)
 		settleKey(r.Context(), x.lease, false, nil, s.log)
 		s.settlePinHold(r.Context(), x, p.hold, nil)
 		cancel()

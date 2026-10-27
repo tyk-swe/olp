@@ -72,6 +72,15 @@ func TestBedrockSetupAndFrameGrammar(t *testing.T) {
 	if _, err := observer.ServerFrame([]byte(`{"event":{"textOutput":{"content":"hello"}}}`)); err != nil {
 		t.Fatal(err)
 	}
+	for _, frame := range []string{
+		`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c1"}}}`,
+		`{"event":{"usageEvent":{"completionId":"c1","details":{"delta":{"inputTokens":3}}}}}`,
+		`{"event":{"completionEnd":{"sessionId":"s1","promptName":"p1","completionId":"c1","stopReason":"END_TURN"}}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatalf("documented Nova Sonic output event refused: %s: %v", frame, err)
+		}
+	}
 	if _, err := observer.ServerFrame([]byte(`{"event":{"mystery":{}}}`)); err == nil {
 		t.Fatal("unregistered provider event was admitted")
 	}

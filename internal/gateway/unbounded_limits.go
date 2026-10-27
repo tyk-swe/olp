@@ -31,6 +31,17 @@ func unboundedWorkLimits(authority access.Authority, provider *routing.Provider,
 	return nil
 }
 
+func sessionTokenCaps(authority access.Authority, p *pin, route *routing.Route) *Error {
+	var slug string
+	if route != nil {
+		slug = route.Slug
+	}
+	if authority.TokenBudgeted(slug) || p.provider.Limits != nil && p.provider.Limits.TokensPerMinute != nil || p.slot.TokensPerMinute != nil {
+		return invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
+	}
+	return nil
+}
+
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
 func (s *Server) unboundedPinLimits(authority access.Authority, p *pin, route *routing.Route) *Error {

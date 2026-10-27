@@ -151,7 +151,7 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority acce
 		x.routingInputs = s.Runtime.RoutingInputs()
 	}
 	hold := x.attemptCostReservation(authority, attempt)
-	if x.lease == nil || hold.amount == "" {
+	if x.lease == nil || hold.amount == "" || x.sessionDebit != nil {
 		return nil
 	}
 	return s.growCost(ctx, x.lease, hold.amount, hold.charge, hold.requestID, ttl)

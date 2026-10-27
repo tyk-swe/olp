@@ -16,6 +16,21 @@ type bedrockPeer struct {
 	stream *connectors.BedrockStream
 }
 
+type streamContextPeer struct {
+	duplexPeer
+	cancel context.CancelFunc
+}
+
+func (p *streamContextPeer) Close(code websocket.StatusCode, reason string) error {
+	defer p.cancel()
+	return p.duplexPeer.Close(code, reason)
+}
+
+func (p *streamContextPeer) CloseNow() error {
+	defer p.cancel()
+	return p.duplexPeer.CloseNow()
+}
+
 func (p *bedrockPeer) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
 	payload, err := p.stream.Receive(ctx)
 	if err != nil {
@@ -78,8 +93,8 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 	dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
 	peer, err := opener(dialCtx, x, p)
 	dialTimer.Stop()
-	cancel()
 	if err != nil {
+		cancel()
 		class := classConnect
 		if errors.Is(err, connectors.ErrCredentialRejected) {
 			class = classCredential
@@ -98,5 +113,5 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 	if p.hold != nil {
 		x.spendCaps(p.hold.budgets, p.attempt)
 	}
-	return peer, nil
+	return &streamContextPeer{duplexPeer: peer, cancel: cancel}, nil
 }

@@ -113,6 +113,7 @@ func (c Config) OperationURL(d operations.Dialect, model string) (string, error)
 			return "", errors.New("invalid registered operation path")
 		}
 		if strings.Contains(path, "{model}") {
+			model = c.Model(model)
 			if !validPathModel(model) || strings.Count(path, "{model}") != 1 {
 				return "", errors.New("invalid registered operation path")
 			}

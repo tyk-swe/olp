@@ -11,12 +11,17 @@ func (a *Authority) CostBudgetedForRoute(route string) bool {
 		a.ProjectAttributionBudgets.Matches(a.Attribution)
 }
 
-// UnboundedWorkBudgeted reports caps that need a provider-enforced output bound.
-// Caller-paid exemptions waive cost caps, never token caps.
-func (a *Authority) UnboundedWorkBudgeted(route string, costExempt bool) bool {
-	return !costExempt && a.CostBudgetedForRoute(route) || a.Policy.TokensPerMinute != nil ||
+// TokenBudgeted reports token caps on the boundaries this request spends against.
+func (a *Authority) TokenBudgeted(route string) bool {
+	return a.Policy.TokensPerMinute != nil ||
 		a.BudgetGroupID != nil && a.BudgetGroupTPM != nil ||
 		a.Policy.RouteLimits[route].TokensPerMinute != nil ||
 		a.Policy.EndUserPolicy.Limits(a.EndUserDigest).TokensPerMinute != nil ||
 		a.ProjectEndUserPolicy.Limits(a.EndUserDigest).TokensPerMinute != nil
+}
+
+// UnboundedWorkBudgeted reports caps that need a provider-enforced output bound.
+// Caller-paid exemptions waive cost caps, never token caps.
+func (a *Authority) UnboundedWorkBudgeted(route string, costExempt bool) bool {
+	return !costExempt && a.CostBudgetedForRoute(route) || a.TokenBudgeted(route)
 }

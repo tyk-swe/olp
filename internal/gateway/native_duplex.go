@@ -194,12 +194,12 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = e, e.Status
 		return
 	}
-	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, nativeDuplexSession); e != nil {
+	if e := s.reserveSessionDebit(ctx, x, x.authority, p.attempt); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
 		x.failure, status = e, e.Status
 		return
 	}
-	if e := s.reserveSessionDebit(ctx, x, x.authority, p.attempt); e != nil {
+	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, nativeDuplexSession); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
 		x.failure, status = e, e.Status
 		return

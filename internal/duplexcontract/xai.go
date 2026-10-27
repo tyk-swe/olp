@@ -26,8 +26,10 @@ func inspectXAISetup(frame []byte, maxBytes int) (Setup, error) {
 }
 
 type xaiObserver struct {
-	maxBytes int
-	usage    *wire.Usage
+	maxBytes   int
+	usage      *wire.Usage
+	pending    int
+	incomplete bool
 }
 
 func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -40,18 +42,27 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	switch kind {
 	case "error":
 		return ServerFrame{ProviderError: true}, nil
+	case "response.created":
+		o.pending++
+		return ServerFrame{}, nil
 	case "response.done":
+		if o.pending > 0 {
+			o.pending--
+		}
 		response, ok := root.Lookup("response")
 		if !ok || response.Kind() != oif.Object {
+			o.incomplete = true
 			return ServerFrame{}, nil
 		}
 		usage, ok := response.Lookup("usage")
 		if !ok || usage.Kind() != oif.Object {
+			o.incomplete = true
 			return ServerFrame{}, nil
 		}
 		input, inputOK := intField(usage, "input_tokens")
 		output, outputOK := intField(usage, "output_tokens")
 		if !inputOK || !outputOK {
+			o.incomplete = true
 			return ServerFrame{}, nil
 		}
 		total, totalOK := intField(usage, "total_tokens")
@@ -80,7 +91,9 @@ func (o *xaiObserver) clientFrame(frame []byte) error {
 }
 
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
-func (o *xaiObserver) complete() bool          { return o.usage != nil }
+func (o *xaiObserver) complete() bool {
+	return o.usage != nil && o.pending == 0 && !o.incomplete
+}
 
 func intField(parent oif.Value, name string) (int64, bool) {
 	v, ok := parent.Lookup(name)

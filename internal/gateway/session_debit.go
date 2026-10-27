@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -160,14 +162,15 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 			TargetID: debit.targetID,
 		},
 	}
-	owners := []limits.DebitOwner{{ID: authority.ID, Kind: "key", Basis: limits.Basis(authority.Policy.CostBasis)}}
+	owners, requests, ok := sessionDebitBoundaries(x, authority)
+	if !ok {
+		return limitsUnavailable()
+	}
 	state, err := s.Debits.Prepare(ctx, intent, owners)
 	if err != nil || state != limits.DebitPrepared {
 		return limitsUnavailable()
 	}
-	request := keyRequest(authority, x.estimate, time.Hour)
-	request.CostIncreases = authority.BudgetIncreases[authority.ID]
-	if err := s.Debits.Admit(ctx, dispatchID, claimID, []limits.Request{request}); err != nil {
+	if err := s.Debits.Admit(ctx, dispatchID, claimID, requests); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
 		_ = s.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
 		cancel()
@@ -181,6 +184,101 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 	}
 	x.sessionDebit = debit
 	return nil
+}
+
+func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.DebitOwner, []limits.Request, bool) {
+	admission := x.admissionAuthority(authority)
+	owners := []limits.DebitOwner{{ID: admission.ID, Kind: "key", Basis: limits.Basis(admission.Policy.CostBasis)}}
+	key := keyRequest(admission, x.estimate, time.Hour)
+	key.CostIncreases = admission.BudgetIncreases[admission.ID]
+	requests := []limits.Request{key}
+	add := func(owner limits.DebitOwner, request limits.Request) {
+		owners = append(owners, owner)
+		requests = append(requests, request)
+	}
+	if admission.BudgetGroupID != nil && admission.GroupLimits().CostBudgeted() {
+		if group := groupRequest(&admission, time.Hour); group != nil {
+			group.CostIncreases = admission.BudgetIncreases[group.CostOwnerID]
+			group.RequestedTokens = x.estimate
+			add(limits.DebitOwner{ID: group.CostOwnerID, Kind: "group", Basis: group.CostBasis}, *group)
+		}
+	}
+	if route := x.limitRoute(); route != "" {
+		if policy := admission.Policy.RouteLimits[route]; policy.CostBudgeted() {
+			owner := limits.KeyRouteBudgetID(admission.ID, route)
+			add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: limits.Basis(policy.CostBasis)}, limits.Request{
+				CostOwnerID: owner, CostIncreases: admission.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
+				RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency,
+				DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+				CostBasis: limits.Basis(policy.CostBasis), RequestedTokens: x.estimate, LeaseTTL: time.Hour,
+			})
+		}
+	}
+	for _, boundary := range [...]struct {
+		level, subject string
+		policy         *access.BudgetPolicy
+	}{
+		{"installation", admission.InstallationID, admission.InstallationBudget},
+		{"organization", projectBudgetSubject(admission.OrganizationID), admission.OrganizationBudget},
+		{"project", projectBudgetSubject(admission.ProjectID), admission.ProjectBudget},
+	} {
+		if !boundary.policy.Limited() {
+			continue
+		}
+		if boundary.subject == "" {
+			return nil, nil, false
+		}
+		owner := limits.AggregateBudgetID(boundary.level, boundary.subject)
+		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: boundary.policy.Basis()}, limits.Request{
+			CostOwnerID: owner, CostIncreases: admission.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
+			DailyCostLimit: boundary.policy.DailyCostLimit, WeeklyCostLimit: boundary.policy.WeeklyCostLimit, MonthlyCostLimit: boundary.policy.MonthlyCostLimit,
+			LeaseTTL: time.Hour, CostBasis: boundary.policy.Basis(),
+		})
+	}
+	for _, key := range slices.Sorted(maps.Keys(admission.Attribution)) {
+		value := admission.Attribution[key]
+		policy, ok := admission.ProjectAttributionBudgets[key][value]
+		if !ok || !policy.Limited() {
+			continue
+		}
+		if admission.ProjectID == nil {
+			return nil, nil, false
+		}
+		owner := limits.AttributionBudgetID(*admission.ProjectID, key, value)
+		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: policy.Basis()}, limits.Request{
+			CostOwnerID: owner, CostIncreases: admission.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
+			DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit,
+			LeaseTTL: time.Hour, CostBasis: policy.Basis(),
+		})
+	}
+	if admission.EndUserDigest != "" {
+		for _, boundary := range [...]struct {
+			policy  *access.EndUserPolicy
+			project bool
+		}{
+			{admission.ProjectEndUserPolicy, true}, {admission.Policy.EndUserPolicy, false},
+		} {
+			policy := boundary.policy.Limits(admission.EndUserDigest)
+			if !policy.CostBudgeted() {
+				continue
+			}
+			owner := limits.EndUserKeyID(admission.ID, admission.EndUserDigest)
+			if boundary.project {
+				if admission.ProjectID == nil {
+					return nil, nil, false
+				}
+				owner = limits.EndUserProjectID(*admission.ProjectID, admission.EndUserDigest)
+			}
+			add(limits.DebitOwner{ID: owner, Kind: "end_user", Basis: limits.Basis(policy.CostBasis)}, limits.Request{
+				CostOwnerID: owner, CostIncreases: admission.BudgetIncreases[owner], LookupID: limits.EndUserLookup(owner),
+				CostBasis:         limits.Basis(policy.CostBasis),
+				RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute,
+				MaxConcurrency: policy.MaxConcurrency, DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+				RequestedTokens: x.estimate, LeaseTTL: time.Hour,
+			})
+		}
+	}
+	return owners, requests, true
 }
 
 func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {

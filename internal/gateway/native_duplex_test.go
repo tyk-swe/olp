@@ -241,8 +241,10 @@ func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) 
 	upstream.frames <- []byte(`{"event":{"contentStart":{"contentId":"c1","type":"TEXT","role":"ASSISTANT"}}}`)
 	upstream.frames <- []byte(`{"event":{"textOutput":{"content":"hello from sonic"}}}`)
 	opens := 0
-	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
+	var streamCtx context.Context
+	h.gateway.bedrockStream = func(ctx context.Context, _ *call, _ *pin) (duplexPeer, error) {
 		opens++
+		streamCtx = ctx
 		return upstream, nil
 	}
 	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
@@ -263,6 +265,9 @@ func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) 
 	if _, frame, err := conn.Read(ctx); err != nil || !strings.Contains(string(frame), "textOutput") {
 		t.Fatalf("second relayed frame = %q err=%v", frame, err)
 	}
+	if streamCtx == nil || streamCtx.Err() != nil {
+		t.Fatalf("stream context cancelled while the session is live: %v", streamCtx.Err())
+	}
 	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -270,6 +275,9 @@ func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) 
 		t.Fatalf("bidirectional streams opened = %d, want exactly one pinned stream", opens)
 	}
 	env := h.sink.last(t)
+	if streamCtx.Err() == nil {
+		t.Fatal("stream context still live after the session closed")
+	}
 	if len(env.Attempts) != 1 || !env.Attempts[0].BillingUncertain || env.Attempts[0].UsageObserved {
 		t.Fatalf("Nova Sonic terminal usage must settle uncertain, never zero, got %+v", env.Attempts)
 	}

@@ -10,7 +10,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type fakeSessionDebits struct {
@@ -69,6 +73,73 @@ func (f *fakeSessionDebits) order() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.events)
+}
+
+func TestSessionDebitBoundariesCoverEveryMonetaryOwner(t *testing.T) {
+	keyID, groupID, projectID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	authority := access.Authority{
+		ID: keyID, ProjectID: &projectID,
+		BudgetGroupID: &groupID, BudgetGroupDailyCostLimit: stringptr("10"),
+		ProjectBudget: &access.BudgetPolicy{DailyCostLimit: stringptr("10")},
+		Policy:        access.KeyPolicy{DailyCostLimit: stringptr("10")},
+	}
+	x := &call{estimate: 100, routeLeg: routeLeg{route: &routing.Route{Slug: routeSlug}}}
+	owners, requests, ok := sessionDebitBoundaries(x, authority)
+	if !ok {
+		t.Fatal("boundaries not built")
+	}
+	want := map[string]string{
+		keyID: "key", groupID: "group",
+		limits.AggregateBudgetID("project", projectID): "aggregate",
+	}
+	if len(owners) != len(want) || len(requests) != len(want) {
+		t.Fatalf("owners=%v requests=%v", owners, requests)
+	}
+	byRequest := map[string]bool{}
+	for _, r := range requests {
+		byRequest[r.CostOwnerID] = true
+	}
+	for _, owner := range owners {
+		if want[owner.ID] != owner.Kind {
+			t.Fatalf("owner %s kind=%q want %q", owner.ID, owner.Kind, want[owner.ID])
+		}
+		if !byRequest[owner.ID] {
+			t.Fatalf("owner %s has no admission request", owner.ID)
+		}
+	}
+}
+
+func TestReserveSessionCostDoesNotDoubleHoldDurableDebitBound(t *testing.T) {
+	client := newAllowing(0, 0, 0, false)
+	s := &Server{Admission: newAdmission(t, client)}
+	authority := access.Authority{ID: benchOwner, LookupID: "lookup_bench", Policy: access.KeyPolicy{DailyCostLimit: stringptr("25")}}
+	x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1, routing.Attempt{Price: costPrice()})
+	x.request.id, x.request.minted = uuid.NewString(), true
+	hold := s.costReservation(x, authority)
+	if hold.amount == "" {
+		t.Fatal("priced attempt produced no cost reservation")
+	}
+	lease, e := s.Admission.reserveKeyCosted(t.Context(), &authority, "openai", 100, time.Hour, hold)
+	if e != nil {
+		t.Fatal(e)
+	}
+	x.lease = lease
+	attempt := x.attempts[0]
+	x.sessionDebit = &sessionDebit{id: uuid.NewString()}
+	before := client.calls.Load()
+	if e := s.reserveSessionCost(t.Context(), x, authority, attempt, time.Hour); e != nil {
+		t.Fatal(e)
+	}
+	if got := client.calls.Load(); got != before {
+		t.Fatalf("lease cost grown beside the durable debit: %d extra limiter commands", got-before)
+	}
+	x.sessionDebit = nil
+	if e := s.reserveSessionCost(t.Context(), x, authority, attempt, time.Hour); e != nil {
+		t.Fatal(e)
+	}
+	if got := client.calls.Load(); got == before {
+		t.Fatal("lease cost not grown when no durable debit holds the bound")
+	}
 }
 
 func TestWebRTCSessionReservesDurableDebitBeforeProviderExists(t *testing.T) {

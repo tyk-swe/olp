@@ -234,6 +234,9 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 			continue
 		}
 		if !provider.Supports(target.ProviderModel, "realtime", "openai", "realtime") {
+			if provider.Supports(target.ProviderModel, "realtime", "openai", "webrtc") {
+				continue
+			}
 			return nil, fmt.Errorf("target %s has no certified OpenAI realtime capability", target.ID)
 		}
 		if len(provider.ParameterDefaults) > 0 {

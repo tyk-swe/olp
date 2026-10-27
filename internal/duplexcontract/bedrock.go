@@ -12,8 +12,8 @@ var bedrockClientEvents = map[string]bool{
 }
 
 var bedrockServerEvents = map[string]bool{
-	"contentStart": true, "textOutput": true, "audioOutput": true,
-	"toolUse": true, "contentEnd": true, "error": true,
+	"completionStart": true, "contentStart": true, "textOutput": true, "audioOutput": true,
+	"toolUse": true, "contentEnd": true, "usageEvent": true, "completionEnd": true, "error": true,
 }
 
 func bedrockEventKind(frame []byte, maxBytes int) (string, error) {

@@ -40,6 +40,27 @@ func TestDocumentURIAuthority(t *testing.T) {
 	}
 }
 
+func TestAzureOCRAddressingResolvesBoundModel(t *testing.T) {
+	config := Config{
+		Kind: "openai_compatible", AuthMode: "api_key", VendorID: "azure-document-intelligence",
+		ProfileID: "azure-document-intelligence-ocr", ProfileRevision: ProfileRevision,
+		Endpoint: "https://example.cognitiveservices.azure.com",
+		Bindings: map[string]Binding{"layout-alias": {Model: "prebuilt-layout"}},
+	}
+	dialect, ok := operationregistry.Lookup("azure-document-intelligence-ocr")
+	if !ok {
+		t.Fatal("dialect not registered")
+	}
+	endpoint, err := config.OperationURL(dialect, "layout-alias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://example.cognitiveservices.azure.com/documentintelligence/documentModels/prebuilt-layout:analyze"
+	if endpoint != want {
+		t.Fatalf("operation url %q want %q", endpoint, want)
+	}
+}
+
 func TestDocumentAIAddressingAndDestination(t *testing.T) {
 	config := Config{
 		Kind: "vertex_ai", AuthMode: "service_account", VendorID: "google-vertex",

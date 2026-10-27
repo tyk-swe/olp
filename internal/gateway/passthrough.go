@@ -147,18 +147,54 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	if inputs := s.Runtime.RoutingInputs(); inputs != nil {
 		attempt.Price = inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, routing.PassthroughOperation, s.now())
 	}
+	estimate := max(resourceEstimate, x.estimate)
+	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
 	var slot routing.Slot
+	var hold *dispatchHold
+	var factP *AttemptFact
 	found := false
+	unmeterable := false
+slots:
 	for i := range provider.Slots {
-		if s.slotAvailable(x, attempt, &provider.Slots[i]) {
-			slot, found = provider.Slots[i], true
-			break
+		candidate := &provider.Slots[i]
+		if !s.slotAvailable(x, attempt, candidate) {
+			continue
+		}
+		gate := s.gateAttempt(r.Context(), x, attempt, &provider, candidate, estimate, deadline)
+		switch gate.verdict {
+		case gateAdmitted:
+			slot, hold, found = *candidate, gate.hold, true
+			break slots
+		case gateRejected:
+			x.facts = append(x.facts, s.rejectedFact(x, attempt, *candidate, 1, gate.rejection))
+			fail(gate.rejection.toError())
+			return
+		case gateExpired:
+			fail((&attemptFailure{class: classTimeout}).toError())
+			return
+		case gateUnmeterable:
+			unmeterable = true
+		case gateDenied:
+			break slots
 		}
 	}
-	if !found && len(provider.Slots) > 0 {
-		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`."))
-		return
+	if !found {
+		if unmeterable {
+			fail(limitsUnavailable())
+			return
+		}
+		if len(provider.Slots) > 0 {
+			fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`."))
+			return
+		}
 	}
+	defer func() {
+		if x.dispatched && hold != nil {
+			x.spendCaps(hold.budgets, attempt)
+		}
+		s.settlePinHold(r.Context(), x, hold, settledAttemptTokens(factP, estimate))
+		s.settleCaps(r.Context(), x)
+	}()
 	timeout := time.Duration(route.OverallTimeout) * time.Millisecond
 	if target.Timeout > 0 {
 		timeout = min(timeout, time.Duration(target.Timeout)*time.Millisecond)
@@ -181,8 +217,11 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	fact := s.newFact(x, attempt, slot, 1, &provider)
 	fact.Mode = "unary"
 	fact.PricingPinned = attempt.Price != nil
+	if hold != nil {
+		fact.Budgets = hold.budgets
+	}
 	x.facts = append(x.facts, fact)
-	factP := &x.facts[len(x.facts)-1]
+	factP = &x.facts[len(x.facts)-1]
 	if err := s.applySlotCredential(ctx, x, req, provider.Connector(), slot, body, &provider, target.ProviderModel); err != nil {
 		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
 		factP.recordEvidence(false)
@@ -253,6 +292,8 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	switch {
 	case success:
 		factP.Class = classSuccess
+		factP.observeUsage(&wire.Usage{}, true)
+		factP.TokenlessUsage = true
 		factP.recordEvidence(false)
 	case resp.StatusCode >= 500:
 		factP.Class = classUpstreamServer
