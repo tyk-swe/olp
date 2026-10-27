@@ -143,6 +143,9 @@ func (d *simulatedDemand) measure(target routing.Target, prompt *estimate.Prompt
 }
 
 func validTuple(operation, surface, mode string) error {
+	if operation == routing.PassthroughOperation && surface == "native" && mode == "unary" {
+		return nil
+	}
 	if operation == "agent_resource" && surface == "gemini" && mode == "unary" {
 		return nil
 	}

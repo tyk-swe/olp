@@ -501,7 +501,7 @@ unresolved realtime exposure additionally requires RM4.2–RM4.3.
   qualify xAI realtime, Vertex AI Live and Bedrock Nova Sonic. Test owner-scoped
   sessions, declared transcription support, cancellation and terminal usage;
   no reconnect/fallback may move a session to another provider.
-- [ ] **RM6.6 — Add governed pass-through:** implement the separate route kind
+- [x] **RM6.6 — Add governed pass-through:** implement the separate route kind
   and anchored namespace. Test adversarial path normalization, query/header
   allowlists, redirect/credential isolation, bounds and policy-publication
   refusals; verify per-request pricing or explicit unpriced accounting.

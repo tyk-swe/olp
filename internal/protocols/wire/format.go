@@ -61,8 +61,9 @@ const (
 	// Native generation families are vendor dialects a client speaks as
 	// they are, at /native/{dialect}/models/{route}: OLP binds the route's
 	// model and meters the result, and never translates them.
-	MistralFIM Format = "mistral_fim"
-	CohereChat Format = "cohere_chat"
+	MistralFIM  Format = "mistral_fim"
+	CohereChat  Format = "cohere_chat"
+	Passthrough Format = "passthrough"
 )
 
 func (f Format) Operation() string {
@@ -85,7 +86,7 @@ func (f Format) Operation() string {
 	case ImageGeneration, ImageEdit, ImageVariation, Speech,
 		Transcription, Translation, VideoCreate, VideoList, VideoGet,
 		VideoContent, VideoDelete, File, Batch,
-		Realtime, GeminiLive, NativeDuplex, BedrockInvoke, OCR, Search:
+		Realtime, GeminiLive, NativeDuplex, BedrockInvoke, OCR, Search, Passthrough:
 		if f == GeminiLive || f == NativeDuplex {
 			return "realtime"
 		}
@@ -106,7 +107,7 @@ func (f Format) Surface() string {
 		return "gemini"
 	case Bedrock, BedrockInvoke:
 		return "bedrock"
-	case MistralFIM, CohereChat, CloudBatch, NativeDuplex:
+	case MistralFIM, CohereChat, CloudBatch, NativeDuplex, Passthrough:
 		return "native"
 	}
 	return "openai"
