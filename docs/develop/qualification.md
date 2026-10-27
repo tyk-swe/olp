@@ -161,6 +161,7 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | OCR/search | Codecs (including the Brave GET-query transport), raw-HTTP process fixtures, route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples (including the exact Brave tuple) and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
 | Governed pass-through (RM6.6) | Adversarial routing normalization and publication refusals, gateway credential isolation, redirect and bound fixtures, configuration plan refusals and console editor units; no locked SDK covers the bound-native namespace, so raw HTTP fixtures are the evidence | Live tuple per bound connection and endpoint family, full `make integration`, release performance |
+| Governed WebRTC (RM6.4) | Gateway session-control fixtures against a mock calls/control/hangup provider, compiled contract, distinct `webrtc` capability tuple, certification probe, ledger rows and a Chromium journey spec with mock provider | Full `make integration` browser run, live OpenAI tuple, durable debit-intent settlement with restart recovery (the slice settles on the realtime lease path and claims no durable settlement), Azure tuple under its own contract |
 | Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
 
 Run `CLIENTS=m9-go tests/clients/run.sh` for locked OpenAI Go completions and
@@ -172,6 +173,10 @@ pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.sve
 ```
 
 The OCR/search journey is `console/tests/gateway/ocr-search.spec.ts`.
+The governed WebRTC journey is
+`console/tests/gateway/realtime-webrtc.spec.ts` against
+`console/tests/gateway/mock-realtime-webrtc.mjs`. It is integration-gated and
+has not run outside `make integration` yet.
 A dedicated resource/accounting integration selection remains required;
 compiling fixtures does not execute it. Every new family needs lifecycle,
 nested-ID/pagination isolation, ambiguous-create, restart, cleanup, revocation,

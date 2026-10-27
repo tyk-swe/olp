@@ -286,7 +286,7 @@ State-bearing requests bypass response-cache replay. Known cached tokens count
 in context, token and monetary admission; unknown history, file and retrieval
 input quantities refuse applicable consumption caps.
 
-`GET /v1/realtime` is a WebSocket endpoint; WebRTC is not supported. The `model`
+`GET /v1/realtime` is a WebSocket endpoint. The `model`
 query parameter is an OLP route slug, the route must allow `realtime`, and the
 target must hold a certified `openai`/`realtime` capability. Target and slot are
 selected and reserved once before the upgrade, with no failover afterwards. The
@@ -295,6 +295,29 @@ propagates ping/close frames, and rechecks the presented API key every five
 seconds, closing with a policy violation on revocation or expiry. Terminal usage
 events feed accounting when the provider sends them; sessions that end without
 usage are recorded as billing-uncertain.
+
+`POST /v1/realtime/calls` opens a governed WebRTC session on OpenAI only. The
+caller posts the OpenAI calls form, an SDP offer plus an optional session
+document whose `model` names a strict route slug, or a raw SDP body with a
+`model` query parameter. Request, concurrency and bounded session cost are
+reserved before the provider session exists, and a server control channel to
+the provider session is established before the SDP answer returns. The answer
+carries a gateway session identity in `Location`, never the provider call
+identity and never a raw provider client secret. `POST
+/v1/realtime/calls/{id}/hangup` with the owning key closes the session, and a
+foreign identity answers as missing. The gateway rechecks the key every five
+seconds and closes the provider session on revocation, on provider credential
+loss and at the one-hour bound. Observed provider usage settles exactly once.
+Sessions that end without trustworthy usage stay billing-uncertain, and losing
+the control channel triggers a close attempt, holds the exposure and refuses
+new WebRTC work for that key until the exposure bound passes. Session cost is
+reserved and settled through the shared realtime lease and cost-hold path, not
+the durable debit ledger, so a gateway crash can lose the control loop for its
+live sessions until provider expiry. SDP and media payloads are never logged
+or stored. The target must hold a certified `realtime`/`openai`/`webrtc`
+capability, which is distinct from the WebSocket `realtime` mode. Azure
+WebRTC is not supported yet and stays pending until its own transport
+contract is certified.
 
 ### Anthropic surface
 

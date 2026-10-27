@@ -259,7 +259,7 @@ export function surfacesFor(operation: string): string[] {
 
 export function modesFor(operation: string): string[] {
   if (operation === 'video_create') return ['async'];
-  if (operation === 'realtime') return ['realtime'];
+  if (operation === 'realtime') return ['realtime', 'webrtc'];
   if (
     [
       'generation',

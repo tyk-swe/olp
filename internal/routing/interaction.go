@@ -56,6 +56,9 @@ func (s *Snapshot) ValidateRouteContracts(route Route) error {
 	if err == nil {
 		_, err = s.compileRealtime(route)
 	}
+	if err == nil {
+		_, err = s.compileWebRTC(route)
+	}
 	return err
 }
 
@@ -240,6 +243,39 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 
 func (s *Snapshot) RealtimeTemplate(slug, target string) (*realtimecontract.Template, bool) {
 	template, ok := s.realtime[slug][target]
+	return template, ok
+}
+
+func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Template, error) {
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
+		return nil, nil
+	}
+	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	for _, target := range route.Targets {
+		provider, ok := s.Providers[target.ProviderID]
+		if !ok {
+			return nil, fmt.Errorf("route target references an unavailable provider")
+		}
+		if provider.ProfileID == "gemini-live" {
+			continue
+		}
+		if !provider.Supports(target.ProviderModel, "realtime", "openai", "webrtc") {
+			continue
+		}
+		if len(provider.ParameterDefaults) > 0 {
+			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
+		}
+		template, err := realtimecontract.CompileWebRTC(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		if err != nil {
+			return nil, err
+		}
+		templates[target.ID] = template
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) WebRTCTemplate(slug, target string) (*realtimecontract.Template, bool) {
+	template, ok := s.webrtc[slug][target]
 	return template, ok
 }
 

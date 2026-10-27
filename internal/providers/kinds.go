@@ -232,7 +232,7 @@ func capabilityOptions() []CapabilityInput {
 	for _, operation := range []string{"image_variation", "video_list", "video_get", "video_content", "video_delete"} {
 		out = append(out, tuple(operation, "openai", "unary"))
 	}
-	out = append(out, tuple("video_create", "openai", "async"), tuple("batch", "openai", "unary"), tuple("batch", "anthropic", "unary"), tuple("realtime", "openai", "realtime"), tuple("realtime", "gemini", "realtime"))
+	out = append(out, tuple("video_create", "openai", "async"), tuple("batch", "openai", "unary"), tuple("batch", "anthropic", "unary"), tuple("realtime", "openai", "realtime"), tuple("realtime", "openai", "webrtc"), tuple("realtime", "gemini", "realtime"))
 	for _, operation := range []string{"generation", "bedrock_invoke"} {
 		out = append(out, tuple(operation, "bedrock", "unary"), tuple(operation, "bedrock", "streaming"))
 	}
@@ -342,6 +342,9 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 		return kind == KindOpenAI || kind == KindAzure || kind == KindOpenAICompatible &&
 			(vendor == "groq" || vendor == "together" || vendor == "mistral")
 	case "realtime":
+		if c.Mode == "webrtc" {
+			return kind == KindOpenAI
+		}
 		return kind == KindOpenAI || kind == KindAzure
 	case "bedrock_invoke":
 		return kind == KindBedrock

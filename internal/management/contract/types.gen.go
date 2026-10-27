@@ -5329,6 +5329,7 @@ const (
 	TransportModeRealtime  TransportMode = "realtime"
 	TransportModeStreaming TransportMode = "streaming"
 	TransportModeUnary     TransportMode = "unary"
+	TransportModeWebrtc    TransportMode = "webrtc"
 )
 
 // Valid indicates whether the value is a known member of the TransportMode enum.
@@ -5341,6 +5342,8 @@ func (e TransportMode) Valid() bool {
 	case TransportModeStreaming:
 		return true
 	case TransportModeUnary:
+		return true
+	case TransportModeWebrtc:
 		return true
 	default:
 		return false

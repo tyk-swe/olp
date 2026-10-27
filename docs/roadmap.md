@@ -181,10 +181,11 @@ durable accounting foundation.
 - [ ] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
   profile, credential isolation, field mapping, egress and observed-unit
   accounting.
-- [ ] **RM6.4 — Governed WebRTC:** implement OpenAI server-mediated session
+- [x] **RM6.4 — Governed WebRTC:** implement OpenAI server-mediated session
   creation/control, five-second revocation checks, close/usage accounting,
   session expiry and lost-control exposure. Extend Azure through its separate
-  transport contract.
+  transport contract. The OpenAI slice is implemented and the Azure tuple
+  stays pending until its own contract is certified.
 - [ ] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
   Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
   declared transcription support, cancellation and terminal usage accounting.
