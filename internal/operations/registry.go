@@ -5,6 +5,7 @@ package operations
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"regexp"
 	"slices"
 	"sync"
@@ -42,15 +43,31 @@ type Field struct {
 // are adapters, never operation IR.
 type Address struct{ FamilyPath, RelativePath string }
 
+type Transport string
+
+const (
+	TransportJSON     Transport = "json"
+	TransportGetQuery Transport = "get-query"
+)
+
+func (t Transport) Normalized() Transport {
+	if t == "" {
+		return TransportJSON
+	}
+	return t
+}
+
 // Dialect is the small unary contract. Optional hooks are absent where that
 // operation has no model-body identity, textual policy surface or usage record.
 type Dialect struct {
 	Identity, Operation           oif.Identity
 	Surface, Label, Documentation string
 	Address                       Address
+	Transport                     Transport
 	RequestSchema, ResultSchema   json.RawMessage
 	Defaults                      map[string]Field
 	Request                       func(oif.Request) (oif.View, error)
+	Query                         func(oif.Request) (url.Values, error)
 	Result                        func(oif.Request, oif.Result) (oif.View, error)
 	ValidateRoute                 func(oif.Request, string) error
 	BindModel                     func(oif.Document, string) ([]oif.Change, error)
@@ -91,6 +108,19 @@ func (r *Registry) Register(d Dialect) error {
 	if d.Address.FamilyPath == "" && d.Address.RelativePath == "" || d.Address.FamilyPath != "" && d.Address.RelativePath != "" {
 		return errors.New("unary dialect requires one addressing contract")
 	}
+	switch d.Transport.Normalized() {
+	case TransportJSON:
+		if d.Query != nil {
+			return errors.New("json unary dialect must not lower to query parameters")
+		}
+	case TransportGetQuery:
+		if d.Query == nil {
+			return errors.New("get-query unary dialect requires query lowering")
+		}
+	default:
+		return errors.New("unary dialect transport is not registered")
+	}
+	d.Transport = d.Transport.Normalized()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.dialects[d.Identity]; exists || len(r.dialects) >= 256 {

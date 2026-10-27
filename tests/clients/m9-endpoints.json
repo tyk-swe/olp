@@ -6996,13 +6996,42 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "q",
+        "count",
+        "offset",
+        "freshness",
+        "result_filter"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/operations/search/search.go",
+        "internal/operations/search/search_test.go",
+        "internal/operations/search/mapping.go",
+        "internal/operations/search/mapping_test.go",
+        "internal/gateway/ocr_search_test.go",
+        "internal/operationplan/search_test.go",
+        "internal/routes/ocr_search_test.go",
+        "internal/providers/operation_probe_test.go",
+        "tests/clients/m9sdk/ocr_search_test.go",
+        "tests/fixtures/vendors/brave/contract.json",
+        "console/tests/gateway/ocr-search.spec.ts"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: requires a GET query unary transport",
+      "refusals": [
+        "array query",
+        "max_tokens",
+        "max_tokens_per_page",
+        "country",
+        "search_language_filter",
+        "search_domain_filter",
+        "last-updated and recency filters",
+        "single-sided date filters",
+        "search_type other than web",
+        "response caching"
+      ],
+      "reference_revision": "Brave Web Search API reference, observed 2026-10-27",
       "admission_contract": "execution-foundations-1"
     },
     {

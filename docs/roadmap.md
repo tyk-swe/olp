@@ -172,7 +172,7 @@ realtime maintainers for RM6.4–RM6.5, and routing maintainers for RM6.6.
 metering, revocation and egress behavior. Realtime exposure uses the shared
 durable accounting foundation.
 
-- [ ] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
+- [x] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
   citations, time ranges, limits and request pricing, with explicit refusal
   of unmappable fields.
 - [ ] **RM6.2 — Azure Document Intelligence polling:** implement bounded

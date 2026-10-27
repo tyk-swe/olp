@@ -1,0 +1,48 @@
+{
+  "type": "search",
+  "query": {
+    "original": "latest airport delays",
+    "show_strict_warning": false,
+    "safesearch": true,
+    "is_navigational": false,
+    "is_geolocal": false,
+    "spellcheck_off": false,
+    "country": "us",
+    "bad_results": false,
+    "should_fallback": false,
+    "more_results_available": true
+  },
+  "web": {
+    "type": "search",
+    "results": [
+      {
+        "title": "Example report",
+        "url": "https://example.com/report",
+        "is_source_local": false,
+        "is_source_both": false,
+        "description": "Summary of the report.",
+        "page_age": "2026-10-01T07:00:00Z",
+        "language": "en",
+        "family_friendly": true,
+        "type": "search_result",
+        "subtype": "generic",
+        "is_live": false,
+        "profile": {
+          "name": "example.com",
+          "url": "https://example.com",
+          "long_name": "Example",
+          "img": "https://example.com/favicon.ico"
+        },
+        "age": "3 weeks ago"
+      },
+      {
+        "title": "Second result",
+        "url": "https://example.org/page",
+        "description": "Another description.",
+        "family_friendly": true,
+        "type": "search_result"
+      }
+    ],
+    "family_friendly": true
+  }
+}

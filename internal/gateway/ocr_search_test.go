@@ -134,6 +134,105 @@ func TestSearchTransformedTargets(t *testing.T) {
 	}
 }
 
+func TestSearchBraveTransformedTarget(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"search"}
+		route.Fidelity.Mode = routing.FidelityTransformed
+		s.Routes[routeSlug] = route
+		ocrSearchProviders(s, "brave", "brave-search", "search")
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method: %s", r.Method)
+		}
+		if r.URL.Path != "/a/v1/res/v1/web/search" {
+			t.Errorf("addressed at %s", r.URL.Path)
+		}
+		query := r.URL.Query()
+		if query.Get("q") != "q" || query.Get("count") != "2" || query.Get("result_filter") != "web" || query.Get("freshness") != "2026-01-02to2026-03-04" {
+			t.Errorf("query: %v", query)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if len(body) != 0 {
+			t.Errorf("get body: %s", body)
+		}
+		if r.Header.Get("X-Subscription-Token") != secretA || r.Header.Get("Authorization") != "" {
+			t.Errorf("credential headers: %v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"type":"search","query":{"original":"q"},"web":{"type":"search","results":[{"title":"t","url":"https://a","description":"d","page_age":"2026-01-02T03:04:05Z"}],"family_friendly":true}}`)
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(`{"query":"q","max_results":2,"search_after_date_filter":"01/02/2026","search_before_date_filter":"03/04/2026"}`), map[string]string{"X-OLP-Route": routeSlug})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var out struct {
+		ID      string `json:"id"`
+		Results []struct {
+			Title, URL, Snippet string
+			Date                *string `json:"date"`
+		} `json:"results"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil {
+		t.Fatalf("brave: %d %s", resp.StatusCode, body)
+	}
+	if !strings.HasPrefix(out.ID, "search_") || len(out.Results) != 1 || out.Results[0].Snippet != "d" || out.Results[0].Date == nil || *out.Results[0].Date != "2026-01-02" {
+		t.Fatalf("brave projection: %+v", out)
+	}
+	if h.mock.count("a") != 1 {
+		t.Fatalf("upstream calls: %d", h.mock.count("a"))
+	}
+}
+
+func TestSearchBraveNativeStrict(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"search"}
+		s.Routes[routeSlug] = route
+		for id, p := range s.Providers {
+			p.Kind, p.VendorID, p.ProfileID = "openai_compatible", "brave", "brave-search"
+			p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "search", Surface: "native", Mode: "unary"}}
+			s.Providers[id] = p
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Query().Get("offset") != "1" || r.URL.Query().Get("count") != "3" {
+			t.Errorf("native wire: %s %v", r.Method, r.URL.Query())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"type":"search","query":{"original":"q"},"web":{"type":"search","results":[{"title":"t","url":"https://a","description":"d"}],"family_friendly":true}}`)
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/native/brave-search/models/"+routeSlug, fullKey, []byte(`{"q":"q","count":3,"offset":1}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"description":"d"`) {
+		t.Fatalf("brave native: %d %s", resp.StatusCode, body)
+	}
+}
+
+func TestSearchBraveRefusalsDispatchNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"query":"q","search_domain_filter":["a.com"]}`,
+		`{"query":"q","search_after_date_filter":"01/02/2026"}`,
+		`{"query":"q","search_recency_filter":"week"}`,
+		`{"query":"q","country":"US"}`,
+	} {
+		h := strictHarness(t, func(s *routing.Snapshot) {
+			route := s.Routes[routeSlug]
+			route.Operations = []string{"search"}
+			route.Fidelity.Mode = routing.FidelityTransformed
+			s.Routes[routeSlug] = route
+			ocrSearchProviders(s, "brave", "brave-search", "search")
+		})
+		resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(body), map[string]string{"X-OLP-Route": routeSlug})
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("refusal dispatched: %d %s", resp.StatusCode, out)
+		}
+	}
+}
+
 func TestSearchMappingRefusalsDispatchNothing(t *testing.T) {
 	for _, body := range []string{
 		`{"query":"q","country":"US"}`,

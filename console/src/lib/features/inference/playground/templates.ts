@@ -341,6 +341,13 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'brave-search',
+    label: 'Web search · Brave',
+    operation: 'search',
+    nativeDialect: 'brave-search',
+    request: { q: 'What is an API gateway?', count: 3 }
+  },
+  {
     key: 'tei-classification',
     label: 'Classification · TEI predict',
     operation: 'classification',

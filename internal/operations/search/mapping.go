@@ -6,19 +6,22 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
 // Mappings qualify Perplexity Search to each reviewed native target. The
-// source contract's token, locale and freshness controls have no target
-// equivalent and are refused rather than approximated.
+// source contract's token and locale controls have no target equivalent and
+// are refused rather than approximated. Brave alone also carries a paired
+// absolute date range as its freshness range.
 func Mappings() []operations.Mapping {
 	return []operations.Mapping{
 		{Source: identity(Perplexity), Target: identity(Tavily), Lower: func(s oif.Request, v oif.View) (oif.Document, []oif.Provenance, error) { return lower(s, v, Tavily) }, Project: project, Evidence: "search-perplexity-tavily/1"},
 		{Source: identity(Perplexity), Target: identity(Exa), Lower: func(s oif.Request, v oif.View) (oif.Document, []oif.Provenance, error) { return lower(s, v, Exa) }, Project: project, Evidence: "search-perplexity-exa/1"},
 		{Source: identity(Perplexity), Target: identity(Parallel), Lower: func(s oif.Request, v oif.View) (oif.Document, []oif.Provenance, error) { return lower(s, v, Parallel) }, Project: project, Evidence: "search-perplexity-parallel/1"},
+		{Source: identity(Perplexity), Target: identity(Brave), Lower: func(s oif.Request, v oif.View) (oif.Document, []oif.Provenance, error) { return lower(s, v, Brave) }, Project: project, Evidence: "search-perplexity-brave/1"},
 	}
 }
 
@@ -50,6 +53,10 @@ func lower(source oif.Request, view oif.View, target string) (oif.Document, []oi
 	for _, m := range root.Members() {
 		switch m.Name {
 		case "query", "max_results", "search_type", "search_domain_filter":
+		case "search_after_date_filter", "search_before_date_filter":
+			if target != Brave {
+				return oif.Document{}, nil, invalid(m.Name)
+			}
 		default:
 			return oif.Document{}, nil, invalid(m.Name)
 		}
@@ -99,9 +106,56 @@ func lower(source oif.Request, view oif.View, target string) (oif.Document, []oi
 			settings["source_policy"] = map[string]any{name: list}
 		}
 		out = map[string]any{"search_queries": []string{query}, "advanced_settings": settings}
+	case Brave:
+		if len(r.domains) > 0 {
+			return oif.Document{}, nil, invalid("search_domain_filter")
+		}
+		freshness, err := braveFreshness(root)
+		if err != nil {
+			return oif.Document{}, nil, err
+		}
+		out = map[string]any{"q": query, "count": maxRaw, "result_filter": "web"}
+		if freshness != "" {
+			out["freshness"] = freshness
+		}
 	}
 	doc, err := parseDocument(out)
 	return doc, nil, err
+}
+
+func braveFreshness(root oif.Value) (string, error) {
+	after := member(root, "search_after_date_filter")
+	before := member(root, "search_before_date_filter")
+	afterSet, beforeSet := !operations.Optional(after), !operations.Optional(before)
+	if !afterSet && !beforeSet {
+		return "", nil
+	}
+	if !afterSet {
+		return "", invalid("search_before_date_filter")
+	}
+	if !beforeSet {
+		return "", invalid("search_after_date_filter")
+	}
+	from, okFrom := sourceDate(text(after))
+	to, okTo := sourceDate(text(before))
+	if !okFrom {
+		return "", invalid("search_after_date_filter")
+	}
+	if !okTo {
+		return "", invalid("search_before_date_filter")
+	}
+	if from.After(to) {
+		return "", invalid("search_after_date_filter")
+	}
+	return from.Format(time.DateOnly) + "to" + to.Format(time.DateOnly), nil
+}
+
+func sourceDate(value string) (time.Time, bool) {
+	if len(value) != len("01/02/2006") || value[2] != '/' || value[5] != '/' {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse("01/02/2006", value)
+	return parsed, err == nil
 }
 
 // searchID is a fresh gateway-generated identifier; upstream result
@@ -130,10 +184,13 @@ func datePrefix(v oif.Value) any {
 
 func project(source oif.Request, result oif.Result, view oif.View, route string) (oif.Document, error) {
 	root := result.Source().Root()
+	dialect := view.(Result).Source.Descriptor().Dialect.ID
 	rows := member(root, "results")
+	if dialect == Brave {
+		rows = member(member(root, "web"), "results")
+	}
 	out := []any{}
 	max := requestLimit(source)
-	dialect := view.(Result).Source.Descriptor().Dialect.ID
 	for i, row := range rows.Elements() {
 		if int64(i) >= max {
 			return oif.Document{}, operations.Violation("/results", "search_result_count")
@@ -148,6 +205,10 @@ func project(source oif.Request, result oif.Result, view oif.View, route string)
 			snippet = joinTexts(member(row, "highlights"))
 		case Parallel:
 			snippet = joinTexts(member(row, "excerpts"))
+		case Brave:
+			if v := member(row, "description"); v.Kind() == oif.String {
+				snippet = text(v)
+			}
 		}
 		var date any
 		switch dialect {
@@ -155,6 +216,8 @@ func project(source oif.Request, result oif.Result, view oif.View, route string)
 			date = datePrefix(member(row, "publishedDate"))
 		case Parallel:
 			date = datePrefix(member(row, "publish_date"))
+		case Brave:
+			date = datePrefix(member(row, "page_age"))
 		}
 		title := ""
 		if v := member(row, "title"); v.Kind() == oif.String {

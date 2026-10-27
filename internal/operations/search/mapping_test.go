@@ -111,6 +111,111 @@ func TestMappingProject(t *testing.T) {
 	}
 }
 
+func mappingFor(dialect string) operations.Mapping {
+	for _, mm := range Mappings() {
+		if mm.Target.ID == dialect {
+			return mm
+		}
+	}
+	return operations.Mapping{}
+}
+
+func TestBraveMappingLower(t *testing.T) {
+	mapping := mappingFor(Brave)
+	for _, tc := range []struct {
+		body string
+		want map[string]any
+	}{
+		{`{"query":"q"}`, map[string]any{"q": "q", "count": float64(10), "result_filter": "web"}},
+		{`{"query":"q","max_results":3}`, map[string]any{"q": "q", "count": float64(3), "result_filter": "web"}},
+		{`{"query":"q","max_results":2,"search_type":"web","search_after_date_filter":"01/02/2026","search_before_date_filter":"03/04/2026"}`, map[string]any{"q": "q", "count": float64(2), "result_filter": "web", "freshness": "2026-01-02to2026-03-04"}},
+	} {
+		r := request(t, Perplexity, tc.body)
+		view, err := parseRequest(r, Perplexity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, _, err := mapping.Lower(r, view)
+		if err != nil {
+			t.Fatalf("lower %s: %v", tc.body, err)
+		}
+		var got map[string]any
+		if json.Unmarshal(doc.Bytes(), &got) != nil {
+			t.Fatal("bad lowered document")
+		}
+		if len(got) != len(tc.want) {
+			t.Fatalf("lowered %v, want %v", got, tc.want)
+		}
+		for k, v := range tc.want {
+			if got[k] != v {
+				t.Fatalf("lowered %v, want %v", got, tc.want)
+			}
+		}
+	}
+	for _, body := range []string{
+		`{"query":"q","search_domain_filter":["a.com"]}`,
+		`{"query":"q","search_domain_filter":["-a.com"]}`,
+		`{"query":"q","search_after_date_filter":"01/02/2026"}`,
+		`{"query":"q","search_before_date_filter":"03/04/2026"}`,
+		`{"query":"q","search_after_date_filter":"2026-01-02","search_before_date_filter":"03/04/2026"}`,
+		`{"query":"q","search_after_date_filter":"02/30/2026","search_before_date_filter":"03/04/2026"}`,
+		`{"query":"q","search_after_date_filter":"03/04/2026","search_before_date_filter":"01/02/2026"}`,
+		`{"query":"q","search_after_date_filter":"01/02/2026","search_before_date_filter":"03/04/2026","search_recency_filter":"week"}`,
+		`{"query":"q","last_updated_after_filter":"01/01/2026"}`,
+		`{"query":"q","search_recency_filter":"week"}`,
+		`{"query":"q","country":"US"}`,
+		`{"query":"q","search_language_filter":["en"]}`,
+		`{"query":"q","max_tokens_per_page":5}`,
+	} {
+		r := request(t, Perplexity, body)
+		view, err := parseRequest(r, Perplexity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := mapping.Lower(r, view); err == nil {
+			t.Fatalf("brave admitted %s", body)
+		}
+	}
+}
+
+func TestBraveMappingProject(t *testing.T) {
+	r := request(t, Perplexity, `{"query":"q","max_results":2}`)
+	mapping := mappingFor(Brave)
+	body := `{"type":"search","query":{"original":"q"},"web":{"type":"search","results":[{"title":"t","url":"u1","description":"d1","page_age":"2026-01-02T03:04:05Z"},{"url":"u2"}],"family_friendly":true}}`
+	res := result(t, Brave, body)
+	view, err := parseResult(request(t, Brave, resBodyFor(t, Brave)), res, Brave)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := mapping.Project(r, res, view, "route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		ID      string `json:"id"`
+		Results []struct {
+			Title   string  `json:"title"`
+			URL     string  `json:"url"`
+			Snippet string  `json:"snippet"`
+			Date    *string `json:"date"`
+		} `json:"results"`
+	}
+	if json.Unmarshal(doc.Bytes(), &out) != nil || !strings.HasPrefix(out.ID, "search_") {
+		t.Fatalf("bad projection id: %q", out.ID)
+	}
+	if len(out.Results) != 2 || out.Results[0].Snippet != "d1" || out.Results[0].Date == nil || *out.Results[0].Date != "2026-01-02" || out.Results[1].Title != "" || out.Results[1].Date != nil {
+		t.Fatalf("brave projection: %+v", out.Results)
+	}
+	over := result(t, Brave, `{"web":{"results":[{"url":"u1"},{"url":"u2"},{"url":"u3"}]}}`)
+	overView, err := parseResult(request(t, Brave, `{"q":"q","count":3}`), over, Brave)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mapping.Project(r, over, overView, "route"); err == nil {
+		t.Fatal("over-limit rows projected")
+	}
+}
+
 func resBodyFor(t *testing.T, dialect string) string {
 	t.Helper()
 	switch dialect {
@@ -120,6 +225,8 @@ func resBodyFor(t *testing.T, dialect string) string {
 		return `{"query":"q","numResults":2,"contents":{"highlights":true}}`
 	case Parallel:
 		return `{"search_queries":["q"],"advanced_settings":{"max_results":2}}`
+	case Brave:
+		return `{"q":"q","count":2,"result_filter":"web"}`
 	}
 	return ""
 }
