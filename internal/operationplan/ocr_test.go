@@ -13,6 +13,7 @@ import (
 func azureTemplate(t *testing.T) *operationplan.Template {
 	t.Helper()
 	c := config("azure-document-intelligence-ocr", "ocr")
+	c.Model = "prebuilt-layout"
 	c.Provider.VendorID, c.Provider.AuthMode = "azure-document-intelligence", "api_key"
 	c.AllowProviderFetchedDocuments = true
 	template, err := operationplan.Compile(c)
@@ -62,7 +63,7 @@ func TestAzureSubmitAndPoll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if method != http.MethodPost || u.Path != "/v1/documentintelligence/documentModels/vendor-model:analyze" {
+	if method != http.MethodPost || u.Path != "/v1/documentintelligence/documentModels/prebuilt-layout:analyze" {
 		t.Fatalf("submit: %s %s", method, submit)
 	}
 	q := u.Query()
@@ -72,14 +73,14 @@ func TestAzureSubmitAndPoll(t *testing.T) {
 	if string(body) != `{"urlSource":"https://example.com/a.pdf"}` {
 		t.Fatalf("body: %s", body)
 	}
-	header := http.Header{"Operation-Location": {"https://example.com/v1/documentintelligence/documentModels/vendor-model/analyzeResults/abc?api-version=2024-11-30"}}
+	header := http.Header{"Operation-Location": {"https://example.com/v1/documentintelligence/documentModels/prebuilt-layout/analyzeResults/abc?api-version=2024-11-30"}}
 	loc, err := plan.PollLocation(submit, header)
 	if err != nil || !strings.Contains(loc, "analyzeResults/abc") {
 		t.Fatalf("poll location: %q %v", loc, err)
 	}
 	for _, bad := range []string{
-		"https://evil.example.net/v1/documentintelligence/documentModels/vendor-model/analyzeResults/abc?api-version=2024-11-30",
-		"http://example.com/v1/documentintelligence/documentModels/vendor-model/analyzeResults/abc",
+		"https://evil.example.net/v1/documentintelligence/documentModels/prebuilt-layout/analyzeResults/abc?api-version=2024-11-30",
+		"http://example.com/v1/documentintelligence/documentModels/prebuilt-layout/analyzeResults/abc",
 		"https://user:pass@example.com/v1/x",
 		"https://example.com/v1/x#frag",
 		"/relative/path",
@@ -103,7 +104,7 @@ func TestAzureSubmitAndPoll(t *testing.T) {
 	if !ok || method != http.MethodDelete || cancelURL != loc {
 		t.Fatalf("cancel: %s %s %v", method, cancelURL, ok)
 	}
-	decoded, err := plan.Decode([]byte(`{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"vendor-model","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# One\n\n# Two","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":5}]},{"pageNumber":3,"spans":[{"offset":7,"length":5}]}]}}`))
+	decoded, err := plan.Decode([]byte(`{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# One\n\n# Two","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":5}]},{"pageNumber":3,"spans":[{"offset":7,"length":5}]}]}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

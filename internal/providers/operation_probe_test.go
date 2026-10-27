@@ -169,18 +169,18 @@ func TestAzureOperationProbePolls(t *testing.T) {
 			t.Errorf("credential header on %s %s: %v", r.Method, r.URL.Path, r.Header)
 		}
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/documentintelligence/documentModels/azure-model:analyze":
+		case r.Method == http.MethodPost && r.URL.Path == "/documentintelligence/documentModels/prebuilt-layout:analyze":
 			submits++
 			if r.URL.Query().Get("api-version") != ocr.AzureAPIVersion || r.URL.Query().Get("outputContentFormat") != "markdown" {
 				t.Errorf("submit query: %s", r.URL.RawQuery)
 			}
-			w.Header().Set("Operation-Location", "http://"+r.Host+"/documentintelligence/documentModels/azure-model/analyzeResults/result-1?api-version=2024-11-30")
+			w.Header().Set("Operation-Location", "http://"+r.Host+"/documentintelligence/documentModels/prebuilt-layout/analyzeResults/result-1?api-version=2024-11-30")
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusAccepted)
-		case r.Method == http.MethodGet && r.URL.Path == "/documentintelligence/documentModels/azure-model/analyzeResults/result-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/documentintelligence/documentModels/prebuilt-layout/analyzeResults/result-1":
 			polls++
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"azure-model","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"probe","pages":[{"pageNumber":1}]}}`)
+			fmt.Fprint(w, `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"probe","pages":[{"pageNumber":1}]}}`)
 		default:
 			t.Errorf("unexpected probe %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -188,10 +188,10 @@ func TestAzureOperationProbePolls(t *testing.T) {
 	}))
 	defer server.Close()
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "azure-document-intelligence-ocr", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL), Options: Options{VendorID: new("azure-document-intelligence")}, ProbeModels: []string{"azure-model"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "azure-document-intelligence-ocr", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL), Options: Options{VendorID: new("azure-document-intelligence")}, ProbeModels: []string{"prebuilt-layout"}}
 	cfg.Normalize()
 	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
-	if err != nil || len(models) != 1 || models[0].Name != "azure-model" || submits != 1 || polls != 1 {
+	if err != nil || len(models) != 1 || models[0].Name != "prebuilt-layout" || submits != 1 || polls != 1 {
 		t.Fatalf("probe: %+v %v submits=%d polls=%d", models, err, submits, polls)
 	}
 }

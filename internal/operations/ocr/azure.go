@@ -146,7 +146,7 @@ func parseAzureResult(request oif.Request, source oif.Result) (oif.View, error) 
 	if member(analyze, "modelId").Kind() != oif.String {
 		return fail("/analyzeResult/modelId", "ocr_model")
 	}
-	if v := member(analyze, "contentFormat"); !operations.Optional(v) && (v.Kind() != oif.String || operations.String(v) != "markdown") {
+	if v := member(analyze, "contentFormat"); !operations.Optional(v) && (v.Kind() != oif.String || (operations.String(v) != "markdown" && operations.String(v) != "text")) {
 		return fail("/analyzeResult/contentFormat", "ocr_content_format")
 	}
 	content := member(analyze, "content")
@@ -212,9 +212,13 @@ func azureWire(view oif.View) (operations.WireRequest, error) {
 		return operations.WireRequest{}, azureInvalid("request")
 	}
 	root := request.source.Document().Root()
+	format := "text"
+	if operations.String(member(root, "model")) == "prebuilt-layout" {
+		format = "markdown"
+	}
 	query := url.Values{
 		"api-version":         {AzureAPIVersion},
-		"outputContentFormat": {"markdown"},
+		"outputContentFormat": {format},
 		"stringIndexType":     {"utf16CodeUnit"},
 	}
 	if v := member(root, "pages"); v.Kind() == oif.String {

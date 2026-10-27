@@ -143,6 +143,11 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			}
 			defer conn.CloseNow()
 			_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2,"input_token_details":{"cached_tokens":1}}}}`))
+			if mode == "emptyusage" {
+				_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"resp_2","usage":{}}}`))
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
 			if mode == "transcribe" {
 				_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"hello"}`))
 				_ = conn.Close(websocket.StatusNormalClosure, "")
@@ -540,6 +545,22 @@ func TestWebRTCCreationHonorsDeploymentBodyLimit(t *testing.T) {
 	}
 	if creates, _, _ := mock.counts(); creates != 0 {
 		t.Fatal("provider session created for an oversized request")
+	}
+}
+
+func TestWebRTCEmptyUsageCountersStayUncertain(t *testing.T) {
+	mock := newWebRTCMock("emptyusage")
+	h := webrtcHarness(t, mock, true)
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d", resp.StatusCode)
+	}
+	env := sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	fact := env.Attempts[len(env.Attempts)-1]
+	if !fact.BillingUncertain {
+		t.Fatalf("counter-less terminal usage settled as complete: %+v", fact)
 	}
 }
 

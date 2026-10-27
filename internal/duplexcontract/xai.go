@@ -125,7 +125,7 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 			o.setBillableSeconds(seconds)
 		}
 		o.coverInput(root)
-		if !o.durationBilled {
+		if !o.durationBilled && secondsOK {
 			o.durationUncovered = false
 		}
 		return ServerFrame{}, nil

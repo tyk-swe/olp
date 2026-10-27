@@ -81,10 +81,14 @@ func TestAzureResultAndUsage(t *testing.T) {
 	if v.(Result).Usage != nil {
 		t.Fatalf("missing pages invented usage: %+v", v.(Result).Usage)
 	}
+	textResult := `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"prebuilt-read","stringIndexType":"utf16CodeUnit","contentFormat":"text","content":"One","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":3}]}]}}`
+	if _, err = parseAzureResult(r, azureResultDoc(t, textResult)); err != nil {
+		t.Fatalf("text content format refused: %v", err)
+	}
 	for _, body := range []string{
 		`{"status":"running","analyzeResult":{"modelId":"m","content":"x"}}`,
 		`{"status":"failed","error":{"code":"x","message":"y"}}`,
-		`{"status":"succeeded","analyzeResult":{"modelId":"m","contentFormat":"text","content":"x"}}`,
+		`{"status":"succeeded","analyzeResult":{"modelId":"m","contentFormat":"html","content":"x"}}`,
 		`{"status":"succeeded","analyzeResult":{"modelId":"m","contentFormat":"markdown"}}`,
 		`{"status":"succeeded","analyzeResult":{"modelId":"m","contentFormat":"markdown","content":"x","pages":[{"pageNumber":0}]}}`,
 		`{"status":"succeeded","analyzeResult":{"modelId":"m","contentFormat":"markdown","content":"x","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":9}]}]}}`,
@@ -149,5 +153,16 @@ func TestAzureWire(t *testing.T) {
 	}
 	if string(wire.Body) != `{"urlSource":"https://example.com/a.pdf"}` {
 		t.Fatalf("body: %s", wire.Body)
+	}
+	readView, err := parseAzureRequest(azureRequestDoc(t, `{"model":"prebuilt-read","base64Source":"QUJD"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readWire, err := azureWire(readView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readWire.Query.Get("outputContentFormat") != "text" {
+		t.Fatalf("read query format = %q, want text (markdown is layout-only)", readWire.Query.Get("outputContentFormat"))
 	}
 }

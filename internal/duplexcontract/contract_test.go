@@ -265,7 +265,16 @@ func TestXAIObserverBillableAudioSecondsAreCumulative(t *testing.T) {
 	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r3"}}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r3","usage":{"billable_audio_seconds":45}}}`)); err != nil {
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r3","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("token-only usage discharged uncovered VAD duration")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r4"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r4","usage":{"billable_audio_seconds":45}}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if !observer.Complete() {

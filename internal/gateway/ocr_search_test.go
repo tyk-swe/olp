@@ -431,7 +431,7 @@ func TestSearchMutatingGuardrailRefused(t *testing.T) {
 	}
 }
 
-const azureSubmitPath = "/a/v1/documentintelligence/documentModels/model-a:analyze"
+const azureSubmitPath = "/a/v1/documentintelligence/documentModels/prebuilt-layout:analyze"
 const azurePollPath = "/a/v1/documentintelligence/documentModels/model-a/analyzeResults/result-1"
 const azureTwoPages = `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"model-a","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# One\n\n# Two","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":5}]},{"pageNumber":2,"spans":[{"offset":7,"length":5}]}]}}`
 
@@ -485,8 +485,15 @@ func azureHarness(t *testing.T, transformed bool, mock *azureMock) *harness {
 		if transformed {
 			route.Fidelity.Mode = routing.FidelityTransformed
 		}
+		for i := range route.Targets {
+			route.Targets[i].ProviderModel = "prebuilt-layout"
+		}
 		s.Routes[routeSlug] = route
 		ocrSearchProviders(s, "azure-document-intelligence", "azure-document-intelligence-ocr", "ocr")
+		for id, p := range s.Providers {
+			p.Capabilities = []routing.Capability{{Model: "prebuilt-layout", Operation: "ocr", Surface: p.Capabilities[0].Surface, Mode: "unary"}}
+			s.Providers[id] = p
+		}
 		if !transformed {
 			for id, p := range s.Providers {
 				p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "ocr", Surface: "native", Mode: "unary"}}
