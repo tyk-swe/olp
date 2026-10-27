@@ -32,8 +32,8 @@ import (
 const (
 	maxWebRTCSDPBytes     = 64 << 10
 	maxWebRTCSessionBytes = 64 << 10
-	webrtcCloseTimeout   = 10 * time.Second
-	webrtcAnswerTimeout  = 30 * time.Second
+	webrtcCloseTimeout    = 10 * time.Second
+	webrtcAnswerTimeout   = 30 * time.Second
 )
 
 type webrtcSession struct {
