@@ -283,7 +283,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	if origin := r.Header.Get("Origin"); origin != "" && !slices.Contains(s.cfg.CORSAllowedOrigins, origin) {
+	if !s.browserOriginAllowed(r) {
 		fail(permissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
 		return
 	}

@@ -295,6 +295,22 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	return request{cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
+func sameOrigin(r *http.Request, origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host == r.Host && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+func (s *Server) browserOriginAllowed(r *http.Request) bool {
+	values := r.Header.Values("Origin")
+	if len(values) == 0 {
+		return true
+	}
+	if len(values) != 1 {
+		return false
+	}
+	return slices.Contains(s.cfg.CORSAllowedOrigins, values[0]) || sameOrigin(r, values[0])
+}
+
 // cors permits browser SDK clients only from explicitly configured origins.
 func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	if !slices.Contains(s.cfg.CORSAllowedOrigins, r.Header.Get("Origin")) {

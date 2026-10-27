@@ -192,6 +192,12 @@ func webrtcCreate(t *testing.T, h *harness, key, session string) *http.Response 
 	return h.do(t.Context(), http.MethodPost, "/v1/realtime/calls", key, body, map[string]string{"Content-Type": contentType})
 }
 
+func webrtcCreateOrigin(t *testing.T, h *harness, key, origin string) *http.Response {
+	t.Helper()
+	body, contentType := webrtcCreateBody(t, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	return h.do(t.Context(), http.MethodPost, "/v1/realtime/calls", key, body, map[string]string{"Content-Type": contentType, "Origin": origin})
+}
+
 func waitEnvelopes(t *testing.T, h *harness, n int) []Envelope {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -266,6 +272,50 @@ func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testin
 	if strings.Contains(string(encoded), "olp-test-marker") || strings.Contains(string(encoded), secretA) {
 		t.Fatalf("SDP or credential in durable envelope: %s", encoded)
 	}
+}
+
+func TestWebRTCCreateBrowserOriginPolicy(t *testing.T) {
+	t.Run("same-origin browser creation succeeds without a CORS allowlist", func(t *testing.T) {
+		mock := newWebRTCMock("close")
+		h := webrtcHarness(t, mock, true)
+		resp := webrtcCreateOrigin(t, h, fullKey, h.server.URL)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated || string(body) != webrtcAnswerSDP {
+			t.Fatalf("same-origin create status=%d body=%q", resp.StatusCode, body)
+		}
+		if creates, _, _ := mock.counts(); creates != 1 {
+			t.Fatalf("creates=%d, want the provider session dispatched once", creates)
+		}
+		_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	})
+	t.Run("allowlisted cross-origin browser creation succeeds", func(t *testing.T) {
+		mock := newWebRTCMock("close")
+		h := webrtcHarnessCfg(t, mock, true, Config{CORSAllowedOrigins: []string{"https://app.example"}})
+		resp := webrtcCreateOrigin(t, h, fullKey, "https://app.example")
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated || string(body) != webrtcAnswerSDP {
+			t.Fatalf("allowlisted create status=%d body=%q", resp.StatusCode, body)
+		}
+		if creates, _, _ := mock.counts(); creates != 1 {
+			t.Fatalf("creates=%d, want the provider session dispatched once", creates)
+		}
+		_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	})
+	t.Run("foreign origin is refused before provider dispatch", func(t *testing.T) {
+		mock := newWebRTCMock("close")
+		h := webrtcHarness(t, mock, true)
+		resp := webrtcCreateOrigin(t, h, fullKey, "https://evil.example")
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "origin_forbidden") {
+			t.Fatalf("foreign create status=%d body=%q", resp.StatusCode, body)
+		}
+		if creates, _, _ := mock.counts(); creates != 0 {
+			t.Fatal("dispatched for a foreign origin")
+		}
+	})
 }
 
 func TestWebRTCRefusalsDispatchNothing(t *testing.T) {
