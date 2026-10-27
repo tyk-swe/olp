@@ -22,10 +22,10 @@ func passthroughHarness(t *testing.T) *harness {
 		route.Targets = route.Targets[:1]
 		route.Passthrough = &routing.PassthroughConfig{
 			Dialect:                    "bound-native",
-			Methods:                    []string{"GET", "POST"},
+			Methods:                    []string{"GET", "POST", "HEAD"},
 			Paths:                      []string{"/v1/widgets/*", "/v1/status"},
 			Query:                      []string{"limit"},
-			Headers:                    []string{"X-Widget-Mode"},
+			Headers:                    []string{"X-Widget-Mode", "If-None-Match"},
 			AcknowledgeOpaqueUnmetered: true,
 		}
 		s.Routes[routeSlug] = route
@@ -106,6 +106,17 @@ func TestPassthroughPricedRouteReservesFeeBeforeDispatch(t *testing.T) {
 	if resp.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 0 {
 		t.Fatalf("priced passthrough dispatched past its budget: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
 	}
+	h.rt.inputs.Discounts = []usage.RoutingDiscount{{ID: "discount-1", ProviderKind: "openai_compatible", Multiplier: "0.5", EffectiveAt: time.Now().Add(-time.Hour)}}
+	resp = h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 {
+		t.Fatalf("discounted passthrough not admitted at its discounted fee: %d calls=%d", resp.StatusCode, h.mock.count("a"))
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 || env.Attempts[0].Discount == nil {
+		t.Fatalf("discount not pinned on the attempt fact: %+v", env.Attempts)
+	}
 }
 
 func TestPassthroughOversizedChunkedResponseRefusedBeforeCommit(t *testing.T) {
@@ -141,6 +152,49 @@ func TestPassthroughTruncatedResponseRefusedBeforeCommit(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("truncated response delivered as %d with %q", resp.StatusCode, body)
+	}
+}
+
+func TestPassthroughHeadAndConditionalResponsesPassThrough(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.Header().Set("ETag", `"v1"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Length", "2097152")
+		w.WriteHeader(http.StatusOK)
+	})
+	head := h.do(t.Context(), http.MethodHead, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, head.Body)
+	head.Body.Close()
+	if head.StatusCode != http.StatusOK || head.Header.Get("Content-Length") != "2097152" {
+		t.Fatalf("HEAD metadata refused or lost: %d content-length=%q", head.StatusCode, head.Header.Get("Content-Length"))
+	}
+	conditional := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{"If-None-Match": `"v1"`})
+	io.Copy(io.Discard, conditional.Body)
+	conditional.Body.Close()
+	if conditional.StatusCode != http.StatusNotModified {
+		t.Fatalf("conditional response rewritten: %d", conditional.StatusCode)
+	}
+}
+
+func TestPassthroughUpstreamErrorRecordsFailureOutcome(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		io.WriteString(w, `{"error":"missing"}`)
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("upstream status not forwarded: %d", resp.StatusCode)
+	}
+	env := h.sink.last(t)
+	if env.Outcome != "failure" {
+		t.Fatalf("forwarded upstream error recorded as %q outcome", env.Outcome)
 	}
 }
 

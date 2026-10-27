@@ -452,6 +452,50 @@ func TestExecutionDebitDefinitiveRejectionSettlesAsUnbilled(t *testing.T) {
 	}
 }
 
+func TestExecutionDebitUnpricedCleanSessionDoesNotBlockLaterSessions(t *testing.T) {
+	f, s, project := debitFixture(t)
+	valkey, prefix, _ := acctKeyspace(t)
+	s.Limiter, _ = limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	i := debitIntent(t, f, project)
+	prepareDebit(t, f, s, i)
+	if err := s.Admit(t.Context(), i.ID, i.ClaimID, []limits.Request{{CostOwnerID: f.Key}, {CostOwnerID: f.Provider}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkDispatched(t.Context(), i.ID, i.ClaimID); err != nil {
+		t.Fatal(err)
+	}
+	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 1, "unpriced-model", 200, acctObserved(3, 2, nil, nil))}})
+	event.RuntimeGenerationID = i.Affinity.ReleaseID
+	event.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: i.Affinity.ProviderRevisionID}
+	event.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: i.ID}
+	payload, err := usage.Encode(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = usage.PersistDebitEventTx(t.Context(), tx, event, payload); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var unpriced bool
+	if err = f.Pool.QueryRow(t.Context(), `SELECT state FROM olp.execution_debits WHERE id=$1`, i.ID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Pool.QueryRow(t.Context(), `SELECT unpriced FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID).Scan(&unpriced); err != nil || !unpriced {
+		t.Fatalf("unpriced accounting not retained: unpriced=%v err=%v", unpriced, err)
+	}
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key); err != nil || held {
+		t.Fatalf("clean unpriced session in state %s blocks later sessions: held=%v err=%v", state, held, err)
+	}
+}
+
 func TestExecutionDebitPrepareSupportsUnsetPricingCurrency(t *testing.T) {
 	f := acctSeed(t, acctPool(t))
 	project := acctID(t)

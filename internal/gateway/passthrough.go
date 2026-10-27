@@ -9,6 +9,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,6 +167,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	attempt := routing.Attempt{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, ProviderKind: provider.Kind, UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, VendorID: provider.VendorID}
 	if inputs := s.Runtime.RoutingInputs(); inputs != nil {
 		attempt.Price = inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, routing.PassthroughOperation, s.now())
+		attempt.Discount = inputs.Discount(provider.Kind, provider.ID, provider.VendorID, s.now())
 	}
 	defer s.settleCaps(r.Context(), x)
 	estimate := max(resourceEstimate, x.estimate)
@@ -276,7 +278,8 @@ slots:
 	defer resp.Body.Close()
 	received := s.now().Sub(factP.StartedAt)
 	factP.FirstByte, factP.Status = &received, resp.StatusCode
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
 		factP.recordEvidence(true)
 		fail(serverError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
@@ -286,7 +289,7 @@ slots:
 	if responseLimit <= 0 {
 		responseLimit = 1 << 20
 	}
-	if resp.ContentLength > responseLimit {
+	if r.Method != http.MethodHead && resp.ContentLength > responseLimit {
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
 		factP.recordEvidence(true)
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
@@ -317,12 +320,15 @@ slots:
 			w.Header().Add(canonical, value)
 		}
 	}
+	if r.Method == http.MethodHead && resp.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+	}
 	w.WriteHeader(resp.StatusCode)
 	x.delivered(s.now())
 	n, copyErr := w.Write(payload)
 	written := int64(n)
 	factP.Duration = s.now().Sub(factP.StartedAt)
-	success := resp.StatusCode >= 200 && resp.StatusCode < 300 && copyErr == nil && written <= responseLimit
+	success := (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified) && copyErr == nil && written <= responseLimit
 	switch {
 	case success:
 		factP.Class = classSuccess
@@ -340,8 +346,12 @@ slots:
 		factP.recordEvidence(true)
 	}
 	out := &outcome{committed: success}
-	if !success && copyErr != nil {
-		out.err = serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
+	if !success {
+		if copyErr != nil {
+			out.err = serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
+		} else {
+			out.err = upstreamError(&attemptFailure{status: resp.StatusCode})
+		}
 	}
 	s.finish(x, out, resp.StatusCode)
 }

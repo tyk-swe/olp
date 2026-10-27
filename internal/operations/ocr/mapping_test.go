@@ -242,6 +242,36 @@ func TestOCRMappingProjectAzure(t *testing.T) {
 	}
 }
 
+func TestOCRMappingProjectAzureBlankPage(t *testing.T) {
+	mapping := mistralToAzure(t)
+	source := request(t, `{"model":"route","document":{"type":"document_url","document_url":"https://x"}}`)
+	body := `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# One","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":5}]},{"pageNumber":2,"spans":[]}]}}`
+	res := azureResultDoc(t, body)
+	view, err := parseAzureResult(azureRequestDoc(t, `{"model":"prebuilt-layout","urlSource":"https://x"}`), res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := mapping.Project(source, res, view, "route")
+	if err != nil {
+		t.Fatalf("blank page refused projection: %v", err)
+	}
+	var out struct {
+		Pages []struct {
+			Index    int    `json:"index"`
+			Markdown string `json:"markdown"`
+		} `json:"pages"`
+		UsageInfo struct {
+			PagesProcessed int `json:"pages_processed"`
+		} `json:"usage_info"`
+	}
+	if json.Unmarshal(doc.Bytes(), &out) != nil {
+		t.Fatalf("projection: %s", doc.Bytes())
+	}
+	if len(out.Pages) != 2 || out.Pages[0].Markdown != "# One" || out.Pages[1].Markdown != "" || out.Pages[1].Index != 1 || out.UsageInfo.PagesProcessed != 2 {
+		t.Fatalf("projection: %+v", out)
+	}
+}
+
 func TestOCRMappingProjectAzureMissingPages(t *testing.T) {
 	mapping := mistralToAzure(t)
 	source := request(t, `{"model":"route","document":{"type":"document_url","document_url":"https://x"}}`)

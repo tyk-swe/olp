@@ -232,7 +232,7 @@ func (s *DebitStore) HasUnknownDebit(ctx context.Context, apiKeyID string) (bool
 		return false, ErrDebitConflict
 	}
 	var held bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits WHERE api_key_id=$1 AND state='outcome_unknown' AND closed_at IS NULL)`, apiKeyID).Scan(&held)
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND d.state='outcome_unknown' AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND NOT f.usage_complete)))`, apiKeyID).Scan(&held)
 	return held, err
 }
 

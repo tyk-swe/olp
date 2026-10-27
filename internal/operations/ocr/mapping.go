@@ -297,8 +297,12 @@ func azurePages(parsed *azureResult) ([]any, error) {
 	for i, page := range parsed.pages {
 		markdown := parsed.content
 		if len(parsed.pages) > 1 || page.hasSpans {
-			if !page.hasSpans || len(page.spans) == 0 {
+			if !page.hasSpans {
 				return nil, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
+			}
+			if len(page.spans) == 0 {
+				pages[i] = map[string]any{"index": jsonNumber(page.number - 1), "markdown": ""}
+				continue
 			}
 			text, ok := utf16Slice(parsed.content, page.spans)
 			if !ok {

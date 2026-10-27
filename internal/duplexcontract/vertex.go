@@ -215,14 +215,25 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 	if err != nil {
 		return err
 	}
-	if content, ok := doc.Root().Lookup("clientContent"); ok && content.Kind() == oif.Object {
-		if complete, present := content.Lookup("turnComplete"); present && complete.Kind() == oif.Boolean && complete.Raw() == "true" {
-			o.submitted++
+	content, contentOK := doc.Root().Lookup("clientContent")
+	if !contentOK {
+		content, contentOK = doc.Root().Lookup("client_content")
+	}
+	if contentOK && content.Kind() == oif.Object {
+		for _, name := range []string{"turnComplete", "turn_complete"} {
+			if complete, present := content.Lookup(name); present && complete.Kind() == oif.Boolean && complete.Raw() == "true" {
+				o.submitted++
+			}
 		}
 	}
-	if input, ok := doc.Root().Lookup("realtimeInput"); ok && input.Kind() == oif.Object {
+	input, inputOK := doc.Root().Lookup("realtimeInput")
+	if !inputOK {
+		input, inputOK = doc.Root().Lookup("realtime_input")
+	}
+	if inputOK && input.Kind() == oif.Object {
 		for _, member := range input.Members() {
-			if member.Name == "activityEnd" || member.Name == "audioStreamEnd" || member.Name == "text" {
+			switch member.Name {
+			case "activityEnd", "activity_end", "audioStreamEnd", "audio_stream_end", "text":
 				o.realtimeTurn = true
 			}
 		}
