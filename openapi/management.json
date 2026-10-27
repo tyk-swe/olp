@@ -15397,11 +15397,14 @@
             ]
           },
           "adapter": {
-            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
+            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
             "enum": [
               "codex",
               "opencode_go",
               "zai_coding",
+              "minimax_plan",
+              "kimi_code",
+              "qwen_token_plan",
               null
             ],
             "type": [
@@ -16000,7 +16003,10 @@
               "enum": [
                 "codex",
                 "opencode_go",
-                "zai_coding"
+                "zai_coding",
+                "minimax_plan",
+                "kimi_code",
+                "qwen_token_plan"
               ],
               "type": "string"
             },
@@ -16404,12 +16410,15 @@
         "description": "Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.",
         "properties": {
           "adapters": {
-            "description": "The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.",
+            "description": "The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.",
             "items": {
               "enum": [
                 "codex",
                 "opencode_go",
-                "zai_coding"
+                "zai_coding",
+                "minimax_plan",
+                "kimi_code",
+                "qwen_token_plan"
               ],
               "type": "string"
             },

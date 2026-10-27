@@ -46,7 +46,7 @@ func NewClaudeCode(t testing.TB, key string) *Agent {
 func NewOpenCode(t testing.TB, key string) *Agent {
 	a := agent(t, "OLP_OPENCODE_BINARY", key, "%s")
 	a.env = append(a.env, "OPENCODE_DISABLE_AUTOUPDATE=1", "OPENCODE_DISABLE_MODELS_FETCH=1", "OPENCODE_DISABLE_LSP_DOWNLOAD=1", "OPENCODE_DISABLE_DEFAULT_PLUGINS=1",
-		"OPENCODE_API_KEY="+Decoy, "ZHIPU_API_KEY="+Decoy)
+		"OPENCODE_API_KEY="+Decoy, "ZHIPU_API_KEY="+Decoy, "MINIMAX_API_KEY="+Decoy)
 	a.Registry = "registry.npmjs.org"
 	a.args = func(configuration string, args []string) (string, []string) {
 		write(t, filepath.Join(a.Work, "opencode.json"), configuration)
