@@ -232,12 +232,18 @@ class AppServer:
 
 
 def pick_message(messages):
-    for phase in ("final_answer", "partial_answer", None):
-        for item in reversed(messages):
-            if phase is None or item.get("phase") == phase:
-                text = item.get("text") or ""
-                if text.strip():
-                    return text
+    answers = [
+        text
+        for item in messages
+        if item.get("phase") in ("partial_answer", "final_answer", None)
+        and (text := (item.get("text") or "")).strip()
+    ]
+    if answers:
+        return "\n".join(answers)
+    for item in reversed(messages):
+        text = item.get("text") or ""
+        if text.strip():
+            return text
     raise TurnFailed("turn completed with no agent message")
 
 
@@ -309,7 +315,7 @@ def main(argv):
         meta = {
             "threadId": thread_id,
             "model": resolved_model,
-            "reasoningEffort": effort,
+            "reasoningEffort": args.effort or effort,
             "tokenUsage": token_usage,
         }
         print(f"sol-review: {json.dumps(meta)}", file=sys.stderr)
