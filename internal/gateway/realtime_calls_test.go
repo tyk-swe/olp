@@ -255,7 +255,7 @@ func webrtcCreateBody(t *testing.T, session string) ([]byte, string) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return buf.Bytes(), writer.FormDataContentType(), nil
+	return buf.Bytes(), writer.FormDataContentType()
 }
 
 func webrtcCreate(t *testing.T, h *harness, key, session string) *http.Response {
