@@ -443,11 +443,11 @@ func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *apiErro
 	if !pinned {
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	tools, ok := snapshot.MCPTools(current.toolsetRevisionID)
+	resolution, ok := snapshot.MCPToolset(current.toolsetRevisionID)
 	if !ok {
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	return resolvedToolset{id: current.toolsetID, revisionID: current.toolsetRevisionID, tools: tools}, nil
+	return resolvedToolset{id: current.toolsetID, revisionID: current.toolsetRevisionID, tools: resolution.Tools, drifted: resolution.Drifted}, nil
 }
 
 type wireTool struct {

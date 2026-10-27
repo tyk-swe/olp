@@ -46,6 +46,11 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 		return nil, ErrCertification
 	}
 	defer c.Close(ctx)
+	return c.CertifyCatalog(ctx)
+}
+
+func (c *Transport) CertifyCatalog(ctx context.Context) (*Catalog, error) {
+	credential := []byte(c.token)
 	result := &Catalog{Protocol: c.Protocol(), Tools: []Tool{}}
 	seen := map[string]bool{}
 	cursors := map[string]bool{}
@@ -64,7 +69,7 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 			if c.token != "" && (strings.Contains(t.Name, c.token) || strings.Contains(t.Description, c.token) || bytes.Contains(t.InputSchema, credential)) {
 				return nil, ErrCertification
 			}
-			if err = validateSchema(t.InputSchema); err != nil {
+			if err := validateSchema(t.InputSchema); err != nil {
 				return nil, ErrCertification
 			}
 			schema, _ := jsonschema.UnmarshalJSON(bytes.NewReader(t.InputSchema))

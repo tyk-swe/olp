@@ -178,6 +178,7 @@ type resolvedToolset struct {
 	id         string
 	revisionID string
 	tools      []routing.MCPToolsetTool
+	drifted    []routing.MCPDriftedTool
 }
 
 func (s *Server) snapshot() (*runtime.Release, *routing.Snapshot, *apiError) {
@@ -214,11 +215,11 @@ func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Sn
 		}
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	tools, ok := snapshot.MCPTools(revisionID)
+	resolution, ok := snapshot.MCPToolset(revisionID)
 	if !ok {
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	return resolvedToolset{id: toolsetID, revisionID: revisionID, tools: tools}, nil
+	return resolvedToolset{id: toolsetID, revisionID: revisionID, tools: resolution.Tools, drifted: resolution.Drifted}, nil
 }
 
 type listedTool struct {

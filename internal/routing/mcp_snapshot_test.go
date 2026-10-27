@@ -42,12 +42,12 @@ func TestSnapshotResolvesPinnedMCPToolAndValidatesArguments(t *testing.T) {
 	if err := snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
-	tools, ok := snapshot.MCPTools(mcpRevision)
-	if !ok || len(tools) != 1 {
-		t.Fatalf("pinned toolset did not resolve: ok=%v tools=%+v", ok, tools)
+	resolved, ok := snapshot.MCPToolset(mcpRevision)
+	if !ok || len(resolved.Tools) != 1 || len(resolved.Drifted) != 0 {
+		t.Fatalf("pinned toolset did not resolve: ok=%v resolved=%+v", ok, resolved)
 	}
-	tool := tools[0]
-	if tool.Alias != agentcontract.ToolAlias(mcpServerID, "lookup") || tool.Name != "lookup" || tool.Endpoint != "https://tools.example.test/mcp" || tool.ServerID != mcpServerID || tool.ServerRevisionID != mcpServerRv || tool.CredentialID == nil || *tool.CredentialID != mcpCredID {
+	tool := resolved.Tools[0]
+	if tool.Alias != agentcontract.ToolAlias(mcpServerID, "lookup") || tool.Name != "lookup" || tool.Endpoint != "https://tools.example.test/mcp" || tool.ServerID != mcpServerID || tool.ServerRevisionID != mcpServerRv || tool.CatalogDigest != digest || tool.CredentialID == nil || *tool.CredentialID != mcpCredID {
 		t.Fatalf("resolved tool lost its pin: %+v", tool)
 	}
 	if err := tool.ValidateArguments(json.RawMessage(`{"query":"x"}`)); err != nil {
@@ -58,20 +58,65 @@ func TestSnapshotResolvesPinnedMCPToolAndValidatesArguments(t *testing.T) {
 			t.Fatalf("invalid arguments accepted: %s", bad)
 		}
 	}
-	if _, ok = snapshot.MCPTools("0192cf87-d4ab-7f2e-a8b1-c2d3e4f50699"); ok {
+	if _, ok = snapshot.MCPToolset("0192cf87-d4ab-7f2e-a8b1-c2d3e4f50699"); ok {
 		t.Fatal("unknown revision resolved as a toolset")
 	}
 }
 
-func TestSnapshotExcludesMCPToolsWhosePinDriftedFromCatalog(t *testing.T) {
-	snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
-	snapshot.MCPServers[0].Digest = strings.Repeat("b", 64)
-	if err := snapshot.Compile(); err != nil {
-		t.Fatal(err)
+func TestSnapshotReportsMCPToolsWhosePinDriftedFromCatalog(t *testing.T) {
+	drift := map[string]func(*Snapshot){
+		"catalog digest changed": func(snapshot *Snapshot) {
+			snapshot.MCPServers[0].Digest = strings.Repeat("b", 64)
+		},
+		"server revision advanced": func(snapshot *Snapshot) {
+			snapshot.MCPServers[0].RevisionID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50617"
+		},
+		"pinned tool left the catalog": func(snapshot *Snapshot) {
+			snapshot.MCPServers[0].Tools[0].Name = "renamed"
+		},
 	}
-	tools, ok := snapshot.MCPTools(mcpRevision)
-	if !ok || len(tools) != 0 {
-		t.Fatalf("drifted pin stayed callable: ok=%v tools=%+v", ok, tools)
+	for name, mutate := range drift {
+		t.Run(name, func(t *testing.T) {
+			snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
+			mutate(&snapshot)
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			resolved, ok := snapshot.MCPToolset(mcpRevision)
+			if !ok || len(resolved.Tools) != 0 {
+				t.Fatalf("drifted pin stayed callable: ok=%v resolved=%+v", ok, resolved)
+			}
+			if len(resolved.Drifted) != 1 {
+				t.Fatalf("drifted pin disappeared without a trace: %+v", resolved)
+			}
+			pin := resolved.Drifted[0]
+			if pin.Alias != agentcontract.ToolAlias(mcpServerID, "lookup") || pin.Name != "lookup" || pin.ServerID != mcpServerID || pin.ServerRevisionID != mcpServerRv || pin.CatalogDigest != strings.Repeat("a", 64) {
+				t.Fatalf("drifted pin lost its published identity: %+v", pin)
+			}
+		})
+	}
+}
+
+func TestSnapshotMissingMCPServerIsNotReportedAsDrift(t *testing.T) {
+	for name, mutate := range map[string]func(*Snapshot){
+		"server gone": func(snapshot *Snapshot) {
+			snapshot.MCPServers = nil
+		},
+		"server in another project": func(snapshot *Snapshot) {
+			snapshot.MCPServers[0].ProjectID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50618"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
+			mutate(&snapshot)
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			resolved, ok := snapshot.MCPToolset(mcpRevision)
+			if !ok || len(resolved.Tools) != 0 || len(resolved.Drifted) != 0 {
+				t.Fatalf("unavailable server was reported as callable or drifted: ok=%v resolved=%+v", ok, resolved)
+			}
+		})
 	}
 }
 
