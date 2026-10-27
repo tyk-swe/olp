@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/plugin-index/v1",
-  "published_at": "2026-10-27T08:53:37Z",
+  "published_at": "2026-10-27T09:40:24Z",
   "plugins": [
     {
       "name": "codex",
@@ -37,20 +37,21 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "ffa521eda47fbce25292a3b5e2b0925f6e9976c8814193d790b189889e307702",
+          "digest": "2a05291aa160d7da24ec1882833b03d485fb77e776566772137d21c16ec4ddd5",
           "abi_version": 1,
-          "size_bytes": 5232084,
+          "size_bytes": 5232739,
           "origins": [
             "https://api.kimi.ai",
             "https://api.kimi.com",
+            "https://www.kimi.ai",
             "https://www.kimi.com"
           ],
           "profiles": [
             "kimi-code",
             "kimi-code-cn"
           ],
-          "commit": "09a0c7c92777995c3252b6f1907c02fe7cb61094",
-          "reviewed_at": "2026-10-27T08:53:34Z"
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:18Z"
         }
       ]
     },
@@ -64,9 +65,9 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "e84d939ab0139167a6efa06515724b805f89b846b603619e9c53be21ce855077",
+          "digest": "8eb35eacad9c85849de09753fb11938a34cd5e6d2583c84f0e2f5a658dc07f38",
           "abi_version": 1,
-          "size_bytes": 5232917,
+          "size_bytes": 5232910,
           "origins": [
             "https://api.minimax.cn",
             "https://api.minimax.io",
@@ -77,8 +78,8 @@
             "minimax-plan",
             "minimax-plan-cn"
           ],
-          "commit": "09a0c7c92777995c3252b6f1907c02fe7cb61094",
-          "reviewed_at": "2026-10-27T08:53:35Z"
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:19Z"
         }
       ]
     },
@@ -92,17 +93,17 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "8c8373711bbabc394d0f42e0e70a8b6c8b56fdb5a96780880ee56d337665fd15",
+          "digest": "31dde5563966b14d5f545ae1c111c3576c20f8c2d2476b889238e74d4390024a",
           "abi_version": 1,
-          "size_bytes": 5202650,
+          "size_bytes": 5231011,
           "origins": [
             "https://opencode.ai"
           ],
           "profiles": [
             "opencode-go"
           ],
-          "commit": "531354f829421e75b190defe406dc9049af7d111",
-          "reviewed_at": "2026-10-05T16:09:39Z"
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:22Z"
         }
       ]
     },
@@ -116,9 +117,9 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "751d2672bc70fa2c84407db3e586f3f426f482373a8f7ff043f7a3e68532503f",
+          "digest": "4d167fd39d99b0fb82929cc8ac9f23b33febef9ee48ccb656928861aa36777ca",
           "abi_version": 1,
-          "size_bytes": 5233151,
+          "size_bytes": 5233140,
           "origins": [
             "https://bailian.console.aliyun.com",
             "https://modelstudio.console.alibabacloud.com",
@@ -129,8 +130,8 @@
             "qwen-token-plan",
             "qwen-token-plan-cn"
           ],
-          "commit": "09a0c7c92777995c3252b6f1907c02fe7cb61094",
-          "reviewed_at": "2026-10-27T08:53:37Z"
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:21Z"
         }
       ]
     },
@@ -144,9 +145,9 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "ff2d4443e1dee38efc4f1e7818f120dd2d369b2160776e6495787ee026e1a5fa",
+          "digest": "0a958052a76092ef220a34cc9c72594d3b5333d83fb6c0fd762755771da3aee9",
           "abi_version": 1,
-          "size_bytes": 5203788,
+          "size_bytes": 5232160,
           "origins": [
             "https://api.z.ai",
             "https://open.bigmodel.cn",
@@ -156,8 +157,8 @@
             "bigmodel-coding-plan",
             "zai-coding-plan"
           ],
-          "commit": "531354f829421e75b190defe406dc9049af7d111",
-          "reviewed_at": "2026-10-05T16:09:39Z"
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:24Z"
         }
       ]
     }
