@@ -13186,7 +13186,8 @@
           "unary",
           "streaming",
           "async",
-          "realtime"
+          "realtime",
+          "webrtc"
         ],
         "type": "string"
       },

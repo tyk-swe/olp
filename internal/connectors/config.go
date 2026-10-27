@@ -498,3 +498,42 @@ func (c Config) RealtimeURL(model string) (string, error) {
 	}
 	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
 }
+
+var realtimeCallID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+func (c Config) RealtimeCallsURL(model string) (string, error) {
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
+		return "", errors.New("profile does not support webrtc")
+	}
+	return c.ResourceURL(model, "realtime/calls", nil)
+}
+
+func (c Config) RealtimeControlURL(model, callID string) (string, error) {
+	if !realtimeCallID.MatchString(callID) {
+		return "", errors.New("invalid realtime call id")
+	}
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
+		return "", errors.New("profile does not support webrtc")
+	}
+	endpoint, err := c.ResourceURL(model, "realtime", url.Values{"call_id": {callID}})
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(endpoint, "https://") {
+		return "wss://" + strings.TrimPrefix(endpoint, "https://"), nil
+	}
+	if strings.HasPrefix(endpoint, "http://") {
+		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
+	}
+	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
+}
+
+func (c Config) RealtimeHangupURL(model, callID string) (string, error) {
+	if !realtimeCallID.MatchString(callID) {
+		return "", errors.New("invalid realtime call id")
+	}
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
+		return "", errors.New("profile does not support webrtc")
+	}
+	return c.ResourceURL(model, "realtime/calls/"+url.PathEscape(callID)+"/hangup", nil)
+}

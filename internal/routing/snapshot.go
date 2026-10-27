@@ -206,6 +206,7 @@ type Snapshot struct {
 	media              map[string]map[string]*mediacontract.Template
 	durable            map[string]map[string]*durablecontract.Template
 	realtime           map[string]map[string]*realtimecontract.Template
+	webrtc             map[string]map[string]*realtimecontract.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -355,6 +356,7 @@ func (s *Snapshot) Compile() error {
 	next.media = make(map[string]map[string]*mediacontract.Template)
 	next.durable = make(map[string]map[string]*durablecontract.Template)
 	next.realtime = make(map[string]map[string]*realtimecontract.Template)
+	next.webrtc = make(map[string]map[string]*realtimecontract.Template)
 	for slug, r := range next.Routes {
 		r.guardrailMigrated = next.Guardrails != nil && next.Guardrails.MigratedRoutes[r.ID]
 		templates, policy, err := next.compileRouteExecution(r)
@@ -382,6 +384,11 @@ func (s *Snapshot) Compile() error {
 			return fmt.Errorf("route %q realtime: %w", slug, err)
 		}
 		next.realtime[slug] = duplex
+		calls, err := next.compileWebRTC(r)
+		if err != nil {
+			return fmt.Errorf("route %q webrtc: %w", slug, err)
+		}
+		next.webrtc[slug] = calls
 		r.compiledContentPolicy = policy
 		next.Routes[slug] = r
 	}

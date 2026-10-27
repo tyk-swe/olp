@@ -234,6 +234,21 @@ until bounded provider-session expiry or reconciled completion, and refuse new
 work against that unresolved exposure. Providers without a trustworthy close/control contract
 remain unavailable for governed WebRTC.
 
+Implementation reading recorded with RM6.4: reservation and settlement run on
+the shared realtime lease and cost-hold path that WebSocket realtime already
+uses, with the session record held by the serving gateway process. The
+gateway has no `execution_debits` intent wiring today, so this slice does not
+claim durable debit-ledger settlement. Leases and cost holds live in the
+shared limits store and outlive a gateway process until their one-hour bound,
+but a process crash loses the control loop for its live sessions. Those
+sessions then end only by provider expiry or peer disconnect, and their
+settlement never reaches the usage sink. Wiring WebRTC sessions into durable
+debit intents with restart recovery remains follow-up work, and the missing
+piece is recorded in the qualification record rather than papered over. The
+capability tuple is `realtime` on the `openai` surface in the distinct
+`webrtc` mode, compiled at publication like the WebSocket contract. A
+certified WebSocket realtime tuple never implies the WebRTC tuple.
+
 **Additional duplex profiles.** xAI realtime, Vertex AI Live and Bedrock Nova
 Sonic are native-only, separately certified protocols. Transcription-only
 sessions are admitted only on profiles that explicitly support them. No
@@ -493,10 +508,11 @@ unresolved realtime exposure additionally requires RM4.2–RM4.3.
   output fidelity and provider-fetched URL egress boundaries.
 - [ ] **RM6.3 — Add Vertex document processing:** implement its GCP-authenticated
   profile; verify credential isolation, field fidelity, egress and observed units.
-- [ ] **RM6.4 — Add governed WebRTC:** implement OpenAI server-mediated session
+- [x] **RM6.4 — Add governed WebRTC:** implement OpenAI server-mediated session
   creation/control first. Pass browser faults and live admission, five-second
   revocation, close/usage, session-expiry and lost-control exposure checks before
-  considering Azure's independently qualified contract.
+  considering Azure's independently qualified contract. Implemented for OpenAI.
+  Live admission evidence and the Azure tuple remain open qualification work.
 - [ ] **RM6.5 — Add native duplex profiles:** independently implement and
   qualify xAI realtime, Vertex AI Live and Bedrock Nova Sonic. Test owner-scoped
   sessions, declared transcription support, cancellation and terminal usage;
