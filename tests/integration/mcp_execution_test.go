@@ -140,6 +140,37 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		}
 		return resp.StatusCode, out
 	}
+	mcpCall := func(method, path, sessionID string, body any) (int, http.Header, map[string]any) {
+		t.Helper()
+		var data []byte
+		if body != nil {
+			data, _ = json.Marshal(body)
+		}
+		req, err := http.NewRequest(method, consumer.URL+path, bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if sessionID != "" {
+			req.Header.Set("Mcp-Session-Id", sessionID)
+			req.Header.Set("MCP-Protocol-Version", "2025-11-25")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if len(raw) > 0 {
+			if err = json.Unmarshal(raw, &out); err != nil {
+				t.Fatalf("consumer MCP response is not JSON: %s", raw)
+			}
+		}
+		return resp.StatusCode, resp.Header, out
+	}
 	debitCount := func() int {
 		t.Helper()
 		var count int
@@ -196,5 +227,50 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50799", "name": tool.Alias, "arguments": map[string]any{"query": "x"}})
 	if status != http.StatusNotFound || calls.Load() != 1 || debitCount() != 1 {
 		t.Fatalf("foreign toolset dispatched: status=%d calls=%d debits=%d", status, calls.Load(), debitCount())
+	}
+
+	status, headers, initialized := mcpCall("POST", "/mcp?toolset_id="+toolsetID, "", map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "integration", "version": "1"}},
+	})
+	sessionID := headers.Get("Mcp-Session-Id")
+	initResult, _ := initialized["result"].(map[string]any)
+	if status != http.StatusOK || sessionID == "" || initResult["protocolVersion"] != "2025-11-25" {
+		t.Fatalf("streamable session did not initialize: status=%d body=%v", status, initialized)
+	}
+	if status, _, _ = mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}); status != http.StatusAccepted {
+		t.Fatalf("initialized notification refused: %d", status)
+	}
+	status, _, sessionListed := mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": map[string]any{}})
+	sessionTools, _ := sessionListed["result"].(map[string]any)["tools"].([]any)
+	if status != http.StatusOK || len(sessionTools) != 1 || sessionTools[0].(map[string]any)["name"] != tool.Alias {
+		t.Fatalf("session did not list the pinned tool: status=%d body=%v", status, sessionListed)
+	}
+	if _, ok := sessionTools[0].(map[string]any)["inputSchema"]; !ok {
+		t.Fatalf("session listing lost the wire schema: %v", sessionTools)
+	}
+	_, _, refused := mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": map[string]any{}})
+	if data, _ := refused["error"].(map[string]any)["data"].(map[string]any); data["code"] != "unsupported_capability" {
+		t.Fatalf("arbitrary resource access was not refused explicitly: %v", refused)
+	}
+	status, _, sessionCalled := mcpCall("POST", "/mcp", sessionID, map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+	})
+	callResult, _ := sessionCalled["result"].(map[string]any)
+	sessionContent, _ := callResult["content"].([]any)
+	if status != http.StatusOK || calls.Load() != 2 || len(sessionContent) != 1 || sessionContent[0].(map[string]any)["text"] != answer {
+		t.Fatalf("session call did not return the upstream result: status=%d calls=%d body=%v", status, calls.Load(), sessionCalled)
+	}
+	meta, _ := callResult["_meta"].(map[string]any)
+	var sessionState string
+	if err = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.execution_debits WHERE id=$1`, meta["olp.dispatch_id"]).Scan(&sessionState); err != nil || sessionState != "settled" || debitCount() != 2 {
+		t.Fatalf("session dispatch did not settle on the shared ledger: state=%q err=%v debits=%d", sessionState, err, debitCount())
+	}
+	if status, _, _ = mcpCall("DELETE", "/mcp", sessionID, nil); status != http.StatusNoContent {
+		t.Fatalf("session delete refused: %d", status)
+	}
+	if status, _, _ = mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": map[string]any{}}); status != http.StatusNotFound {
+		t.Fatalf("deleted session stayed usable: %d", status)
 	}
 }

@@ -57,13 +57,17 @@ func (t *timeline) snapshot() []string {
 }
 
 type fakeRuntime struct {
-	authority   *access.Authority
-	release     *runtime.Release
-	failAuthzOn int
-	authzCalls  atomic.Int32
+	authority      *access.Authority
+	otherAuthority *access.Authority
+	release        *runtime.Release
+	failAuthzOn    int
+	authzCalls     atomic.Int32
 }
 
 func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
+	if secret == "other-key" && f.otherAuthority != nil {
+		return f.otherAuthority, nil
+	}
 	if secret != "test-key" || f.authority == nil {
 		return nil, errors.New("invalid key")
 	}

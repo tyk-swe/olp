@@ -9804,6 +9804,115 @@
         "enforced budget exhausted"
       ],
       "reference_revision": "MCP 2025-11-25 tools over the OLP JSON endpoints; no locked SDK covers the first-party JSON surface"
+    },
+    {
+      "slice": "RM7.1",
+      "method": "POST",
+      "path": "/mcp",
+      "operation": "tool_session",
+      "source_dialect": "mcp-streamable-http",
+      "dialect_revision": "2025-11-25",
+      "provider": "olp",
+      "profile": "mcp-tools-streamable-http",
+      "profile_revision": "1",
+      "transport": "http",
+      "mode": "unary",
+      "sdk": null,
+      "supported_fields": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params",
+        "protocolVersion",
+        "capabilities",
+        "clientInfo",
+        "tools",
+        "name",
+        "arguments",
+        "content",
+        "structuredContent",
+        "isError",
+        "_meta"
+      ],
+      "status": "implemented",
+      "expected_refusal": null,
+      "evidence": [
+        "internal/mcp/streamable.go",
+        "internal/mcp/session.go",
+        "internal/mcp/session_test.go",
+        "tests/integration/mcp_execution_test.go"
+      ],
+      "live_qualification": "required",
+      "refusals": [
+        "missing tools scope",
+        "toolset outside the key allowlist",
+        "arguments outside the pinned schema",
+        "enforced budget exhausted",
+        "session belongs to another principal",
+        "session idle for fifteen minutes",
+        "sixty-five sessions for one key",
+        "sampling, elicitation, roots and arbitrary resource access"
+      ],
+      "reference_revision": "MCP Streamable HTTP at 2025-03-26, 2025-06-18 and 2025-11-25; no locked SDK covers the first-party consumer surface"
+    },
+    {
+      "slice": "RM7.1",
+      "method": "DELETE",
+      "path": "/mcp",
+      "operation": "tool_session_terminate",
+      "source_dialect": "mcp-streamable-http",
+      "dialect_revision": "2025-11-25",
+      "provider": "olp",
+      "profile": "mcp-tools-streamable-http",
+      "profile_revision": "1",
+      "transport": "http",
+      "mode": "unary",
+      "sdk": null,
+      "supported_fields": [
+        "Mcp-Session-Id",
+        "MCP-Protocol-Version"
+      ],
+      "status": "implemented",
+      "expected_refusal": null,
+      "evidence": [
+        "internal/mcp/streamable.go",
+        "internal/mcp/session_test.go",
+        "tests/integration/mcp_execution_test.go"
+      ],
+      "live_qualification": "required",
+      "refusals": [
+        "missing tools scope",
+        "session belongs to another principal",
+        "unknown or expired session"
+      ],
+      "reference_revision": "MCP Streamable HTTP session termination at 2025-03-26, 2025-06-18 and 2025-11-25; no locked SDK covers the first-party consumer surface"
+    },
+    {
+      "slice": "RM7.1",
+      "method": "GET",
+      "path": "/mcp",
+      "operation": "tool_session_stream",
+      "source_dialect": "mcp-streamable-http",
+      "dialect_revision": "2025-11-25",
+      "provider": "olp",
+      "profile": "mcp-tools-streamable-http",
+      "profile_revision": "1",
+      "transport": "sse",
+      "mode": "streaming",
+      "sdk": null,
+      "supported_fields": [],
+      "status": "excluded",
+      "expected_refusal": {
+        "code": "method_not_allowed",
+        "status": 405,
+        "reason": "Sessions answer each POST with one JSON response, so no standalone server event stream exists to resume or replay."
+      },
+      "evidence": [],
+      "live_qualification": "required",
+      "refusals": [
+        "standalone event stream"
+      ],
+      "reference_revision": "MCP Streamable HTTP optional GET stream at 2025-03-26, 2025-06-18 and 2025-11-25; no locked SDK covers the first-party consumer surface"
     }
   ],
   "status_contract": {

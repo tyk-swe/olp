@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -86,11 +87,27 @@ type Server struct {
 	Auth           *secrets.AuthKey
 	TrustedProxies []netip.Prefix
 	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
+	Now            func() time.Time
+
+	sessionsMu sync.Mutex
+	sessions   map[string]session
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/mcp/tools", s.listTools)
 	mux.HandleFunc("POST /v1/mcp/tools/call", s.callTool)
+	for _, path := range []string{"/mcp", "/mcp/"} {
+		mux.HandleFunc("POST "+path, s.serveStreamableHTTP)
+		mux.HandleFunc("GET "+path, s.serveStreamableGET)
+		mux.HandleFunc("DELETE "+path, s.serveStreamableDELETE)
+	}
+}
+
+func releaseIDFor(release *runtime.Release, snapshot *routing.Snapshot) string {
+	if canonicalUUID(release.ID) {
+		return release.ID
+	}
+	return snapshot.Generation.ID
 }
 
 type apiError struct {
@@ -136,7 +153,7 @@ func canonicalUUID(raw string) bool {
 
 func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, time.Now())
+	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, s.now())
 	if failure != nil {
 		kind := "api_error"
 		switch failure.Status {
@@ -313,10 +330,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errLedger)
 		return
 	}
-	releaseID := release.ID
-	if !canonicalUUID(releaseID) {
-		releaseID = snapshot.Generation.ID
-	}
+	releaseID := releaseIDFor(release, snapshot)
 	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID})
 	switch {
 	case outcome.failure != nil:

@@ -21,6 +21,8 @@ import (
 var ErrTransport = errors.New("upstream MCP transport failed")
 var protocols = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 
+func SupportedProtocols() []string { return slices.Clone(protocols) }
+
 type TransportOptions struct {
 	ClientName string
 	Timeout    time.Duration
