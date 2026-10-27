@@ -62,6 +62,51 @@ func TestPassthroughInstallationPolicyExclusionDispatchesNothing(t *testing.T) {
 	}
 }
 
+type failingResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (w failingResponseWriter) Write([]byte) (int, error)   { return 0, io.ErrClosedPipe }
+func (w failingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func TestPassthroughClientWriteFailureKeepsProviderSuccess(t *testing.T) {
+	wrap := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(failingResponseWriter{w}, r)
+		})
+	}
+	h := strictRelease(t, newHarnessWrapped(t, Config{}, wrap), func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"passthrough"}
+		route.MaxAttempts = 1
+		route.Targets = route.Targets[:1]
+		route.Passthrough = &routing.PassthroughConfig{
+			Dialect:                    "bound-native",
+			Methods:                    []string{"GET"},
+			Paths:                      []string{"/v1/widgets/*"},
+			AcknowledgeOpaqueUnmetered: true,
+		}
+		s.Routes[routeSlug] = route
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "widget-result")
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts = %d", len(env.Attempts))
+	}
+	fact := env.Attempts[0]
+	if fact.Class != "success" || !fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
+		t.Fatalf("successful provider work discarded on delivery failure: %+v", fact)
+	}
+	if env.Outcome == "success" {
+		t.Fatal("failed downstream delivery recorded as a successful request outcome")
+	}
+}
+
 func TestPassthroughCallerRoutingExclusionDispatchesNothing(t *testing.T) {
 	h := passthroughHarness(t)
 	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{

@@ -343,12 +343,11 @@ slots:
 	}
 	w.WriteHeader(resp.StatusCode)
 	x.delivered(s.now())
-	n, copyErr := w.Write(payload)
-	written := int64(n)
+	_, copyErr := w.Write(payload)
 	factP.Duration = s.now().Sub(factP.StartedAt)
-	success := (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified) && copyErr == nil && written <= responseLimit
+	providerSuccess := resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified
 	switch {
-	case success:
+	case providerSuccess:
 		factP.Class = classSuccess
 		factP.observeUsage(&wire.Usage{}, true)
 		factP.TokenlessUsage = true
@@ -363,13 +362,12 @@ slots:
 		factP.Class = classProtocol
 		factP.recordEvidence(true)
 	}
-	out := &outcome{committed: success}
-	if !success {
-		if copyErr != nil {
-			out.err = serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
-		} else {
-			out.err = upstreamError(&attemptFailure{status: resp.StatusCode})
-		}
+	out := &outcome{committed: providerSuccess && copyErr == nil}
+	switch {
+	case copyErr != nil:
+		out.err = serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
+	case !providerSuccess:
+		out.err = upstreamError(&attemptFailure{status: resp.StatusCode})
 	}
 	s.finish(x, out, resp.StatusCode)
 }
