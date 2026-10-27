@@ -158,7 +158,7 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | --- | --- | --- |
 | Legacy completions | Protocol/gateway, probes, route inspection, guards/capture, token/usage and pinned SDK fixtures | Console/browser, each provider live, release performance |
 | Text Decisions | Native and one-way mapping, labels/order/usage/pricing, caller-paid budget and inspection fixtures | Console/browser, configuration promotion, each provider live |
-| OCR/search | Codecs, raw-HTTP process fixtures, route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
+| OCR/search | Codecs (including the Brave GET-query transport), raw-HTTP process fixtures, route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples (including the exact Brave tuple) and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
 | Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
 

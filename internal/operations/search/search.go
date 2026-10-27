@@ -1,11 +1,15 @@
 // Package search owns the frozen Perplexity Search contract and the reviewed
-// native search dialects its qualified mappings serve: Tavily, Exa and
-// Parallel. A search result is evidence-complete without usage counters.
+// native search dialects its qualified mappings serve: Tavily, Exa, Parallel
+// and Brave. A search result is evidence-complete without usage counters.
 package search
 
 import (
+	"net/url"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -16,6 +20,7 @@ const (
 	Tavily     = "tavily-search"
 	Exa        = "exa-search"
 	Parallel   = "parallel-search"
+	Brave      = "brave-search"
 )
 
 // maxRows is the largest page of results the frozen contract admits.
@@ -80,7 +85,7 @@ func (r Result) Schema() oif.Identity { return identity("search") }
 
 func Definitions() []operations.Dialect {
 	out := []operations.Dialect{}
-	for _, id := range []string{Perplexity, Tavily, Exa, Parallel} {
+	for _, id := range []string{Perplexity, Tavily, Exa, Parallel, Brave} {
 		d := operations.Dialect{Identity: identity(id), Operation: identity("search"), Surface: "openai", Label: id + " web search", Address: operations.Address{RelativePath: "search"}, Evidence: id + "-results/1",
 			Request:    func(source oif.Request) (oif.View, error) { return parseRequest(source, id) },
 			Result:     func(source oif.Request, result oif.Result) (oif.View, error) { return parseResult(source, result, id) },
@@ -107,6 +112,13 @@ func Definitions() []operations.Dialect {
 			d.Documentation = "https://docs.parallel.ai/api-reference/search"
 			d.RequestSchema = operations.ObjectSchema(map[string]any{"search_queries": map[string]any{"type": "array"}, "advanced_settings": map[string]any{"type": "object"}}, "search_queries", "advanced_settings")
 			d.ResultSchema = operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")
+		case Brave:
+			d.Documentation = "https://api-dashboard.search.brave.com/api-reference/web/search/get"
+			d.Address = operations.Address{RelativePath: "res/v1/web/search"}
+			d.Transport = operations.TransportGetQuery
+			d.Query = braveQuery
+			d.RequestSchema = operations.ObjectSchema(map[string]any{"q": map[string]any{"type": "string"}, "count": map[string]any{"type": "integer", "minimum": 1, "maximum": maxRows}}, "q", "count")
+			d.ResultSchema = operations.ObjectSchema(map[string]any{"web": map[string]any{"type": "object"}}, "web")
 		}
 		out = append(out, d)
 	}
@@ -122,6 +134,8 @@ func probe(id string) func(string) []byte {
 			return operations.Raw(map[string]any{"query": "OLP certification probe", "numResults": 1, "contents": map[string]any{"highlights": true}})
 		case Parallel:
 			return operations.Raw(map[string]any{"search_queries": []string{"OLP certification probe"}, "advanced_settings": map[string]any{"max_results": 1}})
+		case Brave:
+			return operations.Raw(map[string]any{"q": "OLP certification probe", "count": 1, "result_filter": "web"})
 		}
 		return operations.Raw(map[string]any{"query": "OLP certification probe", "max_results": 1})
 	}
@@ -228,8 +242,82 @@ func parseRequest(source oif.Request, id string) (oif.View, error) {
 		if member(settings, "max_results").Kind() != oif.Number {
 			return r, invalid("advanced_settings.max_results")
 		}
+	case Brave:
+		if err := braveRequest(root); err != nil {
+			return r, err
+		}
 	}
 	return r, nil
+}
+
+const maxBraveQueryChars = 600
+
+func braveRequest(root oif.Value) error {
+	for _, m := range root.Members() {
+		switch m.Name {
+		case "q", "count", "offset", "freshness", "result_filter":
+		default:
+			return invalid(m.Name)
+		}
+	}
+	q := member(root, "q")
+	if q.Kind() != oif.String || text(q) == "" || utf8.RuneCountInString(text(q)) > maxBraveQueryChars {
+		return invalid("q")
+	}
+	if n, ok := operations.Int(member(root, "count")); !ok || n < 1 || n > maxRows {
+		return invalid("count")
+	}
+	if v := member(root, "offset"); !operations.Optional(v) {
+		if n, ok := operations.Int(v); !ok || n < 0 || n > 9 {
+			return invalid("offset")
+		}
+	}
+	if v := member(root, "freshness"); !operations.Optional(v) {
+		if v.Kind() != oif.String || !validFreshness(text(v)) {
+			return invalid("freshness")
+		}
+	}
+	if v := member(root, "result_filter"); !operations.Optional(v) {
+		if v.Kind() != oif.String || text(v) != "web" {
+			return invalid("result_filter")
+		}
+	}
+	return nil
+}
+
+func validFreshness(value string) bool {
+	switch value {
+	case "pd", "pw", "pm", "py":
+		return true
+	}
+	start, end, ok := strings.Cut(value, "to")
+	if !ok {
+		return false
+	}
+	from, errFrom := time.Parse(time.DateOnly, start)
+	to, errTo := time.Parse(time.DateOnly, end)
+	return errFrom == nil && errTo == nil && !from.After(to)
+}
+
+func braveQuery(request oif.Request) (url.Values, error) {
+	if _, err := parseRequest(request, Brave); err != nil {
+		return nil, err
+	}
+	root := request.Document().Root()
+	values := url.Values{}
+	values.Set("q", text(member(root, "q")))
+	count, _ := operations.Int(member(root, "count"))
+	values.Set("count", strconv.FormatInt(count, 10))
+	if v := member(root, "offset"); !operations.Optional(v) {
+		offset, _ := operations.Int(v)
+		values.Set("offset", strconv.FormatInt(offset, 10))
+	}
+	if v := member(root, "freshness"); !operations.Optional(v) {
+		values.Set("freshness", text(v))
+	}
+	values.Set("result_filter", "web")
+	values.Set("text_decorations", "false")
+	return values, nil
 }
 
 // boundedQuery validates the shared query plus maximum-result fields.
@@ -312,6 +400,22 @@ func parseResult(request oif.Request, source oif.Result, id string) (oif.View, e
 	fail := func(field, requirement string) (oif.View, error) {
 		return r, operations.Violation(field, requirement)
 	}
+	if id == Brave {
+		rows := member(member(root, "web"), "results")
+		if rows.Kind() != oif.Array {
+			return fail("/web/results", "search_results")
+		}
+		count, ok := operations.Int(member(request.Document().Root(), "count"))
+		if !ok || int64(len(rows.Elements())) > count {
+			return fail("/web/results", "search_result_count")
+		}
+		for i, row := range rows.Elements() {
+			if member(row, "url").Kind() != oif.String {
+				return fail("/web/results/"+strconv.Itoa(i)+"/url", "search_result_url")
+			}
+		}
+		return r, nil
+	}
 	results := member(root, "results")
 	if results.Kind() != oif.Array {
 		return fail("/results", "search_results")
@@ -355,6 +459,9 @@ func inputText(request oif.Request, id string) ([]operations.Text, error) {
 		return nil, err
 	}
 	root := request.Document().Root()
+	if id == Brave {
+		return []operations.Text{{Pointer: "/q", Value: text(member(root, "q"))}}, nil
+	}
 	if id == Parallel {
 		out := []operations.Text{}
 		for i, q := range member(root, "search_queries").Elements() {
@@ -369,6 +476,9 @@ func inputText(request oif.Request, id string) ([]operations.Text, error) {
 // content or excerpt fields. Reviewed metadata fields pass without inspection;
 // anything the contract does not name fails closed unless it carries no text.
 func outputText(result oif.Result, id string) ([]operations.Text, error) {
+	if id == Brave {
+		return braveOutputText(result)
+	}
 	out := []operations.Text{}
 	known := map[string]bool{"id": true, "results": true, "server_time": true}
 	switch id {
@@ -418,6 +528,97 @@ func outputText(result oif.Result, id string) ([]operations.Text, error) {
 		}
 	}
 	return out, nil
+}
+
+func braveOutputText(result oif.Result) ([]operations.Text, error) {
+	out := []operations.Text{}
+	root := result.Source().Root()
+	for _, f := range root.Members() {
+		switch f.Name {
+		case "type":
+		case "query":
+			collectStrings(f.Value, operations.Pointer("", f.Name), &out)
+		case "web":
+			if err := braveWebText(f.Value, &out); err != nil {
+				return nil, err
+			}
+		default:
+			if !inert(f.Value) {
+				return nil, conflict(operations.Pointer("", f.Name))
+			}
+		}
+	}
+	return out, nil
+}
+
+func braveWebText(web oif.Value, out *[]operations.Text) error {
+	for _, f := range web.Members() {
+		switch f.Name {
+		case "type", "family_friendly":
+		case "results":
+			for i, row := range f.Value.Elements() {
+				if err := braveRowText(row, "/web/results/"+strconv.Itoa(i), out); err != nil {
+					return err
+				}
+			}
+		default:
+			if !inert(f.Value) {
+				return conflict(operations.Pointer("/web", f.Name))
+			}
+		}
+	}
+	return nil
+}
+
+func braveRowText(row oif.Value, path string, out *[]operations.Text) error {
+	inspect := map[string]bool{"title": true, "url": true, "description": true}
+	containers := map[string]bool{"profile": true, "meta_url": true, "thumbnail": true}
+	metadata := map[string]bool{"is_source_local": true, "is_source_both": true, "page_age": true, "page_fetched": true, "fetched_content_timestamp": true, "language": true, "family_friendly": true, "type": true, "subtype": true, "is_live": true, "age": true}
+	for _, f := range row.Members() {
+		p := operations.Pointer(path, f.Name)
+		switch {
+		case inspect[f.Name]:
+			if f.Value.Kind() == oif.String {
+				*out = append(*out, operations.Text{Pointer: p, Value: text(f.Value)})
+			} else if !inert(f.Value) {
+				return conflict(p)
+			}
+		case f.Name == "extra_snippets":
+			if f.Value.Kind() != oif.Array && !inert(f.Value) {
+				return conflict(p)
+			}
+			for j, e := range f.Value.Elements() {
+				if e.Kind() == oif.String {
+					*out = append(*out, operations.Text{Pointer: p + "/" + strconv.Itoa(j), Value: text(e)})
+				} else if !inert(e) {
+					return conflict(p + "/" + strconv.Itoa(j))
+				}
+			}
+		case containers[f.Name]:
+			collectStrings(f.Value, p, out)
+		case metadata[f.Name]:
+		default:
+			if !inert(f.Value) {
+				return conflict(p)
+			}
+		}
+	}
+	return nil
+}
+
+func collectStrings(v oif.Value, pointer string, out *[]operations.Text) {
+	switch v.Kind() {
+	case oif.String:
+		*out = append(*out, operations.Text{Pointer: pointer, Value: text(v)})
+	case oif.Array:
+		for i, e := range v.Elements() {
+			collectStrings(e, pointer+"/"+strconv.Itoa(i), out)
+		}
+	case oif.Object:
+		for _, m := range v.Members() {
+			collectStrings(m.Value, operations.Pointer(pointer, m.Name), out)
+		}
+	}
 }
 
 // inert reports whether a field carries no text the output policy could miss:

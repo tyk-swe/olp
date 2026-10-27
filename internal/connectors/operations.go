@@ -19,7 +19,7 @@ func registerUnaryProfiles() {
 		switch d.Identity.ID {
 		case "openai-embeddings", "openai-moderation", "openai-input-tokens", "openai-decisions":
 			kind, hosting = "openai", "direct-openai"
-		case "cohere-embed-v2", "cohere-rerank-v2", "mistral-ocr", "perplexity-search", "tavily-search", "exa-search", "parallel-search":
+		case "cohere-embed-v2", "cohere-rerank-v2", "mistral-ocr", "perplexity-search", "tavily-search", "exa-search", "parallel-search", "brave-search":
 			auth = []string{"api_key"}
 		case "anthropic-count-tokens", "gemini-count-tokens", "bedrock-count-tokens", "gemini-embeddings", "vertex-embeddings", "bedrock-embeddings":
 			continue // established cloud/native compositions

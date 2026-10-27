@@ -316,9 +316,12 @@ provider family.
 
 ## Remaining OCR, search and Decisions breadth
 
-Brave search needs GET-query transport; Azure Document Intelligence needs bounded
-202/poll transport; Vertex document processing needs its GCP-authenticated profile.
-Each remains pending in the endpoint ledger. Certify pagination, filters,
+Brave search runs on the reviewed GET-query unary transport, where the
+lowered request document becomes bounded query parameters on a bodyless GET.
+The same transport shape leaves room for a bounded submit-then-poll shape
+beside it. Azure Document Intelligence still needs that 202/poll transport
+and Vertex document processing still needs its GCP-authenticated profile, so
+those two remain pending in the endpoint ledger. Certify pagination, filters,
 citations, time ranges and result limits independently, refusing unmappable
 fields before paid work. Provider-fetched OCR URLs remain an explicit content-egress
 choice; the gateway does not become a general URL fetcher. Search prices request
@@ -486,7 +489,7 @@ maintainers for RM6.6. **Entry:** RM4.1 per operation and its transport, pricing
 egress and inspection contract. These tasks may progress independently;
 unresolved realtime exposure additionally requires RM4.2–RM4.3.
 
-- [ ] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
+- [x] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
   citations, time ranges, limits and request pricing; refuse unmappable fields.
 - [ ] **RM6.2 — Add Azure Document Intelligence polling:** implement bounded
   202/poll transport; test deadline/cancellation, observed page/document pricing,

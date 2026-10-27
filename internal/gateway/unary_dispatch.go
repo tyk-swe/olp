@@ -73,6 +73,10 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if _, err = s.egress.ValidateEndpoint(endpoint); err != nil {
 		return fail(classConnect, nil)
 	}
+	requestURL, err := plan.RequestURL()
+	if err != nil {
+		return fail(classProtocol, nil)
+	}
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
@@ -82,15 +86,21 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	defer cancel()
 	timer := time.AfterFunc(min(a.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
 	defer timer.Stop()
-	body := plan.Body()
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, state.trace()), http.MethodPost, endpoint, bytes.NewReader(body))
+	body := plan.WireBody()
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, state.trace()), plan.Method(), requestURL, reader)
 	if err != nil {
 		return fail(classConnect, nil)
 	}
 	if trace != nil {
 		trace.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
 	if err := s.applySlotCredential(actx, x, req, plan.Config(), slot, body, provider, a.UpstreamModel); err != nil {

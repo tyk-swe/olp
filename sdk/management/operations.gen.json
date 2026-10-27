@@ -36069,7 +36069,8 @@
             "perplexity-search",
             "tavily-search",
             "exa-search",
-            "parallel-search"
+            "parallel-search",
+            "brave-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -36475,7 +36476,8 @@
             "perplexity-search",
             "tavily-search",
             "exa-search",
-            "parallel-search"
+            "parallel-search",
+            "brave-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },

@@ -5068,6 +5068,7 @@ const (
 	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
 	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
 	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
+	SimulationDialectBraveSearch              SimulationDialect = "brave-search"
 	SimulationDialectExaSearch                SimulationDialect = "exa-search"
 	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
 	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
@@ -5108,6 +5109,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectBedrockCountTokens:
 		return true
 	case SimulationDialectBedrockEmbeddings:
+		return true
+	case SimulationDialectBraveSearch:
 		return true
 	case SimulationDialectExaSearch:
 		return true

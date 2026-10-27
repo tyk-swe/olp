@@ -211,28 +211,41 @@ ApiSearchRequest: a string `query` (arrays refused), `max_results` 1–20,
 `search_type`, `max_tokens`, `max_tokens_per_page`, `country`,
 `search_language_filter`, an all-allow-or-all-deny `search_domain_filter` of
 at most 20 entries, and the date/recency filters. Transformed serving maps it
-to `tavily-search`, `exa-search` and `parallel-search` (vendors Tavily, Exa,
-Parallel; Parallel credentials arrive as `X-Api-Key`). The mappings always
+to `tavily-search`, `exa-search`, `parallel-search` and `brave-search`
+(vendors Tavily, Exa, Parallel, Brave; Parallel credentials arrive as
+`X-Api-Key`, Brave credentials as `X-Subscription-Token`). The mappings always
 send `query` and `max_results` (default 10); `search_type` is admitted only
-absent or `web`; token, locale and freshness controls are refused `400`
-rather than approximated. Domain filters reach Exa as root domains expanded
+absent or `web`; token and locale controls are refused `400` rather than
+approximated. Recency and last-updated filters are refused on every target.
+Brave alone also carries a paired `search_after_date_filter` and
+`search_before_date_filter` as a date range, and a single-sided date filter
+is refused there too. Domain filters reach Exa as root domains expanded
 with `*.d` subdomains and Parallel verbatim (`.tld` and domain/path entries
-allowed, `-` stripped on deny); Tavily carries none. Projections answer with
-the Perplexity shape, a gateway-minted `search_<hex>` id — upstream ids never
-cross — `""` for absent titles, joined highlight/excerpt snippets, and
-per-target dates. A result page beyond `max_results` is a protocol violation.
-Search results carry no usage and settle like moderation: a validated result
-completes its evidence, and the attempt is charged at the target's
-`per_request` price.
+allowed, `-` stripped on deny); Tavily and Brave carry none. Projections
+answer with the Perplexity shape, a gateway-minted `search_<hex>` id,
+upstream ids never cross, `""` for absent titles, joined
+highlight/excerpt snippets or Brave descriptions, and per-target dates. A
+result page beyond `max_results` is a protocol violation. Search results
+carry no usage and settle like moderation: a validated result completes its
+evidence, and the attempt is charged at the target's `per_request` price.
+
+The `brave-search` profile serves its upstream over a GET query transport.
+Its native document admits `q`, `count`, `offset`, `freshness` and
+`result_filter` (only `web`); the gateway lowers the document to bounded
+query parameters with decorations off and sends no body. Strict native
+ingress still takes the JSON document at `/native/{dialect}/models/{route}`.
+Only the wire to Brave is a query. Offset pagination is native-only because
+the frozen source contract has no offset field, so transformed Brave calls
+always read the first page.
 
 Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json),
 the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
 `tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
-required; this evidence does not qualify unimplemented API families. Brave (GET-query
-transport), Azure Document Intelligence (202/poll transport) and Vertex
-document processing (GCP-authenticated profile) stay pending; Google's Custom
-Search JSON API is excluded — the provider discontinued new enrollment and
-the API sunsets on 2027-01-01.
+required; this evidence does not qualify unimplemented API families. Azure
+Document Intelligence (202/poll transport) and Vertex document processing
+(GCP-authenticated profile) stay pending; Google's Custom Search JSON API is
+excluded because the provider discontinued new enrollment and the API
+sunsets on 2027-01-01.
 
 ### Files, batches, realtime, and provider-retained state
 
