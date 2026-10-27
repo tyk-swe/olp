@@ -87,15 +87,24 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 // for another AWS service of the connector's cloud when signingService names
 // one.
 func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
+	status, _, data, err := s.callAsWithHeaders(ctx, cfg, credential, method, path, body, contentType, signingService)
+	return status, data, err
+}
+
+func (s *Server) callWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, http.Header, []byte, error) {
+	return s.callAsWithHeaders(ctx, cfg, credential, method, path, body, "application/json", "")
+}
+
+func (s *Server) callAsWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
 	base, err := s.Egress.ValidateEndpoint(*cfg.Endpoint)
 	if err != nil {
-		return 0, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+		return 0, nil, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
 	}
 	select {
 	case s.probes <- struct{}{}:
 		defer func() { <-s.probes }()
 	case <-ctx.Done():
-		return 0, nil, ctx.Err()
+		return 0, nil, nil, ctx.Err()
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -108,16 +117,16 @@ func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []by
 		endpoint = path
 		u, e := url.Parse(endpoint)
 		if e != nil {
-			return 0, nil, e
+			return 0, nil, nil, e
 		}
 		u.RawQuery = ""
 		if _, e := s.Egress.ValidateEndpoint(u.String()); e != nil {
-			return 0, nil, e
+			return 0, nil, nil, e
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
@@ -135,34 +144,34 @@ func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []by
 	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
 	switch {
 	case errors.Is(err, connectors.ErrSigningUnavailable):
-		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: err.Error()}
+		return 0, nil, nil, &probeError{Code: "upstream_unavailable", Detail: err.Error()}
 	case err != nil:
-		return 0, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
+		return 0, nil, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
 	var client *http.Client
 	switch {
 	case transport.CarriedByPlugin() && s.Plugins == nil:
-		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
+		return 0, nil, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
 	case transport.CarriedByPlugin():
 		client = transport.CarrierClient(s.Plugins, sensitive.Values())
 	default:
 		if client, err = s.connectionClient(ctx, cfg, credential); err != nil {
-			return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+			return 0, nil, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
 		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, classify(err)
+		return 0, nil, nil, classify(err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, probeBodyLimit+1))
 	if err != nil {
-		return resp.StatusCode, nil, classify(err)
+		return resp.StatusCode, resp.Header.Clone(), nil, classify(err)
 	}
 	if len(data) > probeBodyLimit {
-		return resp.StatusCode, nil, &probeError{Code: "upstream_response_too_large", Detail: "The upstream response exceeded the probe body limit."}
+		return resp.StatusCode, resp.Header.Clone(), nil, &probeError{Code: "upstream_response_too_large", Detail: "The upstream response exceeded the probe body limit."}
 	}
-	return resp.StatusCode, data, nil
+	return resp.StatusCode, resp.Header.Clone(), data, nil
 }
 
 // statusError classifies an unsuccessful probe response by its status and the

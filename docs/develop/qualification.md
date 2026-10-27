@@ -158,13 +158,18 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | --- | --- | --- |
 | Legacy completions | Protocol/gateway, probes, route inspection, guards/capture, token/usage and pinned SDK fixtures | Console/browser, each provider live, release performance |
 | Text Decisions | Native and one-way mapping, labels/order/usage/pricing, caller-paid budget and inspection fixtures | Console/browser, configuration promotion, each provider live |
-| OCR/search | Codecs, raw-HTTP process fixtures, route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
+| OCR/search | Codecs, raw-HTTP process fixtures (including the Azure Document Intelligence 202/poll submit-once, cancellation and missing-units cases), route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
 | Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
 
 Run `CLIENTS=m9-go tests/clients/run.sh` for locked OpenAI Go completions and
 Decisions plus raw-HTTP OCR/search fixtures, including required route headers,
-refusals and credential isolation. Console selections:
+refusals and credential isolation. Live Azure Document Intelligence evidence is
+opt-in and separate from this local record: run the live operation probe with
+`OLP_LIVE_OPERATION_DIALECT=azure-document-intelligence-ocr`,
+`OLP_LIVE_ENDPOINT` set to the resource endpoint,
+`OLP_LIVE_AZURE_DOCUMENT_INTELLIGENCE_API_KEY` and `OLP_LIVE_MODEL` naming a
+prebuilt or custom document model. Console selections:
 
 ```sh
 pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.svelte.test.ts src/lib/features/inference/playground/nativeOperation.test.ts

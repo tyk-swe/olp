@@ -1,0 +1,249 @@
+package ocr
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/url"
+	"strconv"
+	"strings"
+	"unicode/utf16"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations"
+)
+
+type azureSpan struct{ offset, length int64 }
+
+type azurePage struct {
+	number   int64
+	spans    []azureSpan
+	hasSpans bool
+}
+
+type azureResult struct {
+	content   string
+	pages     []azurePage
+	hasPages  bool
+	indexType string
+}
+
+func azureRequest(source oif.Request) (oif.View, error) {
+	r := Request{source: source}
+	root := source.Document().Root()
+	if root.Kind() != oif.Object {
+		return r, invalid("request")
+	}
+	for _, m := range root.Members() {
+		switch m.Name {
+		case "model", "urlSource", "base64Source", "pages":
+		default:
+			return r, invalid(m.Name)
+		}
+	}
+	if member(root, "model").Kind() != oif.String || operations.String(member(root, "model")) == "" {
+		return r, invalid("model")
+	}
+	urlValue, hasURL := root.Lookup("urlSource")
+	b64Value, hasB64 := root.Lookup("base64Source")
+	if hasURL == hasB64 {
+		return r, invalid("urlSource")
+	}
+	if hasURL && (urlValue.Kind() != oif.String || !strings.HasPrefix(operations.String(urlValue), "https://")) {
+		return r, invalid("urlSource")
+	}
+	if hasB64 && (b64Value.Kind() != oif.String || !validBase64(operations.String(b64Value))) {
+		return r, invalid("base64Source")
+	}
+	if v := member(root, "pages"); !operations.Optional(v) {
+		if v.Kind() != oif.String || !validAzurePages(operations.String(v)) {
+			return r, invalid("pages")
+		}
+	}
+	return r, nil
+}
+
+func validBase64(s string) bool {
+	if s == "" {
+		return false
+	}
+	if _, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return true
+	}
+	_, err := base64.RawStdEncoding.DecodeString(s)
+	return err == nil
+}
+
+func validAzurePages(s string) bool {
+	parts := strings.Split(s, ",")
+	if len(parts) == 0 || len(parts) > 512 {
+		return false
+	}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return false
+		}
+		lo, hi, found := strings.Cut(part, "-")
+		loN, err := strconv.ParseInt(lo, 10, 64)
+		if err != nil || loN < 1 {
+			return false
+		}
+		if found {
+			hiN, err := strconv.ParseInt(hi, 10, 64)
+			if err != nil || hiN < loN {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func azureResultParse(request oif.Request, source oif.Result) (oif.View, error) {
+	if _, err := azureRequest(request); err != nil {
+		return nil, err
+	}
+	r := Result{Source: source}
+	root := source.Source().Root()
+	fail := func(field, requirement string) (oif.View, error) {
+		return r, operations.Violation(field, requirement)
+	}
+	if operations.String(member(root, "status")) != "succeeded" || member(root, "status").Kind() != oif.String {
+		return fail("/status", "ocr_analysis_status")
+	}
+	analyze := member(root, "analyzeResult")
+	if analyze.Kind() != oif.Object {
+		return fail("/analyzeResult", "ocr_analyze_result")
+	}
+	if member(analyze, "modelId").Kind() != oif.String {
+		return fail("/analyzeResult/modelId", "ocr_model")
+	}
+	if v := member(analyze, "contentFormat"); !operations.Optional(v) && (v.Kind() != oif.String || operations.String(v) != "markdown") {
+		return fail("/analyzeResult/contentFormat", "ocr_content_format")
+	}
+	content := member(analyze, "content")
+	if content.Kind() != oif.String {
+		return fail("/analyzeResult/content", "ocr_content")
+	}
+	parsed := &azureResult{content: operations.String(content), indexType: operations.String(member(analyze, "stringIndexType"))}
+	units := int64(len(utf16.Encode([]rune(parsed.content))))
+	pages := member(analyze, "pages")
+	if pages.Kind() != oif.Absent {
+		if pages.Kind() != oif.Array {
+			return fail("/analyzeResult/pages", "ocr_pages")
+		}
+		parsed.hasPages = true
+		for i, page := range pages.Elements() {
+			path := "/analyzeResult/pages/" + strconv.Itoa(i)
+			number, ok := operations.Int(member(page, "pageNumber"))
+			if !ok || number < 1 {
+				return fail(path+"/pageNumber", "ocr_page_number")
+			}
+			entry := azurePage{number: number}
+			spans := member(page, "spans")
+			if spans.Kind() != oif.Absent {
+				if spans.Kind() != oif.Array {
+					return fail(path+"/spans", "ocr_page_spans")
+				}
+				entry.hasSpans = true
+				for _, span := range spans.Elements() {
+					offset, okOffset := operations.Int(member(span, "offset"))
+					length, okLength := operations.Int(member(span, "length"))
+					if !okOffset || !okLength || offset < 0 || length < 0 || offset+length > units {
+						return fail(path+"/spans", "ocr_page_spans")
+					}
+					entry.spans = append(entry.spans, azureSpan{offset: offset, length: length})
+				}
+			}
+			parsed.pages = append(parsed.pages, entry)
+		}
+	}
+	r.azure = parsed
+	if parsed.hasPages && len(parsed.pages) > 0 {
+		unitsText := strconv.Itoa(len(parsed.pages))
+		r.Usage = &operations.Usage{MediaUnits: &unitsText}
+	}
+	return r, nil
+}
+
+func azurePollState(doc oif.Document) (operations.PollState, error) {
+	switch operations.String(member(doc.Root(), "status")) {
+	case "notStarted", "running":
+		return operations.PollPending, nil
+	case "succeeded":
+		return operations.PollSucceeded, nil
+	case "failed":
+		return operations.PollFailed, nil
+	}
+	return "", operations.Violation("/status", "ocr_poll_status")
+}
+
+func azureWire(view oif.View) (operations.WireRequest, error) {
+	root := view.(Request).source.Document().Root()
+	query := url.Values{
+		"api-version":         {azureAPIVersion},
+		"outputContentFormat": {"markdown"},
+		"stringIndexType":     {"utf16CodeUnit"},
+	}
+	if v := member(root, "pages"); v.Kind() == oif.String {
+		query.Set("pages", operations.String(v))
+	}
+	var body map[string]any
+	if v, ok := root.Lookup("urlSource"); ok {
+		body = map[string]any{"urlSource": operations.String(v)}
+	} else if v, ok := root.Lookup("base64Source"); ok {
+		body = map[string]any{"base64Source": operations.String(v)}
+	} else {
+		return operations.WireRequest{}, invalid("urlSource")
+	}
+	return operations.WireRequest{Query: query, Body: operations.Raw(body)}, nil
+}
+
+func azureBindResultModel(doc oif.Document, model string) ([]oif.Change, error) {
+	analyze := member(doc.Root(), "analyzeResult")
+	if _, present := analyze.Lookup("modelId"); !present {
+		return nil, nil
+	}
+	encoded, _ := json.Marshal(model)
+	return []oif.Change{{Pointer: operations.Pointer("/analyzeResult", "modelId"), Value: string(encoded), Origin: oif.IdentityBinding, Reason: "published model binding"}}, nil
+}
+
+var azureMetadata = map[string]bool{"apiVersion": true, "modelId": true, "stringIndexType": true, "contentFormat": true, "unit": true}
+
+func azureOutputText(result oif.Result) ([]operations.Text, error) {
+	analyze := member(result.Source().Root(), "analyzeResult")
+	if analyze.Kind() != oif.Object {
+		return nil, conflict("/analyzeResult")
+	}
+	out := []operations.Text{}
+	var walk func(v oif.Value, path string)
+	walk = func(v oif.Value, path string) {
+		switch v.Kind() {
+		case oif.String:
+			out = append(out, operations.Text{Pointer: path, Value: operations.String(v)})
+		case oif.Array:
+			for i, e := range v.Elements() {
+				walk(e, path+"/"+strconv.Itoa(i))
+			}
+		case oif.Object:
+			for _, m := range v.Members() {
+				if !azureMetadata[m.Name] {
+					walk(m.Value, operations.Pointer(path, m.Name))
+				}
+			}
+		}
+	}
+	walk(analyze, "/analyzeResult")
+	return out, nil
+}
+
+func utf16Slice(content string, spans []azureSpan) (string, bool) {
+	units := utf16.Encode([]rune(content))
+	var b strings.Builder
+	for _, span := range spans {
+		if span.offset < 0 || span.length < 0 || span.offset+span.length > int64(len(units)) {
+			return "", false
+		}
+		b.WriteString(string(utf16.Decode(units[span.offset : span.offset+span.length])))
+	}
+	return b.String(), true
+}

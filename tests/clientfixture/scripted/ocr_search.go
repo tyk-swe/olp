@@ -8,12 +8,14 @@ import (
 // address resolves exactly where the real API lives.
 const (
 	MistralPrefix    = "/mistral/v1"
+	AzurePrefix      = "/azure"
 	PerplexityPrefix = "/perplexity"
 	TavilyPrefix     = "/tavily"
 	ExaPrefix        = "/exa"
 	ParallelPrefix   = "/parallel/v1"
 
 	MistralModel    = "fixture-mistral"
+	AzureModel      = "fixture-azure"
 	PerplexityModel = "fixture-perplexity"
 	TavilyModel     = "fixture-tavily"
 	ExaModel        = "fixture-exa"
@@ -31,7 +33,16 @@ func bearer(name string) vendor {
 }
 
 var (
-	mistral    = bearer("mistral")
+	mistral = bearer("mistral")
+	azure   = vendor{
+		name: "azure-document-intelligence",
+		authorized: func(r *http.Request, credential string) bool {
+			return r.Header.Get("Ocp-Apim-Subscription-Key") == credential
+		},
+		fail: func(w http.ResponseWriter, status int, kind, message string) {
+			writeJSON(w, status, map[string]any{"error": map[string]any{"code": kind, "message": message}})
+		},
+	}
 	perplexity = bearer("perplexity")
 	tavily     = bearer("tavily")
 	parallel   = vendor{
@@ -62,6 +73,9 @@ func failDetail(w http.ResponseWriter, status int, kind, message string) {
 
 func (f *Fixture) registerOperations() {
 	f.mux.HandleFunc("POST "+MistralPrefix+"/ocr", f.handle(mistral, "mistral.ocr", f.mistralOCR))
+	f.mux.HandleFunc("POST "+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+":analyze", f.handle(azure, "azure.ocr.submit", f.azureSubmit))
+	f.mux.HandleFunc("GET "+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+"/analyzeResults/fixture-result", f.handle(azure, "azure.ocr.poll", f.azurePoll))
+	f.mux.HandleFunc("DELETE "+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+"/analyzeResults/fixture-result", f.handle(azure, "azure.ocr.delete", f.azureDelete))
 	f.mux.HandleFunc("POST "+PerplexityPrefix+"/search", f.handle(perplexity, "perplexity.search", f.perplexitySearch))
 	f.mux.HandleFunc("POST "+TavilyPrefix+"/search", f.handle(tavily, "tavily.search", f.tavilySearch))
 	f.mux.HandleFunc("POST "+ExaPrefix+"/search", f.handle(exa, "exa.search", f.exaSearch))
@@ -166,4 +180,40 @@ func (f *Fixture) parallelSearch(x *request) {
 		}},
 		"session_id": f.nextID("par_sess"),
 	})
+}
+
+func (f *Fixture) azureSubmit(x *request) {
+	var req struct {
+		URLSource    string `json:"urlSource"`
+		Base64Source string `json:"base64Source"`
+	}
+	if !x.decode(&req) || (req.URLSource == "") == (req.Base64Source == "") {
+		x.fail(http.StatusBadRequest, "InvalidRequest", "Either urlSource or base64Source must be specified.")
+		return
+	}
+	if x.r.URL.Query().Get("api-version") != "2024-11-30" || x.r.URL.Query().Get("outputContentFormat") != "markdown" {
+		x.fail(http.StatusBadRequest, "InvalidRequest", "The fixture analyze query is invalid.")
+		return
+	}
+	x.note("ocr", false)
+	x.w.Header().Set("Operation-Location", "http://"+x.r.Host+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+"/analyzeResults/fixture-result?api-version=2024-11-30")
+	x.w.Header().Set("Retry-After", "0")
+	x.w.WriteHeader(http.StatusAccepted)
+}
+
+func (f *Fixture) azurePoll(x *request) {
+	x.note("ocr", false)
+	content := "# Fixture document\n\nFixture OCR text."
+	writeJSON(x.w, http.StatusOK, map[string]any{
+		"status": "succeeded",
+		"analyzeResult": map[string]any{
+			"apiVersion": "2024-11-30", "modelId": AzureModel, "stringIndexType": "utf16CodeUnit",
+			"contentFormat": "markdown", "content": content,
+			"pages": []any{map[string]any{"pageNumber": 1, "spans": []any{map[string]any{"offset": 0, "length": len(content)}}}},
+		},
+	})
+}
+
+func (f *Fixture) azureDelete(x *request) {
+	x.w.WriteHeader(http.StatusNoContent)
 }

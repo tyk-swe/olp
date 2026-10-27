@@ -28,6 +28,8 @@ async function read(request) {
 }
 
 const paths = ['/mistral/v1/ocr', '/perplexity/search', '/tavily/search'];
+const azureSubmit = `/azure/documentintelligence/documentModels/${model}:analyze`;
+const azurePoll = `/azure/documentintelligence/documentModels/${model}/analyzeResults/fixture-result`;
 
 const server = createServer(async (request, response) => {
   const path = new URL(request.url ?? '/', origin).pathname;
@@ -43,6 +45,68 @@ const server = createServer(async (request, response) => {
     return answer(response, 200, JSON.stringify({ calls, unexpected }));
   if (request.method === 'GET' && path.endsWith('/models'))
     return answer(response, 200, JSON.stringify({ data: [{ id: model }] }));
+  if (path === azurePoll && request.method === 'DELETE') {
+    calls.push({ path, raw: '', body: null, headers: request.headers });
+    response.writeHead(204, { 'cache-control': 'no-store' });
+    return response.end();
+  }
+  if (path === azurePoll && request.method === 'GET') {
+    calls.push({ path, raw: '', body: null, headers: request.headers });
+    if (request.headers['ocp-apim-subscription-key'] !== secret) {
+      unexpected.push('incorrect azure credential');
+      return answer(response, 401, '{"error":{"code":"401"}}');
+    }
+    const content = '# Azure fixture\n\nAzure fixture OCR text.';
+    return answer(
+      response,
+      200,
+      JSON.stringify({
+        status: 'succeeded',
+        analyzeResult: {
+          apiVersion: '2024-11-30',
+          modelId: model,
+          stringIndexType: 'utf16CodeUnit',
+          contentFormat: 'markdown',
+          content,
+          pages: [
+            {
+              pageNumber: 1,
+              spans: [{ offset: 0, length: content.length }]
+            }
+          ]
+        }
+      })
+    );
+  }
+  if (request.method === 'POST' && path === azureSubmit) {
+    let raw;
+    let body;
+    try {
+      raw = await read(request);
+      body = JSON.parse(raw);
+    } catch {
+      return answer(
+        response,
+        400,
+        '{"error":{"message":"invalid fixture body"}}'
+      );
+    }
+    calls.push({ path, raw, body, headers: request.headers });
+    if (request.headers['ocp-apim-subscription-key'] !== secret) {
+      unexpected.push('incorrect azure credential');
+      return answer(response, 401, '{"error":{"code":"401"}}');
+    }
+    if (body.urlSource === undefined && body.base64Source === undefined) {
+      unexpected.push('invalid azure body');
+      return answer(response, 400, '{"error":{"code":"InvalidRequest"}}');
+    }
+    response.writeHead(202, {
+      'operation-location': `${origin}${azurePoll}?api-version=2024-11-30`,
+      'retry-after': '0',
+      'cache-control': 'no-store'
+    });
+    return response.end();
+  }
   if (request.method !== 'POST' || !paths.includes(path)) {
     unexpected.push(`${request.method} ${path}`);
     return answer(

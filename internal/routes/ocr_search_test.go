@@ -82,3 +82,18 @@ func TestSearchSimulationMapsAndRefusesControls(t *testing.T) {
 		t.Fatalf("unsupported control admitted: %+v", d)
 	}
 }
+
+func TestAzureOCRSimulationMapsAndRefusesControls(t *testing.T) {
+	snapshot, _ := operationSnapshot([]string{"prebuilt-layout"}, "azure-document-intelligence", "azure-document-intelligence-ocr", "ocr", false)
+	decisions := simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(`{"model":"route","document":{"type":"document_url","document_url":"https://example.com/report.pdf"},"pages":[0,2]}`)}, "ocr")
+	d := decisionFor(t, decisions, "prebuilt-layout")
+	if d.Interaction == nil || d.Interaction.Status != "admitted" || !d.Eligible || d.Interaction.EgressDialect != "azure-document-intelligence-ocr" {
+		t.Fatalf("azure ocr not admitted: %+v", d)
+	}
+
+	decisions = simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(`{"model":"route","document":{"type":"document_url","document_url":"https://example.com/report.pdf"},"table_format":"html"}`)}, "ocr")
+	d = decisionFor(t, decisions, "prebuilt-layout")
+	if d.Interaction != nil && d.Interaction.Status == "admitted" {
+		t.Fatalf("unsupported control admitted: %+v", d)
+	}
+}

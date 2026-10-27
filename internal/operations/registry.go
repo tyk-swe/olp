@@ -5,6 +5,7 @@ package operations
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"regexp"
 	"slices"
 	"sync"
@@ -42,6 +43,32 @@ type Field struct {
 // are adapters, never operation IR.
 type Address struct{ FamilyPath, RelativePath string }
 
+// Transport names the reviewed unary wire shape a dialect dispatches with.
+// The zero value is the JSON body shape every existing dialect uses.
+type Transport string
+
+const (
+	TransportJSON     Transport = "json"
+	TransportGetQuery Transport = "get-query"
+	TransportPoll202  Transport = "poll-202"
+)
+
+// PollState is the terminal reading of one polling response document.
+type PollState string
+
+const (
+	PollPending   PollState = "pending"
+	PollSucceeded PollState = "succeeded"
+	PollFailed    PollState = "failed"
+)
+
+// WireRequest is the bounded wire lowering of an effective request document:
+// query parameters plus the exact body bytes to submit, if any.
+type WireRequest struct {
+	Query url.Values
+	Body  []byte
+}
+
 // Dialect is the small unary contract. Optional hooks are absent where that
 // operation has no model-body identity, textual policy surface or usage record.
 type Dialect struct {
@@ -62,6 +89,10 @@ type Dialect struct {
 	OutputText                    func(oif.Result) ([]Text, error)
 	Probe                         func(string) []byte
 	Evidence                      string
+	Transport                     Transport
+	Wire                          func(oif.View) (WireRequest, error)
+	Poll                          func(oif.Document) (PollState, error)
+	CancelPoll                    func(pollURL string) (method, url string, ok bool)
 }
 
 // Mapping qualifies one actual source/target pair. It owns both directions;
@@ -90,6 +121,22 @@ func (r *Registry) Register(d Dialect) error {
 	}
 	if d.Address.FamilyPath == "" && d.Address.RelativePath == "" || d.Address.FamilyPath != "" && d.Address.RelativePath != "" {
 		return errors.New("unary dialect requires one addressing contract")
+	}
+	switch d.Transport {
+	case "", TransportJSON:
+		if d.Wire != nil || d.Poll != nil || d.CancelPoll != nil {
+			return errors.New("json transport takes no wire or polling hooks")
+		}
+	case TransportGetQuery:
+		if d.Wire == nil || d.Poll != nil || d.CancelPoll != nil {
+			return errors.New("get-query transport requires a wire lowering and no polling hooks")
+		}
+	case TransportPoll202:
+		if d.Wire == nil || d.Poll == nil {
+			return errors.New("poll-202 transport requires a wire lowering and a poll reading")
+		}
+	default:
+		return errors.New("unary dialect transport is not reviewed")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

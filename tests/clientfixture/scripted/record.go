@@ -43,11 +43,13 @@ type Record struct {
 
 // credentialHeaders carry secrets; the recording keeps only that they were sent.
 var credentialHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"x-api-key":           true,
-	"x-goog-api-key":      true,
-	"cookie":              true,
+	"authorization":             true,
+	"proxy-authorization":       true,
+	"x-api-key":                 true,
+	"x-goog-api-key":            true,
+	"api-key":                   true,
+	"ocp-apim-subscription-key": true,
+	"cookie":                    true,
 }
 
 func (f *Fixture) begin(dialect string, r *http.Request, body []byte) *Record {

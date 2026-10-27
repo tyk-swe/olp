@@ -203,6 +203,7 @@ func (b backend) capabilities(surfaces []string) []routing.Capability {
 var backends = map[string]backend{
 	"systemone":  {name: "systemone", kind: "openai_compatible", vendor: "typesafe-jev", prefix: scripted.OpenAIPrefix, model: scripted.OpenAIModel, surface: "openai"},
 	"mistral":    {name: "mistral", kind: "openai_compatible", vendor: "mistral", prefix: scripted.MistralPrefix, model: scripted.MistralModel, surface: "openai"},
+	"azure":      {name: "azure", kind: "openai_compatible", vendor: "azure-document-intelligence", prefix: scripted.AzurePrefix, model: scripted.AzureModel, surface: "openai"},
 	"perplexity": {name: "perplexity", kind: "openai_compatible", vendor: "perplexity", prefix: scripted.PerplexityPrefix, model: scripted.PerplexityModel, surface: "openai"},
 	"tavily":     {name: "tavily", kind: "openai_compatible", vendor: "tavily", prefix: scripted.TavilyPrefix, model: scripted.TavilyModel, surface: "openai"},
 	"exa":        {name: "exa", kind: "openai_compatible", vendor: "exa", prefix: scripted.ExaPrefix, model: scripted.ExaModel, surface: "openai"},
@@ -238,6 +239,7 @@ var routeSpecs = []routeSpec{
 	{env: "ANTHROPIC", slug: "olp-anthropic", backend: "anthropic"},
 	{env: "GEMINI", slug: "olp-gemini", backend: "gemini"},
 	{env: "MISTRAL_OCR", slug: "olp-mistral-ocr", backend: "mistral", profiles: []string{"mistral-ocr"}, operations: []string{"ocr"}},
+	{env: "AZURE_OCR", slug: "olp-azure-ocr", backend: "azure", profiles: []string{"azure-document-intelligence-ocr"}, operations: []string{"ocr"}, transformed: true},
 	{env: "PERPLEXITY_SEARCH", slug: "olp-perplexity-search", backend: "perplexity", profiles: []string{"perplexity-search"}, operations: []string{"search"}},
 	{env: "SEARCH_TAVILY", slug: "olp-search-tavily", backend: "tavily", profiles: []string{"tavily-search"}, operations: []string{"search"}, transformed: true},
 	{env: "SEARCH_EXA", slug: "olp-search-exa", backend: "exa", profiles: []string{"exa-search"}, operations: []string{"search"}, transformed: true},

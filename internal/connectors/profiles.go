@@ -403,6 +403,7 @@ func (c Config) ValidateProfile() error {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
 	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
+		p.Dialect == "azure-document-intelligence-ocr" && c.VendorID != "azure-document-intelligence" ||
 		p.ID == "groq-files-batches" && c.VendorID != "groq" ||
 		p.ID == "together-files-batches" && c.VendorID != "together" ||
 		p.ID == "mistral-files-batches" && c.VendorID != "mistral" ||

@@ -15056,6 +15056,7 @@
           "openai-decisions",
           "systemone",
           "mistral-ocr",
+          "azure-document-intelligence-ocr",
           "perplexity-search",
           "tavily-search",
           "exa-search",

@@ -206,6 +206,34 @@ meters as media units. OCR follows the
 non-exempt cost caps refuse `422 unbounded_work_budget` before dispatch,
 waived only for caller-paid cost-exempt routes.
 
+The `azure-document-intelligence-ocr` profile (vendor Azure Document
+Intelligence, an account-scoped endpoint the operator replaces with their
+resource host, credential as `Ocp-Apim-Subscription-Key`) serves the same
+frozen OCR contract through Azure Document Intelligence REST API
+`2024-11-30`. Its native document admits `model`, exactly one of
+`urlSource` (an `https:` URL the provider fetches) or `base64Source`
+(inline base64), and a one-based `pages` selector such as `1-2,4`. The
+analyze call answers `202` and the gateway polls the returned
+`Operation-Location` inside the same attempt and route deadline, so the
+caller still sends one request and reads one response. Polling retries are
+read-only and a document is never submitted twice; the polling URL must
+stay on the bound provider origin or the attempt fails before any
+credential is sent there. Cancelling the request stops the wait and makes
+a best-effort delete of the upstream result, which only marks the result
+for deletion because the provider offers no cancel operation; a cancelled
+or timed-out attempt stays billing-uncertain. Transformed serving maps the
+frozen OCR document onto this dialect, converting zero-based `pages` to
+the one-based selector, `https:` document and image URLs to `urlSource`
+and base64 `data:` documents to `base64Source`, and projects the provider
+markdown back into `pages[].index`/`pages[].markdown`. Sending an
+`https:` document URL on an OCR route is the explicit choice to let the
+provider fetch that URL; the gateway never fetches document bytes itself.
+`table_format` is admitted only as `markdown`, the image-extraction and
+header/footer controls only as explicit `false`, and `document_name`, the
+caller `id` and every other unmappable field are refused `400` before
+dispatch. Usage meters the observed result pages as media units; a result
+that carries no page evidence stays billing-uncertain instead of free.
+
 The `perplexity-search` profile (vendor Perplexity) admits the frozen
 ApiSearchRequest: a string `query` (arrays refused), `max_results` 1–20,
 `search_type`, `max_tokens`, `max_tokens_per_page`, `country`,
@@ -228,10 +256,10 @@ completes its evidence, and the attempt is charged at the target's
 Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json),
 the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
 `tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
-required; this evidence does not qualify unimplemented API families. Brave (GET-query
-transport), Azure Document Intelligence (202/poll transport) and Vertex
-document processing (GCP-authenticated profile) stay pending; Google's Custom
-Search JSON API is excluded — the provider discontinued new enrollment and
+required; this evidence does not qualify unimplemented API families. Brave
+(GET-query transport) and Vertex document processing (GCP-authenticated
+profile) stay pending; Google's Custom Search JSON API is excluded — the
+provider discontinued new enrollment and
 the API sunsets on 2027-01-01.
 
 ### Files, batches, realtime, and provider-retained state

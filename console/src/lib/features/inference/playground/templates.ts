@@ -306,6 +306,17 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'azure-document-intelligence-ocr',
+    label: 'OCR · Azure Document Intelligence',
+    operation: 'ocr',
+    nativeDialect: 'azure-document-intelligence-ocr',
+    request: {
+      model: '',
+      base64Source:
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+    }
+  },
+  {
     key: 'perplexity-search',
     label: 'Web search · Perplexity',
     operation: 'search',

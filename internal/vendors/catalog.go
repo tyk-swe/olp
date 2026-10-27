@@ -52,6 +52,12 @@ func accountPreset(id, name, description, endpoint string, docs Link, c Contract
 	return c
 }
 
+func accountProfilePreset(id, name, description, endpoint string, docs Link, c Contract, profile *ProfileRef) Contract {
+	c = compatiblePreset(id, name, name, description, endpoint, docs, c, profile)
+	c.Preset.Placeholder = true
+	return c
+}
+
 // selfHostedPreset is a runtime the operator runs: unauthenticated at a
 // placeholder address until the operator says otherwise.
 func selfHostedPreset(id, name, description, endpoint string, docs Link, c Contract) Contract {
@@ -155,6 +161,7 @@ var contracts = []Contract{
 	compatiblePreset("tavily", "Tavily", "Tavily", "Tavily Search API.", "https://api.tavily.com", Link{"Tavily Search API", "https://docs.tavily.com/api-reference/endpoint/search"}, Contract{Operations: []string{"search"}, ProbeOperation: "search", Dialects: []string{"tavily-search"}, Parameters: []string{}}, &ProfileRef{ID: "tavily-search", Revision: "1"}),
 	compatiblePreset("exa", "Exa", "Exa", "Exa Search API.", "https://api.exa.ai", Link{"Exa Search API", "https://docs.exa.ai/reference/search"}, Contract{Operations: []string{"search"}, ProbeOperation: "search", Dialects: []string{"exa-search"}, Parameters: []string{}}, &ProfileRef{ID: "exa-search", Revision: "1"}),
 	compatiblePreset("parallel", "Parallel", "Parallel", "Parallel Search API.", "https://api.parallel.ai/v1", Link{"Parallel Search API", "https://docs.parallel.ai/api-reference/search"}, Contract{Operations: []string{"search"}, ProbeOperation: "search", Dialects: []string{"parallel-search"}, Parameters: []string{}, Credential: &Credential{Header: "X-Api-Key"}}, &ProfileRef{ID: "parallel-search", Revision: "1"}),
+	accountProfilePreset("azure-document-intelligence", "Azure Document Intelligence", "Azure AI Document Intelligence document OCR.", "https://your-resource.cognitiveservices.azure.com", Link{"Document Intelligence analyze document", "https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document"}, Contract{Operations: []string{"ocr"}, ProbeOperation: "ocr", Dialects: []string{"azure-document-intelligence-ocr"}, Parameters: []string{}, Credential: &Credential{Header: "Ocp-Apim-Subscription-Key"}}, &ProfileRef{ID: "azure-document-intelligence-ocr", Revision: "1"}),
 
 	// Frontier and fast inference.
 	compatiblePreset("xai", "xAI", "xAI", "xAI Grok API.", "https://api.x.ai/v1", Link{"xAI chat completions", "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions"}, Contract{Discovery: true, Operations: []string{"generation", "image_generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias"},

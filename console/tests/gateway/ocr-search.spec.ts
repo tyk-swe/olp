@@ -10,6 +10,7 @@ const upstream = {
   credential: 'ocr-search-fixture-secret'
 };
 const ocrRoute = 'e2e-mistral-ocr';
+const azureOcrRoute = 'e2e-azure-ocr';
 const nativeSearchRoute = 'e2e-perplexity-search';
 const mappedSearchRoute = 'e2e-search-tavily';
 const keyName = 'OCR search route key';
@@ -122,29 +123,35 @@ async function addProvider(
   return providerId;
 }
 
-// addMistralProvider provisions the OCR provider through the management API:
+// addOCRProvider provisions an OCR provider through the management API:
 // the provider wizard offers no profile choice for presets that carry no
 // default profile, such as mistral's generation preset.
-async function addMistralProvider(page: Page) {
+async function addOCRProvider(
+  page: Page,
+  name: string,
+  endpoint: string,
+  profile: string,
+  vendor: string
+) {
   const created = await manage<{ id: string }>(
     page,
     'POST',
     '/api/v1/providers',
     {
       body: {
-        name: 'Mistral upstream',
+        name,
         configuration: {
           kind: 'openai_compatible',
           auth_mode: 'api_key',
-          endpoint: `${upstream.origin}/mistral/v1`,
-          profile_id: 'mistral-ocr',
+          endpoint,
+          profile_id: profile,
           profile_revision: '1',
-          options: { vendor_id: 'mistral' }
+          options: { vendor_id: vendor }
         },
         credential: upstream.credential,
         model: upstream.model
       },
-      idempotency: `create-mistral-${Date.now()}`
+      idempotency: `create-${vendor}-${Date.now()}`
     }
   );
   expect(created.status, created.source).toBe(201);
@@ -244,8 +251,23 @@ test('a browser user publishes OCR and search routes and drives them through the
   await signIn(page);
   await resetUpstream(request);
 
-  await addMistralProvider(page);
+  await addOCRProvider(
+    page,
+    'Mistral upstream',
+    `${upstream.origin}/mistral/v1`,
+    'mistral-ocr',
+    'mistral'
+  );
   await addRoute(page, ocrRoute, 'strict', 'OCR', false);
+
+  await addOCRProvider(
+    page,
+    'Azure upstream',
+    `${upstream.origin}/azure`,
+    'azure-document-intelligence-ocr',
+    'azure-document-intelligence'
+  );
+  await addRoute(page, azureOcrRoute, 'transformed', 'OCR', false);
 
   await addProvider(
     page,
@@ -265,14 +287,19 @@ test('a browser user publishes OCR and search routes and drives them through the
   );
   await addRoute(page, mappedSearchRoute, 'transformed', 'Web search');
 
-  // One key allows all three routes.
+  // One key allows all four routes.
   await page.goto('/api-keys/new');
   await expect(
     page.getByRole('heading', { name: 'Create a proxy key.' })
   ).toBeVisible();
   await page.getByLabel('Key name').fill(keyName);
   await page.getByRole('checkbox', { name: 'Model listing' }).check();
-  for (const slug of [ocrRoute, nativeSearchRoute, mappedSearchRoute]) {
+  for (const slug of [
+    ocrRoute,
+    azureOcrRoute,
+    nativeSearchRoute,
+    mappedSearchRoute
+  ]) {
     await page
       .getByRole('group', { name: 'Allowed route slugs' })
       .getByRole('checkbox', { name: slug })
@@ -302,6 +329,11 @@ test('a browser user publishes OCR and search routes and drives them through the
     path: info.outputPath('playground-ocr.png'),
     fullPage: true
   });
+
+  // OCR on the transformed Azure route polls inside one request and
+  // projects into the frozen page shape.
+  await runNative(page, azureOcrRoute, 'ocr', 'mistral-ocr', secret);
+  await expect(result).toContainText('Azure fixture OCR text');
 
   // Native Perplexity search keeps the upstream identity.
   await runNative(
@@ -348,6 +380,21 @@ test('a browser user publishes OCR and search routes and drives them through the
     `Bearer ${upstream.credential}`
   );
   expect((perplexity?.body as { model?: unknown }).model).toBeUndefined();
+  const azureSubmit =
+    '/azure/documentintelligence/documentModels/fixture-model:analyze';
+  const azure = byPath.get(azureSubmit);
+  expect(azure?.headers['ocp-apim-subscription-key']).toBe(upstream.credential);
+  expect(azure?.headers.authorization).toBeUndefined();
+  expect(
+    (azure?.body as { base64Source?: unknown }).base64Source
+  ).toBeDefined();
+  const azurePoll = byPath.get(
+    '/azure/documentintelligence/documentModels/fixture-model/analyzeResults/fixture-result'
+  );
+  expect(azurePoll).toBeDefined();
+  expect(
+    observed.calls.filter((call) => call.path === azureSubmit)
+  ).toHaveLength(1);
   // Only the provider credential ever reached the upstream.
   expect(JSON.stringify(observed.calls)).not.toContain(secret);
 

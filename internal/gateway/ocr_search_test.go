@@ -1,11 +1,15 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -271,5 +275,249 @@ func TestSearchMutatingGuardrailRefused(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "guardrail_surface_unavailable") || h.mock.count("a")+h.mock.count("b") != 0 {
 		t.Fatalf("mutating search guardrail: %d %s", resp.StatusCode, body)
+	}
+}
+
+const azureSubmitPath = "/a/v1/documentintelligence/documentModels/model-a:analyze"
+const azurePollPath = "/a/v1/documentintelligence/documentModels/model-a/analyzeResults/result-1"
+const azureTwoPages = `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"model-a","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# One\n\n# Two","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":5}]},{"pageNumber":2,"spans":[{"offset":7,"length":5}]}]}}`
+
+type azureMock struct {
+	submits, polls, deletes atomic.Int32
+	poll                    func(n int32, w http.ResponseWriter, r *http.Request)
+	foreign                 bool
+}
+
+func (m *azureMock) handler(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Ocp-Apim-Subscription-Key") != secretA || r.Header.Get("Authorization") != "" {
+			t.Errorf("credential headers on %s %s: %v", r.Method, r.URL.Path, r.Header)
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == azureSubmitPath:
+			m.submits.Add(1)
+			q := r.URL.Query()
+			if q.Get("api-version") != "2024-11-30" || q.Get("outputContentFormat") != "markdown" {
+				t.Errorf("submit query: %s", r.URL.RawQuery)
+			}
+			body, _ := io.ReadAll(r.Body)
+			var req map[string]any
+			if json.Unmarshal(body, &req) != nil || len(req) != 1 {
+				t.Errorf("submit body: %s", body)
+			}
+			loc := "http://" + r.Host + azurePollPath + "?api-version=2024-11-30"
+			if m.foreign {
+				loc = "https://evil.example.net" + azurePollPath + "?api-version=2024-11-30"
+			}
+			w.Header().Set("Operation-Location", loc)
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && r.URL.Path == azurePollPath:
+			m.poll(m.polls.Add(1), w, r)
+		case r.Method == http.MethodDelete && r.URL.Path == azurePollPath:
+			m.deletes.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+}
+
+func azureHarness(t *testing.T, transformed bool, mock *azureMock) *harness {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"ocr"}
+		if transformed {
+			route.Fidelity.Mode = routing.FidelityTransformed
+		}
+		s.Routes[routeSlug] = route
+		ocrSearchProviders(s, "azure-document-intelligence", "azure-document-intelligence-ocr", "ocr")
+		if !transformed {
+			for id, p := range s.Providers {
+				p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "ocr", Surface: "native", Mode: "unary"}}
+				s.Providers[id] = p
+			}
+		}
+	})
+	h.mock.set("a", mock.handler(t))
+	return h
+}
+
+func TestAzureOCRTransformedPolling(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "0")
+		if n == 1 {
+			io.WriteString(w, `{"status":"running"}`)
+			return
+		}
+		io.WriteString(w, azureTwoPages)
+	}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var out struct {
+		Model string `json:"model"`
+		Pages []struct {
+			Index    int    `json:"index"`
+			Markdown string `json:"markdown"`
+		} `json:"pages"`
+		UsageInfo struct {
+			PagesProcessed int `json:"pages_processed"`
+		} `json:"usage_info"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil {
+		t.Fatalf("azure ocr: %d %s", resp.StatusCode, body)
+	}
+	if out.Model != routeSlug || len(out.Pages) != 2 || out.Pages[0].Markdown != "# One" || out.Pages[1].Markdown != "# Two" || out.UsageInfo.PagesProcessed != 2 {
+		t.Fatalf("projected: %+v", out)
+	}
+	if mock.submits.Load() != 1 || mock.polls.Load() != 2 {
+		t.Fatalf("submits=%d polls=%d", mock.submits.Load(), mock.polls.Load())
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if !fact.UsageObserved || fact.BillingUncertain || fact.Usage == nil || fact.Usage.MediaUnits == nil || *fact.Usage.MediaUnits != "2" {
+		t.Fatalf("fact: observed=%v uncertain=%v usage=%+v", fact.UsageObserved, fact.BillingUncertain, fact.Usage)
+	}
+}
+
+func TestAzureOCRPollNeverResubmits(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, azureTwoPages)
+	}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || mock.submits.Load() != 1 || mock.polls.Load() != 2 {
+		t.Fatalf("ambiguous poll: %d %s submits=%d polls=%d", resp.StatusCode, body, mock.submits.Load(), mock.polls.Load())
+	}
+}
+
+func TestAzureOCRMappingRefusalsDispatchNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"https://x"},"table_format":"html"}`,
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"https://x"},"include_image_base64":true}`,
+	} {
+		mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {}}
+		h := azureHarness(t, true, mock)
+		resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(body), nil)
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || mock.submits.Load() != 0 {
+			t.Fatalf("refusal dispatched: %d %s submits=%d", resp.StatusCode, out, mock.submits.Load())
+		}
+	}
+}
+
+func TestAzureOCRMissingUnitsBillingUncertain(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"model-a","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# Only"}}`)
+	}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "usage_info") {
+		t.Fatalf("missing units: %d %s", resp.StatusCode, body)
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if fact.UsageObserved || !fact.BillingUncertain || fact.UsageComplete {
+		t.Fatalf("fact: observed=%v uncertain=%v complete=%v", fact.UsageObserved, fact.BillingUncertain, fact.UsageComplete)
+	}
+}
+
+func TestAzureOCRPollForeignLocationRefused(t *testing.T) {
+	mock := &azureMock{foreign: true, poll: func(n int32, w http.ResponseWriter, r *http.Request) {}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || mock.submits.Load() != 1 || mock.polls.Load() != 0 {
+		t.Fatalf("foreign location: %d %s submits=%d polls=%d", resp.StatusCode, body, mock.submits.Load(), mock.polls.Load())
+	}
+}
+
+func TestAzureOCRCancellationDeletesResult(t *testing.T) {
+	polled := make(chan struct{}, 1)
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		select {
+		case polled <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "0")
+		io.WriteString(w, `{"status":"running"}`)
+	}}
+	h := azureHarness(t, true, mock)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/ocr", bytes.NewReader([]byte(ocrBody)))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-polled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("poll never started")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request never ended after cancel")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for mock.deletes.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mock.submits.Load() != 1 || mock.deletes.Load() != 1 {
+		t.Fatalf("submits=%d deletes=%d", mock.submits.Load(), mock.deletes.Load())
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if !fact.BillingUncertain {
+		t.Fatalf("cancelled fact not billing uncertain: %+v", fact)
+	}
+}
+
+func TestAzureOCRNativeRoundTrip(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, azureTwoPages)
+	}}
+	h := azureHarness(t, false, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/native/azure-document-intelligence-ocr/models/"+routeSlug, fullKey, []byte(`{"model":"`+routeSlug+`","base64Source":"QUJD"}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var out struct {
+		Status        string `json:"status"`
+		AnalyzeResult struct {
+			ModelID string `json:"modelId"`
+		} `json:"analyzeResult"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil || out.Status != "succeeded" || out.AnalyzeResult.ModelID != routeSlug {
+		t.Fatalf("native azure: %d %s", resp.StatusCode, body)
+	}
+	if mock.submits.Load() != 1 || mock.polls.Load() != 1 {
+		t.Fatalf("submits=%d polls=%d", mock.submits.Load(), mock.polls.Load())
 	}
 }

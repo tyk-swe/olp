@@ -175,7 +175,7 @@ durable accounting foundation.
 - [ ] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
   citations, time ranges, limits and request pricing, with explicit refusal
   of unmappable fields.
-- [ ] **RM6.2 — Azure Document Intelligence polling:** implement bounded
+- [x] **RM6.2 — Azure Document Intelligence polling:** implement bounded
   202/poll transport, deadlines, cancellation, page/document pricing,
   output mapping and provider-fetched URL egress controls.
 - [ ] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
