@@ -294,3 +294,42 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 		t.Fatal("unregistered provider event was admitted")
 	}
 }
+
+func TestVertexObserverRequiresUsageAfterContextUpdate(t *testing.T) {
+	template, err := duplexcontract.Compile(vertexConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range []string{
+		`{"clientContent":{"turns":[{"role":"user","parts":[{"text":"more context"}]}]}}`,
+		`{"clientContent":{"turns":[{"role":"user","parts":[{"text":"more context"}]}],"turnComplete":false}}`,
+		`{"client_content":{"turns":[{"role":"user","parts":[{"text":"more context"}]}]}}`,
+		`{"client_content":{"turns":[{"role":"user","parts":[{"text":"more context"}]}],"turn_complete":false}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			observer := template.Observer(1 << 20)
+			metered := []byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":3,"responseTokenCount":2,"totalTokenCount":5}}`)
+			if _, err := observer.ServerFrame(metered); err != nil {
+				t.Fatal(err)
+			}
+			if !observer.Complete() {
+				t.Fatal("initial metered completion remains unsettled")
+			}
+			if err := observer.ClientFrame([]byte(frame)); err != nil {
+				t.Fatal(err)
+			}
+			if observer.Complete() {
+				t.Fatal("context update without subsequent usage settled as complete")
+			}
+			if err := observer.ClientFrame([]byte(`{"clientContent":{"turnComplete":true}}`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := observer.ServerFrame(metered); err != nil {
+				t.Fatal(err)
+			}
+			if !observer.Complete() {
+				t.Fatal("subsequent turn usage did not settle the context update")
+			}
+		})
+	}
+}
