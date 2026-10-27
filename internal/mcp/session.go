@@ -2,8 +2,9 @@ package mcp
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -15,21 +16,57 @@ const (
 	sessionIDRandomSize = 32
 )
 
-type session struct {
+type principalIdentity struct {
 	id             string
-	installationID string
-	projectID      string
-	principal      string
-	protocol       string
-	toolset        resolvedToolset
-	releaseID      string
-	createdAt      time.Time
-	lastActiveAt   time.Time
-	initialized    bool
+	issuer         string
+	lookupID       string
+	workloadDigest string
 }
 
-func principalKey(authority access.Authority) string {
-	return strings.Join([]string{authority.ID, authority.Issuer, authority.LookupID, authority.WorkloadDigest}, "\x00")
+func principalOf(authority access.Authority) principalIdentity {
+	return principalIdentity{
+		id: authority.ID, issuer: authority.Issuer,
+		lookupID: authority.LookupID, workloadDigest: authority.WorkloadDigest,
+	}
+}
+
+func (p principalIdentity) scope() string {
+	digest := sha256.New()
+	for _, part := range []string{p.id, p.issuer, p.lookupID, p.workloadDigest} {
+		var size [binary.MaxVarintLen64]byte
+		n := binary.PutUvarint(size[:], uint64(len(part)))
+		digest.Write(size[:n])
+		digest.Write([]byte(part))
+	}
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
+type sessionBinding struct {
+	installationID string
+	projectID      string
+	principal      principalIdentity
+}
+
+func bindingOf(authority access.Authority) sessionBinding {
+	binding := sessionBinding{installationID: authority.InstallationID, principal: principalOf(authority)}
+	if authority.ProjectID != nil {
+		binding.projectID = *authority.ProjectID
+	}
+	return binding
+}
+
+func (b sessionBinding) scope() string { return b.principal.scope() }
+
+type sessionRecord struct {
+	id                string
+	binding           sessionBinding
+	protocol          string
+	toolsetID         string
+	toolsetRevisionID string
+	releaseID         string
+	createdAt         time.Time
+	lastActiveAt      time.Time
+	initialized       bool
 }
 
 func newSessionID() (string, error) {
@@ -45,85 +82,4 @@ func (s *Server) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
-}
-
-func sessionExpired(candidate session, now time.Time) bool {
-	return !now.Before(candidate.lastActiveAt.Add(sessionIdleTimeout))
-}
-
-func sessionOwnedBy(candidate session, authority access.Authority) bool {
-	if authority.ProjectID == nil {
-		return false
-	}
-	return candidate.principal == principalKey(authority) &&
-		candidate.projectID == *authority.ProjectID &&
-		candidate.installationID == authority.InstallationID
-}
-
-func (s *Server) createSession(candidate session) bool {
-	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-	if s.sessions == nil {
-		s.sessions = map[string]session{}
-	}
-	active := 0
-	for id, existing := range s.sessions {
-		if sessionExpired(existing, candidate.createdAt) {
-			delete(s.sessions, id)
-			continue
-		}
-		if existing.principal == candidate.principal {
-			active++
-		}
-	}
-	if active >= maxSessionsPerKey {
-		return false
-	}
-	s.sessions[candidate.id] = candidate
-	return true
-}
-
-func (s *Server) accessSession(id string, authority access.Authority) (session, bool) {
-	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-	existing, ok := s.sessions[id]
-	if !ok || !sessionOwnedBy(existing, authority) {
-		return session{}, false
-	}
-	now := s.now()
-	if sessionExpired(existing, now) {
-		delete(s.sessions, id)
-		return session{}, false
-	}
-	accessed := existing
-	accessed.lastActiveAt = now
-	s.sessions[id] = accessed
-	return accessed, true
-}
-
-func (s *Server) markSessionInitialized(id string, authority access.Authority) {
-	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-	existing, ok := s.sessions[id]
-	if !ok || !sessionOwnedBy(existing, authority) {
-		return
-	}
-	updated := existing
-	updated.initialized = true
-	s.sessions[id] = updated
-}
-
-func (s *Server) deleteSession(id string, authority access.Authority) bool {
-	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-	existing, ok := s.sessions[id]
-	if !ok || !sessionOwnedBy(existing, authority) {
-		return false
-	}
-	if sessionExpired(existing, s.now()) {
-		delete(s.sessions, id)
-		return false
-	}
-	delete(s.sessions, id)
-	return true
 }

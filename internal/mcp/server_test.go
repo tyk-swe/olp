@@ -223,7 +223,7 @@ func testSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
 
 func testAuthority(scopes []string, toolsets []string) *access.Authority {
 	project := testProject
-	return &access.Authority{ID: testKeyID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
+	return &access.Authority{ID: testKeyID, InstallationID: "test-installation", ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
 }
 
 func testAuthKey() *secrets.AuthKey {
@@ -246,6 +246,11 @@ func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Ser
 			return []byte("static-token"), nil
 		},
 	}
+	sessions, err := NewSessionStore(newFakeSessionCommander(func() time.Time { return server.now() }), "test:mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Sessions = sessions
 	return server, fx, ledger, tl, rt
 }
 

@@ -75,6 +75,11 @@ the session with `DELETE /mcp`. Calls list and run only the pinned tools, over
 the same authorized and accounted path as `GET /v1/mcp/tools` and
 `POST /v1/mcp/tools/call`. Sampling, elicitation, roots and arbitrary resource
 or prompt access are refused explicitly, and no standalone `GET /mcp` event
-stream is offered. Session records hold binding metadata only, never message
-bodies, credentials or results, and a session answers only to the principal
-that opened it.
+stream is offered. Session records live in the shared Valkey store that every
+replica already uses for shared limits, and they hold binding identifiers,
+pinned revisions, timestamps and digests only, never message bodies,
+credentials or results. Idle expiry runs on store TTLs and the per key cap
+counts against a per principal index in that store, so both hold across every
+replica instead of per process, and a session answers only to the principal
+that opened it. Where no shared store is configured, session creation refuses
+as unavailable while the JSON tool endpoints keep serving.

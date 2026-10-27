@@ -10,7 +10,6 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,12 +84,10 @@ type Server struct {
 	Egress         *egress.Policy
 	Ledger         Ledger
 	Auth           *secrets.AuthKey
+	Sessions       *SessionStore
 	TrustedProxies []netip.Prefix
 	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
 	Now            func() time.Time
-
-	sessionsMu sync.Mutex
-	sessions   map[string]session
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -122,9 +119,16 @@ func fail(status int, code, kind, msg string) *apiError {
 }
 
 var (
-	errToolsetNotFound = fail(http.StatusNotFound, "toolset_not_found", "invalid_request_error", "The toolset does not exist or this key may not use it.")
-	errToolNotFound    = fail(http.StatusNotFound, "tool_not_found", "invalid_request_error", "The tool does not exist in the pinned toolset.")
-	errLedger          = fail(http.StatusServiceUnavailable, "debit_ledger_unavailable", "api_error", "The durable debit ledger is unavailable, so the call was not dispatched.")
+	errToolsetNotFound          = fail(http.StatusNotFound, "toolset_not_found", "invalid_request_error", "The toolset does not exist or this key may not use it.")
+	errToolNotFound             = fail(http.StatusNotFound, "tool_not_found", "invalid_request_error", "The tool does not exist in the pinned toolset.")
+	errLedger                   = fail(http.StatusServiceUnavailable, "debit_ledger_unavailable", "api_error", "The durable debit ledger is unavailable, so the call was not dispatched.")
+	errSessionRequired          = fail(http.StatusBadRequest, "session_required", "invalid_request_error", "Supply the session in the Mcp-Session-Id header.")
+	errSessionNotFound          = fail(http.StatusNotFound, "session_not_found", "invalid_request_error", "The session does not exist.")
+	errSessionProtocolMismatch  = fail(http.StatusBadRequest, "protocol_version_mismatch", "invalid_request_error", "The protocol version does not match the session.")
+	errSessionUnavailable       = fail(http.StatusServiceUnavailable, "session_unavailable", "api_error", "The session store is unavailable; retry shortly.")
+	errSessionCreateUnavailable = fail(http.StatusServiceUnavailable, "session_unavailable", "api_error", "A session could not be created, so nothing was dispatched.")
+	errSessionNotInitialized    = fail(http.StatusBadRequest, "session_not_initialized", "invalid_request_error", "Send notifications/initialized before using this session.")
+	errSessionLimit             = fail(http.StatusTooManyRequests, "session_limit_exceeded", "rate_limit_error", "This key already has the maximum number of active sessions.")
 )
 
 func writeError(w http.ResponseWriter, err *apiError) {
