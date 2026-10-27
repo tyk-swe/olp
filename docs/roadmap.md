@@ -185,7 +185,7 @@ durable accounting foundation.
   creation/control, five-second revocation checks, close/usage accounting,
   session expiry and lost-control exposure. Extend Azure through its separate
   transport contract.
-- [ ] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
+- [x] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
   Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
   declared transcription support, cancellation and terminal usage accounting.
 - [ ] **RM6.6 — Governed pass-through:** implement the separate route kind

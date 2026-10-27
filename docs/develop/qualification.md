@@ -160,6 +160,7 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | Text Decisions | Native and one-way mapping, labels/order/usage/pricing, caller-paid budget and inspection fixtures | Console/browser, configuration promotion, each provider live |
 | OCR/search | Codecs, raw-HTTP process fixtures, route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
+| Native duplex (RM6.5) | Compiled-profile contract tests, gateway WebSocket relay fixtures in process, a fake Bedrock stream behind the SDK opener seam, per-vendor frame fixtures, and the endpoint ledger rows for xAI, Vertex AI Live and Bedrock Nova Sonic | Live sessions per exact tuple with real xAI, Google Cloud and AWS accounts, including the 8-minute Nova Sonic stream bound and Vertex setup acknowledgement against the aiplatform endpoint |
 | Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
 
 Run `CLIENTS=m9-go tests/clients/run.sh` for locked OpenAI Go completions and

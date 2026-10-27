@@ -497,7 +497,7 @@ unresolved realtime exposure additionally requires RM4.2–RM4.3.
   creation/control first. Pass browser faults and live admission, five-second
   revocation, close/usage, session-expiry and lost-control exposure checks before
   considering Azure's independently qualified contract.
-- [ ] **RM6.5 — Add native duplex profiles:** independently implement and
+- [x] **RM6.5 — Add native duplex profiles:** independently implement and
   qualify xAI realtime, Vertex AI Live and Bedrock Nova Sonic. Test owner-scoped
   sessions, declared transcription support, cancellation and terminal usage;
   no reconnect/fallback may move a session to another provider.
