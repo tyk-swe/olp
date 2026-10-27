@@ -86,6 +86,10 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		"name": "Tool caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
 	}, idem("mcp-exec-key"), 201)
 	secret := key["secret"].(string)
+	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Other tool caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
+	}, idem("mcp-exec-other-key"), 201)
+	otherSecret := otherKey["secret"].(string)
 
 	valkey, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
@@ -100,8 +104,12 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sessionStore, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
 	toolServer := &mcp.Server{
-		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey,
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore,
 		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
 		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 			return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
@@ -140,7 +148,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		}
 		return resp.StatusCode, out
 	}
-	mcpCall := func(method, path, sessionID string, body any) (int, http.Header, map[string]any) {
+	mcpCallAs := func(token, method, path, sessionID string, body any) (int, http.Header, map[string]any) {
 		t.Helper()
 		var data []byte
 		if body != nil {
@@ -150,7 +158,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		if sessionID != "" {
@@ -170,6 +178,10 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 			}
 		}
 		return resp.StatusCode, resp.Header, out
+	}
+	mcpCall := func(method, path, sessionID string, body any) (int, http.Header, map[string]any) {
+		t.Helper()
+		return mcpCallAs(secret, method, path, sessionID, body)
 	}
 	debitCount := func() int {
 		t.Helper()
@@ -266,6 +278,24 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	var sessionState string
 	if err = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.execution_debits WHERE id=$1`, meta["olp.dispatch_id"]).Scan(&sessionState); err != nil || sessionState != "settled" || debitCount() != 2 {
 		t.Fatalf("session dispatch did not settle on the shared ledger: state=%q err=%v debits=%d", sessionState, err, debitCount())
+	}
+	if status, _, _ = mcpCallAs(otherSecret, "POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 6, "method": "tools/list", "params": map[string]any{}}); status != http.StatusNotFound {
+		t.Fatalf("another principal listed through the session at the gateway boundary: %d", status)
+	}
+	if status, _, _ = mcpCallAs(otherSecret, "POST", "/mcp", sessionID, map[string]any{
+		"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+	}); status != http.StatusNotFound {
+		t.Fatalf("another principal called through the session at the gateway boundary: %d", status)
+	}
+	if status, _, _ = mcpCallAs(otherSecret, "DELETE", "/mcp", sessionID, nil); status != http.StatusNotFound {
+		t.Fatalf("another principal deleted the session at the gateway boundary: %d", status)
+	}
+	if calls.Load() != 2 || debitCount() != 2 {
+		t.Fatalf("cross-principal session use dispatched at the gateway boundary: calls=%d debits=%d", calls.Load(), debitCount())
+	}
+	if status, _, _ = mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 8, "method": "tools/list", "params": map[string]any{}}); status != http.StatusOK {
+		t.Fatalf("owner lost the session after a foreign attempt at the gateway boundary: %d", status)
 	}
 	if status, _, _ = mcpCall("DELETE", "/mcp", sessionID, nil); status != http.StatusNoContent {
 		t.Fatalf("session delete refused: %d", status)
