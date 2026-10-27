@@ -382,7 +382,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			if limiter != nil {
 				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
 			}
-			toolServer := &mcp.Server{Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			var sessionStore *mcp.SessionStore
+			if vk != nil {
+				sessionStore, err = mcp.NewSessionStore(vk, prefix+"mcp")
+				if err != nil {
+					return err
+				}
+			}
+			toolServer := &mcp.Server{Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
 			}}
 			toolServer.Register(public)

@@ -57,13 +57,17 @@ func (t *timeline) snapshot() []string {
 }
 
 type fakeRuntime struct {
-	authority   *access.Authority
-	release     *runtime.Release
-	failAuthzOn int
-	authzCalls  atomic.Int32
+	authority      *access.Authority
+	otherAuthority *access.Authority
+	release        *runtime.Release
+	failAuthzOn    int
+	authzCalls     atomic.Int32
 }
 
 func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
+	if secret == "other-key" && f.otherAuthority != nil {
+		return f.otherAuthority, nil
+	}
 	if secret != "test-key" || f.authority == nil {
 		return nil, errors.New("invalid key")
 	}
@@ -219,7 +223,7 @@ func testSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
 
 func testAuthority(scopes []string, toolsets []string) *access.Authority {
 	project := testProject
-	return &access.Authority{ID: testKeyID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
+	return &access.Authority{ID: testKeyID, InstallationID: "test-installation", ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
 }
 
 func testAuthKey() *secrets.AuthKey {
@@ -242,6 +246,11 @@ func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Ser
 			return []byte("static-token"), nil
 		},
 	}
+	sessions, err := NewSessionStore(newFakeSessionCommander(func() time.Time { return server.now() }), "test:mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Sessions = sessions
 	return server, fx, ledger, tl, rt
 }
 

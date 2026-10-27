@@ -60,3 +60,26 @@ request normalization, before upstream discovery. Later catalog drift or endpoin
 unavailability cannot make that completed request fail or overwrite a later
 registration. New applies release mutation locks for discovery and repeat
 reauthorization, replay lookup and destination preconditions before commit.
+
+## Calling published tools over Streamable HTTP
+
+Callers with the `tools` scope and a toolset allowlist can also reach the same
+published tools as the JSON tool endpoints at `POST /mcp`, using Streamable HTTP
+at MCP 2025-03-26, 2025-06-18 or 2025-11-25. A session binds one toolset, chosen
+with the `toolset_id` query parameter when the key may use more than one, and
+stays bound to the installation, project, principal and pinned toolset and
+server revisions it initialized against. Sessions expire after 15 idle minutes
+and each key may hold at most 64 at once. Send the returned `Mcp-Session-Id`
+header, with the negotiated `MCP-Protocol-Version`, on later requests, and close
+the session with `DELETE /mcp`. Calls list and run only the pinned tools, over
+the same authorized and accounted path as `GET /v1/mcp/tools` and
+`POST /v1/mcp/tools/call`. Sampling, elicitation, roots and arbitrary resource
+or prompt access are refused explicitly, and no standalone `GET /mcp` event
+stream is offered. Session records live in the shared Valkey store that every
+replica already uses for shared limits, and they hold binding identifiers,
+pinned revisions, timestamps and digests only, never message bodies,
+credentials or results. Idle expiry runs on store TTLs and the per key cap
+counts against a per principal index in that store, so both hold across every
+replica instead of per process, and a session answers only to the principal
+that opened it. Where no shared store is configured, session creation refuses
+as unavailable while the JSON tool endpoints keep serving.

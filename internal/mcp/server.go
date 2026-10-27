@@ -84,13 +84,27 @@ type Server struct {
 	Egress         *egress.Policy
 	Ledger         Ledger
 	Auth           *secrets.AuthKey
+	Sessions       *SessionStore
 	TrustedProxies []netip.Prefix
 	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
+	Now            func() time.Time
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/mcp/tools", s.listTools)
 	mux.HandleFunc("POST /v1/mcp/tools/call", s.callTool)
+	for _, path := range []string{"/mcp", "/mcp/"} {
+		mux.HandleFunc("POST "+path, s.serveStreamableHTTP)
+		mux.HandleFunc("GET "+path, s.serveStreamableGET)
+		mux.HandleFunc("DELETE "+path, s.serveStreamableDELETE)
+	}
+}
+
+func releaseIDFor(release *runtime.Release, snapshot *routing.Snapshot) string {
+	if canonicalUUID(release.ID) {
+		return release.ID
+	}
+	return snapshot.Generation.ID
 }
 
 type apiError struct {
@@ -105,9 +119,16 @@ func fail(status int, code, kind, msg string) *apiError {
 }
 
 var (
-	errToolsetNotFound = fail(http.StatusNotFound, "toolset_not_found", "invalid_request_error", "The toolset does not exist or this key may not use it.")
-	errToolNotFound    = fail(http.StatusNotFound, "tool_not_found", "invalid_request_error", "The tool does not exist in the pinned toolset.")
-	errLedger          = fail(http.StatusServiceUnavailable, "debit_ledger_unavailable", "api_error", "The durable debit ledger is unavailable, so the call was not dispatched.")
+	errToolsetNotFound          = fail(http.StatusNotFound, "toolset_not_found", "invalid_request_error", "The toolset does not exist or this key may not use it.")
+	errToolNotFound             = fail(http.StatusNotFound, "tool_not_found", "invalid_request_error", "The tool does not exist in the pinned toolset.")
+	errLedger                   = fail(http.StatusServiceUnavailable, "debit_ledger_unavailable", "api_error", "The durable debit ledger is unavailable, so the call was not dispatched.")
+	errSessionRequired          = fail(http.StatusBadRequest, "session_required", "invalid_request_error", "Supply the session in the Mcp-Session-Id header.")
+	errSessionNotFound          = fail(http.StatusNotFound, "session_not_found", "invalid_request_error", "The session does not exist.")
+	errSessionProtocolMismatch  = fail(http.StatusBadRequest, "protocol_version_mismatch", "invalid_request_error", "The protocol version does not match the session.")
+	errSessionUnavailable       = fail(http.StatusServiceUnavailable, "session_unavailable", "api_error", "The session store is unavailable; retry shortly.")
+	errSessionCreateUnavailable = fail(http.StatusServiceUnavailable, "session_unavailable", "api_error", "A session could not be created, so nothing was dispatched.")
+	errSessionNotInitialized    = fail(http.StatusBadRequest, "session_not_initialized", "invalid_request_error", "Send notifications/initialized before using this session.")
+	errSessionLimit             = fail(http.StatusTooManyRequests, "session_limit_exceeded", "rate_limit_error", "This key already has the maximum number of active sessions.")
 )
 
 func writeError(w http.ResponseWriter, err *apiError) {
@@ -136,7 +157,7 @@ func canonicalUUID(raw string) bool {
 
 func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, time.Now())
+	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, s.now())
 	if failure != nil {
 		kind := "api_error"
 		switch failure.Status {
@@ -313,10 +334,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errLedger)
 		return
 	}
-	releaseID := release.ID
-	if !canonicalUUID(releaseID) {
-		releaseID = snapshot.Generation.ID
-	}
+	releaseID := releaseIDFor(release, snapshot)
 	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID})
 	switch {
 	case outcome.failure != nil:
