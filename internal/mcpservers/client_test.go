@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -76,6 +78,178 @@ func TestCertificationNegotiatesSessionsAndBoundsSchemasWithoutExecutingTools(t 
 				t.Fatalf("certification: %v, %v", catalog, err)
 			}
 		})
+	}
+}
+func TestTransportCallsUpstreamTools(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sse  bool
+	}{{"json", false}, {"sse", true}} {
+		sse := tc.sse
+		t.Run(tc.name, func(t *testing.T) {
+			var closed atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+"fixture-only" {
+					t.Error("missing bearer credential")
+				}
+				if r.Method == "DELETE" {
+					closed.Store(true)
+					w.WriteHeader(204)
+					return
+				}
+				var request struct {
+					ID     int             `json:"id"`
+					Method string          `json:"method"`
+					Params json.RawMessage `json:"params"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					t.Error("bad request")
+					return
+				}
+				var result any
+				switch request.Method {
+				case "initialize":
+					w.Header().Set("Mcp-Session-Id", "fixture-session")
+					result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}}}
+				case "notifications/initialized":
+					w.WriteHeader(202)
+					return
+				case "tools/call":
+					if r.Header.Get("Mcp-Session-Id") != "fixture-session" || r.Header.Get("MCP-Protocol-Version") != "2025-03-26" {
+						t.Error("missing negotiated context")
+					}
+					if !strings.Contains(string(request.Params), `"lookup"`) {
+						t.Error("missing tool name")
+					}
+					result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "ok"}}, "isError": false}
+				default:
+					t.Errorf("unexpected method %s", request.Method)
+					w.WriteHeader(400)
+					return
+				}
+				body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+				if sse {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "event: message\ndata: %s\n\n", body)
+					w.(http.Flusher).Flush()
+					<-r.Context().Done()
+				} else {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(body)
+				}
+			}))
+			defer server.Close()
+			transport, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("fixture-only"), TransportOptions{ClientName: "test", Timeout: 10 * time.Second})
+			if err != nil || transport.Protocol() != "2025-03-26" {
+				t.Fatalf("dial: %v, %v", transport, err)
+			}
+			out, err := transport.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+			if err != nil || len(out.Content) != 1 || out.Content[0].Text != "ok" || out.IsError {
+				t.Fatalf("call: %v, %v", out, err)
+			}
+			transport.Close(t.Context())
+			if !closed.Load() {
+				t.Fatal("session not closed")
+			}
+		})
+	}
+}
+func TestTransportRefusesRedirects(t *testing.T) {
+	var redirected atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Store(true)
+		w.WriteHeader(200)
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	if _, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("private-bearer"), TransportOptions{ClientName: "test", Timeout: 10 * time.Second}); err != ErrTransport || strings.Contains(err.Error(), "private-bearer") || redirected.Load() {
+		t.Fatalf("redirect: %v redirected=%v", err, redirected.Load())
+	}
+}
+func TestDialTransportRequiresExplicitOptions(t *testing.T) {
+	for _, opts := range []TransportOptions{{}, {ClientName: "test"}, {Timeout: 10 * time.Second}} {
+		if _, err := DialTransport(t.Context(), fixturePolicy(), "http://127.0.0.1:1", nil, opts); err != ErrTransport {
+			t.Fatalf("options %v: %v", opts, err)
+		}
+	}
+}
+func TestTransportConcurrentToolCallsUseDistinctIDs(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[int]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			w.WriteHeader(204)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			t.Error("bad request")
+			return
+		}
+		if request.Method == "tools/call" {
+			mu.Lock()
+			if seen[request.ID] {
+				t.Errorf("duplicate request id %d", request.ID)
+			}
+			seen[request.ID] = true
+			mu.Unlock()
+		}
+		var result any
+		switch request.Method {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "fixture-session")
+			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "notifications/initialized":
+			w.WriteHeader(202)
+			return
+		case "tools/call":
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "ok"}}, "isError": false}
+		default:
+			t.Errorf("unexpected method %s", request.Method)
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+		w.Write(body)
+	}))
+	defer server.Close()
+	transport, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("fixture-only"), TransportOptions{ClientName: "test", Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer transport.Close(t.Context())
+	const calls = 16
+	errs := make(chan error, calls)
+	var wg sync.WaitGroup
+	for range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := transport.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+			if err == nil && (len(out.Content) != 1 || out.Content[0].Text != "ok") {
+				err = fmt.Errorf("bad result %v", out)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent call: %v", err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != calls {
+		t.Fatalf("distinct ids: %d", len(seen))
 	}
 }
 func TestCertificationRejectsRemoteSchemasPrivateDestinationsAndReflectedSecrets(t *testing.T) {
