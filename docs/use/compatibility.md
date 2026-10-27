@@ -319,6 +319,30 @@ capability, which is distinct from the WebSocket `realtime` mode. Azure
 WebRTC is not supported yet and stays pending until its own transport
 contract is certified.
 
+Native duplex profiles serve at `GET /native/{dialect}/sessions/{route}` on
+strict routes, with dialect `xai-realtime` for xAI, `vertex-realtime` for
+Vertex AI Live and `bedrock-realtime` for Bedrock Nova Sonic. The caller
+always speaks WebSocket to the gateway and sends that provider's native setup
+frame first. xAI and Vertex AI Live continue over WebSocket to the provider,
+while Nova Sonic continues over its SigV4-signed bidirectional event stream,
+with each WebSocket text frame carrying one native JSON event in either
+direction. The route must allow `realtime` and the target must hold a
+certified `native`/`realtime` capability for the profile. Frames stay opaque
+apart from the setup fields the profile gates and the usage evidence it
+extracts, so guardrail or content policies that cannot inspect them refuse
+the route, and no response caching ever applies. None of the three profiles
+declares transcription-only sessions, and a setup asking for one is refused
+before any provider dispatch. Vertex AI Live setup names the route as its
+model and is bound to the configured project, location and publisher model,
+and session resumption handles are refused because sessions are connection
+scoped. The gateway mints no session identifier and exposes no call that can
+address one later, so a session belongs only to the key and route that opened
+its connection. Admissions, the one-hour bound, five-second authority
+rechecks and exactly-once terminal settlement match `GET /v1/realtime`. xAI
+settles from per-response usage and Vertex AI Live from per-turn usage
+metadata. Nova Sonic carries no trustworthy terminal usage on its stream, so
+its sessions always settle as billing-uncertain and never as zero cost.
+
 ### Anthropic surface
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |

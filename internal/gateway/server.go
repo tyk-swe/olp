@@ -135,14 +135,14 @@ type Server struct {
 	fleet       *fleetHealth
 	// unhealthy is fleet.unhealthy bound once, so selection never allocates
 	// a method value per request.
-	unhealthy func(string) bool
-	shadows   *shadowing
-	now       func() time.Time
-	counted   func(estimate.Family)
-
+	unhealthy       func(string) bool
+	shadows         *shadowing
+	now             func() time.Time
+	counted         func(estimate.Family)
 	webrtcMu        sync.Mutex
 	webrtcSessions  map[string]*webrtcSession
 	webrtcExposures map[string]time.Time
+	bedrockStream   func(ctx context.Context, x *call, p *pin) (duplexPeer, error)
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the

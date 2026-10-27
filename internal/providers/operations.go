@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -29,6 +30,9 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 	}
 	if cfg.ProfileID == "gemini-live" {
 		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	}
+	if duplexcontract.IsProfile(cfg.ProfileID) {
+		return tuple.Operation == "realtime" && tuple.Surface == "native" && tuple.Mode == "realtime" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
 	if tuple.Operation == "batch" {
 		return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)

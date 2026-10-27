@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
@@ -58,6 +59,9 @@ func (s *Snapshot) ValidateRouteContracts(route Route) error {
 	}
 	if err == nil {
 		_, err = s.compileWebRTC(route)
+	}
+	if err == nil {
+		_, err = s.compileDuplex(route)
 	}
 	return err
 }
@@ -226,6 +230,10 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if provider.ProfileID == "gemini-live" {
 			continue
 		}
+		// Native duplex profiles compile in their own step below.
+		if duplexcontract.IsProfile(provider.ProfileID) {
+			continue
+		}
 		if !provider.Supports(target.ProviderModel, "realtime", "openai", "realtime") {
 			return nil, fmt.Errorf("target %s has no certified OpenAI realtime capability", target.ID)
 		}
@@ -276,6 +284,39 @@ func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Temp
 
 func (s *Snapshot) WebRTCTemplate(slug, target string) (*realtimecontract.Template, bool) {
 	template, ok := s.webrtc[slug][target]
+	return template, ok
+}
+
+func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Template, error) {
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
+		return nil, nil
+	}
+	templates := make(map[string]*duplexcontract.Template)
+	for _, target := range route.Targets {
+		provider, ok := s.Providers[target.ProviderID]
+		if !ok {
+			return nil, fmt.Errorf("route target references an unavailable provider")
+		}
+		if !duplexcontract.IsProfile(provider.ProfileID) {
+			continue
+		}
+		if !provider.Supports(target.ProviderModel, "realtime", "native", "realtime") {
+			return nil, fmt.Errorf("target %s has no certified native duplex capability", target.ID)
+		}
+		if len(provider.ParameterDefaults) > 0 {
+			return nil, fmt.Errorf("target %s has unqualified duplex parameter defaults", target.ID)
+		}
+		template, err := duplexcontract.Compile(duplexcontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		if err != nil {
+			return nil, err
+		}
+		templates[target.ID] = template
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) DuplexTemplate(slug, target string) (*duplexcontract.Template, bool) {
+	template, ok := s.duplex[slug][target]
 	return template, ok
 }
 

@@ -29,6 +29,7 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 		s.inferenceOperation("", r.PathValue("dialect"))(w, r)
 	})
+	mux.HandleFunc("GET /native/{dialect}/sessions/{route}", s.nativeDuplex)
 	for _, method := range routing.PassthroughMethods {
 		mux.HandleFunc(method+" /native/{dialect}/routes/{route}/{path...}", s.passthrough)
 	}

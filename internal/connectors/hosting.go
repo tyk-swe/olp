@@ -47,6 +47,7 @@ var hostings = map[string]hostingTraits{
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true},
 	"bedrock-invoke":           {awsService: "bedrock"},
 	"bedrock-batch-inference":  {awsService: "bedrock"},
+	"bedrock-nova-sonic":       {awsService: "bedrock", eventStream: true},
 	"sagemaker-openai":         {awsService: "sagemaker", awsBearer: true},
 	"vertex-google":            {vertexPath: "/publishers/google"},
 	"vertex-anthropic":         {vertexPath: "/publishers/anthropic"},

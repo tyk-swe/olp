@@ -25,6 +25,12 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if operation == "batch" && surface == "native" && mode == "unary" {
 		return kind == "vertex_ai" && vendor == "google-vertex" || kind == "bedrock" && vendor == "amazon-bedrock"
 	}
+	if operation == "realtime" && surface == "native" {
+		reviewed := kind == "openai_compatible" && vendor == "xai" ||
+			kind == "vertex_ai" && vendor == "google-vertex" ||
+			kind == "bedrock" && vendor == "amazon-bedrock"
+		return mode == "realtime" && reviewed && vendors.Serves(vendor, operation)
+	}
 	if surface == "native" && operation == "generation" {
 		return kind == KindPlugin && (mode == "unary" || mode == "streaming") ||
 			kind == "openai_compatible" && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2")) &&
