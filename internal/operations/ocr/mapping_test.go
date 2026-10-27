@@ -2,6 +2,9 @@ package ocr
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/operations"
@@ -146,7 +149,7 @@ func TestOCRMappingLowerAzure(t *testing.T) {
 		{`{"model":"route","document":{"type":"image_url","image_url":{"url":"https://example.com/a.png"}}}`, "https://example.com/a.png", "", ""},
 		{`{"model":"route","document":{"type":"document_url","document_url":"data:application/pdf;base64,QUJD"}}`, "", "QUJD", ""},
 		{`{"model":"route","document":{"type":"document_url","document_url":"https://x"},"pages":[3,0,2,2]}`, "https://x", "", "1,3-4"},
-		{`{"model":"route","document":{"type":"document_url","document_url":"https://x"},"table_format":"markdown","include_image_base64":false,"extract_header":false,"extract_footer":false}`, "https://x", "", ""},
+		{`{"model":"route","document":{"type":"document_url","document_url":"https://x"},"include_image_base64":false,"extract_header":false,"extract_footer":false}`, "https://x", "", ""},
 	} {
 		r := request(t, tc.body)
 		view, err := parseRequest(r)
@@ -186,6 +189,7 @@ func TestOCRMappingLowerAzureRefusals(t *testing.T) {
 	doc := `"document":{"type":"document_url","document_url":"https://x"}`
 	for _, body := range []string{
 		`{"model":"route",` + doc + `,"table_format":"html"}`,
+		`{"model":"route",` + doc + `,"table_format":"markdown"}`,
 		`{"model":"route",` + doc + `,"include_image_base64":true}`,
 		`{"model":"route",` + doc + `,"extract_header":true}`,
 		`{"model":"route",` + doc + `,"extract_footer":true}`,
@@ -318,5 +322,32 @@ func TestOCRProjectRejectsForeignView(t *testing.T) {
 	}
 	if _, err := azureWire(foreign); err == nil {
 		t.Fatal("foreign request view lowered to a wire request")
+	}
+}
+
+func TestOCRAzurePageProjectionBoundsAllocations(t *testing.T) {
+	const pageCount = 128
+	content := strings.Repeat("A", 32<<10)
+	pages := make([]string, pageCount)
+	for i := range pages {
+		pages[i] = fmt.Sprintf(`{"pageNumber":%d,"spans":[{"offset":%d,"length":1}]}`, i+1, i)
+	}
+	response := azureResultDoc(t, `{"status":"succeeded","analyzeResult":{"modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","content":`+strconv.Quote(content)+`,"pages":[`+strings.Join(pages, ",")+`]}}`)
+	view, err := parseAzureResult(azureRequestDoc(t, `{"model":"prebuilt-layout","urlSource":"https://x"}`), response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := resultView(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocations := testing.AllocsPerRun(3, func() {
+		result, err := azurePages(parsed.azure)
+		if err != nil || len(result) != pageCount || result[pageCount-1].Markdown != "A" {
+			t.Fatalf("page projection changed: pages=%d err=%v", len(result), err)
+		}
+	})
+	if budget := float64(2*pageCount + 1); allocations > budget {
+		t.Fatalf("page projection exceeded its allocation budget: got %.0f want at most %.0f", allocations, budget)
 	}
 }

@@ -117,6 +117,13 @@ func (p *Permit) Release() {
 	}
 }
 
+func (p *Permit) Transfer() *Permit {
+	if p == nil || !p.state.CompareAndSwap(permitHeld, permitReleased) {
+		return nil
+	}
+	return p.pool.permit(permitHeld)
+}
+
 type permitContextKey struct{}
 
 // PermitFromContext returns the admission slot an outer middleware charged

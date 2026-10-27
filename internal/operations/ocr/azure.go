@@ -61,10 +61,11 @@ type azurePage struct {
 }
 
 type azureResult struct {
-	content   string
-	pages     []azurePage
-	hasPages  bool
-	indexType string
+	content      string
+	contentUnits []uint16
+	pages        []azurePage
+	hasPages     bool
+	indexType    string
 }
 
 func parseAzureRequest(source oif.Request) (oif.View, error) {
@@ -153,8 +154,8 @@ func parseAzureResult(request oif.Request, source oif.Result) (oif.View, error) 
 	if content.Kind() != oif.String {
 		return fail("/analyzeResult/content", "ocr_content")
 	}
-	parsed := &azureResult{content: operations.String(content), indexType: operations.String(member(analyze, "stringIndexType"))}
-	units := int64(len(utf16.Encode([]rune(parsed.content))))
+	parsed := &azureResult{content: operations.String(content), contentUnits: utf16.Encode([]rune(operations.String(content))), indexType: operations.String(member(analyze, "stringIndexType"))}
+	units := int64(len(parsed.contentUnits))
 	pages := member(analyze, "pages")
 	if pages.Kind() != oif.Absent {
 		if pages.Kind() != oif.Array {
@@ -260,8 +261,7 @@ func azureOutputText(result oif.Result) ([]operations.Text, error) {
 	return collectText(analyze, "/analyzeResult", azureMetadata), nil
 }
 
-func utf16Slice(content string, spans []azureSpan) (string, bool) {
-	units := utf16.Encode([]rune(content))
+func utf16Slice(units []uint16, spans []azureSpan) (string, bool) {
 	var b strings.Builder
 	for _, span := range spans {
 		if span.offset < 0 || span.length < 0 || span.offset+span.length > int64(len(units)) {

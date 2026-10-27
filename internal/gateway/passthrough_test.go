@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"slices"
@@ -493,5 +495,38 @@ func TestPassthroughPreflightPermitsPublishedMethods(t *testing.T) {
 		if resp.StatusCode != http.StatusNoContent || !slices.Contains(allowed, method) || resp.Header.Get("Access-Control-Allow-Origin") != "https://app.example" {
 			t.Fatalf("preflight refused supported %s requests: status=%d headers=%v", method, resp.StatusCode, resp.Header)
 		}
+	}
+}
+
+func TestPassthroughErrorsRedactBoundCredentials(t *testing.T) {
+	for _, encoding := range []string{"identity", "gzip"} {
+		t.Run(encoding, func(t *testing.T) {
+			h := passthroughHarness(t)
+			strictRelease(t, h, func(snapshot *routing.Snapshot) {
+				route := snapshot.Routes[routeSlug]
+				route.Passthrough.Headers = append(route.Passthrough.Headers, "Accept-Encoding")
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Diagnostic", "credential="+secretA)
+				w.Header().Set("Content-Encoding", encoding)
+				w.WriteHeader(http.StatusBadRequest)
+				payload := `{"error":{"message":"rejected Bearer ` + secretA + `"}}`
+				if encoding == "gzip" {
+					writer := gzip.NewWriter(w)
+					io.WriteString(writer, payload)
+					writer.Close()
+					return
+				}
+				io.WriteString(w, payload)
+			})
+			resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{"Accept-Encoding": encoding})
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil || resp.StatusCode != http.StatusBadRequest || !json.Valid(body) || !strings.Contains(string(body), "[REDACTED]") || strings.Contains(string(body), secretA) || strings.Contains(resp.Header.Get("X-Diagnostic"), secretA) || resp.Header.Get("Content-Encoding") != "" {
+				t.Fatalf("provider diagnostics were not redacted: status=%d headers=%v body=%q err=%v", resp.StatusCode, resp.Header, body, err)
+			}
+		})
 	}
 }

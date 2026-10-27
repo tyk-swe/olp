@@ -141,6 +141,7 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 
 func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 	sess.settleOnce.Do(func() {
+		defer sess.admission.Release()
 		x := sess.x
 		s.finishSessionDebit(sess.ctx, x, failure != nil && !sess.rejected)
 		if sess.conn != nil {

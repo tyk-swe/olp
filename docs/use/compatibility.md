@@ -236,8 +236,8 @@ this gate existed must set the flag when they next publish, which is a
 deliberate breaking change recorded with the RM6 review fix so that the
 choice belongs to the operator and not to whichever caller sends a URL.
 The gateway never fetches document bytes itself.
-`table_format` is admitted only as `markdown`, the image-extraction and
-header/footer controls only as explicit `false`, and `document_name`, the
+`table_format` is refused because [the upstream returns HTML tables](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/concept/markdown-elements#table) that do not map to the frozen table contract.
+The image-extraction and header/footer controls accept only explicit `false`, and `document_name`, the
 caller `id` and every other unmappable field are refused `400` before
 dispatch. Usage meters the observed result pages as media units; a result
 that carries no page evidence stays billing-uncertain instead of free.

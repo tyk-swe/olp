@@ -400,10 +400,17 @@ func (s *Server) gatewayOrigin(r *http.Request) string {
 // Otherwise the server's own pool bounds the call, so direct handler use (and
 // any composition that skips the middleware) stays bounded.
 func (s *Server) admit(ctx context.Context) bool {
+	return s.acquirePermit(ctx) != nil
+}
+
+func (s *Server) acquirePermit(ctx context.Context) *observability.Permit {
 	if permit := observability.PermitFromContext(ctx); permit != nil {
-		return permit.Await(ctx, observability.ClassNormal, time.Time{})
+		if permit.Await(ctx, observability.ClassNormal, time.Time{}) {
+			return permit
+		}
+		return nil
 	}
-	return s.admission.Acquire()
+	return s.admission.AcquirePermit()
 }
 
 // admitLater is admit for requests that resolve their key and priority

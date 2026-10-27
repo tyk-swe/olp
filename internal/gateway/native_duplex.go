@@ -430,6 +430,7 @@ loop:
 			authority, err := s.Runtime.Authenticate(token)
 			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != routing.Eligible {
 				first.err = errDuplexAuthority
+				upstream.CloseNow()
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop
 			}
@@ -437,6 +438,7 @@ loop:
 			current.EndUserDigest = x.endUserDigest
 			if e := s.unboundedPinLimits(x.admissionAuthority(current), p, x.route); e != nil {
 				first.err = errDuplexAuthority
+				upstream.CloseNow()
 				client.Close(websocket.StatusPolicyViolation, "consumption budget changed")
 				break loop
 			}

@@ -21,6 +21,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/bodylimit"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -36,17 +37,18 @@ const (
 )
 
 type webrtcSession struct {
-	id       string
-	callID   string
-	keyID    string
-	token    string
-	x        *call
-	p        *pin
-	conn     *websocket.Conn
-	ctx      context.Context
-	cancel   context.CancelFunc
-	started  time.Time
-	rejected bool
+	id        string
+	callID    string
+	keyID     string
+	token     string
+	x         *call
+	p         *pin
+	conn      *websocket.Conn
+	ctx       context.Context
+	cancel    context.CancelFunc
+	started   time.Time
+	rejected  bool
+	admission *observability.Permit
 
 	settleOnce sync.Once
 	usageMu    sync.Mutex
@@ -61,17 +63,13 @@ func (s *Server) webrtcSessionCount() int {
 	return len(s.webrtcSessions)
 }
 
-func (s *Server) registerWebRTCSession(sess *webrtcSession) bool {
+func (s *Server) registerWebRTCSession(sess *webrtcSession) {
 	s.webrtcMu.Lock()
 	defer s.webrtcMu.Unlock()
-	if len(s.webrtcSessions) >= s.admission.Capacity() {
-		return false
-	}
 	if s.webrtcSessions == nil {
 		s.webrtcSessions = map[string]*webrtcSession{}
 	}
 	s.webrtcSessions[sess.id] = sess
-	return true
 }
 
 func (s *Server) unregisterWebRTCSession(id string) {
@@ -310,11 +308,12 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		s.finish(x, nil, e.Status)
 		writeSurfaceError(w, e, "openai")
 	}
-	if !s.admit(r.Context()) {
+	permit := s.acquirePermit(r.Context())
+	if permit == nil {
 		fail(overloaded)
 		return
 	}
-	defer s.release(r.Context())
+	defer permit.Release()
 	if !s.browserOriginAllowed(r) {
 		fail(permissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
 		return
@@ -446,12 +445,9 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	sess := &webrtcSession{
 		id: uuid.NewString(), keyID: authority.ID, token: token,
 		x: x, p: p, ctx: bg, cancel: cancel, started: s.now(),
+		admission: permit.Transfer(),
 	}
-	if !s.registerWebRTCSession(sess) {
-		s.settleWebRTC(sess, overloaded)
-		writeSurfaceError(w, overloaded, "openai")
-		return
-	}
+	s.registerWebRTCSession(sess)
 	answer, status, e := s.createWebRTCCall(bg, sess, callReq.sdp, boundSession)
 	if e != nil {
 		s.settleWebRTC(sess, e)

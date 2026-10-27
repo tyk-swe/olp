@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -755,16 +758,49 @@ func TestWebRTCTruncatedAnswerHangsUpCreatedCall(t *testing.T) {
 }
 
 func TestWebRTCActiveSessionsRetainProcessCapacity(t *testing.T) {
-	mock := newWebRTCMock("hold")
-	defer close(mock.release)
-	h := webrtcHarnessCfg(t, mock, true, Config{MaxInFlight: 1})
-	session := `{"type":"realtime","model":"` + routeSlug + `"}`
-	first := webrtcCreate(t, h, fullKey, session)
-	io.Copy(io.Discard, first.Body)
-	first.Body.Close()
-	second := webrtcCreate(t, h, fullKey, session)
-	second.Body.Close()
-	if creates, _, _ := mock.counts(); first.StatusCode != http.StatusCreated || second.StatusCode != http.StatusServiceUnavailable || creates != 1 {
-		t.Fatalf("active session lost its capacity bound: first=%d second=%d creates=%d", first.StatusCode, second.StatusCode, creates)
+	for _, middleware := range []bool{false, true} {
+		t.Run(fmt.Sprint(middleware), func(t *testing.T) {
+			mock := newWebRTCMock("hold")
+			release := sync.OnceFunc(func() { close(mock.release) })
+			defer release()
+			h := webrtcHarnessCfg(t, mock, true, Config{MaxInFlight: 1})
+			if middleware {
+				mux := http.NewServeMux()
+				h.gateway.Register(mux)
+				admission := observability.PublicAdmission{Inference: h.gateway.AdmissionPool(), Management: observability.NewPool(1), InferenceEnabled: true, Reject: func(w http.ResponseWriter, r *http.Request, surface string) {
+					writeSurfaceError(w, overloaded, surface)
+				}}
+				server := httptest.NewServer(admission.Wrap(mux))
+				t.Cleanup(server.Close)
+				h.server = server
+			}
+			session := `{"type":"realtime","model":"` + routeSlug + `"}`
+			first := webrtcCreate(t, h, fullKey, session)
+			io.Copy(io.Discard, first.Body)
+			first.Body.Close()
+			second := webrtcCreate(t, h, fullKey, session)
+			second.Body.Close()
+			beforeOrdinary := h.mock.count("a")
+			ordinary := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hello","max_output_tokens":16,"store":false}`), nil)
+			ordinaryBody, _ := io.ReadAll(ordinary.Body)
+			ordinary.Body.Close()
+			if creates, _, _ := mock.counts(); first.StatusCode != http.StatusCreated || second.StatusCode != http.StatusServiceUnavailable || ordinary.StatusCode != http.StatusServiceUnavailable || h.mock.count("a") != beforeOrdinary || creates != 1 {
+				t.Fatalf("active session lost shared capacity: first=%d second=%d ordinary=%d body=%s creates=%d", first.StatusCode, second.StatusCode, ordinary.StatusCode, ordinaryBody, creates)
+			}
+			release()
+			deadline := time.Now().Add(time.Second)
+			for {
+				resp := webrtcCreate(t, h, fullKey, session)
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusCreated {
+					break
+				}
+				if resp.StatusCode != http.StatusServiceUnavailable || time.Now().After(deadline) {
+					t.Fatalf("settled session retained shared capacity: status=%d", resp.StatusCode)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
 	}
 }

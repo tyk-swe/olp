@@ -260,7 +260,7 @@ func lowerAzure(source oif.Request, view oif.View) (oif.Document, []oif.Provenan
 			return oif.Document{}, nil, invalid(m.Name)
 		}
 	}
-	if v := member(root, "table_format"); !operations.Optional(v) && operations.String(v) != "markdown" {
+	if v := member(root, "table_format"); !operations.Optional(v) {
 		return oif.Document{}, nil, invalid("table_format")
 	}
 	for _, name := range []string{"include_image_base64", "extract_header", "extract_footer"} {
@@ -324,7 +324,7 @@ func azurePages(parsed *azureResult) ([]mappedPage, error) {
 				pages[i] = mappedPage{Index: page.number - 1, Markdown: ""}
 				continue
 			}
-			text, ok := utf16Slice(parsed.content, page.spans)
+			text, ok := utf16Slice(parsed.contentUnits, page.spans)
 			if !ok {
 				return nil, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
 			}

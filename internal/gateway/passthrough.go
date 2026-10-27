@@ -311,13 +311,26 @@ slots:
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
+	responseBody, responseError := passthroughResponseBody(resp, x.sensitive, responseLimit)
+	if responseError != nil {
+		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
+		if ctx.Err() != nil {
+			factP.Class = classTimeout
+		}
+		factP.recordEvidence(true)
+		fail(responseError)
+		return
+	}
 	for name, values := range codewire.ForwardHeaders(resp.Header, false) {
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
-		if routing.HopByHopOrCredentialHeader(canonical) {
+		if routing.HopByHopOrCredentialHeader(canonical) || x.sensitive.Contains(canonical) {
+			continue
+		}
+		if resp.StatusCode >= 400 && (canonical == "Content-Encoding" || canonical == "Content-Md5" || canonical == "Digest") {
 			continue
 		}
 		for _, value := range values {
-			w.Header().Add(canonical, value)
+			w.Header().Add(canonical, x.sensitive.Redact(value))
 		}
 	}
 	if r.Method == http.MethodHead && resp.ContentLength >= 0 {
@@ -325,7 +338,7 @@ slots:
 	}
 	w.WriteHeader(resp.StatusCode)
 	x.delivered(s.now())
-	readErr, copyErr := copyPassthroughResponse(w, resp.Body, responseLimit)
+	readErr, copyErr := copyPassthroughResponse(w, responseBody, responseLimit)
 	factP.Duration = s.now().Sub(factP.StartedAt)
 	providerSuccess := readErr == nil && (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified)
 	switch {
@@ -361,6 +374,25 @@ slots:
 	if readErr != nil || copyErr != nil {
 		panic(http.ErrAbortHandler)
 	}
+}
+
+func passthroughResponseBody(response *http.Response, sensitive egress.Sensitive, limit int64) (io.Reader, *Error) {
+	if response.StatusCode < 400 {
+		return response.Body, nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider error response could not be read.")
+	}
+	decoded, err := codewire.Decode(raw, response.Header.Get("Content-Encoding"), limit)
+	if err != nil {
+		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider error response could not be decoded within the gateway limit.")
+	}
+	redacted := sensitive.Redact(string(decoded))
+	if int64(len(redacted)) > limit {
+		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider error response exceeded the gateway limit.")
+	}
+	return strings.NewReader(redacted), nil
 }
 
 func copyPassthroughResponse(w http.ResponseWriter, source io.Reader, limit int64) (error, error) {

@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -421,5 +423,67 @@ func TestNativeDuplexRollbackStopsNewSessionsAndKeepsSettlement(t *testing.T) {
 	}
 	if settlements != 1 {
 		t.Fatalf("settlement history after rollback = %d records, want the original one kept", settlements)
+	}
+}
+
+type blockedNativeClosePeer struct {
+	*closingRelayPeer
+	started chan struct{}
+	release <-chan struct{}
+}
+
+func (p *blockedNativeClosePeer) Close(websocket.StatusCode, string) error {
+	close(p.started)
+	<-p.release
+	return nil
+}
+
+type observedNativeClosePeer struct {
+	*closingRelayPeer
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (p *observedNativeClosePeer) CloseNow() error { p.once.Do(func() { close(p.closed) }); return nil }
+
+func TestNativeDuplexRevocationStopsProviderBeforeCallerHandshake(t *testing.T) {
+	h := xaiDuplexHarness(t, false)
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	provider := h.rt.release.Snapshot.Providers[route.Targets[0].ProviderID]
+	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: provider.Connector(), Model: modelA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.mu.Lock()
+	delete(h.rt.keys, fullKey)
+	h.rt.mu.Unlock()
+	releaseClose := make(chan struct{})
+	stop := sync.OnceFunc(func() { close(releaseClose) })
+	defer stop()
+	client := &blockedNativeClosePeer{closingRelayPeer: &closingRelayPeer{frames: make(chan []byte)}, started: make(chan struct{}), release: releaseClose}
+	upstream := &observedNativeClosePeer{closingRelayPeer: &closingRelayPeer{frames: make(chan []byte)}, closed: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := h.gateway.relayNativeDuplex(t.Context(), &call{request: request{release: h.rt.release}, routeLeg: routeLeg{route: &route}, keyID: h.keyID}, &pin{provider: provider, slot: provider.Slots[0]}, client, upstream, fullKey, template.Observer(1024), 1024)
+		done <- err
+	}()
+	select {
+	case <-client.started:
+	case <-time.After(realtimeReauth + time.Second):
+		t.Fatal("revoked session never began closing")
+	}
+	select {
+	case <-upstream.closed:
+	default:
+		t.Fatal("provider kept running while the caller held its close handshake open")
+	}
+	stop()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errDuplexAuthority) {
+			t.Fatalf("revocation outcome=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not finish after the caller close completed")
 	}
 }
