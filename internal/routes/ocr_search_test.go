@@ -22,6 +22,7 @@ func operationSnapshot(models []string, vendor, profile, operation string, stric
 	}
 	route := snapshot.Routes["route"]
 	route.Operations = []string{operation}
+	route.ProviderFetchedDocuments = operation == "ocr"
 	route.Fidelity.Mode = routing.FidelityTransformed
 	if strict {
 		route.Fidelity.Mode = routing.FidelityStrict

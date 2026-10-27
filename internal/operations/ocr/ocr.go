@@ -43,6 +43,7 @@ func Definitions() []operations.Dialect {
 		Result:          parseResult,
 		BindModel:       operations.ModelChanges,
 		BindResultModel: operations.ModelChanges,
+		FetchedDocument: mistralFetchedDocument,
 		OutputText:      outputText,
 		Usage:           func(v oif.View) *operations.Usage { return v.(Result).Usage }}
 	d.RequestSchema = operations.ObjectSchema(map[string]any{

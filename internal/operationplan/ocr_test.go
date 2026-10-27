@@ -14,6 +14,7 @@ func azureTemplate(t *testing.T) *operationplan.Template {
 	t.Helper()
 	c := config("azure-document-intelligence-ocr", "ocr")
 	c.Provider.VendorID, c.Provider.AuthMode = "azure-document-intelligence", "api_key"
+	c.AllowProviderFetchedDocuments = true
 	template, err := operationplan.Compile(c)
 	if err != nil {
 		t.Fatal(err)
@@ -111,5 +112,40 @@ func TestAzureSubmitAndPoll(t *testing.T) {
 	}
 	if !strings.Contains(string(decoded.Body), `"pages_processed":2`) || !strings.Contains(string(decoded.Body), `"index":2`) {
 		t.Fatalf("projected: %s", decoded.Body)
+	}
+}
+
+func TestProviderFetchedDocumentRequiresRouteChoice(t *testing.T) {
+	httpsSource, err := operationplan.Parse("mistral-ocr", []byte(`{"model":"route","document":{"type":"document_url","document_url":"https://example.com/a.pdf"}}`), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := config("azure-document-intelligence-ocr", "ocr")
+	c.Provider.VendorID, c.Provider.AuthMode = "azure-document-intelligence", "api_key"
+	refusing, err := operationplan.Compile(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := refusing.Bind(httpsSource, operationplan.Context{Route: "route", ClientContract: operations.RawVectorClient}); err == nil {
+		t.Fatal("provider-fetched https document bound without a route egress choice")
+	}
+	c.AllowProviderFetchedDocuments = true
+	allowed, err := operationplan.Compile(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := allowed.Bind(httpsSource, operationplan.Context{Route: "route", ClientContract: operations.RawVectorClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(plan.WireBody()) != `{"urlSource":"https://example.com/a.pdf"}` {
+		t.Fatalf("wire body = %s", plan.WireBody())
+	}
+	dataSource, err := operationplan.Parse("mistral-ocr", []byte(`{"model":"route","document":{"type":"image_url","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="}}`), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := refusing.Bind(dataSource, operationplan.Context{Route: "route", ClientContract: operations.RawVectorClient}); err != nil {
+		t.Fatalf("inline data document refused without the egress choice: %v", err)
 	}
 }

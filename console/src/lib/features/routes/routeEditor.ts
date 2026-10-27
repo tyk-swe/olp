@@ -614,6 +614,9 @@ function behaviorFields(behavior: RouteBehavior | undefined) {
     ...(value.caller_cost_exempt !== undefined
       ? { caller_cost_exempt: value.caller_cost_exempt }
       : {}),
+    ...(value.provider_fetched_documents !== undefined
+      ? { provider_fetched_documents: value.provider_fetched_documents }
+      : {}),
     ...(value.max_body_bytes !== undefined
       ? { max_body_bytes: value.max_body_bytes }
       : {})

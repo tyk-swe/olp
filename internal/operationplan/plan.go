@@ -23,6 +23,7 @@ type Config struct {
 	ProviderID, RevisionID, Model, Operation string
 	Policy                                   *contentpolicy.Policy
 	MaxBodyBytes                             int
+	AllowProviderFetchedDocuments            bool
 }
 type Context struct {
 	Headers               http.Header
@@ -230,6 +231,9 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 		if location, external := t.codec.DocumentLocation(effective); external && !t.config.Provider.AllowsDocumentURI(location) {
 			return nil, fail("storage_scope", "/document", "document_location_prefix", "The document location is outside the connection's configured document URI prefixes.")
 		}
+	}
+	if t.codec.FetchedDocument != nil && t.codec.FetchedDocument(effective) && !t.config.AllowProviderFetchedDocuments {
+		return nil, fail("content_egress", "/document", "provider_fetched_documents", "This route does not allow the provider to fetch document URLs. Enable provider-fetched documents on the route or send the document inline.")
 	}
 	var query url.Values
 	var wireBody []byte

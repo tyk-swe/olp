@@ -17,6 +17,31 @@ func Mappings() []operations.Mapping {
 	}
 }
 
+func documentURL(v oif.Value) (string, error) {
+	switch operations.String(member(v, "type")) {
+	case "document_url":
+		return operations.String(member(v, "document_url")), nil
+	case "image_url":
+		u := member(v, "image_url")
+		if u.Kind() == oif.Object {
+			u = member(u, "url")
+		}
+		return operations.String(u), nil
+	default:
+		return "", invalid("document.type")
+	}
+}
+
+func mistralFetchedDocument(source oif.Request) bool {
+	url, err := documentURL(member(source.Document().Root(), "document"))
+	return err == nil && strings.HasPrefix(url, "https://")
+}
+
+func azureFetchedDocument(source oif.Request) bool {
+	_, present := source.Document().Root().Lookup("urlSource")
+	return present
+}
+
 func parseDocument(v any) (oif.Document, error) {
 	return oif.ParseJSON(operations.Raw(v), oif.Limits{})
 }

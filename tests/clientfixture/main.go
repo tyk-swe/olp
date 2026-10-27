@@ -230,6 +230,7 @@ type routeSpec struct {
 	// transformed serves the route's named profiles through their operation
 	// mappings rather than natively.
 	transformed bool
+	fetchedDocs bool
 }
 
 var routeSpecs = []routeSpec{
@@ -239,8 +240,8 @@ var routeSpecs = []routeSpec{
 	{env: "OPENAI", slug: "olp-openai", backend: "openai"},
 	{env: "ANTHROPIC", slug: "olp-anthropic", backend: "anthropic"},
 	{env: "GEMINI", slug: "olp-gemini", backend: "gemini"},
-	{env: "MISTRAL_OCR", slug: "olp-mistral-ocr", backend: "mistral", profiles: []string{"mistral-ocr"}, operations: []string{"ocr"}},
-	{env: "AZURE_OCR", slug: "olp-azure-ocr", backend: "azure", profiles: []string{"azure-document-intelligence-ocr"}, operations: []string{"ocr"}, transformed: true},
+	{env: "MISTRAL_OCR", slug: "olp-mistral-ocr", backend: "mistral", profiles: []string{"mistral-ocr"}, operations: []string{"ocr"}, fetchedDocs: true},
+	{env: "AZURE_OCR", slug: "olp-azure-ocr", backend: "azure", profiles: []string{"azure-document-intelligence-ocr"}, operations: []string{"ocr"}, transformed: true, fetchedDocs: true},
 	{env: "PERPLEXITY_SEARCH", slug: "olp-perplexity-search", backend: "perplexity", profiles: []string{"perplexity-search"}, operations: []string{"search"}},
 	{env: "SEARCH_TAVILY", slug: "olp-search-tavily", backend: "tavily", profiles: []string{"tavily-search"}, operations: []string{"search"}, transformed: true},
 	{env: "SEARCH_EXA", slug: "olp-search-exa", backend: "exa", profiles: []string{"exa-search"}, operations: []string{"search"}, transformed: true},
@@ -283,6 +284,7 @@ func fixtureRelease(upstreamURL string) (*runtime.Release, error) {
 			ID: routeID, Slug: spec.slug, OverallTimeout: 60000, MaxAttempts: 1, RoutingID: routeID,
 			RevisionID: uuid.NewString(), Revision: 1, PublishedAt: now, Fidelity: routing.RouteFidelity{Mode: mode},
 		}
+		route.ProviderFetchedDocuments = spec.fetchedDocs
 		for _, profile := range profiles {
 			surfaces := allSurfaces
 			if profile != "" {

@@ -33,6 +33,7 @@ func TestOCRNativeRoundTrip(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"ocr"}
+		route.ProviderFetchedDocuments = true
 		s.Routes[routeSlug] = route
 		ocrSearchProviders(s, "mistral", "mistral-ocr", "ocr")
 	})
@@ -299,6 +300,7 @@ func TestCallerPaidOCRExemptsCostCaps(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		r := s.Routes[routeSlug]
 		r.Operations = []string{"ocr"}
+		r.ProviderFetchedDocuments = true
 		r.CallerCostExempt = true
 		r.Budget = &routing.CostLimits{DailyCostLimit: new("1")}
 		s.Routes[routeSlug] = r
@@ -347,6 +349,7 @@ func TestOCRInputPolicyRefusalAndNoCache(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"ocr"}
+		route.ProviderFetchedDocuments = true
 		route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "secret", Phase: "input", Action: contentpolicy.ActionBlock, Pattern: "secret"}}}
 		route.Cache = &cache.Policy{Mode: "exact"}
 		s.Routes[routeSlug] = route
@@ -478,6 +481,7 @@ func azureHarness(t *testing.T, transformed bool, mock *azureMock) *harness {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"ocr"}
+		route.ProviderFetchedDocuments = true
 		if transformed {
 			route.Fidelity.Mode = routing.FidelityTransformed
 		}
@@ -669,5 +673,23 @@ func TestAzureOCRNativeRoundTrip(t *testing.T) {
 	}
 	if mock.submits.Load() != 1 || mock.polls.Load() != 1 {
 		t.Fatalf("submits=%d polls=%d", mock.submits.Load(), mock.polls.Load())
+	}
+}
+
+func TestOCRProviderFetchedDocumentRefusedWithoutRouteChoice(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"ocr"}
+		s.Routes[routeSlug] = route
+		ocrSearchProviders(s, "mistral", "mistral-ocr", "ocr")
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || h.mock.count("a") != 0 {
+		t.Fatalf("provider-fetched document dispatched without the route choice: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+	if !strings.Contains(string(body), "provider_fetched_documents") && !strings.Contains(string(body), "content_egress") {
+		t.Fatalf("refusal does not name the egress choice: %s", body)
 	}
 }

@@ -206,7 +206,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.LegacyExecutionPolicy()})
+			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.LegacyExecutionPolicy(), AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 			if err != nil {
 				return nil, err
 			}

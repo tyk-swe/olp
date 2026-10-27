@@ -97,6 +97,7 @@ type Dialect struct {
 	InputText                     func(oif.Request) ([]Text, error)
 	OutputText                    func(oif.Result) ([]Text, error)
 	DocumentLocation              func(oif.Request) (string, bool)
+	FetchedDocument               func(oif.Request) bool
 	Probe                         func(string) []byte
 	Evidence                      string
 	Wire                          func(oif.View) (WireRequest, error)

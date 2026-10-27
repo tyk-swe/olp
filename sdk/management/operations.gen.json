@@ -2819,6 +2819,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "expose_upstream_models": {
               "type": "boolean",
               "description": "Explicitly disclose upstream model names in route catalogs."
@@ -9996,6 +10000,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "cache": {
               "oneOf": [
                 {
@@ -10845,6 +10853,10 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
             },
             "cache": {
               "oneOf": [
@@ -24946,6 +24958,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "expose_upstream_models": {
               "type": "boolean",
               "description": "Explicitly disclose upstream model names in route catalogs."
@@ -31584,6 +31600,10 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
             },
             "cache": {
               "oneOf": [
@@ -40585,6 +40605,10 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
             },
             "cache": {
               "oneOf": [

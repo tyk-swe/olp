@@ -7718,7 +7718,10 @@ type ConfigurationRouteEntry struct {
 	// Project Project name, or null for an installation-wide route
 	Project     nullable.Nullable[string]            `json:"project"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
-	Retired     *bool                                `json:"retired,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+	Retired                  *bool `json:"retired,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         *RouteRetry                      `json:"retry,omitempty"`
@@ -8371,6 +8374,9 @@ type CreateRouteDraftRequest struct {
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	PromptCache nullable.Nullable[PromptCachePolicy]  `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -11732,6 +11738,9 @@ type ReplaceRouteDraftRequest struct {
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
 
@@ -12238,6 +12247,9 @@ type RouteBehavior struct {
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
 	Selectors []RouteSelector `json:"selectors"`
@@ -12322,6 +12334,9 @@ type RouteDraftDetailResponse struct {
 	ProjectName nullable.Nullable[string]             `json:"project_name"`
 	PromptCache nullable.Nullable[PromptCachePolicy]  `json:"prompt_cache,omitempty"`
 
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry            `json:"retry"`
 	Selectors []RouteSelector       `json:"selectors"`
@@ -12352,8 +12367,11 @@ type RouteDraftResponse struct {
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	Slug      string                                `json:"slug"`
-	State     string                                `json:"state"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool  `json:"provider_fetched_documents,omitempty"`
+	Slug                     string `json:"slug"`
+	State                    string `json:"state"`
 }
 
 // RouteFallback defines model for RouteFallback.
@@ -12465,6 +12483,9 @@ type RouteRevisionResponse struct {
 	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         RouteRetry            `json:"retry"`
@@ -13813,6 +13834,9 @@ type UpdatePublishedRouteRequest struct {
 	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`

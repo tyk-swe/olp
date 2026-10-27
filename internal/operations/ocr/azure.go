@@ -25,6 +25,7 @@ func azureDefinition() operations.Dialect {
 		Result:          parseAzureResult,
 		BindModel:       operations.ModelChanges,
 		BindResultModel: azureBindResultModel,
+		FetchedDocument: azureFetchedDocument,
 		OutputText:      azureOutputText,
 		Usage:           func(v oif.View) *operations.Usage { return v.(Result).Usage },
 		Transport:       operations.TransportPoll202,

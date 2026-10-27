@@ -217,6 +217,7 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	out["affinity"], out["budget"] = behavior.Affinity, behavior.Budget
 	out["max_body_bytes"] = behavior.MaxBodyBytes
 	out["caller_cost_exempt"] = behavior.CallerCostExempt
+	out["provider_fetched_documents"] = behavior.ProviderFetchedDocuments
 	out["cache"], out["prompt_cache"] = behavior.Cache, behavior.PromptCache
 	out["passthrough"] = behavior.Passthrough
 	certification := "certified"
@@ -270,30 +271,31 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
-	Cache            *cache.Policy              `json:"cache,omitempty"`
-	PromptCache      *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
-	CallerCostExempt bool                       `json:"caller_cost_exempt,omitempty"`
-	MaxBodyBytes     *int64                     `json:"max_body_bytes,omitempty"`
-	Slug             string                     `json:"slug"`
-	Operations       []string                   `json:"operations"`
-	OverallTimeoutMS int                        `json:"overall_timeout_ms"`
-	MaxAttempts      int                        `json:"max_attempts"`
-	Targets          []TargetInput              `json:"targets"`
-	ContentPolicy    json.RawMessage            `json:"content_policy"`
-	Fidelity         json.RawMessage            `json:"fidelity,omitempty"`
-	ProjectID        *string                    `json:"project_id"`
-	Fallbacks        []routing.Fallback         `json:"fallbacks,omitempty"`
-	Selectors        []routing.Selector         `json:"selectors,omitempty"`
-	Retry            routing.Retry              `json:"retry,omitempty"`
-	Affinity         *routing.Affinity          `json:"affinity,omitempty"`
-	Budget           *routing.CostLimits        `json:"budget,omitempty"`
-	Passthrough      *routing.PassthroughConfig `json:"passthrough,omitempty"`
+	Cache                    *cache.Policy              `json:"cache,omitempty"`
+	PromptCache              *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
+	CallerCostExempt         bool                       `json:"caller_cost_exempt,omitempty"`
+	ProviderFetchedDocuments bool                       `json:"provider_fetched_documents,omitempty"`
+	MaxBodyBytes             *int64                     `json:"max_body_bytes,omitempty"`
+	Slug                     string                     `json:"slug"`
+	Operations               []string                   `json:"operations"`
+	OverallTimeoutMS         int                        `json:"overall_timeout_ms"`
+	MaxAttempts              int                        `json:"max_attempts"`
+	Targets                  []TargetInput              `json:"targets"`
+	ContentPolicy            json.RawMessage            `json:"content_policy"`
+	Fidelity                 json.RawMessage            `json:"fidelity,omitempty"`
+	ProjectID                *string                    `json:"project_id"`
+	Fallbacks                []routing.Fallback         `json:"fallbacks,omitempty"`
+	Selectors                []routing.Selector         `json:"selectors,omitempty"`
+	Retry                    routing.Retry              `json:"retry,omitempty"`
+	Affinity                 *routing.Affinity          `json:"affinity,omitempty"`
+	Budget                   *routing.CostLimits        `json:"budget,omitempty"`
+	Passthrough              *routing.PassthroughConfig `json:"passthrough,omitempty"`
 	// Behavior is the validated, stored form of the adaptive routing fields.
 	Behavior []byte `json:"-"`
 }
 
 func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
+	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
 }
 
 func sameProject(a, b *string) bool {

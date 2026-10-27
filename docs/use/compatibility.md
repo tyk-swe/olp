@@ -225,9 +225,17 @@ or timed-out attempt stays billing-uncertain. Transformed serving maps the
 frozen OCR document onto this dialect, converting zero-based `pages` to
 the one-based selector, `https:` document and image URLs to `urlSource`
 and base64 `data:` documents to `base64Source`, and projects the provider
-markdown back into `pages[].index`/`pages[].markdown`. Sending an
-`https:` document URL on an OCR route is the explicit choice to let the
-provider fetch that URL; the gateway never fetches document bytes itself.
+markdown back into `pages[].index`/`pages[].markdown`. Provider-fetched
+documents are a route-level egress choice and apply to every OCR target,
+Mistral included. An `https:` document or image URL is forwarded for the
+provider to fetch only on a route whose revision sets
+`provider_fetched_documents`; without that choice the gateway refuses the
+request before dispatch, and inline `data:` documents are always admitted
+on their own contract terms. Routes that served `https:` documents before
+this gate existed must set the flag when they next publish, which is a
+deliberate breaking change recorded with the RM6 review fix so that the
+choice belongs to the operator and not to whichever caller sends a URL.
+The gateway never fetches document bytes itself.
 `table_format` is admitted only as `markdown`, the image-extraction and
 header/footer controls only as explicit `false`, and `document_name`, the
 caller `id` and every other unmappable field are refused `400` before
