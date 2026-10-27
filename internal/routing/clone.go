@@ -18,6 +18,14 @@ func (s *Snapshot) Clone() *Snapshot {
 		return nil
 	}
 	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out.MCPServers = slices.Clone(s.MCPServers)
+	for i := range out.MCPServers {
+		out.MCPServers[i].CredentialID = copyPointer(out.MCPServers[i].CredentialID)
+		out.MCPServers[i].Tools = slices.Clone(out.MCPServers[i].Tools)
+		for j := range out.MCPServers[i].Tools {
+			out.MCPServers[i].Tools[j].InputSchema = slices.Clone(out.MCPServers[i].Tools[j].InputSchema)
+		}
+	}
 	out.AgentPublications = slices.Clone(s.AgentPublications)
 	for i, v := range out.AgentPublications {
 		out.AgentPublications[i] = agentcontract.CloneRevision(v)
