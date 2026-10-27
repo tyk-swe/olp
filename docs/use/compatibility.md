@@ -401,6 +401,10 @@ rechecks and exactly-once terminal settlement match `GET /v1/realtime`. xAI
 settles from per-response usage and Vertex AI Live from per-turn usage
 metadata. Nova Sonic carries no trustworthy terminal usage on its stream, so
 its sessions always settle as billing-uncertain and never as zero cost.
+Rolling any RM6 family back is an ordinary publication change, for example
+retiring its routes or disabling its providers in a new release. New work
+then refuses at admission with nothing dispatched, and sessions that already
+settled stay in the usage history unchanged, debit records included.
 
 ### Anthropic surface
 

@@ -292,3 +292,47 @@ func TestNativeDuplexRefusesForeignKeyAndUnknownDialect(t *testing.T) {
 		t.Fatalf("upstream sessions = %d, want no dispatch", got)
 	}
 }
+
+func TestNativeDuplexRollbackStopsNewSessionsAndKeepsSettlement(t *testing.T) {
+	h := xaiDuplexHarness(t, true)
+	conn, ctx := dialDuplex(t, h, fullKey, "/native/xai-realtime/sessions/"+routeSlug)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"session.update","session":{"type":"realtime"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatal(err)
+	}
+	settled := h.sink.last(t)
+	if len(settled.Attempts) != 1 || !settled.Attempts[0].UsageObserved {
+		t.Fatalf("settlement before rollback = %+v", settled.Attempts)
+	}
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		delete(s.Routes, routeSlug)
+	})
+	url := "ws" + strings.TrimPrefix(h.server.URL, "http") + "/native/xai-realtime/sessions/" + routeSlug
+	dialCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}}}); err == nil {
+		t.Fatal("new duplex session admitted after the route was retired")
+	}
+	if got := h.mock.count("a"); got != 1 {
+		t.Fatalf("upstream sessions = %d, want the retired family to dispatch nothing new", got)
+	}
+	h.sink.mu.Lock()
+	defer h.sink.mu.Unlock()
+	settlements := 0
+	for _, env := range h.sink.envs {
+		if len(env.Attempts) > 0 && env.Attempts[0].UsageObserved {
+			settlements++
+		}
+	}
+	if settlements != 1 {
+		t.Fatalf("settlement history after rollback = %d records, want the original one kept", settlements)
+	}
+}
