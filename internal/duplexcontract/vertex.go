@@ -83,14 +83,15 @@ func bindVertexSetup(frame []byte, boundModel string, maxBytes int) ([]byte, err
 }
 
 type vertexObserver struct {
-	maxBytes   int
-	usage      *wire.Usage
-	turn       *wire.Usage
-	pending    bool
-	awaiting   bool
-	submitted  int
-	incomplete bool
-	setupDone  bool
+	maxBytes     int
+	usage        *wire.Usage
+	turn         *wire.Usage
+	pending      bool
+	awaiting     bool
+	submitted    int
+	realtimeTurn bool
+	incomplete   bool
+	setupDone    bool
 }
 
 func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -134,6 +135,7 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 }
 
 func (o *vertexObserver) flushTurn() {
+	o.realtimeTurn = false
 	if o.submitted > 0 {
 		o.submitted--
 	}
@@ -218,10 +220,17 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 			o.submitted++
 		}
 	}
+	if input, ok := doc.Root().Lookup("realtimeInput"); ok && input.Kind() == oif.Object {
+		for _, member := range input.Members() {
+			if member.Name == "activityEnd" || member.Name == "audioStreamEnd" || member.Name == "text" {
+				o.realtimeTurn = true
+			}
+		}
+	}
 	return nil
 }
 
 func (o *vertexObserver) usageValue() *wire.Usage { return o.usage }
 func (o *vertexObserver) complete() bool {
-	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && o.submitted == 0 && !o.incomplete
+	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && o.submitted == 0 && !o.realtimeTurn && !o.incomplete
 }

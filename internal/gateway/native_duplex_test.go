@@ -312,6 +312,14 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`)); err != nil {
 		t.Fatal(err)
 	}
+	for _, frame := range []string{
+		`{"event":{"promptEnd":{"promptName":"p1"}}}`,
+		`{"event":{"sessionEnd":{}}}`,
+	} {
+		if err := conn.Write(ctx, websocket.MessageText, []byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for {
 		if _, _, err := conn.Read(ctx); err != nil {
 			break

@@ -128,6 +128,22 @@ func TestPassthroughOversizedChunkedResponseRefusedBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestPassthroughTruncatedResponseRefusedBeforeCommit(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "1048576")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("partial"))
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("truncated response delivered as %d with %q", resp.StatusCode, body)
+	}
+}
+
 func TestPassthroughCoolingSlotDispatchesNothing(t *testing.T) {
 	h := passthroughHarness(t)
 	for _, provider := range h.rt.release.Snapshot.Providers {

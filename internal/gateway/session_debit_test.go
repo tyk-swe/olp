@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -200,6 +201,59 @@ func TestWebRTCDefinitiveCreationRejectionSettlesDebitAsUnbilled(t *testing.T) {
 	second.Body.Close()
 	if second.StatusCode == http.StatusConflict {
 		t.Fatal("corrected request blocked by exposure from a session that never existed")
+	}
+}
+
+func TestWebRTCConnectionRefusalSettlesDebitAsUnbilled(t *testing.T) {
+	ledger := &fakeSessionDebits{}
+	mock := newWebRTCMock("close")
+	var h *harness
+	h = strictHarnessCfg(t, Config{}, func(snapshot *routing.Snapshot) {
+		for id, provider := range snapshot.Providers {
+			if provider.Name != "a" {
+				continue
+			}
+			provider.Kind = "openai"
+			provider.ProfileID = "openai-responses"
+			provider.ProfileRevision = connectors.ProfileRevision
+			provider.VendorID = "openai"
+			provider.Endpoint = "http://127.0.0.1:1"
+			provider.Capabilities = append(provider.Capabilities,
+				routing.Capability{Model: modelA, Operation: "realtime", Surface: "openai", Mode: "realtime"},
+				routing.Capability{Model: modelA, Operation: "realtime", Surface: "openai", Mode: "webrtc"})
+			snapshot.Providers[id] = provider
+		}
+		route := snapshot.Routes[routeSlug]
+		route.Operations = []string{"generation", "realtime"}
+		route.Targets = route.Targets[:1]
+		snapshot.Routes[routeSlug] = route
+	})
+	h.mock.set("a", mock.handler(t, func() bool { return true }))
+	h.gateway.Debits = ledger
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("connection refusal status=%d", resp.StatusCode)
+	}
+	env := sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	fact := env.Attempts[len(env.Attempts)-1]
+	if fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
+		t.Fatalf("unsent creation lacks final evidence flags: %+v", fact)
+	}
+	ev, err := accountingEvent(env)
+	if err != nil || ev == nil {
+		t.Fatalf("connection refusal envelope rejected by accounting conversion: %v", err)
+	}
+	encoded, err := usage.Encode(ev)
+	if err != nil {
+		t.Fatalf("connection refusal envelope rejected by usage encoding: %v", err)
+	}
+	if _, err := usage.Decode(encoded); err != nil {
+		t.Fatalf("connection refusal envelope rejected by usage validation: %v", err)
+	}
+	if got := ledger.order(); slices.Contains(got, "unknown") {
+		t.Fatalf("unsent creation marked its debit unknown: %v", got)
 	}
 }
 

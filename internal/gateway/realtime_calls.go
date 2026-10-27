@@ -485,8 +485,10 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	}
 	if err != nil {
 		fact.Class = classConnect
-		if state.dispatched.Load() {
-			fact.recordEvidence(true)
+		dispatched := state.dispatched.Load()
+		sess.rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
+		fact.recordEvidence(dispatched)
+		if dispatched {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)

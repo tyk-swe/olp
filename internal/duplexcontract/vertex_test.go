@@ -150,6 +150,18 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if !observer.Complete() {
 		t.Fatal("submitted turn settled by terminal usage is not complete")
 	}
+	if err := observer.ClientFrame([]byte(`{"realtimeInput":{"activityEnd":{}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after ending realtime input that never started")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("realtime turn settled by terminal usage is not complete")
+	}
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
 		t.Fatal(err)
 	}

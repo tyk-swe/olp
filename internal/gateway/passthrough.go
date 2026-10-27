@@ -293,7 +293,16 @@ slots:
 		return
 	}
 	payload, readErr := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
-	if readErr == nil && int64(len(payload)) > responseLimit {
+	if readErr != nil {
+		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
+		if ctx.Err() != nil {
+			factP.Class = classTimeout
+		}
+		factP.recordEvidence(true)
+		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered."))
+		return
+	}
+	if int64(len(payload)) > responseLimit {
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
 		factP.recordEvidence(true)
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
@@ -310,15 +319,8 @@ slots:
 	}
 	w.WriteHeader(resp.StatusCode)
 	x.delivered(s.now())
-	var written int64
-	var copyErr error
-	if readErr != nil {
-		copyErr = readErr
-	} else {
-		var n int
-		n, copyErr = w.Write(payload)
-		written = int64(n)
-	}
+	n, copyErr := w.Write(payload)
+	written := int64(n)
 	factP.Duration = s.now().Sub(factP.StartedAt)
 	success := resp.StatusCode >= 200 && resp.StatusCode < 300 && copyErr == nil && written <= responseLimit
 	switch {
