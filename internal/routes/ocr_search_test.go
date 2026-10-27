@@ -115,3 +115,24 @@ func TestSearchSimulationMapsAndRefusesControls(t *testing.T) {
 		t.Fatalf("unsupported control admitted: %+v", d)
 	}
 }
+
+func TestBraveSearchSimulationMapsDatesAndRefusesDomains(t *testing.T) {
+	snapshot, _ := operationSnapshot([]string{"brave-model"}, "brave", "brave-search", "search", false)
+	decisions := simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(`{"query":"q","search_after_date_filter":"01/02/2026","search_before_date_filter":"03/04/2026"}`)}, "search")
+	d := decisionFor(t, decisions, "brave-model")
+	if d.Interaction == nil || d.Interaction.Status != "admitted" || !d.Eligible || d.Interaction.EgressDialect != "brave-search" {
+		t.Fatalf("brave search not admitted: %+v", d)
+	}
+
+	for _, body := range []string{
+		`{"query":"q","search_domain_filter":["a.com"]}`,
+		`{"query":"q","search_after_date_filter":"01/02/2026"}`,
+		`{"query":"q","search_recency_filter":"week"}`,
+	} {
+		decisions = simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(body)}, "search")
+		d = decisionFor(t, decisions, "brave-model")
+		if d.Interaction != nil && d.Interaction.Status == "admitted" {
+			t.Fatalf("unsupported control admitted for %s: %+v", body, d)
+		}
+	}
+}

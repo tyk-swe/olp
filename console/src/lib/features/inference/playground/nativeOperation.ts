@@ -39,7 +39,8 @@ export const nativeOperationDialects = {
     'perplexity-search',
     'tavily-search',
     'exa-search',
-    'parallel-search'
+    'parallel-search',
+    'brave-search'
   ]
 } as const;
 

@@ -2842,6 +2842,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3424,6 +3435,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -9937,6 +10015,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -10535,6 +10624,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }
@@ -10709,6 +10865,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -11307,6 +11474,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }
@@ -24735,6 +24969,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -25317,6 +25562,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -31292,6 +31604,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -31884,6 +32207,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }
@@ -36097,7 +36487,8 @@
             "perplexity-search",
             "tavily-search",
             "exa-search",
-            "parallel-search"
+            "parallel-search",
+            "brave-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -36504,7 +36895,8 @@
             "perplexity-search",
             "tavily-search",
             "exa-search",
-            "parallel-search"
+            "parallel-search",
+            "brave-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -40210,6 +40602,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -40802,6 +41205,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }

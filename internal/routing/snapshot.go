@@ -298,6 +298,9 @@ func (s *Snapshot) validate() error {
 		if err := ValidateRouteFidelity(r.Fidelity, r.ContentPolicy); err != nil {
 			return fmt.Errorf("route %q fidelity: %w", slug, err)
 		}
+		if err := r.ValidatePassthrough(); err != nil {
+			return fmt.Errorf("route %q: %w", slug, err)
+		}
 		seen := map[string]bool{}
 		for _, t := range r.Targets {
 			if !validUUID(t.ID) || !validUUID(t.RoutingID) || seen[t.ID] || t.Weight < 1 || t.Timeout < 1 || t.ProviderModel == "" {

@@ -418,7 +418,8 @@ func (c Config) ValidateProfile() error {
 		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
 		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
 		p.Dialect == "exa-search" && c.VendorID != "exa" ||
-		p.Dialect == "parallel-search" && c.VendorID != "parallel" {
+		p.Dialect == "parallel-search" && c.VendorID != "parallel" ||
+		p.Dialect == "brave-search" && c.VendorID != "brave" {
 		return errors.New("operation profile requires its reviewed vendor")
 	}
 	if p.Dialect == "openai-completions" {

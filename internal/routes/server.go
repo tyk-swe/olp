@@ -60,7 +60,7 @@ var supportedOperations = []string{
 	"generation", "decision", "token_count", "embeddings", "moderation", "rerank", "ocr", "search",
 	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 	"video_create", "video_list", "video_get", "video_content", "video_delete",
-	"batch", "realtime", "bedrock_invoke",
+	"batch", "realtime", "bedrock_invoke", "passthrough",
 }
 
 type draft struct {
@@ -218,6 +218,12 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	out["max_body_bytes"] = behavior.MaxBodyBytes
 	out["caller_cost_exempt"] = behavior.CallerCostExempt
 	out["cache"], out["prompt_cache"] = behavior.Cache, behavior.PromptCache
+	out["passthrough"] = behavior.Passthrough
+	certification := "certified"
+	if behavior.Passthrough != nil {
+		certification = "uncertified"
+	}
+	out["certification"] = certification
 	return out
 }
 
@@ -264,29 +270,30 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
-	Cache            *cache.Policy       `json:"cache,omitempty"`
-	PromptCache      *cache.PromptPolicy `json:"prompt_cache,omitempty"`
-	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
-	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
-	Slug             string              `json:"slug"`
-	Operations       []string            `json:"operations"`
-	OverallTimeoutMS int                 `json:"overall_timeout_ms"`
-	MaxAttempts      int                 `json:"max_attempts"`
-	Targets          []TargetInput       `json:"targets"`
-	ContentPolicy    json.RawMessage     `json:"content_policy"`
-	Fidelity         json.RawMessage     `json:"fidelity,omitempty"`
-	ProjectID        *string             `json:"project_id"`
-	Fallbacks        []routing.Fallback  `json:"fallbacks,omitempty"`
-	Selectors        []routing.Selector  `json:"selectors,omitempty"`
-	Retry            routing.Retry       `json:"retry,omitempty"`
-	Affinity         *routing.Affinity   `json:"affinity,omitempty"`
-	Budget           *routing.CostLimits `json:"budget,omitempty"`
+	Cache            *cache.Policy              `json:"cache,omitempty"`
+	PromptCache      *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
+	CallerCostExempt bool                       `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes     *int64                     `json:"max_body_bytes,omitempty"`
+	Slug             string                     `json:"slug"`
+	Operations       []string                   `json:"operations"`
+	OverallTimeoutMS int                        `json:"overall_timeout_ms"`
+	MaxAttempts      int                        `json:"max_attempts"`
+	Targets          []TargetInput              `json:"targets"`
+	ContentPolicy    json.RawMessage            `json:"content_policy"`
+	Fidelity         json.RawMessage            `json:"fidelity,omitempty"`
+	ProjectID        *string                    `json:"project_id"`
+	Fallbacks        []routing.Fallback         `json:"fallbacks,omitempty"`
+	Selectors        []routing.Selector         `json:"selectors,omitempty"`
+	Retry            routing.Retry              `json:"retry,omitempty"`
+	Affinity         *routing.Affinity          `json:"affinity,omitempty"`
+	Budget           *routing.CostLimits        `json:"budget,omitempty"`
+	Passthrough      *routing.PassthroughConfig `json:"passthrough,omitempty"`
 	// Behavior is the validated, stored form of the adaptive routing fields.
 	Behavior []byte `json:"-"`
 }
 
 func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
+	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
 }
 
 func sameProject(a, b *string) bool {
@@ -407,6 +414,20 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 	}
 	if err := behavior.Validate(in.Slug, tagged); err != nil {
 		return nil, err
+	}
+	route := routing.Route{Slug: in.Slug, Operations: in.Operations, OverallTimeout: int64(in.OverallTimeoutMS), MaxAttempts: in.MaxAttempts, Fidelity: fidelity, Behavior: behavior}
+	for _, t := range targets {
+		route.Targets = append(route.Targets, routing.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID, Tags: t.Tags, Shadow: t.Shadow})
+	}
+	if len(in.ContentPolicy) > 0 {
+		policy, err := contentpolicy.Decode(in.ContentPolicy)
+		if err != nil {
+			return nil, access.Invalid("content_policy", err.Error())
+		}
+		route.ContentPolicy = policy
+	}
+	if err := route.ValidatePassthrough(); err != nil {
+		return nil, PassthroughAccessError(err)
 	}
 	in.Behavior, _ = json.Marshal(behavior)
 	if err := reserveOrdinarySlug(ctx, q, in.Slug); err != nil {

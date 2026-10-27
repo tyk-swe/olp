@@ -316,11 +316,14 @@ provider family.
 
 ## Remaining OCR, search and Decisions breadth
 
-Brave search needs GET-query transport and Azure Document Intelligence needs
-bounded 202/poll transport, and both remain pending in the endpoint ledger.
-Vertex document processing serves through its GCP-authenticated Google Cloud
-Document AI profile, with GCS document locations bounded by the connection's
-configured document URI prefixes. Certify pagination, filters,
+Brave search runs on the reviewed GET-query unary transport, where the
+lowered request document becomes bounded query parameters on a bodyless GET.
+The same transport shape leaves room for a bounded submit-then-poll shape
+beside it, and Azure Document Intelligence still needs that 202/poll
+transport, so it remains pending in the endpoint ledger. Vertex document
+processing serves through its GCP-authenticated Google Cloud Document AI
+profile, with GCS document locations bounded by the connection's configured
+document URI prefixes. Certify pagination, filters,
 citations, time ranges and result limits independently, refusing unmappable
 fields before paid work. Provider-fetched OCR URLs remain an explicit content-egress
 choice; the gateway does not become a general URL fetcher. Search prices request
@@ -488,7 +491,7 @@ maintainers for RM6.6. **Entry:** RM4.1 per operation and its transport, pricing
 egress and inspection contract. These tasks may progress independently;
 unresolved realtime exposure additionally requires RM4.2–RM4.3.
 
-- [ ] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
+- [x] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
   citations, time ranges, limits and request pricing; refuse unmappable fields.
 - [ ] **RM6.2 — Add Azure Document Intelligence polling:** implement bounded
   202/poll transport; test deadline/cancellation, observed page/document pricing,
@@ -503,7 +506,7 @@ unresolved realtime exposure additionally requires RM4.2–RM4.3.
   qualify xAI realtime, Vertex AI Live and Bedrock Nova Sonic. Test owner-scoped
   sessions, declared transcription support, cancellation and terminal usage;
   no reconnect/fallback may move a session to another provider.
-- [ ] **RM6.6 — Add governed pass-through:** implement the separate route kind
+- [x] **RM6.6 — Add governed pass-through:** implement the separate route kind
   and anchored namespace. Test adversarial path normalization, query/header
   allowlists, redirect/credential isolation, bounds and policy-publication
   refusals; verify per-request pricing or explicit unpriced accounting.

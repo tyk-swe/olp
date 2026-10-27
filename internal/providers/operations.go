@@ -98,11 +98,11 @@ func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, crede
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The native operation probe cannot bind its configured defaults."}
 	}
-	endpoint, err := plan.Endpoint()
+	endpoint, err := plan.RequestURL()
 	if err != nil {
 		return err
 	}
-	status, body, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, plan.Body())
+	status, body, err := s.call(ctx, cfg, credential, plan.Method(), endpoint, plan.WireBody())
 	if err != nil {
 		return err
 	}

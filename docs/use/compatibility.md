@@ -234,28 +234,40 @@ ApiSearchRequest: a string `query` (arrays refused), `max_results` 1–20,
 `search_type`, `max_tokens`, `max_tokens_per_page`, `country`,
 `search_language_filter`, an all-allow-or-all-deny `search_domain_filter` of
 at most 20 entries, and the date/recency filters. Transformed serving maps it
-to `tavily-search`, `exa-search` and `parallel-search` (vendors Tavily, Exa,
-Parallel; Parallel credentials arrive as `X-Api-Key`). The mappings always
+to `tavily-search`, `exa-search`, `parallel-search` and `brave-search`
+(vendors Tavily, Exa, Parallel, Brave; Parallel credentials arrive as
+`X-Api-Key`, Brave credentials as `X-Subscription-Token`). The mappings always
 send `query` and `max_results` (default 10); `search_type` is admitted only
-absent or `web`; token, locale and freshness controls are refused `400`
-rather than approximated. Domain filters reach Exa as root domains expanded
+absent or `web`; token and locale controls are refused `400` rather than
+approximated. Recency and last-updated filters are refused on every target.
+Brave alone also carries a paired `search_after_date_filter` and
+`search_before_date_filter` as a date range, and a single-sided date filter
+is refused there too. Domain filters reach Exa as root domains expanded
 with `*.d` subdomains and Parallel verbatim (`.tld` and domain/path entries
-allowed, `-` stripped on deny); Tavily carries none. Projections answer with
-the Perplexity shape, a gateway-minted `search_<hex>` id — upstream ids never
-cross — `""` for absent titles, joined highlight/excerpt snippets, and
-per-target dates. A result page beyond `max_results` is a protocol violation.
-Search results carry no usage and settle like moderation: a validated result
-completes its evidence, and the attempt is charged at the target's
-`per_request` price.
+allowed, `-` stripped on deny); Tavily and Brave carry none. Projections
+answer with the Perplexity shape, a gateway-minted `search_<hex>` id,
+upstream ids never cross, `""` for absent titles, joined
+highlight/excerpt snippets or Brave descriptions, and per-target dates. A
+result page beyond `max_results` is a protocol violation. Search results
+carry no usage and settle like moderation: a validated result completes its
+evidence, and the attempt is charged at the target's `per_request` price.
+
+The `brave-search` profile serves its upstream over a GET query transport.
+Its native document admits `q`, `count`, `offset`, `freshness` and
+`result_filter` (only `web`); the gateway lowers the document to bounded
+query parameters with decorations off and sends no body. Strict native
+ingress still takes the JSON document at `/native/{dialect}/models/{route}`.
+Only the wire to Brave is a query. Offset pagination is native-only because
+the frozen source contract has no offset field, so transformed Brave calls
+always read the first page.
 
 Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json),
 the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
 `tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
-required; this evidence does not qualify unimplemented API families. Brave (GET-query
-transport) and Azure Document Intelligence (202/poll transport) stay
-pending. Google's Custom
-Search JSON API is excluded — the provider discontinued new enrollment and
-the API sunsets on 2027-01-01.
+required; this evidence does not qualify unimplemented API families. Azure
+Document Intelligence (202/poll transport) stays pending. Google's Custom
+Search JSON API is excluded because the provider discontinued new enrollment
+and the API sunsets on 2027-01-01.
 
 ### Files, batches, realtime, and provider-retained state
 
@@ -688,6 +700,14 @@ embeddings remain served. The media guide owns fal, Google Cloud TTS, Imagen
 and video declines. Reopening a decline needs a stable wire contract,
 representable pricing/usage and executable certification; generic endpoint
 registration does not reopen it.
+
+## Governed pass-through
+
+A pass-through route is a separate route kind for provider endpoints the gateway does not model. It is neither strict nor transformed, it advertises uncertified in route detail and capability views, and it binds exactly one connection through its single target. Callers reach it at `/native/{dialect}/routes/{route}/...` with an inference key that names the route, and the namespace cannot shadow a modeled endpoint because modeled native work lives under the `models` segment rather than `routes`.
+
+The route declares its methods and anchored path segment patterns, where `*` matches one nonempty segment. The gateway normalizes the path once before matching and refuses encoded separators, dot segments, absolute URLs, fragments and alternate authorities before any dispatch. Query names and forwarded headers come from explicit allowlists, and an unlisted query name is refused. Hop-by-hop headers and every caller credential are stripped, only the bound connection credential is injected, and provider redirects are refused instead of followed. The `Content-Type` of a request body is forwarded as body framing alongside the allowlisted headers. WebSocket upgrades are refused. Request and response bodies stream inside the gateway body and response bounds and the route deadline, and a request body is read within those bounds before dispatch so the bound credential can sign it where the connector requires signing.
+
+Fallback, mirroring, translation, response caching, guardrails and content policies cannot attach to this route kind, and a configuration that asks for them fails at configuration plan time and again at draft validation and publication. Publishing requires the operator acknowledgement for opaque provider state and unmetered work, recorded on the route itself. A successful attempt is charged the per-request price configured for the `passthrough` operation when one exists, and otherwise it is recorded as explicitly unpriced rather than as metered work. The gateway mints no resource handles or background jobs for an opaque response, and the escape hatch never qualifies the underlying endpoint as a modeled family. Live qualification against a real provider account remains a separate gate for each bound connection.
 
 ## Product boundaries
 

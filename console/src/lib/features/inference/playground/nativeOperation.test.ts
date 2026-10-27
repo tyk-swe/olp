@@ -10,7 +10,8 @@ it.each([
   'perplexity-search',
   'tavily-search',
   'exa-search',
-  'parallel-search'
+  'parallel-search',
+  'brave-search'
 ])('refuses a body model for %s', async (dialect) => {
   await expect(
     runNativeOperation(

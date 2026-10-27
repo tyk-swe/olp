@@ -172,7 +172,7 @@ realtime maintainers for RM6.4–RM6.5, and routing maintainers for RM6.6.
 metering, revocation and egress behavior. Realtime exposure uses the shared
 durable accounting foundation.
 
-- [ ] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
+- [x] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
   citations, time ranges, limits and request pricing, with explicit refusal
   of unmappable fields.
 - [ ] **RM6.2 — Azure Document Intelligence polling:** implement bounded
@@ -188,7 +188,7 @@ durable accounting foundation.
 - [ ] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
   Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
   declared transcription support, cancellation and terminal usage accounting.
-- [ ] **RM6.6 — Governed pass-through:** implement the separate route kind
+- [x] **RM6.6 — Governed pass-through:** implement the separate route kind
   and anchored namespace, path normalization, query/header allowlists,
   redirect refusal, credential isolation, bounds, policy compatibility and
   per-request pricing or explicit unpriced accounting.
