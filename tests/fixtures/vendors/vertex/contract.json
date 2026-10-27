@@ -8,5 +8,23 @@
     },
     "fields": ["name", "state", "createTime", "endTime", "completionStats.successfulCount", "completionStats.failedCount", "completionStats.incompleteCount", "outputInfo.gcsOutputDirectory", "labels.olp_submission"],
     "fixtures": ["job.create.request.json", "job.create.response.json", "job.running.json", "job.succeeded.json", "jobs.list.response.json", "predictions.jsonl", "error.json"]
+  },
+  "ocr": {
+    "basis": "schema",
+    "reviewed_at": "2026-10-27",
+    "notes": "Vertex document processing is served by the Google Cloud Document AI API, not the Vertex AI aiplatform host. The synchronous processors.process method is POST https://LOCATION-documentai.googleapis.com/v1/projects/PROJECT/locations/LOCATION/processors/PROCESSOR:process with an OAuth2 bearer token. A request carries exactly one rawDocument (base64 content plus mimeType) or gcsDocument (gs:// URI plus mimeType) and optional processOptions.individualPageSelector pages in provider page numbering. The ProcessResponse document carries the full text plus pages whose layout textAnchor textSegments index into that text. Online processing is the synchronous contract; batchProcess is outside the reviewed contract. These are offline schema-built fixtures, not live-provider qualification.",
+    "documentation_links": {
+      "process": "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/projects.locations.processors/process",
+      "send_request": "https://docs.cloud.google.com/document-ai/docs/send-request",
+      "document": "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/Document"
+    },
+    "endpoints": {
+      "ocr": "https://LOCATION-documentai.googleapis.com/v1/projects/PROJECT/locations/LOCATION/processors/PROCESSOR:process"
+    },
+    "request": "ocr.request.json",
+    "file": "ocr.response.json",
+    "usage": {
+      "media_units": "2"
+    }
   }
 }

@@ -306,6 +306,19 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'vertex-document-processing-ocr',
+    label: 'OCR · Vertex document processing',
+    operation: 'ocr',
+    nativeDialect: 'vertex-document-processing-ocr',
+    request: {
+      rawDocument: {
+        content:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+        mimeType: 'image/png'
+      }
+    }
+  },
+  {
     key: 'perplexity-search',
     label: 'Web search · Perplexity',
     operation: 'search',

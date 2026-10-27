@@ -178,7 +178,7 @@ durable accounting foundation.
 - [ ] **RM6.2 — Azure Document Intelligence polling:** implement bounded
   202/poll transport, deadlines, cancellation, page/document pricing,
   output mapping and provider-fetched URL egress controls.
-- [ ] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
+- [x] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
   profile, credential isolation, field mapping, egress and observed-unit
   accounting.
 - [ ] **RM6.4 — Governed WebRTC:** implement OpenAI server-mediated session

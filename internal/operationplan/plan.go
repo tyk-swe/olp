@@ -224,6 +224,11 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if t.codec.DocumentLocation != nil {
+		if location, external := t.codec.DocumentLocation(effective); external && !t.config.Provider.AllowsDocumentURI(location) {
+			return nil, fail("storage_scope", "/document", "document_location_prefix", "The document location is outside the connection's configured document URI prefixes.")
+		}
+	}
 	for _, pair := range []struct {
 		codec operations.Dialect
 		view  oif.View

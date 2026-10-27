@@ -34,6 +34,7 @@ type Config struct {
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
 	BatchStorage                                                                          *BatchStorage
 	TuningDatasetURIPrefixes                                                              []string
+	DocumentURIPrefixes                                                                   []string
 	// SigningService overrides the SigV4 signing name of one call to an AWS
 	// service beside the connector's own, such as Amazon Polly's.
 	SigningService    string `json:"-"`
@@ -49,6 +50,16 @@ type Config struct {
 // gets when it names none: its kind's, or the address the profile's hosting
 // is served at.
 func DefaultProfileEndpoint(kind, profileID, region, project string) string {
+	if profileID == "vertex-document-processing-ocr" {
+		host := region + "-documentai.googleapis.com"
+		if region == "global" {
+			host = "documentai.googleapis.com"
+		}
+		if !cloudIdentifier.MatchString(region) || !cloudIdentifier.MatchString(project) {
+			return ""
+		}
+		return "https://" + host + "/v1/projects/" + project + "/locations/" + region
+	}
 	endpoint := DefaultEndpoint(kind, region, project)
 	if profileID == "bedrock-knowledge-bases" {
 		return strings.Replace(endpoint, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
@@ -303,6 +314,8 @@ func (c Config) URL(encodedWire wire.Format, model string, stream bool) (string,
 		path = "/models/" + url.PathEscape(model) + ":batchEmbedContents"
 	case wire.VertexEmbeddings:
 		path = "/models/" + url.PathEscape(model) + ":predict"
+	case wire.DocumentAIProcess:
+		path = "/processors/" + url.PathEscape(model) + ":process"
 	case wire.BedrockInvoke:
 		operation := "invoke"
 		if stream {

@@ -39,6 +39,7 @@ const cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
 var hostings = map[string]hostingTraits{
 	"azure-ai-search":          {azureScope: "https://search.azure.com/.default"},
 	"vertex-rag-engine":        {},
+	"google-document-ai":       {},
 	"bedrock-knowledge-bases":  {awsService: "bedrock"},
 	"azure-deployment":         {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
 	"azure-responses-legacy":   {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},

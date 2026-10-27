@@ -171,6 +171,13 @@ pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.sve
 ```
 
 The OCR/search journey is `console/tests/gateway/ocr-search.spec.ts`.
+Vertex document processing (RM6.3) local evidence covers the Document AI
+dialect and Mistral mapping, plan-level processor addressing and page
+projection, document-location prefix refusals at the gateway, and route
+simulation. Its exact live tuple stays unqualified until an opt-in run of
+`TestVertexDocumentProcessingLive` under the `liveproviders` build tag
+sets `OLP_LIVE_DOCUMENTAI_PROJECT`, `OLP_LIVE_DOCUMENTAI_LOCATION` and
+`OLP_LIVE_MODEL` naming a processor ID under ADC credentials.
 A dedicated resource/accounting integration selection remains required;
 compiling fixtures does not execute it. Every new family needs lifecycle,
 nested-ID/pagination isolation, ambiguous-create, restart, cleanup, revocation,

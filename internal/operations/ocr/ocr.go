@@ -57,7 +57,7 @@ func Definitions() []operations.Dialect {
 	d.Probe = func(model string) []byte {
 		return operations.Raw(map[string]any{"model": model, "document": map[string]any{"type": "image_url", "image_url": probeImage}})
 	}
-	return []operations.Dialect{d}
+	return []operations.Dialect{d, vertexDefinition()}
 }
 
 func parseRequest(source oif.Request) (oif.View, error) {

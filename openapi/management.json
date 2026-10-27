@@ -2946,6 +2946,15 @@
               "maxLength": 1024
             },
             "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+          },
+          "document_uri_prefixes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
           }
         },
         "type": "object"
@@ -15056,6 +15065,7 @@
           "openai-decisions",
           "systemone",
           "mistral-ocr",
+          "vertex-document-processing-ocr",
           "perplexity-search",
           "tavily-search",
           "exa-search",
