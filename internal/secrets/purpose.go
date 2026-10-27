@@ -36,12 +36,13 @@ var (
 	ApprovalDigest           = DigestPurpose{"agent_approval"}
 	AgentPrincipalDigest     = DigestPurpose{"agent_principal"}
 	BatchLineDigest          = DigestPurpose{"batch_line"}
+	ToolInputDigest          = DigestPurpose{"tool_input"}
 )
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
 	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, RetainedSubmissionDigest}
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, RetainedSubmissionDigest, ToolInputDigest}
 }
 
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed

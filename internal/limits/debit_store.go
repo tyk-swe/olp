@@ -310,7 +310,7 @@ func DebitResultReplayTx(ctx context.Context, tx pgx.Tx, r DebitResult) (bool, e
 	var final, complete bool
 	err = tx.QueryRow(ctx, `SELECT evidence_digest,resolution_digest,event_id::text,cost::text,charge::text,final,complete FROM olp.execution_debit_results WHERE dispatch_id=$1 AND result_digest=$2`, r.DispatchID, r.ResultDigest).Scan(&evidence, &resolutions, &event, &cost, &charge, &final, &complete)
 	if err == nil {
-		if !bytes.Equal(evidence, r.EvidenceDigest) || !bytes.Equal(resolutions, resolutionDigest) || event != r.EventID || !equalDebitAmount(cost, r.Cost) || !equalDebitAmount(charge, r.Charge) || final != r.Final || complete != r.Complete {
+		if !debitResultMatches(r, resolutionDigest, evidence, resolutions, event, cost, charge, final, complete) {
 			return false, ErrDebitConflict
 		}
 		return true, nil
@@ -321,20 +321,45 @@ func DebitResultReplayTx(ctx context.Context, tx pgx.Tx, r DebitResult) (bool, e
 	return false, nil
 }
 
+func debitResultMatches(r DebitResult, resolutionDigest, evidence, resolutions []byte, event, cost, charge string, final, complete bool) bool {
+	return bytes.Equal(evidence, r.EvidenceDigest) && bytes.Equal(resolutions, resolutionDigest) && event == r.EventID && equalDebitAmount(cost, r.Cost) && equalDebitAmount(charge, r.Charge) && final == r.Final && complete == r.Complete
+}
+
+type debitSettleHead struct {
+	state     DebitState
+	kind      string
+	zeroBound bool
+}
+
+func beginDebitSettleTx(ctx context.Context, tx pgx.Tx, r DebitResult) (debitSettleHead, bool, error) {
+	var head debitSettleHead
+	if err := tx.QueryRow(ctx, `SELECT state,kind,cost_bound=0 AND charge_bound=0 FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&head.state, &head.kind, &head.zeroBound); err != nil {
+		return head, false, err
+	}
+	duplicate, err := DebitResultReplayTx(ctx, tx, r)
+	return head, duplicate, err
+}
+
+func appendDebitResultTx(ctx context.Context, tx pgx.Tx, r DebitResult, owners []DebitOwner, resolutionDigest []byte) error {
+	if err := lockDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO olp.execution_debit_results(dispatch_id,result_digest,evidence_digest,event_id,cost,charge,final,complete,resolution_digest) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7,$8,$9)`, r.DispatchID, r.ResultDigest, r.EvidenceDigest, r.EventID, r.Cost, r.Charge, r.Final, r.Complete, resolutionDigest)
+	return err
+}
+
 // SettleDebitTx shares the usage persistence transaction. Accounting contains
 // the balances returned by that event's persistence, covering every owner.
 func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []CostSnapshot) error {
-	var state DebitState
-	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&state); err != nil {
+	head, duplicate, err := beginDebitSettleTx(ctx, tx, r)
+	if err != nil {
 		return err
 	}
-	if duplicate, err := DebitResultReplayTx(ctx, tx, r); err != nil {
-		return err
-	} else if duplicate {
+	if duplicate {
 		return nil
 	}
 	resolutionDigest, _ := debitResolutionDigest(r.ResolvesResultDigests)
-	if state != DebitDispatched && state != DebitUnknown {
+	if head.state != DebitDispatched && head.state != DebitUnknown {
 		return ErrDebitState
 	}
 	var persisted bool
@@ -351,10 +376,7 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []C
 	if !debitOwnersAccounted(owners, accounting) {
 		return ErrDebitState
 	}
-	if err = lockDebitOwners(ctx, tx, owners); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.execution_debit_results(dispatch_id,result_digest,evidence_digest,event_id,cost,charge,final,complete,resolution_digest) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7,$8,$9)`, r.DispatchID, r.ResultDigest, r.EvidenceDigest, r.EventID, r.Cost, r.Charge, r.Final, r.Complete, resolutionDigest); err != nil {
+	if err = appendDebitResultTx(ctx, tx, r, owners, resolutionDigest); err != nil {
 		return err
 	}
 	for _, resolved := range r.ResolvesResultDigests {

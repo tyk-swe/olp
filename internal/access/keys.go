@@ -714,3 +714,18 @@ func (a Authority) LimitsLookup() string {
 	}
 	return a.LookupID
 }
+
+func (a Authority) KeyDebitOwner() limits.DebitOwner {
+	return limits.DebitOwner{ID: a.ID, Kind: "key", Basis: limits.Basis(a.Policy.CostBasis)}
+}
+
+func (a Authority) KeyDebitRequest(leaseTTL time.Duration) limits.Request {
+	return limits.Request{
+		CostOwnerID: a.ID, CostBasis: limits.Basis(a.Policy.CostBasis), LookupID: a.LimitsLookup(),
+		CostIncreases:    a.BudgetIncreases[a.ID],
+		DailyCostLimit:   a.Policy.DailyCostLimit,
+		WeeklyCostLimit:  a.Policy.WeeklyCostLimit,
+		MonthlyCostLimit: a.Policy.MonthlyCostLimit,
+		LeaseTTL:         leaseTTL,
+	}
+}
