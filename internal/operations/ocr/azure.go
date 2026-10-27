@@ -178,7 +178,7 @@ func parseAzureResult(request oif.Request, source oif.Result) (oif.View, error) 
 				for _, span := range spans.Elements() {
 					offset, okOffset := operations.Int(member(span, "offset"))
 					length, okLength := operations.Int(member(span, "length"))
-					if !okOffset || !okLength || offset < 0 || length < 0 || offset+length > units {
+					if !okOffset || !okLength || offset < 0 || length < 0 || offset > units || length > units-offset {
 						return fail(path+"/spans", "ocr_page_spans")
 					}
 					entry.spans = append(entry.spans, azureSpan{offset: offset, length: length})
@@ -264,7 +264,7 @@ func azureOutputText(result oif.Result) ([]operations.Text, error) {
 func utf16Slice(units []uint16, spans []azureSpan) (string, bool) {
 	var b strings.Builder
 	for _, span := range spans {
-		if span.offset < 0 || span.length < 0 || span.offset+span.length > int64(len(units)) {
+		if span.offset < 0 || span.length < 0 || span.offset > int64(len(units)) || span.length > int64(len(units))-span.offset {
 			return "", false
 		}
 		b.WriteString(string(utf16.Decode(units[span.offset : span.offset+span.length])))
