@@ -2,6 +2,7 @@ package codeplans
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,6 +43,9 @@ func TestStartGrantSendsOperatorsToEachPlanKeyPage(t *testing.T) {
 		{QwenTokenPlan(), QwenTokenPlanProfile, QwenTokenPlanKeyPage},
 		{QwenTokenPlan(), QwenTokenPlanCNProfile, QwenTokenPlanCNKeyPage},
 	} {
+		if !slices.ContainsFunc(test.adapter.Manifest().Profiles, func(profile abi.Profile) bool { return profile.ID == test.profile }) {
+			t.Fatalf("plugin does not advertise enrollment profile %s", test.profile)
+		}
 		start, err := test.adapter.StartGrant(context.Background(), abi.GrantStart{Profile: test.profile})
 		if err != nil || start.URL != test.page {
 			t.Fatalf("%s opened %q: %v", test.profile, start.URL, err)

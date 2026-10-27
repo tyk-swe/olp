@@ -39,9 +39,6 @@ func TestValidateRejectsDuplicateAdapter(t *testing.T) {
 	}
 }
 
-// MiniMax and Qwen place the key as a bearer token on both endpoints; Kimi
-// places it in X-Api-Key on Messages, as its Claude Code setup does, and as a
-// bearer token on Chat Completions.
 func TestCodingPlanAdaptersPlaceTheKeyInEachEndpointHeader(t *testing.T) {
 	key := "vendor-key-0123456789abcdef0"
 	secret, err := json.Marshal(connectors.GrantCredential{AccessToken: key})
@@ -95,6 +92,31 @@ func TestForConnectionRequiresGrantPluginProfile(t *testing.T) {
 	}
 	if _, ok := ForConnection(kindPlugin, "api_key", vendor.profiles[0]); ok {
 		t.Fatal("non-grant connection resolved to a code adapter")
+	}
+}
+
+func TestCodingPlanClientsUseOpenCodeCatalogProviders(t *testing.T) {
+	for _, test := range []struct {
+		adapter  codemode.Adapter
+		provider string
+	}{
+		{codemode.AdapterMiniMaxPlan, "minimax-coding-plan"},
+		{codemode.AdapterKimiCode, "kimi-code-plan-global"},
+		{codemode.AdapterQwenTokenPlan, "alibaba-token-plan"},
+	} {
+		t.Run(string(test.adapter), func(t *testing.T) {
+			vendor, ok := Lookup(test.adapter)
+			if !ok {
+				t.Fatalf("adapter %s missing", test.adapter)
+			}
+			client, ok := vendor.Client(ClientOpenCode)
+			if !ok {
+				t.Fatal("OpenCode client missing")
+			}
+			if client.Provider != test.provider {
+				t.Fatalf("OpenCode provider %q cannot resolve models from %q (https://models.dev/api.json, reviewed 2026-10-27)", client.Provider, test.provider)
+			}
+		})
 	}
 }
 

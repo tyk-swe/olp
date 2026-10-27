@@ -360,9 +360,9 @@ claude.ai login features are outside code mode. Optional
 
 The controlled suite resolves OpenCode from npm **latest** on each run. OLP generates an `opencode.json`
 that overrides the base URL of OpenCode's own provider for each subscription:
-`opencode-go`, `zai-coding-plan` for either GLM profile, `minimax-plan` for
-either MiniMax profile, `kimi-code` for either Kimi profile or
-`qwen-token-plan` for either Qwen profile. Each model is listed
+`opencode-go`, `zai-coding-plan` for either GLM profile, `minimax-coding-plan` for
+either MiniMax profile, `kimi-code-plan-global` for either Kimi profile or
+`alibaba-token-plan` for either Qwen profile. Each model is listed
 under the provider of the subscription that serves it, and every provider points
 at the route. The provider picks the endpoint OpenCode sends a model on, so for
 a model both subscriptions offer OLP picks the providers with which one

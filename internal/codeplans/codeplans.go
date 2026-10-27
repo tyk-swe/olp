@@ -52,9 +52,7 @@ const (
 	QwenTokenPlanCNKeyPage  = "https://bailian.console.aliyun.com/cn-beijing/subscription/overview"
 )
 
-// Adapter enrolls the profiles of one vendor's plugin. keyPrefix guards the
-// pasted key where a plan's keys differ from the vendor's pay-as-you-go keys,
-// which share the host and would bill silently.
+// Adapter enrolls the profiles of one vendor's plugin.
 type Adapter struct {
 	manifest           func() abi.Manifest
 	keyPages           map[string]string
@@ -72,21 +70,15 @@ func ZAI() Adapter {
 	return Adapter{manifest: ZAIManifest, keyPages: map[string]string{ZAIProfile: ZAIKeyPage, BigModelProfile: BigModelKeyPage}}
 }
 
-// MiniMax is the MiniMax M Plan plugin's adapter, for the global and the
-// mainland China account systems.
 func MiniMax() Adapter {
 	return Adapter{manifest: MiniMaxManifest, keyPages: map[string]string{MiniMaxProfile: MiniMaxKeyPage, MiniMaxCNProfile: MiniMaxCNKeyPage},
 		keyPrefix: "sk-cp-", keyHint: "Paste the plan's Subscription Key, which starts with sk-cp-, not a pay-as-you-go API key."}
 }
 
-// Kimi is the Kimi Code plugin's adapter, for the global and the mainland
-// China account systems, which share one key page.
 func Kimi() Adapter {
 	return Adapter{manifest: KimiManifest, keyPages: map[string]string{KimiProfile: KimiKeyPage, KimiCNProfile: KimiKeyPage}}
 }
 
-// QwenTokenPlan is the Alibaba Model Studio Token Plan Team Edition plugin's
-// adapter, for the global and the mainland China (Bailian) account systems.
 func QwenTokenPlan() Adapter {
 	return Adapter{manifest: QwenTokenPlanManifest, keyPages: map[string]string{QwenTokenPlanProfile: QwenTokenPlanKeyPage, QwenTokenPlanCNProfile: QwenTokenPlanCNKeyPage},
 		keyPrefix: "sk-sp-", keyHint: "Paste the Token Plan key, which starts with sk-sp-, not a pay-as-you-go API key."}
@@ -114,8 +106,6 @@ func ZAIManifest() abi.Manifest {
 	}
 }
 
-// MiniMaxManifest declares the MiniMax M Plan profiles of api.minimax.io and
-// api.minimax.cn.
 func MiniMaxManifest() abi.Manifest {
 	return abi.Manifest{
 		Name: "minimax-plan", Version: "0.1.0", Description: "MiniMax M Plan API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
@@ -127,8 +117,6 @@ func MiniMaxManifest() abi.Manifest {
 	}
 }
 
-// KimiManifest declares the Kimi Code profiles of api.kimi.ai and
-// api.kimi.com.
 func KimiManifest() abi.Manifest {
 	return abi.Manifest{
 		Name: "kimi-code", Version: "0.1.0", Description: "Kimi Code API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
@@ -140,8 +128,6 @@ func KimiManifest() abi.Manifest {
 	}
 }
 
-// QwenTokenPlanManifest declares the Token Plan Team Edition profiles of
-// Alibaba Cloud Model Studio and Bailian.
 func QwenTokenPlanManifest() abi.Manifest {
 	return abi.Manifest{
 		Name: "qwen-token-plan", Version: "0.1.0", Description: "Alibaba Model Studio Token Plan Team Edition API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
