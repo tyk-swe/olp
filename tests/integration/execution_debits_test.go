@@ -411,6 +411,65 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestExecutionDebitDefinitiveRejectionSettlesAsUnbilled(t *testing.T) {
+	f, s, project := debitFixture(t)
+	valkey, prefix, _ := acctKeyspace(t)
+	s.Limiter, _ = limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	i := debitIntent(t, f, project)
+	prepareDebit(t, f, s, i)
+	if err := s.Admit(t.Context(), i.ID, i.ClaimID, []limits.Request{{CostOwnerID: f.Key}, {CostOwnerID: f.Provider}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkDispatched(t.Context(), i.ID, i.ClaimID); err != nil {
+		t.Fatal(err)
+	}
+	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 1, "debit-model", 400, acctSettled())}})
+	event.RuntimeGenerationID = i.Affinity.ReleaseID
+	event.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: i.Affinity.ProviderRevisionID}
+	event.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: i.ID}
+	payload, err := usage.Encode(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = usage.PersistDebitEventTx(t.Context(), tx, event, payload); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var closed bool
+	if err = f.Pool.QueryRow(t.Context(), `SELECT state,closed_at IS NOT NULL FROM olp.execution_debits WHERE id=$1`, i.ID).Scan(&state, &closed); err != nil || state != "settled" || !closed {
+		t.Fatalf("definitive rejection did not settle its debit as unbilled: state=%s closed=%v err=%v", state, closed, err)
+	}
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key); err != nil || held {
+		t.Fatalf("settled rejection still holds session exposure: held=%v err=%v", held, err)
+	}
+}
+
+func TestExecutionDebitPrepareSupportsUnsetPricingCurrency(t *testing.T) {
+	f := acctSeed(t, acctPool(t))
+	project := acctID(t)
+	acctExec(t, f.Pool, `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,'Unpriced project',$2,$3)`, project, acctID(t), f.User)
+	acctExec(t, f.Pool, `UPDATE olp.api_keys SET project_id=$2 WHERE id=$1`, f.Key, project)
+	s := &limits.DebitStore{Pool: f.Pool}
+	i := debitIntent(t, f, project)
+	owners := []limits.DebitOwner{{ID: f.Key, Kind: "key"}}
+	if state, err := s.Prepare(t.Context(), i, owners); err != nil || state != limits.DebitPrepared {
+		t.Fatalf("unpriced installation cannot prepare a session debit: %s %v", state, err)
+	}
+	foreign := debitIntent(t, f, project)
+	foreign.Currency = "EUR"
+	if _, err := s.Prepare(t.Context(), foreign, owners); !errors.Is(err, limits.ErrDebitAuthority) {
+		t.Fatalf("foreign currency accepted without pricing: %v", err)
+	}
+}
+
 func TestExecutionDebitNonAcceptanceRequiresImmutableProof(t *testing.T) {
 	f, s, project := debitFixture(t)
 	valkey, prefix, _ := acctKeyspace(t)

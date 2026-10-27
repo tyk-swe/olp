@@ -16,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -369,6 +368,9 @@ func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testin
 	}
 	h.sink.mu.Unlock()
 	env := sessionEnvelope(t, envs)
+	if _, _, hangups := mock.counts(); hangups != 1 {
+		t.Fatalf("hangups=%d, normal sideband close must hang up the provider call before settling", hangups)
+	}
 	fact := env.Attempts[len(env.Attempts)-1]
 	if fact.Usage == nil || fact.Usage.InputTokens != 3 || fact.Usage.OutputTokens != 2 || !fact.UsageObserved || fact.BillingUncertain {
 		t.Fatalf("settled fact = %+v", fact)
@@ -515,6 +517,28 @@ func TestWebRTCRevokedKeyClosesSession(t *testing.T) {
 	}
 }
 
+func TestWebRTCAddedCapClosesSessionAtReauthorization(t *testing.T) {
+	mock := newWebRTCMock("usage")
+	h := webrtcHarnessCfg(t, mock, true, Config{WebRTCReauth: 20 * time.Millisecond, WebRTCHeartbeat: time.Hour})
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d", resp.StatusCode)
+	}
+	h.rt.mu.Lock()
+	authority := h.rt.keys[fullKey]
+	authority.Policy.TokensPerMinute = int64ptr(1000)
+	h.rt.keys[fullKey] = authority
+	h.rt.mu.Unlock()
+	select {
+	case <-mock.hangupSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("newly added token cap did not close the provider session")
+	}
+	_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+}
+
 func TestWebRTCLostControlHoldsExposureAndRefusesNewWork(t *testing.T) {
 	mock := newWebRTCMock("drop")
 	h := webrtcHarness(t, mock, true)
@@ -558,39 +582,6 @@ func TestWebRTCMissingControlIdentitySettlesUncertainWithoutSDP(t *testing.T) {
 	env := sessionEnvelope(t, waitEnvelopes(t, h, 1))
 	if fact := env.Attempts[len(env.Attempts)-1]; !fact.BillingUncertain {
 		t.Fatalf("uncontrollable session settled as certain: %+v", fact)
-	}
-}
-
-func TestWebRTCBudgetExhaustionAgainstReservedBound(t *testing.T) {
-	rate := "1000000"
-	price := &usage.RoutingPrice{Price: usage.Price{
-		ProviderKind: "openai", Model: modelA, Operation: "realtime",
-		InputPerMillion: &rate, OutputPerMillion: &rate,
-	}}
-	boundUsage := wire.Usage{InputTokens: 10}
-	bound, ok := price.Cost(usage.ObservedAttemptUsage(&boundUsage, true, "realtime"), time.Now(), true, nil)
-	if !ok || bound.IsZero() {
-		t.Fatalf("bound=%s ok=%v", bound, ok)
-	}
-	sess := &webrtcSession{
-		p:         &pin{attempt: routing.Attempt{Price: price}},
-		started:   time.Now(),
-		costBound: bound,
-		usage:     wire.Usage{InputTokens: 3, OutputTokens: 2},
-		haveUsage: true,
-	}
-	server := &Server{}
-	if e := server.webrtcBudgetExhausted(sess); e != nil {
-		t.Fatalf("under-bound session exhausted: %v", e)
-	}
-	sess.usage = wire.Usage{InputTokens: 100_000, OutputTokens: 2}
-	e := server.webrtcBudgetExhausted(sess)
-	if e == nil || e.Code != "budget_exhausted" {
-		t.Fatalf("over-bound session not exhausted: %v", e)
-	}
-	sess.costBound = usage.Cost{}
-	if e := server.webrtcBudgetExhausted(sess); e != nil {
-		t.Fatalf("unbounded session exhausted: %v", e)
 	}
 }
 

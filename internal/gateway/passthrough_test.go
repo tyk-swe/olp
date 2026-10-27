@@ -1,13 +1,16 @@
 package gateway
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func passthroughHarness(t *testing.T) *harness {
@@ -74,6 +77,34 @@ func TestPassthroughRoundTripStripsCallerCredentials(t *testing.T) {
 	}
 	if env.Attempts[0].Price != nil {
 		t.Fatalf("unpriced attempt priced: %+v", env.Attempts[0].Price)
+	}
+}
+
+type feeDenying struct{ *allowing }
+
+func (c *feeDenying) Do(ctx context.Context, args ...string) (any, error) {
+	if slices.Contains(args, "0.75") {
+		return []any{int64(1), int64(0), "daily_cost_estimate", int64(1000), int64(86_400_000), int64(2_678_400_000)}, nil
+	}
+	return c.allowing.Do(ctx, args...)
+}
+
+func TestPassthroughPricedRouteReservesFeeBeforeDispatch(t *testing.T) {
+	h := passthroughHarness(t)
+	fee := "0.75"
+	h.rt.inputs = &usage.RoutingInputs{Prices: []usage.RoutingPrice{
+		{Price: usage.Price{ProviderKind: "openai_compatible", Model: modelA, Operation: "passthrough", PerRequest: &fee, Currency: "usd"}, EffectiveAt: time.Now()},
+	}, RefreshedAt: time.Now()}
+	authority := h.rt.keys[fullKey]
+	authority.LookupID = "lookup_full"
+	authority.Policy.DailyCostLimit = stringptr("0.5")
+	h.rt.keys[fullKey] = authority
+	h.gateway.Admission = newAdmission(t, &feeDenying{allowing: newAllowing(0, 0, 0, false)})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 0 {
+		t.Fatalf("priced passthrough dispatched past its budget: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
 	}
 }
 

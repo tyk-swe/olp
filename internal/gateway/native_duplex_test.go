@@ -141,7 +141,10 @@ type recordingPeer struct {
 
 func (p *recordingPeer) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
 	select {
-	case frame := <-p.frames:
+	case frame, ok := <-p.frames:
+		if !ok {
+			return 0, nil, websocket.CloseError{Code: websocket.StatusNormalClosure}
+		}
 		return websocket.MessageText, frame, nil
 	case <-ctx.Done():
 		return 0, nil, ctx.Err()
@@ -213,8 +216,9 @@ func TestDuplexSetupAckRequiresSetupComplete(t *testing.T) {
 	}
 }
 
-func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) {
-	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+func bedrockDuplexHarness(t *testing.T) *harness {
+	t.Helper()
+	return strictHarness(t, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
 			if provider.Name != "a" {
 				continue
@@ -237,6 +241,10 @@ func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) 
 		route.Targets = route.Targets[:1]
 		snapshot.Routes[routeSlug] = route
 	})
+}
+
+func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) {
+	h := bedrockDuplexHarness(t)
 	upstream := &recordingPeer{frames: make(chan []byte, 4), writes: make(chan []byte, 4)}
 	upstream.frames <- []byte(`{"event":{"contentStart":{"contentId":"c1","type":"TEXT","role":"ASSISTANT"}}}`)
 	upstream.frames <- []byte(`{"event":{"textOutput":{"content":"hello from sonic"}}}`)
@@ -280,6 +288,42 @@ func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) 
 	}
 	if len(env.Attempts) != 1 || !env.Attempts[0].BillingUncertain || env.Attempts[0].UsageObserved {
 		t.Fatalf("Nova Sonic terminal usage must settle uncertain, never zero, got %+v", env.Attempts)
+	}
+}
+
+func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
+	h := bedrockDuplexHarness(t)
+	upstream := &recordingPeer{frames: make(chan []byte, 8), writes: make(chan []byte, 4)}
+	for _, frame := range []string{
+		`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c1"}}}`,
+		`{"event":{"contentStart":{"contentId":"x1","type":"TEXT","role":"ASSISTANT"}}}`,
+		`{"event":{"textOutput":{"content":"hello"}}}`,
+		`{"event":{"contentEnd":{"contentId":"x1"}}}`,
+		`{"event":{"usageEvent":{"sessionId":"s1","promptName":"p1","completionId":"c1","totalInputTokens":12,"totalOutputTokens":5,"totalTokens":17}}}`,
+		`{"event":{"completionEnd":{"sessionId":"s1","promptName":"p1","completionId":"c1","stopReason":"END_TURN"}}}`,
+	} {
+		upstream.frames <- []byte(frame)
+	}
+	close(upstream.frames)
+	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
+		return upstream, nil
+	}
+	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, _, err := conn.Read(ctx); err != nil {
+			break
+		}
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts = %d", len(env.Attempts))
+	}
+	fact := env.Attempts[0]
+	if !fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.InputTokens != 12 || fact.Usage.OutputTokens != 5 {
+		t.Fatalf("clean Bedrock stream end did not settle observed usage: %+v", fact)
 	}
 }
 

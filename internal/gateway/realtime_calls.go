@@ -35,18 +35,17 @@ const (
 )
 
 type webrtcSession struct {
-	id        string
-	callID    string
-	keyID     string
-	token     string
-	x         *call
-	p         *pin
-	conn      *websocket.Conn
-	ctx       context.Context
-	cancel    context.CancelFunc
-	started   time.Time
-	costBound usage.Cost
-	rejected  bool
+	id       string
+	callID   string
+	keyID    string
+	token    string
+	x        *call
+	p        *pin
+	conn     *websocket.Conn
+	ctx      context.Context
+	cancel   context.CancelFunc
+	started  time.Time
+	rejected bool
 
 	settleOnce sync.Once
 	usageMu    sync.Mutex
@@ -402,9 +401,6 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	sess := &webrtcSession{
 		id: uuid.NewString(), keyID: authority.ID, token: token,
 		x: x, p: p, ctx: bg, cancel: cancel, started: s.now(),
-	}
-	if x.costBudgeted(authority) && !x.callerCostExempt() {
-		sess.costBound = x.attemptCostBound(p.attempt)
 	}
 	s.registerWebRTCSession(sess)
 	answer, status, e := s.createWebRTCCall(bg, sess, callReq.sdp, boundSession)

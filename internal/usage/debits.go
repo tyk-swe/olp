@@ -113,7 +113,7 @@ func PersistDebitEventTx(ctx context.Context, tx pgx.Tx, event *Event, payload [
 	var cost, charge string
 	var factsComplete bool
 	var facts int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE(estimated_cost,0)),0)::text,COALESCE(sum(COALESCE(charge,0)),0)::text,COALESCE(bool_and(usage_complete AND NOT unpriced AND estimated_cost IS NOT NULL AND charge IS NOT NULL AND (currency=$2 OR (estimated_cost=0 AND charge=0))),false),count(*) FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID, currency).Scan(&cost, &charge, &factsComplete, &facts); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE(estimated_cost,0)),0)::text,COALESCE(sum(COALESCE(charge,0)),0)::text,COALESCE(bool_and(charge_status='not_billable' OR (usage_complete AND NOT unpriced AND estimated_cost IS NOT NULL AND charge IS NOT NULL AND (currency=$2 OR (estimated_cost=0 AND charge=0)))),false),count(*) FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID, currency).Scan(&cost, &charge, &factsComplete, &facts); err != nil {
 		return Persisted{}, err
 	}
 	complete := factsComplete && facts > 0

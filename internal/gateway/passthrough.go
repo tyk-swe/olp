@@ -55,7 +55,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	defer func() { settleKey(r.Context(), x.lease, x.dispatched, nil, s.log) }()
+	defer s.settleAdmission(r.Context(), x)
 	if isWebSocketUpgrade(r) {
 		fail(invalidRequest("passthrough_websocket_refused", "Pass-through routes do not accept WebSocket upgrades.", nil))
 		return
@@ -112,6 +112,14 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection is unavailable."))
 		return
 	}
+	timeout := time.Duration(route.OverallTimeout) * time.Millisecond
+	if target.Timeout > 0 {
+		timeout = min(timeout, time.Duration(target.Timeout)*time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 	limit := s.cfg.MaxBodyBytes
 	if route.MaxBodyBytes != nil {
 		limit = min(limit, *route.MaxBodyBytes)
@@ -121,9 +129,15 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	}
 	var body []byte
 	if r.Body != nil && r.Body != http.NoBody {
+		stop := context.AfterFunc(ctx, func() { r.Body.Close() })
 		var err error
 		body, err = io.ReadAll(io.LimitReader(r.Body, limit+1))
+		stop()
 		if err != nil {
+			if ctx.Err() != nil {
+				fail((&attemptFailure{class: classTimeout}).toError())
+				return
+			}
 			fail(invalidRequest("invalid_request", "The request body could not be read.", nil))
 			return
 		}
@@ -149,7 +163,6 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	}
 	defer s.settleCaps(r.Context(), x)
 	estimate := max(resourceEstimate, x.estimate)
-	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
 	var slot routing.Slot
 	var hold *dispatchHold
 	var factP *AttemptFact
@@ -161,7 +174,7 @@ slots:
 		if !s.slotAvailable(x, attempt, candidate) {
 			continue
 		}
-		gate := s.gateAttempt(r.Context(), x, attempt, &provider, candidate, estimate, deadline)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, candidate, estimate, deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			slot, hold, found = *candidate, gate.hold, true
@@ -195,12 +208,10 @@ slots:
 		}
 		s.settlePinHold(r.Context(), x, hold, settledAttemptTokens(factP, estimate))
 	}()
-	timeout := time.Duration(route.OverallTimeout) * time.Millisecond
-	if target.Timeout > 0 {
-		timeout = min(timeout, time.Duration(target.Timeout)*time.Millisecond)
+	if e := s.reserveSessionCost(ctx, x, x.authority, attempt, time.Until(deadline)); e != nil {
+		fail(e)
+		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, r.Method, upstream.String(), bytes.NewReader(body))
 	if err != nil {
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider request could not be built."))

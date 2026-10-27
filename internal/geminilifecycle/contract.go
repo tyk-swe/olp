@@ -413,7 +413,7 @@ func ObserveLiveServerFrame(data []byte, maxBytes int) (LiveServerFrame, error) 
 			return LiveServerFrame{}, errors.New("Gemini Live server frame has an unregistered principal event")
 		}
 	}
-	if principals != 1 {
+	if principals > 1 || principals == 0 && observation.Usage == nil {
 		return LiveServerFrame{}, errors.New("Gemini Live server frame must carry one principal event")
 	}
 	return observation, nil

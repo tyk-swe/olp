@@ -125,6 +125,25 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if observer.Complete() {
 		t.Fatal("session settled as complete after a turn ended without usage")
 	}
+	if _, err := observer.ServerFrame([]byte(`{"usageMetadata":{"promptTokenCount":4,"responseTokenCount":1,"totalTokenCount":5}}`)); err != nil {
+		t.Fatalf("standalone usage message refused: %v", err)
+	}
+	usage = observer.Usage()
+	if usage == nil || usage.InputTokens != 16 || usage.OutputTokens != 8 || usage.TotalTokens != 24 {
+		t.Fatalf("standalone usage not applied to the finished turn: %+v", usage)
+	}
+	if !observer.Complete() {
+		t.Fatal("standalone terminal usage did not complete the session")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"modelTurn":{"parts":[{"text":"next"}]}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after a later turn produced no usage at all")
+	}
 	if err := observer.ClientFrame([]byte(`{"setup":{"model":"models/team-live"}}`)); err == nil {
 		t.Fatal("a second setup frame was admitted mid-session")
 	}

@@ -29,6 +29,8 @@ func (c Config) BedrockDuplexEndpoint() (string, error) {
 	return BedrockEndpoint(c.CloudRegion, false)
 }
 
+var ErrBedrockStreamClosed = errors.New("Bedrock bidirectional stream closed")
+
 type BedrockStream struct {
 	stream *bedrockruntime.InvokeModelWithBidirectionalStreamEventStream
 	events <-chan types.InvokeModelWithBidirectionalStreamOutput
@@ -77,7 +79,7 @@ func (s *BedrockStream) Receive(ctx context.Context) ([]byte, error) {
 			if err := s.stream.Err(); err != nil {
 				return nil, err
 			}
-			return nil, errors.New("Bedrock bidirectional stream closed")
+			return nil, ErrBedrockStreamClosed
 		}
 		if chunk, isChunk := event.(*types.InvokeModelWithBidirectionalStreamOutputMemberChunk); isChunk {
 			return chunk.Value.Bytes, nil

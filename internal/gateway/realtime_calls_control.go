@@ -62,14 +62,6 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			s.finishWebRTCControl(sess, err)
 			return
 		case <-reauth.C:
-			if e := s.webrtcBudgetExhausted(sess); e != nil {
-				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
-				}
-				s.settleWebRTC(sess, e)
-				sess.cancel()
-				return
-			}
 			if e := s.webrtcAuthority(sess); e != nil {
 				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
 					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
@@ -96,24 +88,6 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 	}
 }
 
-func (s *Server) webrtcBudgetExhausted(sess *webrtcSession) *Error {
-	if sess.costBound.IsZero() || sess.p.attempt.Price == nil {
-		return nil
-	}
-	sess.usageMu.Lock()
-	if !sess.haveUsage {
-		sess.usageMu.Unlock()
-		return nil
-	}
-	observed := sess.usage
-	sess.usageMu.Unlock()
-	cost, ok := sess.p.attempt.Price.Cost(usage.ObservedAttemptUsage(&observed, true, "realtime"), sess.started, true, sess.p.attempt.Discount)
-	if !ok || cost.Cmp(sess.costBound) <= 0 {
-		return nil
-	}
-	return serverError(http.StatusTooManyRequests, "budget_exhausted", "The session cost budget is exhausted.")
-}
-
 func (s *Server) webrtcAuthority(sess *webrtcSession) *Error {
 	x := sess.x
 	authority, err := s.Runtime.Authenticate(sess.token)
@@ -122,6 +96,11 @@ func (s *Server) webrtcAuthority(sess *webrtcSession) *Error {
 	}
 	if eligibility := s.pinEligibility(sess.p); eligibility != routing.Eligible {
 		return permissionError("provider_credential_"+string(eligibility), "The realtime provider credential is no longer eligible.")
+	}
+	current := *authority
+	current.EndUserDigest = x.endUserDigest
+	if e := s.unboundedPinLimits(x.admissionAuthority(current), sess.p, x.route); e != nil {
+		return e
 	}
 	return nil
 }
@@ -132,6 +111,12 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	pending := sess.responses.pending()
 	sess.usageMu.Unlock()
 	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
+		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
+			sess.cancel()
+			return
+		}
 		s.settleWebRTC(sess, nil)
 		sess.cancel()
 		return

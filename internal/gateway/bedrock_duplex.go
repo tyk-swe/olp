@@ -33,6 +33,9 @@ func (p *streamContextPeer) CloseNow() error {
 
 func (p *bedrockPeer) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
 	payload, err := p.stream.Receive(ctx)
+	if errors.Is(err, connectors.ErrBedrockStreamClosed) {
+		return 0, nil, websocket.CloseError{Code: websocket.StatusNormalClosure}
+	}
 	if err != nil {
 		return 0, nil, err
 	}

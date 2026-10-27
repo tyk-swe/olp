@@ -30,6 +30,7 @@ type xaiObserver struct {
 	maxBytes   int
 	usage      *wire.Usage
 	pending    int
+	requested  int
 	incomplete bool
 }
 
@@ -44,11 +45,16 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	case "error":
 		return ServerFrame{ProviderError: true}, nil
 	case "response.created":
+		if o.requested > 0 {
+			o.requested--
+		}
 		o.pending++
 		return ServerFrame{}, nil
 	case "response.done":
 		if o.pending > 0 {
 			o.pending--
+		} else if o.requested > 0 {
+			o.requested--
 		}
 		response, ok := root.Lookup("response")
 		if !ok || response.Kind() != oif.Object {
@@ -93,13 +99,19 @@ func (o *xaiObserver) addUsage(input, output, total int64, hasTotal bool) {
 }
 
 func (o *xaiObserver) clientFrame(frame []byte) error {
-	_, err := parseObject(frame, o.maxBytes)
-	return err
+	doc, err := parseObject(frame, o.maxBytes)
+	if err != nil {
+		return err
+	}
+	if kind, _ := textField(doc.Root(), "type"); kind == "response.create" {
+		o.requested++
+	}
+	return nil
 }
 
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
 func (o *xaiObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && !o.incomplete
+	return o.usage != nil && o.pending == 0 && o.requested == 0 && !o.incomplete
 }
 
 func (o *xaiObserver) setBillableSeconds(seconds string) {

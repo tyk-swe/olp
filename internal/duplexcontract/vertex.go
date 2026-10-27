@@ -87,6 +87,7 @@ type vertexObserver struct {
 	usage      *wire.Usage
 	turn       *wire.Usage
 	pending    bool
+	awaiting   bool
 	incomplete bool
 	setupDone  bool
 }
@@ -106,6 +107,15 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	if observed.Usage != nil {
 		turnUsage = vertexUsage(observed.Usage)
 	}
+	if o.awaiting {
+		o.awaiting = false
+		if observed.Kind == "" && turnUsage != nil {
+			o.turn = turnUsage
+			o.flushTurn()
+			return ServerFrame{}, nil
+		}
+		o.incomplete = true
+	}
 	if observed.Kind == "serverContent" || observed.Kind == "toolCall" {
 		o.pending = !observed.TurnComplete
 	}
@@ -116,7 +126,7 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 		if o.turn != nil {
 			o.flushTurn()
 		} else {
-			o.incomplete = true
+			o.awaiting = true
 		}
 	}
 	return ServerFrame{ProviderError: observed.Kind == "error", SetupComplete: observed.Kind == "setupComplete"}, nil
@@ -192,5 +202,5 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 
 func (o *vertexObserver) usageValue() *wire.Usage { return o.usage }
 func (o *vertexObserver) complete() bool {
-	return o.usage != nil && o.turn == nil && !o.pending && !o.incomplete
+	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && !o.incomplete
 }
