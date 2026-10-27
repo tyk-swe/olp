@@ -375,6 +375,11 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return access.Reply{}, err
 	}
+	if s.Access.RuntimePublisher != nil {
+		if err = s.Access.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
+			return access.Reply{}, err
+		}
+	}
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}

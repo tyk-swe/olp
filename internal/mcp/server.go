@@ -45,11 +45,17 @@ type ReserveInput struct {
 }
 
 type Reservation struct {
-	DispatchID string
-	ClaimID    string
-	RunID      string
-	StepID     string
-	AttemptID  string
+	DispatchID        string
+	ClaimID           string
+	RunID             string
+	StepID            string
+	AttemptID         string
+	APIKeyID          string
+	ProjectID         string
+	ToolsetID         string
+	ToolsetRevisionID string
+	ToolAlias         string
+	InputDigest       string
 }
 
 type AttemptEvidence struct {
