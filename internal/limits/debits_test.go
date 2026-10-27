@@ -35,7 +35,7 @@ const debitTestID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 func TestHasUnknownDebitRejectsNonCanonicalKeyBeforeQuery(t *testing.T) {
 	store := &DebitStore{}
 	for _, id := range []string{"", "not-a-uuid", strings.ToUpper(debitTestID), "00000000-0000-0000-0000-000000000000", debitTestID + " "} {
-		held, err := store.HasUnknownDebit(t.Context(), id)
+		held, err := store.HasUnknownDebit(t.Context(), id, time.Hour)
 		if held || !errors.Is(err, ErrDebitConflict) {
 			t.Fatalf("non-canonical key %q was answered instead of refused: %v %v", id, held, err)
 		}
@@ -51,7 +51,7 @@ func TestHasUnknownDebitSurfacesLedgerFailureInsteadOfClearingExposure(t *testin
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	store := &DebitStore{Pool: pool}
-	held, err := store.HasUnknownDebit(ctx, debitTestID)
+	held, err := store.HasUnknownDebit(ctx, debitTestID, time.Hour)
 	if held || err == nil {
 		t.Fatalf("an unreadable ledger cleared the key's exposure: %v %v", held, err)
 	}

@@ -27,14 +27,26 @@ func inspectXAISetup(frame []byte, maxBytes int) (Setup, error) {
 }
 
 type xaiObserver struct {
-	maxBytes   int
-	usage      *wire.Usage
-	pending    int
-	requested  int
-	inputSeq   int
-	coveredSeq int
-	boundaries map[string]int
-	incomplete bool
+	maxBytes       int
+	usage          *wire.Usage
+	pending        int
+	requested      int
+	inputSeq       int
+	coveredSeq     int
+	boundaries     map[string]int
+	durationBilled bool
+	incomplete     bool
+}
+
+func sessionDurationBilled(session oif.Value, present bool, current bool) bool {
+	if !present || session.Kind() != oif.Object {
+		return current
+	}
+	detection, ok := session.Lookup("turn_detection")
+	if !ok {
+		return current
+	}
+	return detection.Kind() != oif.Null
 }
 
 func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -47,6 +59,10 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	switch kind {
 	case "error":
 		return ServerFrame{ProviderError: true}, nil
+	case "session.created", "session.updated":
+		session, present := root.Lookup("session")
+		o.durationBilled = sessionDurationBilled(session, present, o.durationBilled)
+		return ServerFrame{}, nil
 	case "response.created":
 		if o.requested > 0 {
 			o.requested--
@@ -135,6 +151,9 @@ func (o *xaiObserver) clientFrame(frame []byte) error {
 	}
 	root := doc.Root()
 	switch kind, _ := textField(root, "type"); kind {
+	case "session.update":
+		session, present := root.Lookup("session")
+		o.durationBilled = sessionDurationBilled(session, present, o.durationBilled)
 	case "response.create":
 		o.requested++
 	case "input_audio_buffer.append", "input_audio_buffer.commit":
@@ -179,7 +198,7 @@ func billableTextItem(root oif.Value) bool {
 
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
 func (o *xaiObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && o.requested == 0 && o.inputSeq == o.coveredSeq && !o.incomplete
+	return o.usage != nil && o.pending == 0 && o.requested == 0 && o.inputSeq == o.coveredSeq && !o.durationBilled && !o.incomplete
 }
 
 func (o *xaiObserver) setBillableSeconds(seconds string) {

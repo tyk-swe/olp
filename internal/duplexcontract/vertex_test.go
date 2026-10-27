@@ -77,6 +77,12 @@ func TestVertexSetupInspectionAndBinding(t *testing.T) {
 	if _, err := template.InspectSetup([]byte(`{"setup":{"model":"models/team-live","sessionResumption":{"handle":"foreign-handle"}}}`), 1<<20); err == nil {
 		t.Fatal("a provider session resumption handle was admitted")
 	}
+	if _, err := template.InspectSetup([]byte(`{"setup":{"model":"models/team-live","inputAudioTranscription":{},"generationConfig":{"responseModalities":["AUDIO"]}}}`), 1<<20); err == nil {
+		t.Fatal("mixed input transcription without a complete meter was admitted")
+	}
+	if _, err := template.InspectSetup([]byte(`{"setup":{"model":"models/team-live","output_audio_transcription":{},"generationConfig":{"responseModalities":["AUDIO"]}}}`), 1<<20); err == nil {
+		t.Fatal("mixed output transcription without a complete meter was admitted")
+	}
 	transcription, err := template.InspectSetup([]byte(`{"setup":{"model":"models/team-live","inputAudioTranscription":{},"generationConfig":{"responseModalities":[]}}}`), 1<<20)
 	if err != nil {
 		t.Fatal(err)

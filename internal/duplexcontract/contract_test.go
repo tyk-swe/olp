@@ -111,6 +111,9 @@ func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	observer := template.Observer(1 << 20)
+	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":null}}`)); err != nil {
+		t.Fatal(err)
+	}
 	for _, frame := range []string{
 		`{"type":"response.created","response":{"id":"r1"}}`,
 		`{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}`,
@@ -227,6 +230,9 @@ func TestXAIObserverBillableAudioSecondsAreCumulative(t *testing.T) {
 		t.Fatal(err)
 	}
 	observer := template.Observer(1 << 20)
+	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":null}}`)); err != nil {
+		t.Fatal(err)
+	}
 	for _, frame := range []string{
 		`{"type":"response.created","response":{"id":"r1"}}`,
 		`{"type":"response.done","response":{"id":"r1","usage":{"billable_audio_seconds":12.5}}}`,
@@ -243,5 +249,30 @@ func TestXAIObserverBillableAudioSecondsAreCumulative(t *testing.T) {
 	}
 	if !observer.Complete() {
 		t.Fatal("duration-only terminal usage did not settle as complete")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"session.updated","session":{"type":"realtime","turn_detection":{"type":"server_vad"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("duration-billed session settled complete on stale response usage")
+	}
+}
+
+func TestXAIObserverDefaultVADStaysUncertain(t *testing.T) {
+	template, err := duplexcontract.Compile(xaiConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := template.Observer(1 << 20)
+	for _, frame := range []string{
+		`{"type":"response.created","response":{"id":"r1"}}`,
+		`{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5,"billable_audio_seconds":4}}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if observer.Complete() {
+		t.Fatal("default server_vad session settled complete without usage covering its duration")
 	}
 }

@@ -30,7 +30,14 @@ func (t *Template) Observer(maxBytes int) *Observer {
 	case BedrockRealtime:
 		return &Observer{inner: &bedrockObserver{maxBytes: maxBytes}}
 	}
-	return &Observer{inner: &xaiObserver{maxBytes: maxBytes}}
+	return &Observer{inner: &xaiObserver{maxBytes: maxBytes, durationBilled: true}}
+}
+
+func (t *Template) ObserveSetupFrame(o *Observer, frame []byte) error {
+	if t.profile.Dialect != XAIRealtime {
+		return nil
+	}
+	return o.ClientFrame(frame)
 }
 
 func (o *Observer) ServerFrame(frame []byte) (ServerFrame, error) {

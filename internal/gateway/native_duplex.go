@@ -226,6 +226,12 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = invalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
 		return
 	}
+	observer := template.Observer(int(limit))
+	if err := template.ObserveSetupFrame(observer, bound); err != nil {
+		client.Close(websocket.StatusPolicyViolation, "invalid setup")
+		x.failure, status = invalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
+		return
+	}
 	x.dispatched = true
 	if err := writeGeminiLiveFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
 		client.Close(websocket.StatusInternalError, "setup uncertain")
@@ -233,7 +239,6 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		markDuplexFactUncertain(x, classAmbiguous)
 		return
 	}
-	observer := template.Observer(int(limit))
 	if template.SetupAck() {
 		if ackErr := awaitDuplexSetupAck(ctx, upstream, client, observer, p.attempt.Timeout); ackErr != nil {
 			client.Close(websocket.StatusInternalError, "setup uncertain")

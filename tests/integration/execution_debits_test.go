@@ -341,9 +341,21 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer checkTx.Rollback(t.Context())
-	ordinary, err := usage.PersistEventTx(t.Context(), checkTx, event, payload)
+	ordinaryEvent := event
+	ordinaryAttempt := event.Attempts[0]
+	ordinaryAttempt.Execution = nil
+	ordinaryEvent.Attempts = []usage.Attempt{ordinaryAttempt}
+	ordinaryPayload, err := json.Marshal(ordinaryEvent)
 	if err != nil {
 		t.Fatal(err)
+	}
+	ordinary, err := usage.PersistEventTx(t.Context(), checkTx, ordinaryEvent, ordinaryPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preSettleState string
+	if err = checkTx.QueryRow(t.Context(), `SELECT state FROM olp.execution_debits WHERE id=$1`, i.ID).Scan(&preSettleState); err != nil || preSettleState != "dispatched" {
+		t.Fatalf("ordinary accounting already settled the debit: state=%s err=%v", preSettleState, err)
 	}
 	if err = limits.SettleDebitTx(t.Context(), checkTx, result, ordinary.CostSnapshots); !errors.Is(err, limits.ErrDebitState) {
 		t.Fatalf("settlement released unaccounted supply exposure: %v", err)
@@ -447,7 +459,7 @@ func TestExecutionDebitDefinitiveRejectionSettlesAsUnbilled(t *testing.T) {
 	if err = f.Pool.QueryRow(t.Context(), `SELECT state,closed_at IS NOT NULL FROM olp.execution_debits WHERE id=$1`, i.ID).Scan(&state, &closed); err != nil || state != "settled" || !closed {
 		t.Fatalf("definitive rejection did not settle its debit as unbilled: state=%s closed=%v err=%v", state, closed, err)
 	}
-	if held, err := s.HasUnknownDebit(t.Context(), f.Key); err != nil || held {
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Hour); err != nil || held {
 		t.Fatalf("settled rejection still holds session exposure: held=%v err=%v", held, err)
 	}
 }
@@ -491,8 +503,31 @@ func TestExecutionDebitUnpricedCleanSessionDoesNotBlockLaterSessions(t *testing.
 	if err = f.Pool.QueryRow(t.Context(), `SELECT unpriced FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID).Scan(&unpriced); err != nil || !unpriced {
 		t.Fatalf("unpriced accounting not retained: unpriced=%v err=%v", unpriced, err)
 	}
-	if held, err := s.HasUnknownDebit(t.Context(), f.Key); err != nil || held {
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Hour); err != nil || held {
 		t.Fatalf("clean unpriced session in state %s blocks later sessions: held=%v err=%v", state, held, err)
+	}
+}
+
+func TestExecutionDebitOrphanedDispatchHoldsExposureAfterBound(t *testing.T) {
+	f, s, project := debitFixture(t)
+	valkey, prefix, _ := acctKeyspace(t)
+	s.Limiter, _ = limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	i := debitIntent(t, f, project)
+	prepareDebit(t, f, s, i)
+	if err := s.Admit(t.Context(), i.ID, i.ClaimID, []limits.Request{{CostOwnerID: f.Key}, {CostOwnerID: f.Provider}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkDispatched(t.Context(), i.ID, i.ClaimID); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Hour); err != nil || held {
+		t.Fatalf("live dispatched session already holds exposure: held=%v err=%v", held, err)
+	}
+	if _, err := f.Pool.Exec(t.Context(), `UPDATE olp.execution_debits SET dispatched_at=clock_timestamp()-interval '2 hours' WHERE id=$1`, i.ID); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Hour); err != nil || !held {
+		t.Fatalf("orphaned dispatched session holds no exposure: held=%v err=%v", held, err)
 	}
 }
 

@@ -33,7 +33,7 @@ func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {
 	if slug == "" || strings.Contains(slug, "/") {
 		return Setup{}, refuse("invalid_duplex_setup", "/setup/model", "route_model", "Vertex Live setup must name its route model.")
 	}
-	for _, aliases := range [][]string{{"generationConfig", "generation_config"}, {"realtimeInputConfig", "realtime_input_config"}, {"sessionResumption", "session_resumption"}, {"inputAudioTranscription", "input_audio_transcription"}} {
+	for _, aliases := range [][]string{{"generationConfig", "generation_config"}, {"realtimeInputConfig", "realtime_input_config"}, {"sessionResumption", "session_resumption"}, {"inputAudioTranscription", "input_audio_transcription"}, {"outputAudioTranscription", "output_audio_transcription"}} {
 		_, a := setup.Lookup(aliases[0])
 		_, b := setup.Lookup(aliases[1])
 		if a && b {
@@ -51,6 +51,10 @@ func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {
 	if !transcription {
 		_, transcription = setup.Lookup("input_audio_transcription")
 	}
+	_, outputTranscription := setup.Lookup("outputAudioTranscription")
+	if !outputTranscription {
+		_, outputTranscription = setup.Lookup("output_audio_transcription")
+	}
 	transcriptionOnly := false
 	if transcription {
 		for _, name := range []string{"generationConfig", "generation_config"} {
@@ -62,6 +66,9 @@ func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {
 				}
 			}
 		}
+	}
+	if (transcription || outputTranscription) && !transcriptionOnly {
+		return Setup{}, refuse("invalid_duplex_setup", "/setup", "metered_transcription", "Vertex Live transcription alongside generated output has no complete usage meter on this surface.")
 	}
 	return Setup{Model: slug, TranscriptionOnly: transcriptionOnly}, nil
 }

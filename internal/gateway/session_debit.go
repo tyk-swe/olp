@@ -21,7 +21,7 @@ type SessionDebitLedger interface {
 	MarkDispatched(context.Context, string, string) error
 	MarkUnknown(context.Context, string, string) error
 	ReleaseUndispatched(context.Context, string, string) error
-	HasUnknownExposure(context.Context, string) (bool, error)
+	HasUnknownExposure(context.Context, string, time.Duration) (bool, error)
 	Currency(context.Context) (string, error)
 }
 
@@ -54,8 +54,8 @@ func (d durableSessionDebits) ReleaseUndispatched(ctx context.Context, id, claim
 	return d.store.ReleaseUndispatched(ctx, id, claim)
 }
 
-func (d durableSessionDebits) HasUnknownExposure(ctx context.Context, keyID string) (bool, error) {
-	return d.store.HasUnknownDebit(ctx, keyID)
+func (d durableSessionDebits) HasUnknownExposure(ctx context.Context, keyID string, maxDispatch time.Duration) (bool, error) {
+	return d.store.HasUnknownDebit(ctx, keyID, maxDispatch)
 }
 
 func (d durableSessionDebits) Currency(ctx context.Context) (string, error) {
@@ -102,7 +102,7 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	if s.Debits == nil {
 		return false, nil
 	}
-	held, err := s.Debits.HasUnknownExposure(ctx, keyID)
+	held, err := s.Debits.HasUnknownExposure(ctx, keyID, max(s.cfg.WebRTCBound, nativeDuplexSession))
 	if err != nil {
 		return false, serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
 	}

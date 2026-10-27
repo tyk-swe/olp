@@ -63,7 +63,7 @@ func (f *fakeSessionDebits) ReleaseUndispatched(_ context.Context, _, _ string) 
 	return nil
 }
 
-func (f *fakeSessionDebits) HasUnknownExposure(_ context.Context, _ string) (bool, error) {
+func (f *fakeSessionDebits) HasUnknownExposure(_ context.Context, _ string, _ time.Duration) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.unknown, nil

@@ -103,6 +103,30 @@ func TestNativeDuplexXAIRelaysOpaqueFramesAndSettlesUsageOnce(t *testing.T) {
 	}
 }
 
+func TestNativeDuplexXAITextFirstSessionStaysUncertain(t *testing.T) {
+	h := xaiDuplexHarness(t, true)
+	conn, ctx := dialDuplex(t, h, fullKey, "/native/xai-realtime/sessions/"+routeSlug)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatal(err)
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts = %d, want one settled attempt", len(env.Attempts))
+	}
+	if !env.Attempts[0].BillingUncertain {
+		t.Fatalf("text-first session settled as billing-complete: %+v", env.Attempts[0])
+	}
+}
+
 func TestNativeDuplexXAIRefusesTranscriptionBeforeDispatch(t *testing.T) {
 	h := xaiDuplexHarness(t, true)
 	conn, ctx := dialDuplex(t, h, fullKey, "/native/xai-realtime/sessions/"+routeSlug)
