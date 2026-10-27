@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -339,7 +340,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
 			if exceeded.RetryAfter > 0 {
-				w.Header().Set("Retry-After", strings.TrimSuffix(exceeded.RetryAfter.Round(time.Second).String(), "s"))
+				w.Header().Set("Retry-After", strconv.FormatInt(int64((exceeded.RetryAfter+time.Second-1)/time.Second), 10))
 			}
 			writeError(w, fail(http.StatusTooManyRequests, "budget_exceeded", "rate_limit_error", "The call exceeds an enforced budget, so it was not dispatched."))
 			return
