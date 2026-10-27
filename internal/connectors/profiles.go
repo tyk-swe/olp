@@ -78,6 +78,7 @@ var profileRegistry = []Profile{
 	{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
 	{ID: "gemini-agents", Label: "Gemini managed agents", Kind: "gemini", Dialect: "gemini-agents", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
 	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
+	{ID: "xai-realtime", Label: "xAI Realtime", Kind: "openai_compatible", Dialect: "xai-realtime", DialectRevision: "1", Hosting: "xai-realtime"},
 	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
 	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
 	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
@@ -226,6 +227,14 @@ func init() {
 			p.Authentication = []string{"api_key"}
 			p.Transport = "websocket"
 			p.Documentation = "https://ai.google.dev/api/live"
+		case "xai-realtime":
+			p.Operations = []string{"realtime"}
+			p.Authentication = []string{"api_key"}
+			p.Transport = "websocket"
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.OperationDialects = map[string]string{}
+			p.Documentation = "https://docs.x.ai/developers/model-capabilities/voice"
 		}
 		completeProfileMetadata(p)
 	}
@@ -399,6 +408,22 @@ func (c Config) ValidateProfile() error {
 			}
 		}
 	}
+	switch p.Dialect {
+	case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+		if len(c.OperationDefaults) > 0 {
+			return errors.New("native duplex profile does not admit provider defaults on opaque frames")
+		}
+		for _, binding := range c.Bindings {
+			if len(binding.Defaults) > 0 {
+				return errors.New("native duplex profile does not admit model defaults on opaque frames")
+			}
+		}
+	}
+	if p.Dialect == "xai-realtime" && c.VendorID != "xai" ||
+		p.Dialect == "vertex-realtime" && c.VendorID != "google-vertex" ||
+		p.Dialect == "bedrock-realtime" && c.VendorID != "amazon-bedrock" {
+		return errors.New("native duplex profile requires its reviewed vendor")
+	}
 	if p.Dialect == "openai-decisions" && c.VendorID != "openai" || p.Dialect == "systemone" && c.VendorID != "typesafe-jev" {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
@@ -551,7 +576,7 @@ func (c Config) Supports(operation, surface, mode string) bool {
 		}
 		// Dedicated single-purpose profiles never gain retained families.
 		switch c.ProfileID {
-		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim":
+		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim", "xai-realtime", "vertex-realtime", "bedrock-realtime":
 			return false
 		}
 		return retainedapi.Supports(c.Kind, operation, surface, mode)
@@ -590,6 +615,8 @@ func (c Config) Supports(operation, surface, mode string) bool {
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
 			case "gemini-live":
 				return operation == "realtime" && surface == "gemini" && mode == "realtime"
+			case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+				return operation == "realtime" && surface == "native" && mode == "realtime"
 			}
 			// An operation outside the profile has no dialect of its own; the
 			// default dialect OperationDialect names for it does not apply.
@@ -797,6 +824,10 @@ func (p Profile) OperationDialect(operation string) string {
 	case "realtime":
 		if (p.Kind == "openai" && p.Hosting == "direct-openai") || (p.Kind == "azure_openai" && p.Hosting == "azure-v1") {
 			return "openai-realtime"
+		}
+		switch p.Dialect {
+		case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+			return p.Dialect
 		}
 	}
 	return p.Hosting + "/" + operation

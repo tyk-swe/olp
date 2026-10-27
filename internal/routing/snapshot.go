@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -206,6 +207,7 @@ type Snapshot struct {
 	media              map[string]map[string]*mediacontract.Template
 	durable            map[string]map[string]*durablecontract.Template
 	realtime           map[string]map[string]*realtimecontract.Template
+	duplex             map[string]map[string]*duplexcontract.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -355,6 +357,7 @@ func (s *Snapshot) Compile() error {
 	next.media = make(map[string]map[string]*mediacontract.Template)
 	next.durable = make(map[string]map[string]*durablecontract.Template)
 	next.realtime = make(map[string]map[string]*realtimecontract.Template)
+	next.duplex = make(map[string]map[string]*duplexcontract.Template)
 	for slug, r := range next.Routes {
 		r.guardrailMigrated = next.Guardrails != nil && next.Guardrails.MigratedRoutes[r.ID]
 		templates, policy, err := next.compileRouteExecution(r)
@@ -377,11 +380,16 @@ func (s *Snapshot) Compile() error {
 			return fmt.Errorf("route %q durable: %w", slug, err)
 		}
 		next.durable[slug] = durable
-		duplex, err := next.compileRealtime(r)
+		realtimeTemplates, err := next.compileRealtime(r)
 		if err != nil {
 			return fmt.Errorf("route %q realtime: %w", slug, err)
 		}
-		next.realtime[slug] = duplex
+		next.realtime[slug] = realtimeTemplates
+		duplex, err := next.compileDuplex(r)
+		if err != nil {
+			return fmt.Errorf("route %q duplex: %w", slug, err)
+		}
+		next.duplex[slug] = duplex
 		r.compiledContentPolicy = policy
 		next.Routes[slug] = r
 	}

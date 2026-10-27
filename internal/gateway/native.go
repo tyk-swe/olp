@@ -29,6 +29,7 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 		s.inferenceOperation("", r.PathValue("dialect"))(w, r)
 	})
+	mux.HandleFunc("GET /native/{dialect}/sessions/{route}", s.nativeDuplex)
 	mux.HandleFunc("OPTIONS /native/", s.preflight)
 	mux.HandleFunc("POST /v1/completions", s.inference(wire.Completions))
 	mux.HandleFunc("POST /v1/decisions", s.inference(wire.Decisions))

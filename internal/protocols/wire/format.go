@@ -54,6 +54,7 @@ const (
 	GeminiBatch    Format = "gemini_batch"
 	CloudBatch     Format = "cloud_batch"
 	Realtime       Format = "realtime"
+	NativeDuplex   Format = "native_duplex"
 	Bedrock        Format = "bedrock"
 	BedrockInvoke  Format = "bedrock_invoke"
 
@@ -84,8 +85,8 @@ func (f Format) Operation() string {
 	case ImageGeneration, ImageEdit, ImageVariation, Speech,
 		Transcription, Translation, VideoCreate, VideoList, VideoGet,
 		VideoContent, VideoDelete, File, Batch,
-		Realtime, GeminiLive, BedrockInvoke, OCR, Search:
-		if f == GeminiLive {
+		Realtime, GeminiLive, NativeDuplex, BedrockInvoke, OCR, Search:
+		if f == GeminiLive || f == NativeDuplex {
 			return "realtime"
 		}
 		return string(f)
@@ -105,7 +106,7 @@ func (f Format) Surface() string {
 		return "gemini"
 	case Bedrock, BedrockInvoke:
 		return "bedrock"
-	case MistralFIM, CohereChat, CloudBatch:
+	case MistralFIM, CohereChat, CloudBatch, NativeDuplex:
 		return "native"
 	}
 	return "openai"
