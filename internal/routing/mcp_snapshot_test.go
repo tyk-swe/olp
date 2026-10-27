@@ -2,6 +2,7 @@ package routing
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -90,5 +91,31 @@ func TestSnapshotMCPCloneAndDigest(t *testing.T) {
 	got, err := clone.Digest()
 	if err != nil || got == want {
 		t.Fatal("MCP server mutation did not change serving digest", err)
+	}
+}
+
+func TestSnapshotRefusesMoreThan128MCPServers(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	servers := func(count int) []MCPServer {
+		out := make([]MCPServer, count)
+		for i := range out {
+			out[i] = MCPServer{
+				ID:         fmt.Sprintf("0192cf87-d4ab-7f2e-a8b1-c2d3e4f5%04x", i),
+				ProjectID:  mcpProject,
+				RevisionID: fmt.Sprintf("0192cf87-d4ab-7f2e-a8b1-c2d3e4f6%04x", i),
+				Endpoint:   "https://tools.example.test/mcp", Protocol: "2025-11-25", Digest: digest,
+			}
+		}
+		return out
+	}
+	snapshot := fidelitySnapshot(t)
+	snapshot.MCPServers = servers(128)
+	if err := snapshot.Compile(); err != nil {
+		t.Fatalf("128 MCP servers refused: %v", err)
+	}
+	snapshot = fidelitySnapshot(t)
+	snapshot.MCPServers = servers(129)
+	if err := snapshot.Compile(); err == nil {
+		t.Fatal("snapshot accepted more than 128 MCP servers")
 	}
 }

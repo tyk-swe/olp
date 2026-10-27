@@ -230,7 +230,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// with credentials from the manager's credential source.
 	var keys *secrets.KeyRing
 	var prober *gateway.Server
-	var toolServer *mcp.Server
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 		var bootstrap string
 		var err error
@@ -379,7 +378,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
-			toolServer = &mcp.Server{Runtime: rt, Egress: &policy, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			var toolLedger mcp.Ledger
+			if limiter != nil {
+				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
+			}
+			toolServer := &mcp.Server{Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
 			}}
 			toolServer.Register(public)
@@ -389,9 +392,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// health probes. No producer may log and forget a failed ledger write.
 		// Without shared state, hard limits are refused and metadata stays logged.
 		if limiter != nil {
-			if toolServer != nil {
-				toolServer.Ledger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
-			}
 			emitter = usage.NewEmitter(metadataBuffer)
 			gatewayInstance = usage.GatewayInstance()
 			for _, server := range []*gateway.Server{gw, prober} {

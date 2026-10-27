@@ -7,24 +7,26 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+type Status string
+
 const (
-	StatusSucceeded      = "succeeded"
-	StatusUpstreamError  = "upstream_error"
-	StatusOutcomeUnknown = "outcome_unknown"
+	StatusSucceeded      Status = "succeeded"
+	StatusUpstreamError  Status = "upstream_error"
+	StatusOutcomeUnknown Status = "outcome_unknown"
 
 	defaultCallTimeout = 30 * time.Second
 	maxCallBodyBytes   = 1 << 20
@@ -62,7 +64,7 @@ type Reservation struct {
 type AttemptEvidence struct {
 	ServerID         string
 	ServerRevisionID string
-	Status           string
+	Status           Status
 	IsError          bool
 	ResultDigest     string
 	StartedAt        time.Time
@@ -78,11 +80,12 @@ type Ledger interface {
 }
 
 type Server struct {
-	Runtime     Runtime
-	Egress      *egress.Policy
-	Ledger      Ledger
-	Credentials func(ctx context.Context, credentialID string) ([]byte, error)
-	CallTimeout time.Duration
+	Runtime        Runtime
+	Egress         *egress.Policy
+	Ledger         Ledger
+	Auth           *secrets.AuthKey
+	TrustedProxies []netip.Prefix
+	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -119,32 +122,35 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+func writeOutcomeUnknown(w http.ResponseWriter, reservation *Reservation, message string) {
+	writeJSON(w, http.StatusBadGateway, map[string]any{
+		"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID, "status": StatusOutcomeUnknown,
+		"error": map[string]any{"message": message, "type": "api_error", "code": "outcome_unknown"},
+	})
+}
+
 func canonicalUUID(raw string) bool {
 	id, err := uuid.Parse(raw)
 	return err == nil && id != uuid.Nil && id.String() == raw
 }
 
 func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
-	header := r.Header.Get("Authorization")
-	token := ""
-	if len(header) >= 7 && strings.EqualFold(header[:7], "Bearer ") {
-		token = strings.TrimSpace(header[7:])
+	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
+	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, time.Now())
+	if failure != nil {
+		kind := "api_error"
+		switch failure.Status {
+		case http.StatusUnauthorized:
+			kind = "authentication_error"
+		case http.StatusForbidden:
+			kind = "permission_error"
+		}
+		return access.Authority{}, fail(failure.Status, failure.Code, kind, failure.Message)
 	}
-	if token == "" || s.Runtime == nil {
-		return access.Authority{}, fail(http.StatusUnauthorized, "invalid_api_key", "authentication_error", "Provide an API key in the Authorization header as a bearer credential.")
-	}
-	authority, err := s.Runtime.Authenticate(token)
-	switch {
-	case errors.Is(err, runtime.ErrStaleAuthority):
-		return access.Authority{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
-	case err != nil || authority == nil:
-		return access.Authority{}, fail(http.StatusUnauthorized, "invalid_api_key", "authentication_error", "Incorrect API key provided.")
-	case authority.RevokedAt != nil || authority.ExpiresAt != nil && !authority.ExpiresAt.After(time.Now()):
-		return access.Authority{}, fail(http.StatusUnauthorized, "invalid_api_key", "authentication_error", "This API key is no longer active.")
-	case !slices.Contains(authority.Policy.Scopes, "tools") || authority.ProjectID == nil:
+	if authority.ProjectID == nil {
 		return access.Authority{}, fail(http.StatusForbidden, "permission_denied", "permission_error", "This API key does not have the tools scope for a project.")
 	}
-	return *authority, nil
+	return authority, nil
 }
 
 type resolvedToolset struct {
@@ -251,6 +257,10 @@ func digestBytes(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func (s *Server) toolInputDigest(arguments json.RawMessage) string {
+	return hex.EncodeToString(s.Auth.Digest(secrets.ToolInputDigest, string(arguments)))
+}
+
 func (s *Server) release(reservation *Reservation) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -299,102 +309,28 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fail(http.StatusUnprocessableEntity, "invalid_tool_arguments", "invalid_request_error", "The arguments do not match the pinned tool schema."))
 		return
 	}
-	if s.Ledger == nil || s.Egress == nil {
+	if s.Ledger == nil || s.Egress == nil || s.Auth == nil {
 		writeError(w, errLedger)
 		return
 	}
-	var credential []byte
-	if tool.CredentialID != nil {
-		if s.Credentials == nil {
-			writeError(w, fail(http.StatusServiceUnavailable, "credential_unavailable", "api_error", "The registered credential is unavailable, so the call was not dispatched."))
-			return
-		}
-		var err error
-		if credential, err = s.Credentials(r.Context(), *tool.CredentialID); err != nil || len(credential) == 0 {
-			writeError(w, fail(http.StatusServiceUnavailable, "credential_unavailable", "api_error", "The registered credential is unavailable, so the call was not dispatched."))
-			return
-		}
-		defer clear(credential)
-	}
-	timeout := s.CallTimeout
-	if timeout <= 0 {
-		timeout = defaultCallTimeout
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-tools", Timeout: timeout})
-	if err != nil {
-		writeError(w, fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server could not be reached, so the tool was not called."))
-		return
-	}
-	defer transport.Close(context.WithoutCancel(ctx))
 	releaseID := release.ID
 	if !canonicalUUID(releaseID) {
 		releaseID = snapshot.Generation.ID
 	}
-	reservation, err := s.Ledger.Reserve(ctx, ReserveInput{
-		Authority: authority, ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
-		ReleaseID: releaseID, ToolAlias: tool.Alias, InputDigest: digestBytes(arguments),
-	})
-	if err != nil {
-		var exceeded *limits.ExceededError
-		if errors.As(err, &exceeded) {
-			if exceeded.RetryAfter > 0 {
-				w.Header().Set("Retry-After", strconv.FormatInt(int64((exceeded.RetryAfter+time.Second-1)/time.Second), 10))
-			}
-			writeError(w, fail(http.StatusTooManyRequests, "budget_exceeded", "rate_limit_error", "The call exceeds an enforced budget, so it was not dispatched."))
-			return
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID})
+	switch {
+	case outcome.failure != nil:
+		if outcome.retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.FormatInt(int64((outcome.retryAfter+time.Second-1)/time.Second), 10))
 		}
-		writeError(w, errLedger)
-		return
-	}
-	if err = s.Runtime.AuthorizeAgentResource(authority, "tools", resolved.id, resolved.revisionID, *authority.ProjectID); err != nil {
-		s.release(reservation)
-		if errors.Is(err, runtime.ErrStaleAuthority) {
-			writeError(w, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly."))
-			return
-		}
-		writeError(w, fail(http.StatusForbidden, "permission_denied", "permission_error", "This API key may no longer use the toolset."))
-		return
-	}
-	if err = s.Ledger.MarkDispatched(ctx, reservation); err != nil {
-		s.release(reservation)
-		writeError(w, errLedger)
-		return
-	}
-	started := time.Now()
-	result, callErr := transport.CallTool(ctx, tool.Name, arguments)
-	completed := time.Now()
-	evidence := AttemptEvidence{ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID, StartedAt: started, CompletedAt: completed}
-	if callErr != nil {
-		evidence.Status = StatusOutcomeUnknown
-		evidence.ResultDigest = digestBytes([]byte(StatusOutcomeUnknown + ":" + reservation.DispatchID))
-		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID, "status": StatusOutcomeUnknown,
-			"error": map[string]any{"message": "The tool call may have run upstream, but its outcome could not be confirmed.", "type": "api_error", "code": "outcome_unknown"},
+		writeError(w, outcome.failure)
+	case outcome.outcomeUnknown:
+		writeOutcomeUnknown(w, outcome.reservation, outcome.unknownMessage)
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
+			"content": outcome.result.Content, "structured_content": outcome.result.StructuredContent, "is_error": outcome.result.IsError,
+			"attempt_id": outcome.reservation.AttemptID, "dispatch_id": outcome.reservation.DispatchID,
 		})
-		return
 	}
-	encoded, _ := json.Marshal(result)
-	evidence.ResultDigest = digestBytes(encoded)
-	evidence.IsError = result.IsError
-	evidence.Status = StatusSucceeded
-	if result.IsError {
-		evidence.Status = StatusUpstreamError
-	}
-	if err = s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
-		evidence.Status = StatusOutcomeUnknown
-		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID, "status": StatusOutcomeUnknown,
-			"error": map[string]any{"message": "The tool call ran upstream, but its accounting could not be settled.", "type": "api_error", "code": "outcome_unknown"},
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
-		"content": result.Content, "structured_content": result.StructuredContent, "is_error": result.IsError,
-		"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID,
-	})
 }

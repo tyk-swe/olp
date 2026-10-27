@@ -56,14 +56,13 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 	if err != nil || currency == "" {
 		return nil, limits.ErrDebitAuthority
 	}
-	basis := limits.Basis(in.Authority.Policy.CostBasis)
 	intent := limits.DebitIntent{
 		ID: reservation.DispatchID, APIKeyID: in.Authority.ID, ProjectID: reservation.ProjectID,
 		RunID: reservation.RunID, StepID: reservation.StepID, Kind: "tool", ClaimID: reservation.ClaimID,
 		Currency: currency, CostBound: "0", ChargeBound: "0", PreparedUntil: time.Now().Add(90 * time.Second),
 		Affinity: limits.ExecutionAffinity{ReleaseID: in.ReleaseID, RevisionID: in.ToolsetRevisionID, ToolAlias: in.ToolAlias, InputDigest: in.InputDigest},
 	}
-	owners := []limits.DebitOwner{{ID: in.Authority.ID, Kind: "key", Basis: basis}}
+	owners := []limits.DebitOwner{in.Authority.KeyDebitOwner()}
 	tx, err := l.Pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -82,17 +81,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	lookup := in.Authority.LimitLookupID
-	if lookup == "" {
-		lookup = in.Authority.LookupID
-	}
-	request := limits.Request{
-		CostOwnerID: in.Authority.ID, CostBasis: basis, LookupID: lookup,
-		CostIncreases:  in.Authority.BudgetIncreases[in.Authority.ID],
-		DailyCostLimit: in.Authority.Policy.DailyCostLimit, WeeklyCostLimit: in.Authority.Policy.WeeklyCostLimit, MonthlyCostLimit: in.Authority.Policy.MonthlyCostLimit,
-		LeaseTTL: time.Hour,
-	}
-	if err = l.Store.Admit(ctx, reservation.DispatchID, reservation.ClaimID, []limits.Request{request}); err != nil {
+	if err = l.Store.Admit(ctx, reservation.DispatchID, reservation.ClaimID, []limits.Request{in.Authority.KeyDebitRequest(time.Hour)}); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		_ = l.Store.ReleaseUndispatched(releaseCtx, reservation.DispatchID, reservation.ClaimID)
 		cancel()
@@ -113,7 +102,7 @@ func insertAttemptTx(ctx context.Context, tx pgx.Tx, reservation *Reservation, e
 	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,result_digest,status,is_error,started_at,completed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(dispatch_id) DO NOTHING`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
-		reservation.ToolAlias, reservation.InputDigest, evidence.ResultDigest, evidence.Status, evidence.IsError,
+		reservation.ToolAlias, reservation.InputDigest, evidence.ResultDigest, string(evidence.Status), evidence.IsError,
 		evidence.StartedAt, evidence.CompletedAt)
 	return err
 }
@@ -135,7 +124,7 @@ func (l *DurableLedger) MarkUnknown(ctx context.Context, reservation *Reservatio
 
 func (l *DurableLedger) Settle(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error {
 	resultDigest := sha256.Sum256([]byte("olp:mcp-tool-result:" + reservation.DispatchID + ":" + reservation.AttemptID))
-	evidenceDigest := sha256.Sum256([]byte(reservation.AttemptID + ":" + evidence.Status + ":" + evidence.ResultDigest))
+	evidenceDigest := sha256.Sum256([]byte(reservation.AttemptID + ":" + string(evidence.Status) + ":" + evidence.ResultDigest))
 	result := limits.DebitResult{
 		DispatchID: reservation.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:],
 		EventID: reservation.AttemptID, Cost: "0", Charge: "0", Final: true, Complete: true,

@@ -24,7 +24,7 @@ type ToolCall struct {
 	ToolAlias         string    `json:"tool_alias"`
 	InputDigest       string    `json:"input_digest"`
 	ResultDigest      string    `json:"result_digest"`
-	Status            string    `json:"status"`
+	Status            Status    `json:"status"`
 	IsError           bool      `json:"is_error"`
 	StartedAt         time.Time `json:"started_at"`
 	CompletedAt       time.Time `json:"completed_at"`
@@ -43,8 +43,18 @@ func scanToolCall(row toolCallRow) (ToolCall, error) {
 	return call, err
 }
 
-func LoadToolCall(ctx context.Context, q access.Queryer, id string) (ToolCall, error) {
+func loadToolCall(ctx context.Context, q access.Queryer, id string) (ToolCall, error) {
 	return scanToolCall(q.QueryRow(ctx, "SELECT "+toolCallColumns+" FROM olp.mcp_tool_calls WHERE id=$1", id))
+}
+
+func validateToolCallFilters(apiKeyID, toolsetID string) error {
+	if apiKeyID != "" && !canonicalUUID(apiKeyID) {
+		return access.Invalid("api_key_id", "Use a canonical UUID.")
+	}
+	if toolsetID != "" && !canonicalUUID(toolsetID) {
+		return access.Invalid("toolset_id", "Use a canonical UUID.")
+	}
+	return nil
 }
 
 func (m *Management) Register(mux *http.ServeMux) {
@@ -59,10 +69,8 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	}
 	key := r.URL.Query().Get("api_key_id")
 	toolset := r.URL.Query().Get("toolset_id")
-	for field, value := range map[string]string{"api_key_id": key, "toolset_id": toolset} {
-		if value != "" && !canonicalUUID(value) {
-			return access.Reply{}, access.Invalid(field, "Use a canonical UUID.")
-		}
+	if err := validateToolCallFilters(key, toolset); err != nil {
+		return access.Reply{}, err
 	}
 	rows, err := m.Access.Pool.Query(r.Context(), "SELECT "+toolCallColumns+" FROM olp.mcp_tool_calls WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR api_key_id=$4::uuid) AND ($5='' OR toolset_id=$5::uuid) ORDER BY id DESC LIMIT $6", page.Before, p.AllProjects, p.ProjectIDs(), key, toolset, page.Limit+1)
 	if err != nil {
@@ -88,7 +96,7 @@ func (m *Management) get(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	call, err := LoadToolCall(r.Context(), m.Access.Pool, id)
+	call, err := loadToolCall(r.Context(), m.Access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}

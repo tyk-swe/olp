@@ -1,7 +1,10 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
@@ -150,6 +154,11 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 		var result any
 		switch request.Method {
 		case "initialize":
+			tl.add("initialize")
+			if fx.mode == "dial_fail" {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			w.Header().Set("Mcp-Session-Id", "fixture-session")
 			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "notifications/initialized":
@@ -213,6 +222,10 @@ func testAuthority(scopes []string, toolsets []string) *access.Authority {
 	return &access.Authority{ID: testKeyID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
 }
 
+func testAuthKey() *secrets.AuthKey {
+	return secrets.NewAuthKey(bytes.Repeat([]byte{9}, 32), "test-installation")
+}
+
 func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Server, *fixture, *fakeLedger, *timeline, *fakeRuntime) {
 	t.Helper()
 	tl := &timeline{}
@@ -220,7 +233,7 @@ func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Ser
 	rt := &fakeRuntime{authority: authority, release: &runtime.Release{ID: testGenID, Snapshot: testSnapshot(t, fx.server.URL)}}
 	ledger := &fakeLedger{tl: tl}
 	server := &Server{
-		Runtime: rt, Ledger: ledger,
+		Runtime: rt, Ledger: ledger, Auth: testAuthKey(),
 		Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
 		Credentials: func(_ context.Context, id string) ([]byte, error) {
 			if id != testCredID {
@@ -234,6 +247,11 @@ func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Ser
 
 func request(t *testing.T, server *Server, method, path, body string) (int, map[string]any) {
 	t.Helper()
+	return requestFrom(t, server, method, path, body, "", "")
+}
+
+func requestFrom(t *testing.T, server *Server, method, path, body, remoteAddr, forwardedFor string) (int, map[string]any) {
+	t.Helper()
 	mux := http.NewServeMux()
 	server.Register(mux)
 	var reader io.Reader
@@ -241,6 +259,12 @@ func request(t *testing.T, server *Server, method, path, body string) (int, map[
 		reader = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, path, reader)
+	if remoteAddr != "" {
+		req.RemoteAddr = remoteAddr
+	}
+	if forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+	}
 	req.Header.Set("Authorization", "Bearer test-key")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -308,11 +332,18 @@ func TestCallToolReservesDispatchesAndSettlesExactlyOnce(t *testing.T) {
 	if len(content) != 1 || fx.calls.Load() != 1 {
 		t.Fatalf("call did not reach the upstream exactly once: calls=%d body=%v", fx.calls.Load(), body)
 	}
-	if got := strings.Join(tl.snapshot(), ","); got != "reserve,dispatched,upstream,settled" {
+	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,dispatched,upstream,settled" {
 		t.Fatalf("debit did not fence dispatch and settle after it: %s", got)
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusSucceeded {
 		t.Fatalf("settlement evidence missing: %+v", ledger.evidence)
+	}
+	bare := sha256.Sum256([]byte(`{"query":"secret-argument"}`))
+	if ledger.reserved[0].InputDigest == hex.EncodeToString(bare[:]) {
+		t.Fatal("input digest is a bare hash of the raw arguments")
+	}
+	if want := hex.EncodeToString(testAuthKey().Digest(secrets.ToolInputDigest, `{"query":"secret-argument"}`)); ledger.reserved[0].InputDigest != want {
+		t.Fatalf("input digest is not the keyed purpose-tagged digest: %q", ledger.reserved[0].InputDigest)
 	}
 	evidence := ledger.evidence[0]
 	for _, digest := range []string{ledger.reserved[0].InputDigest, evidence.ResultDigest} {
@@ -361,7 +392,7 @@ func TestCallToolAmbiguousUpstreamFailureStaysUnknown(t *testing.T) {
 	if status != http.StatusBadGateway || fx.calls.Load() != 1 {
 		t.Fatalf("ambiguous failure status %d calls=%d: %v", status, fx.calls.Load(), body)
 	}
-	if got := strings.Join(tl.snapshot(), ","); got != "reserve,dispatched,upstream,unknown" {
+	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,dispatched,upstream,unknown" {
 		t.Fatalf("ambiguous dispatch settled or released: %s", got)
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusOutcomeUnknown {
@@ -376,7 +407,7 @@ func TestCallToolUpstreamToolErrorSettlesAsObservedAttempt(t *testing.T) {
 	if status != http.StatusOK || body["is_error"] != true || fx.calls.Load() != 1 {
 		t.Fatalf("tool error not returned as an observed result: %d %v", status, body)
 	}
-	if got := strings.Join(tl.snapshot(), ","); got != "reserve,dispatched,upstream,settled" {
+	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,dispatched,upstream,settled" {
 		t.Fatalf("tool error attempt did not settle: %s", got)
 	}
 	if ledger.evidence[0].Status != StatusUpstreamError || !ledger.evidence[0].IsError {
@@ -404,5 +435,54 @@ func TestCallToolBudgetRefusalNeverDispatches(t *testing.T) {
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
 	if status != http.StatusTooManyRequests || fx.calls.Load() != 0 {
 		t.Fatalf("budget refusal dispatched: status=%d calls=%d", status, fx.calls.Load())
+	}
+}
+
+func TestCallToolDialFailureReleasesReservation(t *testing.T) {
+	server, fx, _, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "dial_fail")
+	status, _ := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusBadGateway || fx.calls.Load() != 0 {
+		t.Fatalf("failed session setup dispatched a tool call: status=%d calls=%d", status, fx.calls.Load())
+	}
+	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,released" {
+		t.Fatalf("session setup did not follow reservation or its failure did not release it: %s", got)
+	}
+}
+
+func TestCallToolSettleFailureStaysUnknown(t *testing.T) {
+	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	ledger.settleErr = errors.New("settle failed")
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusBadGateway || fx.calls.Load() != 1 || body["status"] != string(StatusOutcomeUnknown) {
+		t.Fatalf("unsettled dispatch was not reported unknown: status=%d calls=%d body=%v", status, fx.calls.Load(), body)
+	}
+	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,dispatched,upstream,unknown" {
+		t.Fatalf("unsettled dispatch settled or released: %s", got)
+	}
+}
+
+func TestToolEndpointsEnforceKeyCIDRsWithTrustedProxies(t *testing.T) {
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	authority.Policy.AllowedCIDRs = []string{"10.0.0.0/8"}
+	server, fx, ledger, tl, _ := newTestServer(t, authority, "")
+	status, body := requestFrom(t, server, http.MethodGet, "/v1/mcp/tools", "", "192.0.2.10:1234", "")
+	if status != http.StatusForbidden {
+		t.Fatalf("list from a disallowed address succeeded: %d %v", status, body)
+	}
+	status, _ = requestFrom(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`, "192.0.2.10:1234", "10.1.2.3")
+	if status != http.StatusForbidden || fx.calls.Load() != 0 || len(ledger.reserved) != 0 || len(tl.snapshot()) != 0 {
+		t.Fatalf("call spoofing a forwarded address through an untrusted proxy dispatched: status=%d calls=%d events=%v", status, fx.calls.Load(), tl.snapshot())
+	}
+	server.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+	status, _ = requestFrom(t, server, http.MethodGet, "/v1/mcp/tools", "", "192.0.2.10:1234", "10.1.2.3")
+	if status != http.StatusOK {
+		t.Fatalf("list from an allowed address behind a trusted proxy refused: %d", status)
+	}
+	status, _ = requestFrom(t, server, http.MethodGet, "/v1/mcp/tools", "", "192.0.2.10:1234", "203.0.113.9")
+	if status != http.StatusForbidden {
+		t.Fatalf("list from a disallowed forwarded address succeeded: %d", status)
 	}
 }

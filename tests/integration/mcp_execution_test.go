@@ -101,7 +101,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		t.Fatal(err)
 	}
 	toolServer := &mcp.Server{
-		Runtime: h.Runtime, Egress: &h.Policy,
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey,
 		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
 		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 			return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
