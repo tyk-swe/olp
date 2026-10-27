@@ -157,6 +157,33 @@ func (*recordingPeer) Ping(context.Context) error               { return nil }
 func (*recordingPeer) Close(websocket.StatusCode, string) error { return nil }
 func (*recordingPeer) CloseNow() error                          { return nil }
 
+func TestNativeDuplexGainsNoResponseCaching(t *testing.T) {
+	h, memory := enableTestCache(t, xaiDuplexHarness(t, true))
+	for i := 0; i < 2; i++ {
+		conn, ctx := dialDuplex(t, h, fullKey, "/native/xai-realtime/sessions/"+routeSlug)
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"session.update","session":{"type":"realtime"}}`)); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := h.mock.count("a"); got != 2 {
+		t.Fatalf("upstream sessions = %d, want both sessions dispatched with no replay", got)
+	}
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	if len(memory.values) != 0 {
+		t.Fatalf("duplex registration populated the response cache with %d entries", len(memory.values))
+	}
+}
+
 func TestDuplexSetupAckRequiresSetupComplete(t *testing.T) {
 	template, err := duplexcontract.Compile(duplexcontract.Config{
 		Provider: connectors.Config{
