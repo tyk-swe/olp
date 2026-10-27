@@ -353,9 +353,7 @@ document whose `model` names a strict route slug, or a raw SDP body with a
 reserved before the provider session exists, and a server control channel to
 the provider session is established before the SDP answer returns. The answer
 carries a gateway session identity in `Location`, never the provider call
-identity and never a raw provider client secret. `POST
-/v1/realtime/calls/{id}/hangup` with the owning key closes the session, and a
-foreign identity answers as missing. The gateway rechecks the key every five
+identity and never a raw provider client secret. The gateway rechecks the key every five
 seconds and closes the provider session on revocation, on provider credential
 loss and at the one-hour bound. Observed provider usage settles exactly once.
 Sessions that end without trustworthy usage stay billing-uncertain, and losing

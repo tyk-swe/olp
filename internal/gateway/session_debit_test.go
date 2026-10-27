@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -184,5 +185,26 @@ func TestNativeDuplexUnresolvedExposureRefusesBeforeDispatch(t *testing.T) {
 	}
 	if got := h.mock.count("a"); got != 0 {
 		t.Fatalf("upstream sessions = %d, want refusal before dispatch", got)
+	}
+}
+
+func TestWebRTCCallerHangupPathIsNotServed(t *testing.T) {
+	mock := newWebRTCMock("usage")
+	h := webrtcHarnessCfg(t, mock, true, Config{WebRTCBound: 300 * time.Millisecond})
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	location := resp.Header.Get("Location")
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d", resp.StatusCode)
+	}
+	hangup := h.do(t.Context(), http.MethodPost, location+"/hangup", fullKey, nil, nil)
+	io.Copy(io.Discard, hangup.Body)
+	hangup.Body.Close()
+	if hangup.StatusCode != http.StatusNotFound {
+		t.Fatalf("caller hangup status=%d, want the path unserved", hangup.StatusCode)
+	}
+	if _, _, hangups := mock.counts(); hangups != 0 {
+		t.Fatal("caller hangup path closed the provider session")
 	}
 }

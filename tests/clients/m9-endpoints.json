@@ -6684,39 +6684,6 @@
     {
       "slice": "M9.6",
       "method": "POST",
-      "path": "/v1/realtime/calls/{id}/hangup",
-      "operation": "realtime",
-      "source_dialect": "openai-realtime-calls",
-      "dialect_revision": "m9-baseline-1",
-      "provider": "openai",
-      "profile": "openai-webrtc",
-      "profile_revision": "1",
-      "transport": "http",
-      "mode": "webrtc",
-      "sdk": {
-        "module": "github.com/openai/openai-go/v3",
-        "version": "3.78.0"
-      },
-      "supported_fields": [
-        "call_id"
-      ],
-      "status": "implemented",
-      "expected_refusal": null,
-      "evidence": [
-        "internal/gateway/realtime_calls.go",
-        "internal/gateway/realtime_calls_test.go"
-      ],
-      "live_qualification": "required",
-      "refusals": [
-        "call identities owned by another key answer as missing",
-        "provider call identities are never accepted from callers"
-      ],
-      "reference_revision": "github.com/openai/openai-go/v3@3.78.0",
-      "admission_contract": "execution-foundations-1"
-    },
-    {
-      "slice": "M9.6",
-      "method": "POST",
       "path": "/v1/realtime/calls",
       "operation": "realtime",
       "source_dialect": "openai-realtime-calls",

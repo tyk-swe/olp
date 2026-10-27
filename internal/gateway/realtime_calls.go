@@ -45,11 +45,9 @@ type webrtcSession struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	started   time.Time
-	closeReq  chan struct{}
 	costBound usage.Cost
 
 	settleOnce sync.Once
-	closeOnce  sync.Once
 	usageMu    sync.Mutex
 	usage      wire.Usage
 	haveUsage  bool
@@ -75,16 +73,6 @@ func (s *Server) unregisterWebRTCSession(id string) {
 	s.webrtcMu.Lock()
 	defer s.webrtcMu.Unlock()
 	delete(s.webrtcSessions, id)
-}
-
-func (s *Server) lookupWebRTCSession(id, keyID string) *webrtcSession {
-	s.webrtcMu.Lock()
-	defer s.webrtcMu.Unlock()
-	sess := s.webrtcSessions[id]
-	if sess == nil || sess.keyID != keyID {
-		return nil
-	}
-	return sess
 }
 
 func (s *Server) holdWebRTCExposure(keyID string, until time.Time) {
@@ -408,7 +396,6 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	sess := &webrtcSession{
 		id: uuid.NewString(), keyID: authority.ID, token: token,
 		x: x, p: p, ctx: bg, cancel: cancel, started: s.now(),
-		closeReq: make(chan struct{}),
 	}
 	if x.costBudgeted(authority) && !x.callerCostExempt() {
 		sess.costBound = x.attemptCostBound(p.attempt)
@@ -637,21 +624,6 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 		case err := <-readErr:
 			s.finishWebRTCControl(sess, err)
 			return
-		case <-sess.closeReq:
-			closed := s.hangupWebRTCCall(sess.ctx, sess) == nil
-			sess.usageMu.Lock()
-			complete := sess.haveUsage && !sess.responses.pending()
-			sess.usageMu.Unlock()
-			if closed && complete {
-				s.settleWebRTC(sess, nil)
-			} else {
-				if !closed {
-					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
-				}
-				s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
-			}
-			sess.cancel()
-			return
 		case <-reauth.C:
 			if e := s.webrtcBudgetExhausted(sess); e != nil {
 				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
@@ -812,42 +784,4 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 		s.unregisterWebRTCSession(sess.id)
 		sess.cancel()
 	})
-}
-
-func (sess *webrtcSession) requestClose() {
-	sess.closeOnce.Do(func() { close(sess.closeReq) })
-}
-
-func (s *Server) realtimeCallsHangup(w http.ResponseWriter, r *http.Request) {
-	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
-	x.mode = "webrtc"
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
-	if !s.admit(r.Context()) {
-		fail(overloaded)
-		return
-	}
-	defer s.release(r.Context())
-	token := bearerToken(r)
-	if token == "" {
-		fail(authenticationError("missing_authorization", "Provide an Authorization Bearer [REDACTED] key."))
-		return
-	}
-	authority, e := s.authenticateRequest(r, token, "inference")
-	if e != nil {
-		fail(e)
-		return
-	}
-	s.bindAuthority(x, authority)
-	sess := s.lookupWebRTCSession(r.PathValue("id"), authority.ID)
-	if sess == nil {
-		fail(serverError(http.StatusNotFound, "call_not_found", "No such realtime call exists for this key."))
-		return
-	}
-	sess.requestClose()
-	s.finish(x, &outcome{committed: false}, http.StatusOK)
-	w.WriteHeader(http.StatusOK)
 }

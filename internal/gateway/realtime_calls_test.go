@@ -221,7 +221,7 @@ func sessionEnvelope(t *testing.T, envs []Envelope) Envelope {
 }
 
 func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testing.T) {
-	mock := newWebRTCMock("usage")
+	mock := newWebRTCMock("close")
 	h := webrtcHarness(t, mock, true)
 	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
 	body, _ := io.ReadAll(resp.Body)
@@ -250,22 +250,11 @@ func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testin
 	}
 	mock.mu.Unlock()
 
-	hangup := h.do(t.Context(), http.MethodPost, location+"/hangup", fullKey, nil, nil)
-	io.Copy(io.Discard, hangup.Body)
-	hangup.Body.Close()
-	if hangup.StatusCode != http.StatusOK {
-		t.Fatalf("hangup status=%d", hangup.StatusCode)
-	}
-	select {
-	case <-mock.hangupSeen:
-	case <-time.After(2 * time.Second):
-		t.Fatal("provider hangup never attempted")
-	}
-	envs := waitEnvelopes(t, h, 2)
+	envs := waitEnvelopes(t, h, 1)
 	time.Sleep(50 * time.Millisecond)
 	h.sink.mu.Lock()
-	if len(h.sink.envs) != 2 {
-		t.Fatalf("settlement envelopes = %d, want session + hangup only", len(h.sink.envs))
+	if len(h.sink.envs) != 1 {
+		t.Fatalf("settlement envelopes = %d, want one session envelope only", len(h.sink.envs))
 	}
 	h.sink.mu.Unlock()
 	env := sessionEnvelope(t, envs)
