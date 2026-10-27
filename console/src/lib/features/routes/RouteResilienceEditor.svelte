@@ -78,6 +78,20 @@
   >
 </fieldset>
 <fieldset disabled={locked}>
+  <legend>Provider-fetched documents</legend>
+  <label
+    ><input
+      type="checkbox"
+      bind:checked={editor.behavior.provider_fetched_documents}
+      onchange={() => editor.touch()}
+    /> Allow the provider to fetch https document URLs named by callers</label
+  >
+  <small
+    >The gateway never fetches document bytes itself. Leave this off unless this
+    route is meant to send caller-named document URLs to the provider.</small
+  >
+</fieldset>
+<fieldset disabled={locked}>
   <legend>Request size</legend>
   <div class="form-field">
     <label for="route-max-body">Maximum request body (bytes)</label>

@@ -3685,6 +3685,36 @@ func (e OrganizationMemberRole) Valid() bool {
 	}
 }
 
+// Defines values for PassthroughConfigMethods.
+const (
+	DELETE PassthroughConfigMethods = "DELETE"
+	GET    PassthroughConfigMethods = "GET"
+	HEAD   PassthroughConfigMethods = "HEAD"
+	PATCH  PassthroughConfigMethods = "PATCH"
+	POST   PassthroughConfigMethods = "POST"
+	PUT    PassthroughConfigMethods = "PUT"
+)
+
+// Valid indicates whether the value is a known member of the PassthroughConfigMethods enum.
+func (e PassthroughConfigMethods) Valid() bool {
+	switch e {
+	case DELETE:
+		return true
+	case GET:
+		return true
+	case HEAD:
+		return true
+	case PATCH:
+		return true
+	case POST:
+		return true
+	case PUT:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PlaygroundRequestOperation.
 const (
 	PlaygroundRequestOperationEmbeddings PlaygroundRequestOperation = "embeddings"
@@ -4768,6 +4798,24 @@ func (e RouteAffinitySource) Valid() bool {
 	}
 }
 
+// Defines values for RouteBehaviorCertification.
+const (
+	RouteBehaviorCertificationCertified   RouteBehaviorCertification = "certified"
+	RouteBehaviorCertificationUncertified RouteBehaviorCertification = "uncertified"
+)
+
+// Valid indicates whether the value is a known member of the RouteBehaviorCertification enum.
+func (e RouteBehaviorCertification) Valid() bool {
+	switch e {
+	case RouteBehaviorCertificationCertified:
+		return true
+	case RouteBehaviorCertificationUncertified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RouteDetailResponseState.
 const (
 	Active  RouteDetailResponseState = "active"
@@ -4780,6 +4828,24 @@ func (e RouteDetailResponseState) Valid() bool {
 	case Active:
 		return true
 	case Retired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteDraftDetailResponseCertification.
+const (
+	RouteDraftDetailResponseCertificationCertified   RouteDraftDetailResponseCertification = "certified"
+	RouteDraftDetailResponseCertificationUncertified RouteDraftDetailResponseCertification = "uncertified"
+)
+
+// Valid indicates whether the value is a known member of the RouteDraftDetailResponseCertification enum.
+func (e RouteDraftDetailResponseCertification) Valid() bool {
+	switch e {
+	case RouteDraftDetailResponseCertificationCertified:
+		return true
+	case RouteDraftDetailResponseCertificationUncertified:
 		return true
 	default:
 		return false
@@ -4816,6 +4882,24 @@ func (e RouteLegVia) Valid() bool {
 	case RouteLegViaFallback:
 		return true
 	case RouteLegViaSelector:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteRevisionResponseCertification.
+const (
+	RouteRevisionResponseCertificationCertified   RouteRevisionResponseCertification = "certified"
+	RouteRevisionResponseCertificationUncertified RouteRevisionResponseCertification = "uncertified"
+)
+
+// Valid indicates whether the value is a known member of the RouteRevisionResponseCertification enum.
+func (e RouteRevisionResponseCertification) Valid() bool {
+	switch e {
+	case RouteRevisionResponseCertificationCertified:
+		return true
+	case RouteRevisionResponseCertificationUncertified:
 		return true
 	default:
 		return false
@@ -5091,38 +5175,41 @@ func (e SimulatedRouteLegVia) Valid() bool {
 
 // Defines values for SimulationDialect.
 const (
-	SimulationDialectAnthropicCountTokens     SimulationDialect = "anthropic-count-tokens"
-	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
-	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
-	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
-	SimulationDialectExaSearch                SimulationDialect = "exa-search"
-	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
-	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
-	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
-	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
-	SimulationDialectMistralOcr               SimulationDialect = "mistral-ocr"
-	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
-	SimulationDialectOpenaiCompletions        SimulationDialect = "openai-completions"
-	SimulationDialectOpenaiDecisions          SimulationDialect = "openai-decisions"
-	SimulationDialectOpenaiEmbeddings         SimulationDialect = "openai-embeddings"
-	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
-	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
-	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
-	SimulationDialectParallelSearch           SimulationDialect = "parallel-search"
-	SimulationDialectPerplexitySearch         SimulationDialect = "perplexity-search"
-	SimulationDialectRerank                   SimulationDialect = "rerank"
-	SimulationDialectSystemone                SimulationDialect = "systemone"
-	SimulationDialectTavilySearch             SimulationDialect = "tavily-search"
-	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
-	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
-	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
-	SimulationDialectTeiRerank                SimulationDialect = "tei-rerank"
-	SimulationDialectTeiScoring               SimulationDialect = "tei-scoring"
-	SimulationDialectTeiSparseEmbeddings      SimulationDialect = "tei-sparse-embeddings"
-	SimulationDialectTeiTokenize              SimulationDialect = "tei-tokenize"
-	SimulationDialectVertexEmbeddings         SimulationDialect = "vertex-embeddings"
-	SimulationDialectVoyageEmbeddings         SimulationDialect = "voyage-embeddings"
-	SimulationDialectVoyageRerank             SimulationDialect = "voyage-rerank"
+	SimulationDialectAnthropicCountTokens         SimulationDialect = "anthropic-count-tokens"
+	SimulationDialectAnthropicMessages            SimulationDialect = "anthropic-messages"
+	SimulationDialectAzureDocumentIntelligenceOcr SimulationDialect = "azure-document-intelligence-ocr"
+	SimulationDialectBedrockCountTokens           SimulationDialect = "bedrock-count-tokens"
+	SimulationDialectBedrockEmbeddings            SimulationDialect = "bedrock-embeddings"
+	SimulationDialectBraveSearch                  SimulationDialect = "brave-search"
+	SimulationDialectExaSearch                    SimulationDialect = "exa-search"
+	SimulationDialectGeminiBatchEmbeddings        SimulationDialect = "gemini-batch-embeddings"
+	SimulationDialectGeminiCountTokens            SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiEmbeddings             SimulationDialect = "gemini-embeddings"
+	SimulationDialectGeminiGenerateContent        SimulationDialect = "gemini-generate-content"
+	SimulationDialectMistralOcr                   SimulationDialect = "mistral-ocr"
+	SimulationDialectOpenaiChat                   SimulationDialect = "openai-chat"
+	SimulationDialectOpenaiCompletions            SimulationDialect = "openai-completions"
+	SimulationDialectOpenaiDecisions              SimulationDialect = "openai-decisions"
+	SimulationDialectOpenaiEmbeddings             SimulationDialect = "openai-embeddings"
+	SimulationDialectOpenaiInputTokens            SimulationDialect = "openai-input-tokens"
+	SimulationDialectOpenaiModeration             SimulationDialect = "openai-moderation"
+	SimulationDialectOpenaiResponses              SimulationDialect = "openai-responses"
+	SimulationDialectParallelSearch               SimulationDialect = "parallel-search"
+	SimulationDialectPerplexitySearch             SimulationDialect = "perplexity-search"
+	SimulationDialectRerank                       SimulationDialect = "rerank"
+	SimulationDialectSystemone                    SimulationDialect = "systemone"
+	SimulationDialectTavilySearch                 SimulationDialect = "tavily-search"
+	SimulationDialectTeiClassification            SimulationDialect = "tei-classification"
+	SimulationDialectTeiEmbeddings                SimulationDialect = "tei-embeddings"
+	SimulationDialectTeiMultivectorEmbeddings     SimulationDialect = "tei-multivector-embeddings"
+	SimulationDialectTeiRerank                    SimulationDialect = "tei-rerank"
+	SimulationDialectTeiScoring                   SimulationDialect = "tei-scoring"
+	SimulationDialectTeiSparseEmbeddings          SimulationDialect = "tei-sparse-embeddings"
+	SimulationDialectTeiTokenize                  SimulationDialect = "tei-tokenize"
+	SimulationDialectVertexDocumentProcessingOcr  SimulationDialect = "vertex-document-processing-ocr"
+	SimulationDialectVertexEmbeddings             SimulationDialect = "vertex-embeddings"
+	SimulationDialectVoyageEmbeddings             SimulationDialect = "voyage-embeddings"
+	SimulationDialectVoyageRerank                 SimulationDialect = "voyage-rerank"
 )
 
 // Valid indicates whether the value is a known member of the SimulationDialect enum.
@@ -5132,9 +5219,13 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectAnthropicMessages:
 		return true
+	case SimulationDialectAzureDocumentIntelligenceOcr:
+		return true
 	case SimulationDialectBedrockCountTokens:
 		return true
 	case SimulationDialectBedrockEmbeddings:
+		return true
+	case SimulationDialectBraveSearch:
 		return true
 	case SimulationDialectExaSearch:
 		return true
@@ -5185,6 +5276,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectTeiSparseEmbeddings:
 		return true
 	case SimulationDialectTeiTokenize:
+		return true
+	case SimulationDialectVertexDocumentProcessingOcr:
 		return true
 	case SimulationDialectVertexEmbeddings:
 		return true
@@ -5269,6 +5362,7 @@ const (
 	TransportModeRealtime  TransportMode = "realtime"
 	TransportModeStreaming TransportMode = "streaming"
 	TransportModeUnary     TransportMode = "unary"
+	TransportModeWebrtc    TransportMode = "webrtc"
 )
 
 // Valid indicates whether the value is a known member of the TransportMode enum.
@@ -5281,6 +5375,8 @@ func (e TransportMode) Valid() bool {
 	case TransportModeStreaming:
 		return true
 	case TransportModeUnary:
+		return true
+	case TransportModeWebrtc:
 		return true
 	default:
 		return false
@@ -7643,10 +7739,16 @@ type ConfigurationRouteEntry struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
+
 	// Project Project name, or null for an installation-wide route
 	Project     nullable.Nullable[string]            `json:"project"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
-	Retired     *bool                                `json:"retired,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+	Retired                  *bool `json:"retired,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         *RouteRetry                      `json:"retry,omitempty"`
@@ -7838,10 +7940,13 @@ type ConnectionOptions struct {
 	Commitment *Commitment `json:"commitment,omitempty"`
 
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
-	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
-	HealthProbe       nullable.Nullable[HealthProbe]      `json:"health_probe,omitempty"`
-	Limits            nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
-	Models            *map[string]ModelMetadata           `json:"models,omitempty"`
+	CredentialHeaders *[]string `json:"credential_headers,omitempty"`
+
+	// DocumentUriPrefixes Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations.
+	DocumentUriPrefixes *[]string                           `json:"document_uri_prefixes,omitempty"`
+	HealthProbe         nullable.Nullable[HealthProbe]      `json:"health_probe,omitempty"`
+	Limits              nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
+	Models              *map[string]ModelMetadata           `json:"models,omitempty"`
 
 	// Network Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.
 	Network *ProviderNetworkOptions `json:"network,omitempty"`
@@ -8290,9 +8395,15 @@ type CreateRouteDraftRequest struct {
 	Operations       *[]string              `json:"operations,omitempty"`
 	OverallTimeoutMs int64                  `json:"overall_timeout_ms"`
 
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
+
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	PromptCache nullable.Nullable[PromptCachePolicy]  `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -9760,6 +9871,22 @@ type OverviewResponse struct {
 	// UsableApiKey Whether at least one API key has not been revoked, including expired keys.
 	UsableApiKey bool `json:"usable_api_key"`
 }
+
+// PassthroughConfig Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.
+type PassthroughConfig struct {
+	// AcknowledgeOpaqueUnmetered Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true.
+	AcknowledgeOpaqueUnmetered bool `json:"acknowledge_opaque_unmetered"`
+
+	// Dialect Native namespace segment the route serves under /native/{dialect}/routes/{route}/.
+	Dialect string                     `json:"dialect"`
+	Headers *[]string                  `json:"headers,omitempty"`
+	Methods []PassthroughConfigMethods `json:"methods"`
+	Paths   []string                   `json:"paths"`
+	Query   *[]string                  `json:"query,omitempty"`
+}
+
+// PassthroughConfigMethods defines model for PassthroughConfig.Methods.
+type PassthroughConfigMethods string
 
 // PlaygroundRequest defines model for PlaygroundRequest.
 type PlaygroundRequest struct {
@@ -11630,10 +11757,16 @@ type ReplaceRouteDraftRequest struct {
 	MaxAttempts int32                            `json:"max_attempts"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes     nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
-	Operations       []string                             `json:"operations"`
-	OverallTimeoutMs int32                                `json:"overall_timeout_ms"`
-	PromptCache      nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
+	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -12128,17 +12261,29 @@ type RouteBehavior struct {
 	Cache    nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool           `json:"caller_cost_exempt,omitempty"`
-	Fallbacks        []RouteFallback `json:"fallbacks"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
+
+	// Certification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
+	Certification RouteBehaviorCertification `json:"certification"`
+	Fallbacks     []RouteFallback            `json:"fallbacks"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
-	PromptCache  nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
+	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
 	Selectors []RouteSelector `json:"selectors"`
 }
+
+// RouteBehaviorCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
+type RouteBehaviorCertification string
 
 // RouteCatalogExposureResponse defines model for RouteCatalogExposureResponse.
 type RouteCatalogExposureResponse struct {
@@ -12186,9 +12331,12 @@ type RouteDraftDetailResponse struct {
 	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
-	CreatedAt        time.Time                        `json:"created_at"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
+
+	// Certification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
+	Certification RouteDraftDetailResponseCertification `json:"certification"`
+	ContentPolicy nullable.Nullable[ContentPolicy]      `json:"content_policy"`
+	CreatedAt     time.Time                             `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
 	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
@@ -12205,10 +12353,16 @@ type RouteDraftDetailResponse struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
+
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	ProjectName nullable.Nullable[string]             `json:"project_name"`
 	PromptCache nullable.Nullable[PromptCachePolicy]  `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry            `json:"retry"`
@@ -12218,6 +12372,9 @@ type RouteDraftDetailResponse struct {
 	Targets   []RouteTargetResponse `json:"targets"`
 	UpdatedAt time.Time             `json:"updated_at"`
 }
+
+// RouteDraftDetailResponseCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
+type RouteDraftDetailResponseCertification string
 
 // RouteDraftListResponse defines model for RouteDraftListResponse.
 type RouteDraftListResponse struct {
@@ -12237,8 +12394,11 @@ type RouteDraftResponse struct {
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	Slug      string                                `json:"slug"`
-	State     string                                `json:"state"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool  `json:"provider_fetched_documents,omitempty"`
+	Slug                     string `json:"slug"`
+	State                    string `json:"state"`
 }
 
 // RouteFallback defines model for RouteFallback.
@@ -12330,9 +12490,12 @@ type RouteRevisionResponse struct {
 	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
-	Fallbacks        []RouteFallback                  `json:"fallbacks"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
+
+	// Certification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
+	Certification RouteRevisionResponseCertification `json:"certification"`
+	ContentPolicy nullable.Nullable[ContentPolicy]   `json:"content_policy"`
+	Fallbacks     []RouteFallback                    `json:"fallbacks"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 	Fidelity    RouteFidelity      `json:"fidelity"`
@@ -12340,10 +12503,16 @@ type RouteRevisionResponse struct {
 	MaxAttempts int32              `json:"max_attempts"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes     nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
-	Operations       []string                             `json:"operations"`
-	OverallTimeoutMs int32                                `json:"overall_timeout_ms"`
-	PromptCache      nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
+	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         RouteRetry            `json:"retry"`
@@ -12355,6 +12524,9 @@ type RouteRevisionResponse struct {
 	SourceDraftId openapi_types.UUID    `json:"source_draft_id"`
 	Targets       []RouteTargetResponse `json:"targets"`
 }
+
+// RouteRevisionResponseCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
+type RouteRevisionResponseCertification string
 
 // RouteSelector The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.
 type RouteSelector struct {
@@ -13682,10 +13854,16 @@ type UpdatePublishedRouteRequest struct {
 	MaxAttempts int32                            `json:"max_attempts"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes     nullable.Nullable[int]               `json:"max_body_bytes,omitempty"`
-	Operations       []string                             `json:"operations"`
-	OverallTimeoutMs int32                                `json:"overall_timeout_ms"`
-	PromptCache      nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
+	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
+
+	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
+	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`

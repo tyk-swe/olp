@@ -8,16 +8,20 @@ import (
 // address resolves exactly where the real API lives.
 const (
 	MistralPrefix    = "/mistral/v1"
+	AzurePrefix      = "/azure"
 	PerplexityPrefix = "/perplexity"
 	TavilyPrefix     = "/tavily"
 	ExaPrefix        = "/exa"
 	ParallelPrefix   = "/parallel/v1"
+	BravePrefix      = "/brave"
 
 	MistralModel    = "fixture-mistral"
+	AzureModel      = "fixture-azure"
 	PerplexityModel = "fixture-perplexity"
 	TavilyModel     = "fixture-tavily"
 	ExaModel        = "fixture-exa"
 	ParallelModel   = "fixture-parallel"
+	BraveModel      = "fixture-brave"
 )
 
 func bearer(name string) vendor {
@@ -31,7 +35,16 @@ func bearer(name string) vendor {
 }
 
 var (
-	mistral    = bearer("mistral")
+	mistral = bearer("mistral")
+	azure   = vendor{
+		name: "azure-document-intelligence",
+		authorized: func(r *http.Request, credential string) bool {
+			return r.Header.Get("Ocp-Apim-Subscription-Key") == credential
+		},
+		fail: func(w http.ResponseWriter, status int, kind, message string) {
+			writeJSON(w, status, map[string]any{"error": map[string]any{"code": kind, "message": message}})
+		},
+	}
 	perplexity = bearer("perplexity")
 	tavily     = bearer("tavily")
 	parallel   = vendor{
@@ -52,6 +65,15 @@ var (
 			writeJSON(w, status, map[string]any{"requestId": "exa_fx", "error": message, "tag": kind})
 		},
 	}
+	brave = vendor{
+		name: "brave",
+		authorized: func(r *http.Request, credential string) bool {
+			return r.Header.Get("X-Subscription-Token") == credential
+		},
+		fail: func(w http.ResponseWriter, status int, kind, message string) {
+			writeJSON(w, status, map[string]any{"type": "ErrorResponse", "error": map[string]any{"id": "brave_fx", "status": status, "detail": message, "code": kind}})
+		},
+	}
 )
 
 // failDetail answers in the FastAPI validation envelope Mistral, Perplexity
@@ -62,10 +84,14 @@ func failDetail(w http.ResponseWriter, status int, kind, message string) {
 
 func (f *Fixture) registerOperations() {
 	f.mux.HandleFunc("POST "+MistralPrefix+"/ocr", f.handle(mistral, "mistral.ocr", f.mistralOCR))
+	f.mux.HandleFunc("POST "+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+":analyze", f.handle(azure, "azure.ocr.submit", f.azureSubmit))
+	f.mux.HandleFunc("GET "+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+"/analyzeResults/fixture-result", f.handle(azure, "azure.ocr.poll", f.azurePoll))
+	f.mux.HandleFunc("DELETE "+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+"/analyzeResults/fixture-result", f.handle(azure, "azure.ocr.delete", f.azureDelete))
 	f.mux.HandleFunc("POST "+PerplexityPrefix+"/search", f.handle(perplexity, "perplexity.search", f.perplexitySearch))
 	f.mux.HandleFunc("POST "+TavilyPrefix+"/search", f.handle(tavily, "tavily.search", f.tavilySearch))
 	f.mux.HandleFunc("POST "+ExaPrefix+"/search", f.handle(exa, "exa.search", f.exaSearch))
 	f.mux.HandleFunc("POST "+ParallelPrefix+"/search", f.handle(parallel, "parallel.search", f.parallelSearch))
+	f.mux.HandleFunc("GET "+BravePrefix+"/res/v1/web/search", f.handle(brave, "brave.search", f.braveSearch))
 }
 
 func (f *Fixture) mistralOCR(x *request) {
@@ -165,5 +191,62 @@ func (f *Fixture) parallelSearch(x *request) {
 			"publish_date": "2026-10-01", "excerpts": []any{"Fixture excerpt."},
 		}},
 		"session_id": f.nextID("par_sess"),
+	})
+}
+
+func (f *Fixture) azureSubmit(x *request) {
+	var req struct {
+		URLSource    string `json:"urlSource"`
+		Base64Source string `json:"base64Source"`
+	}
+	if !x.decode(&req) || (req.URLSource == "") == (req.Base64Source == "") {
+		x.fail(http.StatusBadRequest, "InvalidRequest", "Either urlSource or base64Source must be specified.")
+		return
+	}
+	if x.r.URL.Query().Get("api-version") != "2024-11-30" || x.r.URL.Query().Get("outputContentFormat") != "markdown" {
+		x.fail(http.StatusBadRequest, "InvalidRequest", "The fixture analyze query is invalid.")
+		return
+	}
+	x.note("ocr", false)
+	x.w.Header().Set("Operation-Location", "http://"+x.r.Host+AzurePrefix+"/documentintelligence/documentModels/"+AzureModel+"/analyzeResults/fixture-result?api-version=2024-11-30")
+	x.w.Header().Set("Retry-After", "0")
+	x.w.WriteHeader(http.StatusAccepted)
+}
+
+func (f *Fixture) azurePoll(x *request) {
+	x.note("ocr", false)
+	content := "# Fixture document\n\nFixture OCR text."
+	writeJSON(x.w, http.StatusOK, map[string]any{
+		"status": "succeeded",
+		"analyzeResult": map[string]any{
+			"apiVersion": "2024-11-30", "modelId": AzureModel, "stringIndexType": "utf16CodeUnit",
+			"contentFormat": "markdown", "content": content,
+			"pages": []any{map[string]any{"pageNumber": 1, "spans": []any{map[string]any{"offset": 0, "length": len(content)}}}},
+		},
+	})
+}
+
+func (f *Fixture) azureDelete(x *request) {
+	x.w.WriteHeader(http.StatusNoContent)
+}
+func (f *Fixture) braveSearch(x *request) {
+	query := x.r.URL.Query()
+	if query.Get("q") == "" {
+		x.fail(http.StatusUnprocessableEntity, "VALIDATION", "Missing query parameter: q")
+		return
+	}
+	x.note("search", false)
+	writeJSON(x.w, http.StatusOK, map[string]any{
+		"type":  "search",
+		"query": map[string]any{"original": query.Get("q"), "more_results_available": false},
+		"web": map[string]any{
+			"type": "search",
+			"results": []any{map[string]any{
+				"title": "Fixture result", "url": "https://fixture.example/result",
+				"description": "Fixture description.", "page_age": "2026-10-01T00:00:00Z",
+				"family_friendly": true, "type": "search_result",
+			}},
+			"family_friendly": true,
+		},
 	})
 }
