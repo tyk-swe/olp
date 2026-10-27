@@ -380,6 +380,9 @@ func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testin
 	if strings.Contains(string(body), "client_secret") || strings.Contains(location, "secret") {
 		t.Fatal("raw client secret material in response")
 	}
+	// The dialer can receive the handshake before the mock counts it.
+	// Settlement synchronizes the assertions with its sideband frames.
+	envs := waitEnvelopes(t, h, 1)
 	creates, controls, _ := mock.counts()
 	if creates != 1 || controls != 1 {
 		t.Fatalf("creates=%d controls=%d, control must exist before admission completes", creates, controls)
@@ -394,7 +397,6 @@ func TestWebRTCCreateReservesBeforeProviderAndSettlesObservedUsageOnce(t *testin
 	}
 	mock.mu.Unlock()
 
-	envs := waitEnvelopes(t, h, 1)
 	time.Sleep(50 * time.Millisecond)
 	h.sink.mu.Lock()
 	if len(h.sink.envs) != 1 {
