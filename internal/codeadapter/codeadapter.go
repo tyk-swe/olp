@@ -80,8 +80,11 @@ func (e Endpoint) Supports(transport Transport) bool {
 }
 
 // Client contains the adapter's settings for a generated client configuration.
+// Protocol, when set, is the one protocol the client's provider sends on,
+// where that differs from the client's usual preference.
 type Client struct {
 	ID, Provider, URLSuffix string
+	Protocol                codemode.Protocol
 }
 
 // Vendor is a static adapter declaration. Collections stay private; accessors
@@ -155,7 +158,7 @@ var vendors = []Vendor{
 			{ClientPath: "v1/messages", UpstreamPath: "anthropic/v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
 			{ClientPath: "v1/chat/completions", UpstreamPath: "v1/chat/completions", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
 		},
-		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "minimax-coding-plan", URLSuffix: "/v1"}},
+		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "minimax-coding-plan", URLSuffix: "/v1", Protocol: codemode.ProtocolMessages}},
 		enrollmentNotes: keyEnrollmentNotes,
 		notes:           []string{"MiniMax's terms govern M Plan use; OLP forwards this client's requests unmodified but cannot guarantee that MiniMax accepts pooled use."},
 	},
@@ -354,11 +357,17 @@ func (v Vendor) Reaches(client, model string) bool {
 // a model on through the adapter: the first the client speaks that the adapter
 // serves the model on.
 func (v Vendor) Protocol(client, model string) (codemode.Protocol, bool) {
-	if v.Supports(client) {
-		for _, p := range clientProtocols[client] {
-			if v.ServesModel(p, model) {
-				return p, true
-			}
+	c, ok := v.Client(client)
+	if !ok {
+		return "", false
+	}
+	protocols := clientProtocols[client]
+	if c.Protocol != "" {
+		protocols = []codemode.Protocol{c.Protocol}
+	}
+	for _, p := range protocols {
+		if v.ServesModel(p, model) {
+			return p, true
 		}
 	}
 	return "", false

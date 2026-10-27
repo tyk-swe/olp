@@ -120,6 +120,19 @@ func TestCodingPlanClientsUseOpenCodeCatalogProviders(t *testing.T) {
 	}
 }
 
+func TestMiniMaxOpenCodeClientSendsMessages(t *testing.T) {
+	vendor, ok := Lookup(codemode.AdapterMiniMaxPlan)
+	if !ok {
+		t.Fatal("MiniMax adapter missing")
+	}
+	if p, ok := vendor.Protocol(ClientOpenCode, "MiniMax-M3"); !ok || p != codemode.ProtocolMessages {
+		t.Fatalf("OpenCode predicted to send %q, but minimax-coding-plan uses @ai-sdk/anthropic (https://models.dev/api.json, reviewed 2026-10-27)", p)
+	}
+	if !vendor.ServesModel(codemode.ProtocolChat, "MiniMax-M3") {
+		t.Fatal("raw Chat Completions forwarding lost")
+	}
+}
+
 func TestOpenCodeGoServesEachModelOnOneProtocol(t *testing.T) {
 	vendor, ok := Lookup(codemode.AdapterOpenCodeGo)
 	if !ok {
