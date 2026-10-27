@@ -113,6 +113,25 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection is unavailable."))
 		return
 	}
+	options := s.selectionOptions(r.Context(), x)
+	options.CheckSlots = false
+	plan, planErr := routing.Select(x.snapshot(), route.Slug, routing.PassthroughOperation, "native", "unary", x.affinity, options)
+	if planErr != nil {
+		fail(selectionError(planErr, route.Slug))
+		return
+	}
+	var attempt routing.Attempt
+	eligible := false
+	for _, planned := range plan.Attempts {
+		if planned.TargetID == target.ID {
+			attempt, eligible = planned, true
+			break
+		}
+	}
+	if !eligible {
+		fail(selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug))
+		return
+	}
 	timeout := time.Duration(route.OverallTimeout) * time.Millisecond
 	if target.Timeout > 0 {
 		timeout = min(timeout, time.Duration(target.Timeout)*time.Millisecond)
@@ -164,11 +183,6 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	upstream.RawQuery = query.Encode()
 	upstream.Fragment = ""
 
-	attempt := routing.Attempt{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, ProviderKind: provider.Kind, UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, VendorID: provider.VendorID}
-	if inputs := s.Runtime.RoutingInputs(); inputs != nil {
-		attempt.Price = inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, routing.PassthroughOperation, s.now())
-		attempt.Discount = inputs.Discount(provider.Kind, provider.ID, provider.VendorID, s.now())
-	}
 	defer s.settleCaps(r.Context(), x)
 	estimate := max(resourceEstimate, x.estimate)
 	var slot routing.Slot

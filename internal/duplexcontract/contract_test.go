@@ -111,7 +111,7 @@ func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	observer := template.Observer(1 << 20)
-	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":null}}`)); err != nil {
+	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":{"type":null}}}`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, frame := range []string{
@@ -230,7 +230,7 @@ func TestXAIObserverBillableAudioSecondsAreCumulative(t *testing.T) {
 		t.Fatal(err)
 	}
 	observer := template.Observer(1 << 20)
-	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":null}}`)); err != nil {
+	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":{"type":null}}}`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, frame := range []string{
@@ -255,6 +255,21 @@ func TestXAIObserverBillableAudioSecondsAreCumulative(t *testing.T) {
 	}
 	if observer.Complete() {
 		t.Fatal("duration-billed session settled complete on stale response usage")
+	}
+	if err := observer.ClientFrame([]byte(`{"type":"session.update","session":{"type":"realtime","turn_detection":{"type":null}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("switching to push-to-talk discharged uncovered VAD duration")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r3"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r3","usage":{"billable_audio_seconds":45}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("fresh cumulative usage after the mode switch did not settle the session")
 	}
 }
 

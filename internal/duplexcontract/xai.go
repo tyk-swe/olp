@@ -27,15 +27,16 @@ func inspectXAISetup(frame []byte, maxBytes int) (Setup, error) {
 }
 
 type xaiObserver struct {
-	maxBytes       int
-	usage          *wire.Usage
-	pending        int
-	requested      int
-	inputSeq       int
-	coveredSeq     int
-	boundaries     map[string]int
-	durationBilled bool
-	incomplete     bool
+	maxBytes          int
+	usage             *wire.Usage
+	pending           int
+	requested         int
+	inputSeq          int
+	coveredSeq        int
+	boundaries        map[string]int
+	durationBilled    bool
+	durationUncovered bool
+	incomplete        bool
 }
 
 func sessionDurationBilled(session oif.Value, present bool, current bool) bool {
@@ -46,7 +47,24 @@ func sessionDurationBilled(session oif.Value, present bool, current bool) bool {
 	if !ok {
 		return current
 	}
-	return detection.Kind() != oif.Null
+	if detection.Kind() == oif.Null {
+		return false
+	}
+	if detection.Kind() != oif.Object {
+		return true
+	}
+	kind, present := detection.Lookup("type")
+	if present && kind.Kind() == oif.Null {
+		return false
+	}
+	return true
+}
+
+func (o *xaiObserver) applySession(session oif.Value, present bool) {
+	o.durationBilled = sessionDurationBilled(session, present, o.durationBilled)
+	if o.durationBilled {
+		o.durationUncovered = true
+	}
 }
 
 func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -56,12 +74,15 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	}
 	root := doc.Root()
 	kind, _ := textField(root, "type")
+	if kind != "session.created" && kind != "session.updated" && o.durationBilled {
+		o.durationUncovered = true
+	}
 	switch kind {
 	case "error":
 		return ServerFrame{ProviderError: true}, nil
 	case "session.created", "session.updated":
 		session, present := root.Lookup("session")
-		o.durationBilled = sessionDurationBilled(session, present, o.durationBilled)
+		o.applySession(session, present)
 		return ServerFrame{}, nil
 	case "response.created":
 		if o.requested > 0 {
@@ -104,6 +125,9 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 			o.setBillableSeconds(seconds)
 		}
 		o.coverInput(root)
+		if !o.durationBilled {
+			o.durationUncovered = false
+		}
 		return ServerFrame{}, nil
 	}
 	return ServerFrame{}, nil
@@ -150,10 +174,14 @@ func (o *xaiObserver) clientFrame(frame []byte) error {
 		return err
 	}
 	root := doc.Root()
-	switch kind, _ := textField(root, "type"); kind {
+	kind, _ := textField(root, "type")
+	if kind != "session.update" && o.durationBilled {
+		o.durationUncovered = true
+	}
+	switch kind {
 	case "session.update":
 		session, present := root.Lookup("session")
-		o.durationBilled = sessionDurationBilled(session, present, o.durationBilled)
+		o.applySession(session, present)
 	case "response.create":
 		o.requested++
 	case "input_audio_buffer.append", "input_audio_buffer.commit":
@@ -198,7 +226,7 @@ func billableTextItem(root oif.Value) bool {
 
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
 func (o *xaiObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && o.requested == 0 && o.inputSeq == o.coveredSeq && !o.durationBilled && !o.incomplete
+	return o.usage != nil && o.pending == 0 && o.requested == 0 && o.inputSeq == o.coveredSeq && !o.durationBilled && !o.durationUncovered && !o.incomplete
 }
 
 func (o *xaiObserver) setBillableSeconds(seconds string) {

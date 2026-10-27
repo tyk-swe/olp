@@ -34,6 +34,34 @@ func passthroughHarness(t *testing.T) *harness {
 
 const passthroughURL = "/native/bound-native/routes/" + routeSlug + "/v1/widgets/abc"
 
+func TestPassthroughInstallationPolicyExclusionDispatchesNothing(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"passthrough"}
+		route.MaxAttempts = 1
+		route.Targets = route.Targets[:1]
+		route.Passthrough = &routing.PassthroughConfig{
+			Dialect:                    "bound-native",
+			Methods:                    []string{"GET", "POST", "HEAD"},
+			Paths:                      []string{"/v1/widgets/*", "/v1/status"},
+			Query:                      []string{"limit"},
+			Headers:                    []string{"X-Widget-Mode", "If-None-Match"},
+			AcknowledgeOpaqueUnmetered: true,
+		}
+		s.Routes[routeSlug] = route
+		s.InstallationPolicy = &routing.Policy{Constraints: routing.Preferences{Only: []string{"provider:00000000-0000-0000-0000-000000000000"}}}
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("policy-excluded bound connection served the request")
+	}
+	if got := h.mock.count("a"); got != 0 {
+		t.Fatalf("upstream dispatches = %d, want policy refusal before dispatch", got)
+	}
+}
+
 func TestPassthroughRoundTripStripsCallerCredentials(t *testing.T) {
 	h := passthroughHarness(t)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
