@@ -3,6 +3,7 @@ package routing
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -116,6 +117,27 @@ func passthroughRoute() Route {
 		Fidelity:       RouteFidelity{Mode: FidelityStrict},
 		Targets:        []Target{{ID: "11111111-1111-1111-1111-111111111111", ProviderID: "22222222-2222-2222-2222-222222222222", ProviderModel: "m", Weight: 1, Timeout: 1000, RoutingID: "33333333-3333-3333-3333-333333333333"}},
 		Behavior:       Behavior{Passthrough: passthroughConfig()},
+	}
+}
+
+func TestPassthroughPlanningAdmitsBoundConnection(t *testing.T) {
+	route := passthroughRoute()
+	route.RoutingID = "44444444-4444-4444-4444-444444444444"
+	providerID := route.Targets[0].ProviderID
+	s := Snapshot{
+		Providers: map[string]Provider{providerID: {ID: providerID, Kind: "openai", Enabled: true}},
+		Routes:    map[string]Route{route.Slug: route},
+	}
+	plan, e := Select(&s, route.Slug, PassthroughOperation, "native", "unary", []byte("seed"), Options{Now: time.Now()})
+	if e != nil || len(plan.Attempts) != 1 || plan.Attempts[0].ProviderID != providerID {
+		t.Fatalf("bound passthrough connection not planned: %+v %v", plan, e)
+	}
+	plain := route
+	plain.Behavior.Passthrough = nil
+	s.Routes[route.Slug] = plain
+	plan, e = Select(&s, route.Slug, PassthroughOperation, "native", "unary", []byte("seed"), Options{Now: time.Now()})
+	if e != nil || len(plan.Attempts) != 0 {
+		t.Fatalf("passthrough planned without a bound route: %+v %v", plan, e)
 	}
 }
 

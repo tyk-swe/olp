@@ -255,6 +255,7 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 		for _, name := range []string{"turnComplete", "turn_complete"} {
 			if complete, present := content.Lookup(name); present && complete.Kind() == oif.Boolean && complete.Raw() == "true" {
 				o.submitted++
+				o.inputSeq++
 			}
 		}
 	}

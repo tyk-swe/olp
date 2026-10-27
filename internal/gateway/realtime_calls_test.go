@@ -529,6 +529,20 @@ func TestWebRTCRevokedKeyClosesSession(t *testing.T) {
 	}
 }
 
+func TestWebRTCCreationHonorsDeploymentBodyLimit(t *testing.T) {
+	mock := newWebRTCMock("usage")
+	h := webrtcHarnessCfg(t, mock, true, Config{MaxBodyBytes: 16})
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 {
+		t.Fatalf("oversized creation admitted: %d", resp.StatusCode)
+	}
+	if creates, _, _ := mock.counts(); creates != 0 {
+		t.Fatal("provider session created for an oversized request")
+	}
+}
+
 func TestWebRTCInputTranscriptionRefusedAndObservedWorkUncertain(t *testing.T) {
 	mock := newWebRTCMock("transcribe")
 	h := webrtcHarness(t, mock, true)

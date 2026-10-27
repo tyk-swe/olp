@@ -257,6 +257,24 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
 		t.Fatal(err)
 	}
+	if err := observer.ClientFrame([]byte(`{"clientContent":{"turns":[{"role":"user","parts":[{"text":"next"}]}],"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("delayed usage for the finished turn discharged a newer text submission")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("newer text submission settled by its own terminal usage is not complete")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"modelTurn":{"parts":[{"text":"next"}]}}}`)); err != nil {
 		t.Fatal(err)
 	}

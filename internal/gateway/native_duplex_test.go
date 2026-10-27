@@ -98,6 +98,9 @@ func TestNativeDuplexXAIRelaysOpaqueFramesAndSettlesUsageOnce(t *testing.T) {
 	if !attempt.UsageObserved || attempt.Usage == nil || attempt.Usage.InputTokens != 11 || attempt.Usage.OutputTokens != 7 {
 		t.Fatalf("settled usage = %+v observed=%v", attempt.Usage, attempt.UsageObserved)
 	}
+	if attempt.Status != http.StatusOK {
+		t.Fatalf("settled status = %d, want a successful terminal status so request pricing applies", attempt.Status)
+	}
 }
 
 func TestNativeDuplexXAIRefusesTranscriptionBeforeDispatch(t *testing.T) {

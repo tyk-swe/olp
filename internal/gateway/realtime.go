@@ -885,6 +885,7 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: nativeError}))
 	}
 	fact.Class = "success"
+	fact.Status = http.StatusOK
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamAccepted
 	}

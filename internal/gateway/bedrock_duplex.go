@@ -105,6 +105,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 		return finish(class, serverError(http.StatusBadGateway, "upstream_error", "The Bedrock bidirectional stream could not be opened."))
 	}
 	fact.Class = "success"
+	fact.Status = http.StatusOK
 	fact.Committed = true
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamAccepted

@@ -27,12 +27,14 @@ func inspectXAISetup(frame []byte, maxBytes int) (Setup, error) {
 }
 
 type xaiObserver struct {
-	maxBytes        int
-	usage           *wire.Usage
-	pending         int
-	requested       int
-	inputAfterUsage bool
-	incomplete      bool
+	maxBytes   int
+	usage      *wire.Usage
+	pending    int
+	requested  int
+	inputSeq   int
+	coveredSeq int
+	boundaries map[string]int
+	incomplete bool
 }
 
 func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -50,6 +52,10 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 			o.requested--
 		}
 		o.pending++
+		if o.boundaries == nil {
+			o.boundaries = map[string]int{}
+		}
+		o.boundaries[responseID(root)] = o.inputSeq
 		return ServerFrame{}, nil
 	case "response.done":
 		if o.pending > 0 {
@@ -81,7 +87,7 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 		if secondsOK {
 			o.setBillableSeconds(seconds)
 		}
-		o.inputAfterUsage = false
+		o.coverInput(root)
 		return ServerFrame{}, nil
 	}
 	return ServerFrame{}, nil
@@ -100,23 +106,80 @@ func (o *xaiObserver) addUsage(input, output, total int64, hasTotal bool) {
 	}
 }
 
+func responseID(root oif.Value) string {
+	response, ok := root.Lookup("response")
+	if !ok || response.Kind() != oif.Object {
+		return ""
+	}
+	id, _ := textField(response, "id")
+	return id
+}
+
+func (o *xaiObserver) coverInput(root oif.Value) {
+	id := responseID(root)
+	boundary, known := o.boundaries[id]
+	if !known {
+		o.coveredSeq = o.inputSeq
+		return
+	}
+	delete(o.boundaries, id)
+	if boundary > o.coveredSeq {
+		o.coveredSeq = boundary
+	}
+}
+
 func (o *xaiObserver) clientFrame(frame []byte) error {
 	doc, err := parseObject(frame, o.maxBytes)
 	if err != nil {
 		return err
 	}
-	switch kind, _ := textField(doc.Root(), "type"); kind {
+	root := doc.Root()
+	switch kind, _ := textField(root, "type"); kind {
 	case "response.create":
 		o.requested++
-	case "input_audio_buffer.append", "input_audio_buffer.commit", "conversation.item.create":
-		o.inputAfterUsage = true
+	case "input_audio_buffer.append", "input_audio_buffer.commit":
+		o.inputSeq++
+	case "conversation.item.create":
+		o.inputSeq++
+		if billableTextItem(root) {
+			o.incomplete = true
+		}
 	}
 	return nil
 }
 
+func billableTextItem(root oif.Value) bool {
+	item, ok := root.Lookup("item")
+	if !ok || item.Kind() != oif.Object {
+		return true
+	}
+	if kind, _ := textField(item, "type"); kind == "function_call_output" {
+		return false
+	}
+	content, ok := item.Lookup("content")
+	if !ok || content.Kind() != oif.Array {
+		return true
+	}
+	parts := content.Elements()
+	if len(parts) == 0 {
+		return true
+	}
+	for _, part := range parts {
+		if part.Kind() != oif.Object {
+			return true
+		}
+		switch kind, _ := textField(part, "type"); kind {
+		case "input_audio", "audio":
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
 func (o *xaiObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && o.requested == 0 && !o.inputAfterUsage && !o.incomplete
+	return o.usage != nil && o.pending == 0 && o.requested == 0 && o.inputSeq == o.coveredSeq && !o.incomplete
 }
 
 func (o *xaiObserver) setBillableSeconds(seconds string) {

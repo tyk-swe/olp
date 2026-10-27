@@ -152,6 +152,39 @@ func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
 	if !observer.Complete() {
 		t.Fatal("submitted audio settled by terminal usage is not complete")
 	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r11"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ClientFrame([]byte(`{"type":"input_audio_buffer.append","audio":"AA=="}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r11","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("an older response discharged input submitted while it was running")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r12"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r12","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("overlapping input settled by the next response is not complete")
+	}
+	if err := observer.ClientFrame([]byte(`{"type":"conversation.item.create","item":{"type":"function_call_output","call_id":"c1","output":"ok"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r13"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r13","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("unbilled function output settled by terminal usage is not complete")
+	}
 	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r2"}}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +196,28 @@ func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
 	}
 	if observer.Complete() {
 		t.Fatal("session settled as complete after a response ended without usage")
+	}
+}
+
+func TestXAIObserverBillableTextInputStaysUncertain(t *testing.T) {
+	template, err := duplexcontract.Compile(xaiConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := template.Observer(1 << 20)
+	if err := observer.ClientFrame([]byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range []string{
+		`{"type":"response.created","response":{"id":"r1"}}`,
+		`{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5,"billable_audio_seconds":1.5}}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if observer.Complete() {
+		t.Fatal("separately billed text input settled as complete without a text meter")
 	}
 }
 

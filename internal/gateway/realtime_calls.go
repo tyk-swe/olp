@@ -335,6 +335,9 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(serverError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
 		return
 	}
+	if s.cfg.MaxBodyBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+	}
 	callReq, e := parseWebRTCCallRequest(r)
 	if e != nil {
 		fail(e)
