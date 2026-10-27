@@ -51,42 +51,31 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 	cursors := map[string]bool{}
 	cursor := ""
 	for page := 0; page < 16; page++ {
-		var listing struct {
-			Tools []struct {
-				Name        string          `json:"name"`
-				Description string          `json:"description"`
-				Input       json.RawMessage `json:"inputSchema"`
-			} `json:"tools"`
-			Next string `json:"nextCursor"`
-		}
-		params := map[string]any{}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-		if err = c.Call(ctx, "tools/list", params, &listing); err != nil || listing.Tools == nil {
+		listing, listErr := c.ListTools(ctx, cursor)
+		if listErr != nil || listing.Tools == nil {
 			return nil, ErrCertification
 		}
 		for _, t := range listing.Tools {
-			if !toolName.MatchString(t.Name) || seen[t.Name] || len(t.Description) > 4096 || len(t.Input) > 64<<10 || len(result.Tools) >= 128 {
+			if !toolName.MatchString(t.Name) || seen[t.Name] || len(t.Description) > 4096 || len(t.InputSchema) > 64<<10 || len(result.Tools) >= 128 {
 				return nil, ErrCertification
 			}
 			// Static authentication is never retained in upstream descriptions or
 			// schema defaults, even when a hostile server reflects its bearer value.
-			if c.token != "" && (strings.Contains(t.Name, c.token) || strings.Contains(t.Description, c.token) || bytes.Contains(t.Input, credential)) {
+			if c.token != "" && (strings.Contains(t.Name, c.token) || strings.Contains(t.Description, c.token) || bytes.Contains(t.InputSchema, credential)) {
 				return nil, ErrCertification
 			}
-			if err = validateSchema(t.Input); err != nil {
+			if err = validateSchema(t.InputSchema); err != nil {
 				return nil, ErrCertification
 			}
-			schema, _ := jsonschema.UnmarshalJSON(bytes.NewReader(t.Input))
+			schema, _ := jsonschema.UnmarshalJSON(bytes.NewReader(t.InputSchema))
 			if c.token != "" && reflectsCredential(schema, c.token) {
 				return nil, ErrCertification
 			}
-			t.Input, _ = json.Marshal(schema)
+			input, _ := json.Marshal(schema)
 			seen[t.Name] = true
-			result.Tools = append(result.Tools, Tool{t.Name, t.Description, t.Input})
+			result.Tools = append(result.Tools, Tool{t.Name, t.Description, input})
 		}
-		if listing.Next == "" {
+		if listing.NextCursor == "" {
 			sort.Slice(result.Tools, func(i, j int) bool { return result.Tools[i].Name < result.Tools[j].Name })
 			encoded, _ := json.Marshal(result.Tools)
 			if len(encoded) > 1<<20 {
@@ -96,11 +85,11 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 			result.Digest = hex.EncodeToString(sum[:])
 			return result, nil
 		}
-		if len(listing.Next) > 1024 || cursors[listing.Next] {
+		if len(listing.NextCursor) > 1024 || cursors[listing.NextCursor] {
 			return nil, ErrCertification
 		}
-		cursors[listing.Next] = true
-		cursor = listing.Next
+		cursors[listing.NextCursor] = true
+		cursor = listing.NextCursor
 	}
 	return nil, ErrCertification
 }

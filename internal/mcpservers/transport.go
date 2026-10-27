@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -25,36 +26,73 @@ type TransportOptions struct {
 	Timeout    time.Duration
 }
 
+type ListedTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+type ToolList struct {
+	Tools      []ListedTool `json:"tools"`
+	NextCursor string       `json:"nextCursor"`
+}
+
+type ToolContent struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+}
+
+type ToolResult struct {
+	Content           []ToolContent   `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
+}
+
+type toolListParams struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
+type toolCallParams struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+type clientInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type initializeParams struct {
+	ProtocolVersion string     `json:"protocolVersion"`
+	Capabilities    struct{}   `json:"capabilities"`
+	ClientInfo      clientInfo `json:"clientInfo"`
+}
+
 type Transport struct {
 	client                             *http.Client
 	endpoint, token, session, protocol string
-	nextID                             int
+	nextID                             atomic.Int64
 }
 
 func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, opts TransportOptions) (*Transport, error) {
-	if policy == nil {
+	if policy == nil || opts.ClientName == "" || opts.Timeout <= 0 {
 		return nil, ErrTransport
 	}
 	u, err := policy.ValidateEndpoint(endpoint)
 	if err != nil {
 		return nil, ErrTransport
 	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	clientName := opts.ClientName
-	if clientName == "" {
-		clientName = "openllmproxy-certifier"
-	}
-	c := &Transport{client: policy.Client(timeout), endpoint: u.String(), token: string(credential), nextID: 2}
+	c := &Transport{client: policy.Client(opts.Timeout), endpoint: u.String(), token: string(credential)}
+	c.nextID.Store(1)
 	var init struct {
 		Protocol     string `json:"protocolVersion"`
 		Capabilities struct {
 			Tools json.RawMessage `json:"tools"`
 		} `json:"capabilities"`
 	}
-	if err = c.call(ctx, 1, "initialize", map[string]any{"protocolVersion": protocols[0], "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": clientName, "version": "1"}}, &init); err != nil || !slices.Contains(protocols, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
+	if err = c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: protocols[0], ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !slices.Contains(protocols, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
 		c.Close(ctx)
 		return nil, ErrTransport
 	}
@@ -68,10 +106,32 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 
 func (c *Transport) Protocol() string { return c.protocol }
 
-func (c *Transport) Call(ctx context.Context, method string, params any, out any) error {
-	id := c.nextID
-	c.nextID++
-	return c.call(ctx, id, method, params, out)
+func (c *Transport) ListTools(ctx context.Context, cursor string) (ToolList, error) {
+	out := ToolList{}
+	if err := c.call(ctx, int(c.nextID.Add(1)), "tools/list", toolListParams{Cursor: cursor}, &out); err != nil {
+		return ToolList{}, err
+	}
+	return out, nil
+}
+
+func (c *Transport) CallTool(ctx context.Context, name string, arguments json.RawMessage) (ToolResult, error) {
+	out := ToolResult{}
+	if err := c.call(ctx, int(c.nextID.Add(1)), "tools/call", toolCallParams{Name: name, Arguments: arguments}, &out); err != nil {
+		return ToolResult{}, err
+	}
+	return out, nil
+}
+
+func (c *Transport) applyHeaders(h http.Header) {
+	if c.token != "" {
+		h.Set("Authorization", "Bearer "+c.token)
+	}
+	if c.session != "" {
+		h.Set("Mcp-Session-Id", c.session)
+	}
+	if c.protocol != "" {
+		h.Set("MCP-Protocol-Version", c.protocol)
+	}
 }
 
 func (c *Transport) call(ctx context.Context, id int, method string, params any, out any) error {
@@ -89,15 +149,7 @@ func (c *Transport) call(ctx context.Context, id int, method string, params any,
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if c.session != "" {
-		req.Header.Set("Mcp-Session-Id", c.session)
-	}
-	if c.protocol != "" {
-		req.Header.Set("MCP-Protocol-Version", c.protocol)
-	}
+	c.applyHeaders(req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return ErrTransport
@@ -190,11 +242,7 @@ func (c *Transport) Close(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	r.Header.Set("Mcp-Session-Id", c.session)
-	r.Header.Set("MCP-Protocol-Version", c.protocol)
-	if c.token != "" {
-		r.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	c.applyHeaders(r.Header)
 	if response, err := c.client.Do(r); err == nil {
 		response.Body.Close()
 	}
