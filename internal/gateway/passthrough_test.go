@@ -178,6 +178,10 @@ func TestPassthroughHeadAndConditionalResponsesPassThrough(t *testing.T) {
 	if conditional.StatusCode != http.StatusNotModified {
 		t.Fatalf("conditional response rewritten: %d", conditional.StatusCode)
 	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != "success" || !attemptSuccessful(&env.Attempts[0]) {
+		t.Fatalf("conditional 304 not priced as a successful attempt: %+v", env.Attempts)
+	}
 }
 
 func TestPassthroughUpstreamErrorRecordsFailureOutcome(t *testing.T) {

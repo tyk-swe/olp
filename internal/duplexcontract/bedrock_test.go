@@ -95,18 +95,27 @@ func TestBedrockObserverSettlesCumulativeUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	observer := template.Observer(1 << 20)
-	for _, frame := range []string{
+	serve := func(frames ...string) {
+		t.Helper()
+		for _, frame := range frames {
+			if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+				t.Fatalf("frame %s: %v", frame, err)
+			}
+		}
+	}
+	serve(
 		`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c1"}}}`,
 		`{"event":{"contentStart":{"contentId":"x1","type":"TEXT","role":"ASSISTANT"}}}`,
 		`{"event":{"textOutput":{"content":"hello"}}}`,
 		`{"event":{"contentEnd":{"contentId":"x1"}}}`,
+	)
+	if err := observer.ClientFrame([]byte(`{"event":{"audioInput":{"promptName":"p1","contentName":"a1","content":"AA=="}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	serve(
 		`{"event":{"usageEvent":{"sessionId":"s1","promptName":"p1","completionId":"c1","totalInputTokens":120,"totalOutputTokens":45,"totalTokens":165,"details":{"total":{"input":{"speechTokens":100,"textTokens":20},"output":{"speechTokens":40,"textTokens":5}}}}}}`,
 		`{"event":{"completionEnd":{"sessionId":"s1","promptName":"p1","completionId":"c1","stopReason":"END_TURN"}}}`,
-	} {
-		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
-			t.Fatalf("frame %s: %v", frame, err)
-		}
-	}
+	)
 	usage := observer.Usage()
 	if usage == nil || usage.InputTokens != 120 || usage.OutputTokens != 45 || usage.TotalTokens != 165 {
 		t.Fatalf("usage = %+v", usage)

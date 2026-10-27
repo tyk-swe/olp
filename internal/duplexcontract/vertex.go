@@ -83,15 +83,16 @@ func bindVertexSetup(frame []byte, boundModel string, maxBytes int) ([]byte, err
 }
 
 type vertexObserver struct {
-	maxBytes     int
-	usage        *wire.Usage
-	turn         *wire.Usage
-	pending      bool
-	awaiting     bool
-	submitted    int
-	realtimeTurn bool
-	incomplete   bool
-	setupDone    bool
+	maxBytes   int
+	usage      *wire.Usage
+	turn       *wire.Usage
+	pending    bool
+	awaiting   bool
+	submitted  int
+	inputSeq   int
+	coveredSeq int
+	incomplete bool
+	setupDone  bool
 }
 
 func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -108,17 +109,26 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	var turnUsage *wire.Usage
 	if observed.Usage != nil {
 		turnUsage = vertexUsage(observed.Usage)
+		o.coveredSeq = o.inputSeq
+	}
+	auxiliary := observed.Kind == "serverContent" && !observed.TurnComplete && transcriptionOnly(observed.Source.Root())
+	if auxiliary && turnUsage == nil {
+		return ServerFrame{}, nil
 	}
 	if o.awaiting {
+		switch observed.Kind {
+		case "setupComplete", "sessionResumptionUpdate", "goAway":
+			return ServerFrame{SetupComplete: observed.Kind == "setupComplete"}, nil
+		}
 		o.awaiting = false
-		if observed.Kind == "" && turnUsage != nil {
+		if (observed.Kind == "" || auxiliary) && turnUsage != nil {
 			o.turn = turnUsage
 			o.flushTurn()
 			return ServerFrame{}, nil
 		}
 		o.incomplete = true
 	}
-	if observed.Kind == "serverContent" || observed.Kind == "toolCall" {
+	if (observed.Kind == "serverContent" || observed.Kind == "toolCall") && !auxiliary {
 		o.pending = !observed.TurnComplete
 	}
 	if turnUsage != nil {
@@ -134,8 +144,22 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	return ServerFrame{ProviderError: observed.Kind == "error", SetupComplete: observed.Kind == "setupComplete"}, nil
 }
 
+func transcriptionOnly(root oif.Value) bool {
+	content, ok := root.Lookup("serverContent")
+	if !ok || content.Kind() != oif.Object || len(content.Members()) == 0 {
+		return false
+	}
+	for _, member := range content.Members() {
+		switch member.Name {
+		case "inputTranscription", "outputTranscription", "input_transcription", "output_transcription":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (o *vertexObserver) flushTurn() {
-	o.realtimeTurn = false
 	if o.submitted > 0 {
 		o.submitted--
 	}
@@ -230,18 +254,13 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 	if !inputOK {
 		input, inputOK = doc.Root().Lookup("realtime_input")
 	}
-	if inputOK && input.Kind() == oif.Object {
-		for _, member := range input.Members() {
-			switch member.Name {
-			case "activityEnd", "activity_end", "audioStreamEnd", "audio_stream_end", "text":
-				o.realtimeTurn = true
-			}
-		}
+	if inputOK && input.Kind() == oif.Object && len(input.Members()) > 0 {
+		o.inputSeq++
 	}
 	return nil
 }
 
 func (o *vertexObserver) usageValue() *wire.Usage { return o.usage }
 func (o *vertexObserver) complete() bool {
-	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && o.submitted == 0 && !o.realtimeTurn && !o.incomplete
+	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && o.submitted == 0 && o.inputSeq == o.coveredSeq && !o.incomplete
 }

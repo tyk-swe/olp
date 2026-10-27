@@ -186,6 +186,39 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if !observer.Complete() {
 		t.Fatal("snake_case realtime turn settled by terminal usage is not complete")
 	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"outputTranscription":{"text":"hello"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("trailing transcription reopened a settled session")
+	}
+	if err := observer.ClientFrame([]byte(`{"realtimeInput":{"audio":{"mimeType":"audio/pcm;rate=16000","data":"AQIDBA=="}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after streaming audio that never started")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("streamed audio settled by terminal usage is not complete")
+	}
+	if err := observer.ClientFrame([]byte(`{"clientContent":{"turns":[{"role":"user","parts":[{"text":"again"}]}],"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range []string{
+		`{"serverContent":{"turnComplete":true}}`,
+		`{"sessionResumptionUpdate":{"resumable":true}}`,
+		`{"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !observer.Complete() {
+		t.Fatal("control frame between turn completion and standalone usage broke settlement")
+	}
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
 		t.Fatal(err)
 	}

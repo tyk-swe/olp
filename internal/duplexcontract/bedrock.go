@@ -40,12 +40,12 @@ func inspectBedrockSetup(frame []byte, maxBytes int) (Setup, error) {
 }
 
 type bedrockObserver struct {
-	maxBytes     int
-	usage        *wire.Usage
-	pending      int
-	inputPending bool
-	sawUsage     bool
-	incomplete   bool
+	maxBytes        int
+	usage           *wire.Usage
+	pending         int
+	inputAfterUsage bool
+	sawUsage        bool
+	incomplete      bool
 }
 
 func (o *bedrockObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -63,7 +63,6 @@ func (o *bedrockObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	}
 	switch kind {
 	case "completionStart":
-		o.inputPending = false
 		o.pending++
 		o.sawUsage = false
 	case "completionEnd":
@@ -78,6 +77,7 @@ func (o *bedrockObserver) serverFrame(frame []byte) (ServerFrame, error) {
 			if o.usage == nil || usage.TotalTokens >= o.usage.TotalTokens {
 				o.usage = usage
 			}
+			o.inputAfterUsage = false
 			o.sawUsage = true
 		} else {
 			o.incomplete = true
@@ -127,12 +127,12 @@ func (o *bedrockObserver) clientFrame(frame []byte) error {
 		return refuse("invalid_duplex_frame", "/event", "registered_event", "The duplex client sent an unregistered Nova Sonic event.")
 	}
 	if kind == "textInput" || kind == "audioInput" {
-		o.inputPending = true
+		o.inputAfterUsage = true
 	}
 	return nil
 }
 
 func (o *bedrockObserver) usageValue() *wire.Usage { return o.usage }
 func (o *bedrockObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && !o.inputPending && !o.incomplete
+	return o.usage != nil && o.pending == 0 && !o.inputAfterUsage && !o.incomplete
 }

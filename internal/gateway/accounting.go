@@ -300,7 +300,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 // attemptSuccessful reports whether the attempt completed successfully, which
 // is when a per-request price component applies.
 func attemptSuccessful(fact *AttemptFact) bool {
-	return (fact.Class == classSuccess || fact.Class == "cache_hit") && fact.Status >= 200 && fact.Status <= 299
+	return (fact.Class == classSuccess || fact.Class == "cache_hit") && (fact.Status >= 200 && fact.Status <= 299 || fact.Status == 304)
 }
 
 // attemptUsage is the billing evidence an attempt carries into its usage event.
