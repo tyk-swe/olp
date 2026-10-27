@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image/png"
+	"math"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
@@ -121,6 +124,46 @@ func TestAzureResultAndUsage(t *testing.T) {
 		if _, err := parseAzureResult(r, azureResultDoc(t, body)); err == nil {
 			t.Fatalf("bad result admitted: %s", body)
 		}
+	}
+}
+
+func TestAzureSpanBounds(t *testing.T) {
+	request := azureRequestDoc(t, `{"model":"m","base64Source":"QUJD"}`)
+	units := utf16.Encode([]rune("a𝄞b"))
+	for _, tc := range []struct {
+		name   string
+		offset int64
+		length int64
+		valid  bool
+		text   string
+	}{
+		{"full", 0, 4, true, "a𝄞b"},
+		{"surrogate pair", 1, 2, true, "𝄞"},
+		{"empty at end", 4, 0, true, ""},
+		{"past end", 4, 1, false, ""},
+		{"negative offset", -1, 1, false, ""},
+		{"negative length", 1, -1, false, ""},
+		{"overflow length", 1, math.MaxInt64, false, ""},
+		{"overflow offset", math.MaxInt64, 1, false, ""},
+		{"both maximum", math.MaxInt64, math.MaxInt64, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"status":"succeeded","analyzeResult":{"modelId":"m","stringIndexType":"utf16CodeUnit","content":"a𝄞b","pages":[{"pageNumber":1,"spans":[{"offset":%d,"length":%d}]}]}}`, tc.offset, tc.length)
+			view, err := parseAzureResult(request, azureResultDoc(t, body))
+			if (err == nil) != tc.valid {
+				t.Errorf("result error = %v, want valid = %t", err, tc.valid)
+			}
+			if err == nil && tc.valid {
+				pages, pageErr := azurePages(view.(Result).azure)
+				if pageErr != nil || len(pages) != 1 || pages[0].Markdown != tc.text {
+					t.Fatalf("pages = %+v, error = %v, want text %q", pages, pageErr, tc.text)
+				}
+			}
+			text, ok := utf16Slice(units, []azureSpan{{offset: tc.offset, length: tc.length}})
+			if ok != tc.valid || text != tc.text {
+				t.Fatalf("slice = (%q, %t), want (%q, %t)", text, ok, tc.text, tc.valid)
+			}
+		})
 	}
 }
 
