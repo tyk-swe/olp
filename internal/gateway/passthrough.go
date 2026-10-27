@@ -326,7 +326,7 @@ slots:
 		if routing.HopByHopOrCredentialHeader(canonical) || x.sensitive.Contains(canonical) {
 			continue
 		}
-		if resp.StatusCode >= 400 && (canonical == "Content-Encoding" || canonical == "Content-Md5" || canonical == "Digest") {
+		if r.Method != http.MethodHead && resp.StatusCode >= 400 && (canonical == "Content-Encoding" || canonical == "Content-Md5" || canonical == "Digest") {
 			continue
 		}
 		for _, value := range values {
@@ -377,7 +377,7 @@ slots:
 }
 
 func passthroughResponseBody(response *http.Response, sensitive egress.Sensitive, limit int64) (io.Reader, *Error) {
-	if response.StatusCode < 400 {
+	if response.StatusCode < 400 || response.Request != nil && response.Request.Method == http.MethodHead {
 		return response.Body, nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
@@ -399,24 +399,28 @@ func copyPassthroughResponse(w http.ResponseWriter, source io.Reader, limit int6
 	bounded := &io.LimitedReader{R: source, N: limit + 1}
 	buffer := make([]byte, 32<<10)
 	controller := http.NewResponseController(w)
+	var deliveryErr error
 	for {
 		n, readErr := bounded.Read(buffer)
 		if bounded.N == 0 {
-			return io.ErrShortBuffer, nil
+			return io.ErrShortBuffer, deliveryErr
 		}
-		if n > 0 {
-			if _, err := w.Write(buffer[:n]); err != nil {
-				return nil, err
-			}
-			if err := controller.Flush(); err != nil {
-				return nil, err
+		if n > 0 && deliveryErr == nil {
+			written, err := w.Write(buffer[:n])
+			switch {
+			case err != nil:
+				deliveryErr = err
+			case written != n:
+				deliveryErr = io.ErrShortWrite
+			default:
+				deliveryErr = controller.Flush()
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
-			return nil, nil
+			return nil, deliveryErr
 		}
 		if readErr != nil {
-			return readErr, nil
+			return readErr, deliveryErr
 		}
 	}
 }

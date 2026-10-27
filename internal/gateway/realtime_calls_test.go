@@ -27,6 +27,54 @@ const (
 	webrtcAnswerSDP = "v=0\r\no=- 3 4 IN IP4 127.0.0.1\r\ns=-\r\na=olp-test-marker-answer\r\n"
 )
 
+func TestWebRTCSessionBindingRejectsOtherSessionContracts(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"transcription","model":"route"}`,
+		`{"type":null,"model":"route"}`,
+		`{"type":1,"model":"route"}`,
+		`{"type":"","model":"route"}`,
+		`{"type":"realtime","model":"route"}]`,
+	} {
+		if _, err := bindWebRTCSession([]byte(raw), "route", "upstream"); err == nil {
+			t.Fatalf("invalid session accepted: %s", raw)
+		}
+	}
+	for _, raw := range []string{`{}`, `{"type":"realtime","model":"route"}`} {
+		bound, err := bindWebRTCSession([]byte(raw), "route", "upstream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var session struct {
+			Type  string `json:"type"`
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(bound, &session); err != nil || session.Type != "realtime" || session.Model != "upstream" {
+			t.Fatalf("incorrect session binding: %s (%v)", bound, err)
+		}
+	}
+}
+
+func TestWebRTCNonSDPAnswerIsNotDeliveredAndIsHungUp(t *testing.T) {
+	mock := newWebRTCMock("json-answer")
+	h := webrtcHarness(t, mock, true)
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadGateway || strings.Contains(string(body), "private-provider-diagnostic") {
+		t.Fatalf("non-SDP answer delivered: %d %s", resp.StatusCode, body)
+	}
+	creates, controls, hangups := mock.counts()
+	if creates != 1 || controls != 0 || hangups != 1 {
+		t.Fatalf("provider cleanup: creates=%d controls=%d hangups=%d", creates, controls, hangups)
+	}
+	if h.gateway.webrtcSessionCount() != 0 {
+		t.Fatal("failed session retained")
+	}
+}
+
 func TestWebRTCAccumulateUsageKeepsModalityShares(t *testing.T) {
 	share := func(v int64) *int64 { return &v }
 	sess := &webrtcSession{}
@@ -125,6 +173,12 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			}
 			if mode == "truncated" {
 				w.Header().Set("Content-Length", "1024")
+			}
+			if mode == "json-answer" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				io.WriteString(w, `{"diagnostic":"private-provider-diagnostic"}`)
+				return
 			}
 			w.Header().Set("Content-Type", "application/sdp")
 			w.WriteHeader(http.StatusCreated)

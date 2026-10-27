@@ -267,7 +267,14 @@ func utf16Slice(units []uint16, spans []azureSpan) (string, bool) {
 		if span.offset < 0 || span.length < 0 || span.offset > int64(len(units)) || span.length > int64(len(units))-span.offset {
 			return "", false
 		}
-		b.WriteString(string(utf16.Decode(units[span.offset : span.offset+span.length])))
+		if span.length == 0 {
+			continue
+		}
+		end := span.offset + span.length
+		if units[span.offset] >= 0xdc00 && units[span.offset] <= 0xdfff || units[end-1] >= 0xd800 && units[end-1] <= 0xdbff {
+			return "", false
+		}
+		b.WriteString(string(utf16.Decode(units[span.offset:end])))
 	}
 	return b.String(), true
 }

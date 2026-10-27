@@ -10,6 +10,29 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
+func TestOCRMappingsRejectUnrepresentablePageSelections(t *testing.T) {
+	for _, target := range []string{Vertex, AzureDocumentIntelligence} {
+		for _, pages := range []string{`[]`, `[9223372036854775807]`} {
+			t.Run(target+pages, func(t *testing.T) {
+				source := request(t, `{"model":"route","document":{"type":"document_url","document_url":"data:application/pdf;base64,QUJD"},"pages":`+pages+`}`)
+				view, err := parseRequest(source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, mapping := range Mappings() {
+					if mapping.Source.ID == Mistral && mapping.Target.ID == target {
+						if _, _, err := mapping.Lower(source, view); err == nil {
+							t.Fatalf("%s accepted an unrepresentable page selection %s", target, pages)
+						}
+						return
+					}
+				}
+				t.Fatal("mapping missing")
+			})
+		}
+	}
+}
+
 func lowerVertex(t *testing.T, body string) (map[string]any, error) {
 	t.Helper()
 	source := request(t, body)

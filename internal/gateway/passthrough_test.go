@@ -15,6 +15,76 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+type passthroughShortWriter struct{ http.ResponseWriter }
+
+func (w passthroughShortWriter) Write(body []byte) (int, error) {
+	return len(body) - 1, nil
+}
+
+type passthroughFlushFailureWriter struct{ http.ResponseWriter }
+
+func (w passthroughFlushFailureWriter) Write(body []byte) (int, error) {
+	return len(body), nil
+}
+
+func (w passthroughFlushFailureWriter) FlushError() error { return io.ErrClosedPipe }
+
+func TestPassthroughShortWriteIsNotSuccessfulDelivery(t *testing.T) {
+	readErr, deliveryErr := copyPassthroughResponse(passthroughShortWriter{}, strings.NewReader("complete response"), 1024)
+	if readErr != nil || deliveryErr != io.ErrShortWrite {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func TestPassthroughFlushFailureDoesNotHideIncompleteUpstream(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		_, _ = io.WriteString(writer, "partial response")
+		_ = writer.CloseWithError(io.ErrUnexpectedEOF)
+	}()
+	readErr, deliveryErr := copyPassthroughResponse(passthroughFlushFailureWriter{}, reader, 1024)
+	if readErr != io.ErrUnexpectedEOF || deliveryErr != io.ErrClosedPipe {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func TestPassthroughHEADPreservesCompressedErrorMetadata(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", "120")
+		w.WriteHeader(http.StatusNotFound)
+	})
+	resp := h.do(t.Context(), http.MethodHead, passthroughURL, fullKey, nil, nil)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusNotFound || len(body) != 0 || resp.Header.Get("Content-Encoding") != "gzip" || resp.Header.Get("Content-Length") != "120" {
+		t.Fatalf("HEAD response: status=%d headers=%v body=%q error=%v", resp.StatusCode, resp.Header, body, err)
+	}
+}
+
+func TestPassthroughDeliveryFailureDoesNotHideIncompleteUpstream(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		_, _ = io.WriteString(writer, "partial response")
+		_ = writer.CloseWithError(io.ErrUnexpectedEOF)
+	}()
+	readErr, deliveryErr := copyPassthroughResponse(failingResponseWriter{}, reader, 1024)
+	if readErr != io.ErrUnexpectedEOF || deliveryErr != io.ErrClosedPipe {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func TestPassthroughDeliveryFailureRetainsCompletedUpstream(t *testing.T) {
+	readErr, deliveryErr := copyPassthroughResponse(failingResponseWriter{}, strings.NewReader("complete response"), 1024)
+	if readErr != nil || deliveryErr != io.ErrClosedPipe {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
 func passthroughHarness(t *testing.T) *harness {
 	t.Helper()
 	h := strictHarness(t, func(s *routing.Snapshot) {

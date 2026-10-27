@@ -217,10 +217,16 @@ func bindWebRTCSession(raw json.RawMessage, slug, providerModel string) (json.Ra
 		return bound, nil
 	}
 	var members map[string]json.RawMessage
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if err := decoder.Decode(&members); err != nil || decoder.More() || members == nil {
+	if err := json.Unmarshal(raw, &members); err != nil || members == nil {
 		return nil, invalidRequest("invalid_value", "The session document must be one JSON object.", strPtr("session"))
 	}
+	if rawType, present := members["type"]; present {
+		var sessionType string
+		if err := json.Unmarshal(rawType, &sessionType); err != nil || sessionType != "realtime" {
+			return nil, invalidRequest("unsupported_session_type", "This surface only admits realtime sessions.", strPtr("session"))
+		}
+	}
+	members["type"] = json.RawMessage(`"realtime"`)
 	for _, name := range []string{"client_secret", "client_secrets"} {
 		if _, ok := members[name]; ok {
 			return nil, invalidRequest("client_secrets_unavailable", "Raw provider client secrets are not available on this surface.", strPtr("session"))
@@ -587,7 +593,8 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		sess.callID = callID
 	}
 	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxWebRTCSDPBytes+1))
-	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes {
+	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes || mediaErr != nil || mediaType != "application/sdp" {
 		fact.Class = classProtocol
 		fact.recordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)

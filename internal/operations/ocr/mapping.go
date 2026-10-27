@@ -2,6 +2,7 @@ package ocr
 
 import (
 	"encoding/base64"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -140,7 +141,7 @@ func pageNumbers(root oif.Value) ([]int64, bool, error) {
 	numbers := make([]int64, len(elements))
 	for i, e := range elements {
 		n, ok := operations.Int(e)
-		if !ok || n < 0 {
+		if !ok || n < 0 || n == math.MaxInt64 {
 			return nil, false, invalid("pages")
 		}
 		numbers[i] = n + 1
@@ -280,9 +281,12 @@ func lowerAzure(source oif.Request, view oif.View) (oif.Document, []oif.Provenan
 	if err != nil {
 		return oif.Document{}, nil, err
 	}
-	numbers, _, err := pageNumbers(root)
+	numbers, present, err := pageNumbers(root)
 	if err != nil {
 		return oif.Document{}, nil, err
+	}
+	if present && len(numbers) == 0 {
+		return oif.Document{}, nil, invalid("pages")
 	}
 	document := mappedAzureRequest{Model: operations.String(member(root, "model")), URLSource: urlSource, Base64Source: base64Source, Pages: azurePageRanges(numbers)}
 	parsed, err := oif.ParseJSON(operations.Raw(document), oif.Limits{})

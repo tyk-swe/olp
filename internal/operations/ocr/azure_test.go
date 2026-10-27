@@ -13,6 +13,32 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
+func TestAzureUTF16SlicePreservesWholeCharacters(t *testing.T) {
+	units := utf16.Encode([]rune("A🙂B"))
+	for _, tc := range []struct {
+		name  string
+		spans []azureSpan
+		want  string
+		ok    bool
+	}{
+		{"whole", []azureSpan{{offset: 0, length: 4}}, "A🙂B", true},
+		{"emoji", []azureSpan{{offset: 1, length: 2}}, "🙂", true},
+		{"split end", []azureSpan{{offset: 0, length: 2}}, "", false},
+		{"split start", []azureSpan{{offset: 2, length: 2}}, "", false},
+		{"empty", []azureSpan{{offset: 2, length: 0}}, "", true},
+		{"end", []azureSpan{{offset: 4, length: 0}}, "", true},
+		{"outside", []azureSpan{{offset: 4, length: 1}}, "", false},
+		{"negative", []azureSpan{{offset: -1, length: 1}}, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := utf16Slice(units, tc.spans)
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("slice = %q, %v; want %q, %v", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
 func TestAzureProbeUsesSupportedImage(t *testing.T) {
 	var probe struct {
 		Base64Source string `json:"base64Source"`

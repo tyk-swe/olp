@@ -64,10 +64,17 @@ export function validatePassthroughConfig(
     )
   )
     return 'Choose distinct pass-through methods.';
-  if (!config.paths.length || config.paths.length > 32)
+  if (
+    !config.paths.length ||
+    config.paths.length > 32 ||
+    new Set(config.paths).size !== config.paths.length
+  )
     return 'Declare 1 to 32 pass-through path patterns.';
   for (const pattern of config.paths) {
     if (
+      pattern.length > 512 ||
+      pattern.split('/').length > 17 ||
+      /[^\x21-\x7e]/.test(pattern) ||
       !pattern.startsWith('/') ||
       pattern.startsWith('//') ||
       /[?#\\%]/.test(pattern) ||
@@ -84,11 +91,32 @@ export function validatePassthroughConfig(
     )
       return 'Pass-through path patterns are anchored segment paths where * is a whole segment.';
   }
+  const query = config.query ?? [];
   if (
-    (config.headers ?? []).some((header) =>
-      forbiddenHeaders.has(header.toLowerCase())
+    query.length > 32 ||
+    new Set(query).size !== query.length ||
+    query.some((name) => !/^[A-Za-z0-9._-]{1,64}$/.test(name))
+  )
+    return 'Allow at most 32 distinct query names using letters, digits, dot, underscore or hyphen.';
+  const headers = config.headers ?? [];
+  if (
+    headers.length > 32 ||
+    new Set(headers).size !== headers.length ||
+    headers.some(
+      (header) =>
+        header.length > 128 ||
+        !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(header) ||
+        header !==
+          header
+            .toLowerCase()
+            .replace(
+              /(^|-)([a-z])/g,
+              (_, prefix: string, letter: string) => prefix + letter.toUpperCase()
+            ) ||
+        header.toLowerCase().startsWith('x-olp-') ||
+        forbiddenHeaders.has(header.toLowerCase())
     )
   )
-    return 'Pass-through headers cannot name hop-by-hop or credential headers.';
+    return 'Allow at most 32 distinct canonical headers, excluding hop-by-hop, credential and OLP control headers.';
   return null;
 }
