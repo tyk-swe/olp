@@ -3322,6 +3322,27 @@ func (e MCPServerSummaryTransport) Valid() bool {
 	}
 }
 
+// Defines values for MCPToolCallResponseStatus.
+const (
+	MCPToolCallResponseStatusOutcomeUnknown MCPToolCallResponseStatus = "outcome_unknown"
+	MCPToolCallResponseStatusSucceeded      MCPToolCallResponseStatus = "succeeded"
+	MCPToolCallResponseStatusUpstreamError  MCPToolCallResponseStatus = "upstream_error"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResponseStatus enum.
+func (e MCPToolCallResponseStatus) Valid() bool {
+	switch e {
+	case MCPToolCallResponseStatusOutcomeUnknown:
+		return true
+	case MCPToolCallResponseStatusSucceeded:
+		return true
+	case MCPToolCallResponseStatusUpstreamError:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MFAChallengeMethods.
 const (
 	MFAChallengeMethodsRecovery MFAChallengeMethods = "recovery"
@@ -9350,6 +9371,35 @@ type MCPServerSummary struct {
 // MCPServerSummaryTransport defines model for MCPServerSummary.Transport.
 type MCPServerSummaryTransport string
 
+// MCPToolCallList defines model for MCPToolCallList.
+type MCPToolCallList struct {
+	Items      []MCPToolCallResponse     `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// MCPToolCallResponse defines model for MCPToolCallResponse.
+type MCPToolCallResponse struct {
+	ApiKeyId          openapi_types.UUID        `json:"api_key_id"`
+	CompletedAt       time.Time                 `json:"completed_at"`
+	CreatedAt         time.Time                 `json:"created_at"`
+	DispatchId        openapi_types.UUID        `json:"dispatch_id"`
+	Id                openapi_types.UUID        `json:"id"`
+	InputDigest       string                    `json:"input_digest"`
+	IsError           bool                      `json:"is_error"`
+	ProjectId         openapi_types.UUID        `json:"project_id"`
+	ResultDigest      string                    `json:"result_digest"`
+	ServerId          openapi_types.UUID        `json:"server_id"`
+	ServerRevisionId  openapi_types.UUID        `json:"server_revision_id"`
+	StartedAt         time.Time                 `json:"started_at"`
+	Status            MCPToolCallResponseStatus `json:"status"`
+	ToolAlias         string                    `json:"tool_alias"`
+	ToolsetId         openapi_types.UUID        `json:"toolset_id"`
+	ToolsetRevisionId openapi_types.UUID        `json:"toolset_revision_id"`
+}
+
+// MCPToolCallResponseStatus defines model for MCPToolCallResponse.Status.
+type MCPToolCallResponseStatus string
+
 // MFABootstrapSession defines model for MFABootstrapSession.
 type MFABootstrapSession struct {
 	RecoveryCodes []string        `json:"recovery_codes"`
@@ -14722,6 +14772,17 @@ type DeleteMcpServerParams struct {
 type UpdateMcpServerParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 	IfMatch        string `json:"If-Match"`
+}
+
+// ListMcpToolCallsParams defines parameters for ListMcpToolCalls.
+type ListMcpToolCallsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	ToolsetId *openapi_types.UUID `form:"toolset_id,omitempty" json:"toolset_id,omitempty"`
 }
 
 // ListMediaJobsParams defines parameters for ListMediaJobs.

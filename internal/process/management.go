@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
@@ -79,6 +80,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	}}).Register(mux)
 	(&agents.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	(&mcp.Management{Access: m.Access}).Register(mux)
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)

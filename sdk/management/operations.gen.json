@@ -15617,6 +15617,53 @@
     }
   },
   {
+    "name": "get_mcp_tool_call",
+    "group": "mcp-servers",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/mcp-tool-calls/{call_id}",
+    "description": "get mcp tool call",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "call_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "call_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "call_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_media_job",
     "group": "media-jobs",
     "method": "GET",
@@ -19146,6 +19193,78 @@
               "maximum": 200,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_mcp_tool_calls",
+    "group": "mcp-servers",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/mcp-tool-calls",
+    "description": "list mcp tool calls",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "toolset_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "api_key_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
