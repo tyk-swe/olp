@@ -147,6 +147,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	if inputs := s.Runtime.RoutingInputs(); inputs != nil {
 		attempt.Price = inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, routing.PassthroughOperation, s.now())
 	}
+	defer s.settleCaps(r.Context(), x)
 	estimate := max(resourceEstimate, x.estimate)
 	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
 	var slot routing.Slot
@@ -193,7 +194,6 @@ slots:
 			x.spendCaps(hold.budgets, attempt)
 		}
 		s.settlePinHold(r.Context(), x, hold, settledAttemptTokens(factP, estimate))
-		s.settleCaps(r.Context(), x)
 	}()
 	timeout := time.Duration(route.OverallTimeout) * time.Millisecond
 	if target.Timeout > 0 {

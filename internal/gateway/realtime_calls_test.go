@@ -105,6 +105,12 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			m.session = []byte(r.FormValue("session"))
 			mode := m.mode
 			m.mu.Unlock()
+			if mode == "reject" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				io.WriteString(w, `{"error":{"message":"invalid session","type":"invalid_request_error","code":"invalid_value"}}`)
+				return
+			}
 			if mode != "noloc" {
 				w.Header().Set("Location", "/v1/realtime/calls/rtc_test1")
 			}
@@ -305,6 +311,23 @@ func TestWebRTCTokenCappedKeyRefusedBeforeDispatch(t *testing.T) {
 	}
 	if creates, _, _ := mock.counts(); creates != 0 {
 		t.Fatal("provider session created for a token-capped key")
+	}
+}
+
+func TestWebRTCCostCappedKeyRefusedBeforeDispatch(t *testing.T) {
+	mock := newWebRTCMock("usage")
+	h := webrtcHarness(t, mock, true)
+	authority := h.rt.keys[fullKey]
+	authority.Policy.DailyCostLimit = stringptr("10")
+	h.rt.keys[fullKey] = authority
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || !strings.Contains(string(body), "unbounded_work_budget") {
+		t.Fatalf("cost-capped create status=%d body=%q", resp.StatusCode, body)
+	}
+	if creates, _, _ := mock.counts(); creates != 0 {
+		t.Fatal("provider session created for a cost-capped key")
 	}
 }
 

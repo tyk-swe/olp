@@ -85,6 +85,42 @@ func TestBedrockSetupAndFrameGrammar(t *testing.T) {
 		t.Fatal("unregistered provider event was admitted")
 	}
 	if observer.Usage() != nil || observer.Complete() {
-		t.Fatal("Nova Sonic produced terminal usage evidence its wire does not carry; settlement must stay uncertain")
+		t.Fatal("frames without cumulative usage totals settled as complete evidence")
+	}
+}
+
+func TestBedrockObserverSettlesCumulativeUsage(t *testing.T) {
+	template, err := duplexcontract.Compile(bedrockConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := template.Observer(1 << 20)
+	for _, frame := range []string{
+		`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c1"}}}`,
+		`{"event":{"contentStart":{"contentId":"x1","type":"TEXT","role":"ASSISTANT"}}}`,
+		`{"event":{"textOutput":{"content":"hello"}}}`,
+		`{"event":{"contentEnd":{"contentId":"x1"}}}`,
+		`{"event":{"usageEvent":{"sessionId":"s1","promptName":"p1","completionId":"c1","totalInputTokens":120,"totalOutputTokens":45,"totalTokens":165,"details":{"total":{"input":{"speechTokens":100,"textTokens":20},"output":{"speechTokens":40,"textTokens":5}}}}}}`,
+		`{"event":{"completionEnd":{"sessionId":"s1","promptName":"p1","completionId":"c1","stopReason":"END_TURN"}}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatalf("frame %s: %v", frame, err)
+		}
+	}
+	usage := observer.Usage()
+	if usage == nil || usage.InputTokens != 120 || usage.OutputTokens != 45 || usage.TotalTokens != 165 {
+		t.Fatalf("usage = %+v", usage)
+	}
+	if usage.AudioInputTokens == nil || *usage.AudioInputTokens != 100 || usage.AudioOutputTokens == nil || *usage.AudioOutputTokens != 40 {
+		t.Fatalf("speech shares = %+v", usage)
+	}
+	if !observer.Complete() {
+		t.Fatal("a completion with cumulative usage did not settle as complete")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c2"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete while a later completion has no usage")
 	}
 }

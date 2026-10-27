@@ -184,10 +184,17 @@ func TestBraveResultContract(t *testing.T) {
 	}
 	for _, body := range []string{
 		`{"type":"search","query":{"original":"q"}}`,
+		`{"type":"search","query":{"original":"q"},"web":null}`,
+	} {
+		if _, err := parseResult(r, result(t, Brave, body), Brave); err != nil {
+			t.Fatalf("nullable web result refused: %s: %v", body, err)
+		}
+	}
+	for _, body := range []string{
 		`{"web":{"results":[{"title":"t"}]}}`,
 		`{"web":{"results":[{"title":"t","url":"https://x"},{"title":"t","url":"https://y"}]}}`,
 		`{"web":{"results":{}}}`,
-		`{"results":[{"title":"t","url":"https://x"}]}`,
+		`{"web":{"type":"search"}}`,
 	} {
 		if _, err := parseResult(r, result(t, Brave, body), Brave); err == nil {
 			t.Fatalf("bad result admitted: %s", body)

@@ -404,6 +404,9 @@ func parseResult(request oif.Request, source oif.Result, id string) (oif.View, e
 		return r, operations.Violation(field, requirement)
 	}
 	if id == Brave {
+		if operations.Optional(member(root, "web")) {
+			return r, nil
+		}
 		rows := member(member(root, "web"), "results")
 		if rows.Kind() != oif.Array {
 			return fail("/web/results", "search_results")

@@ -357,7 +357,9 @@ usage are recorded as billing-uncertain.
 `POST /v1/realtime/calls` opens a governed WebRTC session on OpenAI only. The
 caller posts the OpenAI calls form, an SDP offer plus an optional session
 document whose `model` names a strict route slug, or a raw SDP body with a
-`model` query parameter. Request, concurrency and bounded session cost are
+`model` query parameter. A session whose consumption no token or cost budget
+can bound refuses applicable caps with `unbounded_work_budget`, like the other
+unbounded session paths. Request, concurrency and bounded session cost are
 reserved before the provider session exists, and a server control channel to
 the provider session is established before the SDP answer returns. The answer
 carries a gateway session identity in `Location`, never the provider call
@@ -398,9 +400,11 @@ scoped. The gateway mints no session identifier and exposes no call that can
 address one later, so a session belongs only to the key and route that opened
 its connection. Admissions, the one-hour bound, five-second authority
 rechecks and exactly-once terminal settlement match `GET /v1/realtime`. xAI
-settles from per-response usage and Vertex AI Live from per-turn usage
-metadata. Nova Sonic carries no trustworthy terminal usage on its stream, so
-its sessions always settle as billing-uncertain and never as zero cost.
+settles from per-response usage, including its cumulative billable audio
+seconds, Vertex AI Live from per-turn usage metadata, and Nova Sonic from
+the cumulative token totals its usage events carry. A session whose stream
+ends without that terminal evidence settles as billing-uncertain and never
+as zero cost.
 Rolling any RM6 family back is an ordinary publication change, for example
 retiring its routes or disabling its providers in a new release. New work
 then refuses at admission with nothing dispatched, and sessions that already

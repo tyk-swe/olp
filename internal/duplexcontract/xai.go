@@ -2,6 +2,7 @@ package duplexcontract
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -61,12 +62,18 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 		}
 		input, inputOK := intField(usage, "input_tokens")
 		output, outputOK := intField(usage, "output_tokens")
-		if !inputOK || !outputOK {
+		seconds, secondsOK := decimalField(usage, "billable_audio_seconds")
+		if (!inputOK || !outputOK) && !secondsOK {
 			o.incomplete = true
 			return ServerFrame{}, nil
 		}
-		total, totalOK := intField(usage, "total_tokens")
-		o.addUsage(input, output, total, totalOK)
+		if inputOK && outputOK {
+			total, totalOK := intField(usage, "total_tokens")
+			o.addUsage(input, output, total, totalOK)
+		}
+		if secondsOK {
+			o.setBillableSeconds(seconds)
+		}
 		return ServerFrame{}, nil
 	}
 	return ServerFrame{}, nil
@@ -93,6 +100,33 @@ func (o *xaiObserver) clientFrame(frame []byte) error {
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
 func (o *xaiObserver) complete() bool {
 	return o.usage != nil && o.pending == 0 && !o.incomplete
+}
+
+func (o *xaiObserver) setBillableSeconds(seconds string) {
+	if o.usage == nil {
+		o.usage = &wire.Usage{}
+	}
+	o.usage.MediaUnits = &seconds
+}
+
+func decimalField(parent oif.Value, name string) (string, bool) {
+	v, ok := parent.Lookup(name)
+	if !ok || v.Kind() != oif.Number {
+		return "", false
+	}
+	raw := v.Raw()
+	integer, fraction, hasFraction := strings.Cut(raw, ".")
+	if integer == "" || len(integer) > 18 || hasFraction && (fraction == "" || len(fraction) > 6) {
+		return "", false
+	}
+	for _, part := range [2]string{integer, fraction} {
+		for i := 0; i < len(part); i++ {
+			if part[i] < '0' || part[i] > '9' {
+				return "", false
+			}
+		}
+	}
+	return raw, true
 }
 
 func intField(parent oif.Value, name string) (int64, bool) {

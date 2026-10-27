@@ -39,17 +39,81 @@ func inspectBedrockSetup(frame []byte, maxBytes int) (Setup, error) {
 	return Setup{}, nil
 }
 
-type bedrockObserver struct{ maxBytes int }
+type bedrockObserver struct {
+	maxBytes   int
+	usage      *wire.Usage
+	pending    int
+	sawUsage   bool
+	incomplete bool
+}
 
 func (o *bedrockObserver) serverFrame(frame []byte) (ServerFrame, error) {
-	kind, err := bedrockEventKind(frame, o.maxBytes)
+	doc, err := parseObject(frame, o.maxBytes)
 	if err != nil {
 		return ServerFrame{}, err
 	}
+	event, ok := doc.Root().Lookup("event")
+	if !ok || event.Kind() != oif.Object || len(event.Members()) != 1 {
+		return ServerFrame{}, refuse("invalid_duplex_frame", "/event", "one_event_object", "Nova Sonic frames must carry one event object.")
+	}
+	kind := event.Members()[0].Name
 	if !bedrockServerEvents[kind] {
 		return ServerFrame{}, refuse("invalid_duplex_frame", "/event", "registered_event", "Nova Sonic sent an unregistered server event.")
 	}
+	switch kind {
+	case "completionStart":
+		o.pending++
+		o.sawUsage = false
+	case "completionEnd":
+		if o.pending > 0 {
+			o.pending--
+		}
+		if !o.sawUsage {
+			o.incomplete = true
+		}
+	case "usageEvent":
+		if usage, valid := bedrockUsage(event.Members()[0].Value); valid {
+			if o.usage == nil || usage.TotalTokens >= o.usage.TotalTokens {
+				o.usage = usage
+			}
+			o.sawUsage = true
+		} else {
+			o.incomplete = true
+		}
+	}
 	return ServerFrame{ProviderError: kind == "error"}, nil
+}
+
+func bedrockUsage(event oif.Value) (*wire.Usage, bool) {
+	if event.Kind() != oif.Object {
+		return nil, false
+	}
+	input, inputOK := intField(event, "totalInputTokens")
+	output, outputOK := intField(event, "totalOutputTokens")
+	total, totalOK := intField(event, "totalTokens")
+	if !inputOK || !outputOK || !totalOK {
+		return nil, false
+	}
+	usage := &wire.Usage{InputTokens: input, OutputTokens: output, TotalTokens: total}
+	details, ok := event.Lookup("details")
+	if !ok || details.Kind() != oif.Object {
+		return usage, true
+	}
+	totals, ok := details.Lookup("total")
+	if !ok || totals.Kind() != oif.Object {
+		return usage, true
+	}
+	if in, ok := totals.Lookup("input"); ok && in.Kind() == oif.Object {
+		if speech, speechOK := intField(in, "speechTokens"); speechOK {
+			usage.AudioInputTokens = &speech
+		}
+	}
+	if out, ok := totals.Lookup("output"); ok && out.Kind() == oif.Object {
+		if speech, speechOK := intField(out, "speechTokens"); speechOK {
+			usage.AudioOutputTokens = &speech
+		}
+	}
+	return usage, true
 }
 
 func (o *bedrockObserver) clientFrame(frame []byte) error {
@@ -63,5 +127,7 @@ func (o *bedrockObserver) clientFrame(frame []byte) error {
 	return nil
 }
 
-func (o *bedrockObserver) usageValue() *wire.Usage { return nil }
-func (o *bedrockObserver) complete() bool          { return false }
+func (o *bedrockObserver) usageValue() *wire.Usage { return o.usage }
+func (o *bedrockObserver) complete() bool {
+	return o.usage != nil && o.pending == 0 && !o.incomplete
+}

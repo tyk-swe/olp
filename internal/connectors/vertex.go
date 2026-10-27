@@ -21,6 +21,6 @@ func (c Config) vertexDestination(u *url.URL) bool {
 	}
 	expected, err := url.Parse(expectedRaw)
 	return (c.Network == nil || c.Network.TrustRootsPEM == "") && err == nil && expected.Hostname() != "" &&
-		cloudIdentifier.MatchString(c.CloudRegion) && u.Scheme == "https" && u.User == nil && u.Opaque == "" &&
+		cloudIdentifier.MatchString(c.CloudRegion) && (u.Scheme == "https" || u.Scheme == "wss") && u.User == nil && u.Opaque == "" &&
 		strings.EqualFold(u.Hostname(), expected.Hostname()) && (u.Port() == "" || u.Port() == "443")
 }

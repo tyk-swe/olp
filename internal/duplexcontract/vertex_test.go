@@ -119,6 +119,12 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if !observer.Complete() {
 		t.Fatal("completed turns did not produce complete usage evidence")
 	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after a turn ended without usage")
+	}
 	if err := observer.ClientFrame([]byte(`{"setup":{"model":"models/team-live"}}`)); err == nil {
 		t.Fatal("a second setup frame was admitted mid-session")
 	}

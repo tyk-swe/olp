@@ -85,6 +85,8 @@ func TestDocumentAIAddressingAndDestination(t *testing.T) {
 	}
 	for raw, allowed := range map[string]bool{
 		want: true,
+		"wss://eu-documentai.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent":              true,
+		"ws://eu-documentai.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent":               false,
 		"https://aiplatform.eu.rep.googleapis.com/v1/projects/example-project/locations/eu/processors/processor-1:process": false,
 		"https://us-documentai.googleapis.com/v1/projects/example-project/locations/eu/processors/processor-1:process":     false,
 		"https://eu-documentai.googleapis.com.evil.example/v1/projects/example-project/locations/eu/processors/p:process":  false,

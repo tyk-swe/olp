@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 
+	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/operations/ocr"
 )
@@ -42,6 +44,35 @@ func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
 				t.Fatalf("probe: %+v %v calls=%d", models, err, calls)
 			}
 		})
+	}
+}
+
+func TestNativeDuplexProfileCertifiesOverItsWebSocket(t *testing.T) {
+	dials := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dials++
+		if r.URL.Path != "/v1/realtime" || r.URL.Query().Get("model") != "grok-voice" {
+			t.Errorf("unexpected duplex dial %s", r.URL)
+		}
+		if !strings.Contains(r.Header.Get("Authorization"), "secret") {
+			t.Errorf("duplex dial credential: %v", r.Header)
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "xai-realtime", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1"), Options: Options{VendorID: new("xai")}}
+	cfg.Normalize()
+	tuple := CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}
+	if err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("secret"), "grok-voice", tuple, 4096); err != nil {
+		t.Fatalf("native duplex certification: %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("duplex dials = %d, want one native transport probe", dials)
 	}
 }
 

@@ -46,6 +46,7 @@ type webrtcSession struct {
 	cancel    context.CancelFunc
 	started   time.Time
 	costBound usage.Cost
+	rejected  bool
 
 	settleOnce sync.Once
 	usageMu    sync.Mutex
@@ -348,46 +349,44 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return provider.Connector().Supports("realtime", "openai", "webrtc") && provider.Supports(model, "realtime", "openai", "webrtc")
 	})
 	if e != nil {
+		s.settleCaps(r.Context(), x)
 		cancel()
 		fail(e)
 		return
 	}
+	releasePin := func() {
+		s.settlePinHold(r.Context(), x, p.hold, nil)
+		s.settleCaps(r.Context(), x)
+	}
 	template, ok := snapshot.WebRTCTemplate(route.Slug, p.target.ID)
 	if !ok || !template.WebRTC() {
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+		releasePin()
 		cancel()
 		fail(policyUnavailable("webrtc_contract_unavailable", "The selected target has no compiled governed WebRTC contract."))
 		return
 	}
 	boundSession, e := bindWebRTCSession(callReq.session, slug, template.Model())
 	if e != nil {
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+		releasePin()
 		cancel()
 		fail(e)
 		return
 	}
-	if e := sessionTokenCaps(x.admissionAuthority(authority), p, &route); e != nil {
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, &route); e != nil {
+		releasePin()
 		cancel()
 		fail(e)
 		return
 	}
 	if e := s.reserveState(bg, x, authority, s.cfg.WebRTCBound); e != nil {
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+		releasePin()
 		cancel()
 		fail(e)
 		return
 	}
-	if x.costBudgeted(authority) && x.attemptCostReservation(authority, p.attempt).amount == "" && !x.callerCostExempt() {
-		settleKey(r.Context(), x.lease, false, nil, s.log)
-		s.settlePinHold(r.Context(), x, p.hold, nil)
-		cancel()
-		fail(invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil))
-		return
-	}
 	if e := s.reserveSessionDebit(bg, x, authority, p.attempt); e != nil {
 		settleKey(r.Context(), x.lease, false, nil, s.log)
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+		releasePin()
 		cancel()
 		fail(e)
 		return
@@ -395,7 +394,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	if e := s.reserveSessionCost(bg, x, authority, p.attempt, s.cfg.WebRTCBound); e != nil {
 		s.abandonSessionDebit(r.Context(), x)
 		settleKey(r.Context(), x.lease, false, nil, s.log)
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+		releasePin()
 		cancel()
 		fail(e)
 		return
@@ -436,12 +435,18 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
 	}
-	state := attemptState{parent: ctx, classifier: upstream.Classifier{Declared: cfg.Classification()}}
+	createCtx := ctx
+	cancelCreate := context.CancelFunc(func() {})
+	if p.attempt.Timeout > 0 {
+		createCtx, cancelCreate = context.WithTimeout(ctx, p.attempt.Timeout)
+	}
+	defer cancelCreate()
+	state := attemptState{parent: createCtx, classifier: upstream.Classifier{Declared: cfg.Classification()}}
 	body, contentType, err := buildWebRTCCallsBody(sdp, session)
 	if err != nil {
 		return nil, 0, serverError(http.StatusInternalServerError, "internal_error", "The realtime call could not be encoded.")
 	}
-	reqCtx := httptrace.WithClientTrace(ctx, state.trace())
+	reqCtx := httptrace.WithClientTrace(createCtx, state.trace())
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -470,6 +475,9 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	}
 	resp, err := client.Do(req)
 	x.dispatched = x.dispatched || state.dispatched.Load() || resp != nil
+	if x.dispatched && p.hold != nil {
+		x.spendCaps(p.hold.budgets, p.attempt)
+	}
 	if err != nil {
 		fact.Class = classConnect
 		if state.dispatched.Load() {
@@ -488,6 +496,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		evidence := state.evidence()
 		evidence.Error = nativeError
 		outcome := state.classifier.Classify(evidence)
+		sess.rejected = outcome.Acceptance == upstream.Terminal
 		fact.Class = string(outcome.Class)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(false)
@@ -522,7 +531,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	fact.recordEvidence(true)
 	x.facts = append(x.facts, fact)
-	conn, e := s.dialWebRTCControl(ctx, sess, controlEndpoint)
+	conn, e := s.dialWebRTCControl(createCtx, sess, controlEndpoint)
 	if e != nil {
 		if herr := s.hangupWebRTCCall(ctx, sess); herr != nil {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))

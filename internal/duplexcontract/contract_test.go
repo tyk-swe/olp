@@ -135,3 +135,28 @@ func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
 		t.Fatal("session settled as complete after a response ended without usage")
 	}
 }
+
+func TestXAIObserverBillableAudioSecondsAreCumulative(t *testing.T) {
+	template, err := duplexcontract.Compile(xaiConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := template.Observer(1 << 20)
+	for _, frame := range []string{
+		`{"type":"response.created","response":{"id":"r1"}}`,
+		`{"type":"response.done","response":{"id":"r1","usage":{"billable_audio_seconds":12.5}}}`,
+		`{"type":"response.created","response":{"id":"r2"}}`,
+		`{"type":"response.done","response":{"id":"r2","usage":{"billable_audio_seconds":30}}}`,
+	} {
+		if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage := observer.Usage()
+	if usage == nil || usage.MediaUnits == nil || *usage.MediaUnits != "30" {
+		t.Fatalf("usage = %+v, want the latest cumulative billable seconds", usage)
+	}
+	if !observer.Complete() {
+		t.Fatal("duration-only terminal usage did not settle as complete")
+	}
+}

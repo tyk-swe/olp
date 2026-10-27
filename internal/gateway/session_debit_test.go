@@ -175,6 +175,33 @@ func TestWebRTCSessionReservesDurableDebitBeforeProviderExists(t *testing.T) {
 	}
 }
 
+func TestWebRTCDefinitiveCreationRejectionSettlesDebitAsUnbilled(t *testing.T) {
+	ledger := &fakeSessionDebits{}
+	mock := newWebRTCMock("reject")
+	h := webrtcHarness(t, mock, true)
+	h.gateway.Debits = ledger
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusCreated {
+		t.Fatal("rejected provider creation was admitted")
+	}
+	env := sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	fact := env.Attempts[len(env.Attempts)-1]
+	if fact.BillingUncertain || !fact.UsageComplete || fact.UsageObserved {
+		t.Fatalf("definitive rejection settled as uncertain: %+v", fact)
+	}
+	if got := ledger.order(); slices.Contains(got, "unknown") {
+		t.Fatalf("definitive rejection marked its debit unknown: %v", got)
+	}
+	second := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, second.Body)
+	second.Body.Close()
+	if second.StatusCode == http.StatusConflict {
+		t.Fatal("corrected request blocked by exposure from a session that never existed")
+	}
+}
+
 func TestWebRTCUnresolvedDurableExposureRefusesNewSession(t *testing.T) {
 	ledger := &fakeSessionDebits{unknown: true}
 	mock := newWebRTCMock("usage")

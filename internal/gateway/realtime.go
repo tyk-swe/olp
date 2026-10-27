@@ -515,11 +515,16 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 			}
 		}
 	}
-	if event.Type != "response.done" || event.Response == nil || event.Response.Usage == nil {
+	if event.Type != "response.done" {
+		return nil
+	}
+	if event.Response == nil || event.Response.Usage == nil {
+		s.unknown = true
 		return nil
 	}
 	u := event.Response.Usage
 	if u.InputTokens < 0 || u.OutputTokens < 0 {
+		s.unknown = true
 		return nil
 	}
 	out := &wire.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
@@ -527,6 +532,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 		if u.InputDetails.CachedTokens != nil {
 			cached := *u.InputDetails.CachedTokens
 			if cached < 0 || cached > u.InputTokens {
+				s.unknown = true
 				return nil
 			}
 			out.CachedInputTokens = &cached

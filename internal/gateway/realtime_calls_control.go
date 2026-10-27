@@ -153,7 +153,7 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 	sess.settleOnce.Do(func() {
 		x := sess.x
-		s.finishSessionDebit(sess.ctx, x, failure != nil)
+		s.finishSessionDebit(sess.ctx, x, failure != nil && !sess.rejected)
 		if sess.conn != nil {
 			_ = sess.conn.CloseNow()
 		}
@@ -181,7 +181,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 				if observed != nil {
 					fact.Interaction.ClientState = usage.ClientPartial
 				}
-				if failure == nil {
+				if failure == nil || sess.rejected {
 					fact.Interaction.UpstreamState = usage.UpstreamTerminal
 					fact.Interaction.ClientState = usage.ClientTerminal
 				} else {
@@ -193,7 +193,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 				fact.UsageObserved = true
 				fact.UsageComplete = failure == nil && !pending
 				fact.BillingUncertain = !fact.UsageComplete
-			} else if x.dispatched {
+			} else if x.dispatched && !sess.rejected {
 				fact.UsageComplete = false
 				fact.BillingUncertain = true
 			}

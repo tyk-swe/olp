@@ -83,11 +83,12 @@ func bindVertexSetup(frame []byte, boundModel string, maxBytes int) ([]byte, err
 }
 
 type vertexObserver struct {
-	maxBytes  int
-	usage     *wire.Usage
-	turn      *wire.Usage
-	pending   bool
-	setupDone bool
+	maxBytes   int
+	usage      *wire.Usage
+	turn       *wire.Usage
+	pending    bool
+	incomplete bool
+	setupDone  bool
 }
 
 func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -111,8 +112,12 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	if turnUsage != nil {
 		o.turn = turnUsage
 	}
-	if observed.TurnComplete && o.turn != nil {
-		o.flushTurn()
+	if observed.TurnComplete {
+		if o.turn != nil {
+			o.flushTurn()
+		} else {
+			o.incomplete = true
+		}
 	}
 	return ServerFrame{ProviderError: observed.Kind == "error", SetupComplete: observed.Kind == "setupComplete"}, nil
 }
@@ -186,4 +191,6 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 }
 
 func (o *vertexObserver) usageValue() *wire.Usage { return o.usage }
-func (o *vertexObserver) complete() bool          { return o.usage != nil && o.turn == nil && !o.pending }
+func (o *vertexObserver) complete() bool {
+	return o.usage != nil && o.turn == nil && !o.pending && !o.incomplete
+}

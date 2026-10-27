@@ -206,6 +206,23 @@ func TestBraveMappingProject(t *testing.T) {
 	if len(out.Results) != 2 || out.Results[0].Snippet != "d1" || out.Results[0].Date == nil || *out.Results[0].Date != "2026-01-02" || out.Results[1].Title != "" || out.Results[1].Date != nil {
 		t.Fatalf("brave projection: %+v", out.Results)
 	}
+	for _, empty := range []string{`{"type":"search","query":{"original":"q"},"web":null}`, `{"type":"search","query":{"original":"q"}}`} {
+		emptyRes := result(t, Brave, empty)
+		emptyView, err := parseResult(request(t, Brave, resBodyFor(t, Brave)), emptyRes, Brave)
+		if err != nil {
+			t.Fatalf("nullable web rejected: %v", err)
+		}
+		emptyDoc, err := mapping.Project(r, emptyRes, emptyView, "route")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var emptyOut struct {
+			Results []any `json:"results"`
+		}
+		if json.Unmarshal(emptyDoc.Bytes(), &emptyOut) != nil || len(emptyOut.Results) != 0 {
+			t.Fatalf("nullable web projected results: %s", emptyDoc.Bytes())
+		}
+	}
 	over := result(t, Brave, `{"web":{"results":[{"url":"u1"},{"url":"u2"},{"url":"u3"}]}}`)
 	overView, err := parseResult(request(t, Brave, `{"q":"q","count":3}`), over, Brave)
 	if err != nil {

@@ -10,9 +10,12 @@
     { "event": { "sessionEnd": {} } }
   ],
   "server": [
+    { "event": { "completionStart": { "sessionId": "<id>", "promptName": "<id>", "completionId": "<id>" } } },
     { "event": { "contentStart": { "contentId": "<id>", "type": "TEXT", "role": "ASSISTANT" } } },
     { "event": { "textOutput": { "content": "example transcript" } } },
     { "event": { "audioOutput": { "content": "<base64>" } } },
-    { "event": { "contentEnd": { "contentId": "<id>", "stopReason": "END_TURN" } } }
+    { "event": { "contentEnd": { "contentId": "<id>", "stopReason": "END_TURN" } } },
+    { "event": { "usageEvent": { "sessionId": "<id>", "promptName": "<id>", "completionId": "<id>", "totalInputTokens": 120, "totalOutputTokens": 45, "totalTokens": 165, "details": { "total": { "input": { "speechTokens": 100, "textTokens": 20 }, "output": { "speechTokens": 40, "textTokens": 5 } } } } } },
+    { "event": { "completionEnd": { "sessionId": "<id>", "promptName": "<id>", "completionId": "<id>", "stopReason": "END_TURN" } } }
   ]
 }

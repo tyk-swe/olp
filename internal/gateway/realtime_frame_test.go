@@ -125,6 +125,17 @@ func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T
 		t.Fatalf("valid escaped key and native usage were lost: usage=%+v state=%+v", got, state)
 	}
 	state = realtimeResponseState{}
+	state.clientFrame(websocket.MessageText, []byte(`{"type":"response.create"}`))
+	state.providerFrame(websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_1"}}`), true)
+	if got := state.providerFrame(websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`), true); got == nil || state.pending() {
+		t.Fatalf("first terminal usage did not settle its response: usage=%+v state=%+v", got, state)
+	}
+	state.clientFrame(websocket.MessageText, []byte(`{"type":"response.create"}`))
+	state.providerFrame(websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_2"}}`), true)
+	if got := state.providerFrame(websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"resp_2"}}`), true); got != nil || !state.pending() {
+		t.Fatalf("terminal response without usage discharged the session: usage=%+v state=%+v", got, state)
+	}
+	state = realtimeResponseState{}
 	state.clientFrame(websocket.MessageText, []byte(`{"TYPE":"response.create"}`))
 	state.providerFrame(websocket.MessageText, []byte(`{"TYPE":"response.created","Response":{"ID":"resp_1"}}`), true)
 	got = state.providerFrame(websocket.MessageText, []byte(`{"TYPE":"response.done","Response":{"ID":"resp_1","Usage":{"Input_Tokens":3,"Output_Tokens":2}}}`), true)

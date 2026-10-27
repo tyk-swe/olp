@@ -23,6 +23,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -421,6 +422,9 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	if cfg.ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
 		return s.certifyGeminiLive(ctx, cfg, credential, model, maxEventBytes)
 	}
+	if duplexcontract.IsProfile(cfg.ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
+		return s.certifyNativeDuplex(ctx, cfg, credential, model)
+	}
 	if codec, ok := configuredOperation(cfg, tuple.Operation); ok {
 		return s.certifyOperation(ctx, cfg, credential, model, tuple, codec)
 	}
@@ -647,11 +651,58 @@ func validBatchListing(data []byte, field string, optional bool) bool {
 }
 
 func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
-	transport := cfg.transport()
-	endpoint, err := transport.RealtimeURL(model)
+	endpoint, err := cfg.transport().RealtimeURL(model)
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
 	}
+	return s.certifyWebSocketDial(ctx, cfg, credential, endpoint)
+}
+
+func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+	transport := cfg.transport()
+	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: model})
+	if err != nil {
+		return &probeError{Code: "capability_unavailable", Detail: "The native duplex contract could not be compiled."}
+	}
+	switch template.Transport() {
+	case duplexcontract.TransportWebSocket:
+		endpoint, err := transport.DuplexURL(model)
+		if err != nil {
+			return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+		}
+		return s.certifyWebSocketDial(ctx, cfg, credential, endpoint)
+	case duplexcontract.TransportBedrockBidi:
+		endpoint, err := transport.BedrockDuplexEndpoint()
+		if err != nil {
+			return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+		}
+		if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
+			return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+		}
+		select {
+		case s.probes <- struct{}{}:
+			defer func() { <-s.probes }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+		defer cancel()
+		client, err := s.connectionClient(ctx, cfg, credential)
+		if err != nil {
+			return &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+		}
+		stream, _, err := s.auth.OpenBedrockDuplex(ctx, transport, credential, model, client)
+		if err != nil {
+			return classify(err)
+		}
+		_ = stream.Close()
+		return nil
+	}
+	return &probeError{Code: "capability_unavailable", Detail: "The native duplex transport cannot be certified."}
+}
+
+func (s *Server) certifyWebSocketDial(ctx context.Context, cfg *Configuration, credential []byte, endpoint string) error {
+	transport := cfg.transport()
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
 	u, err := url.Parse(check)
