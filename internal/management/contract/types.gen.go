@@ -657,10 +657,13 @@ func (e CatalogSampleSdk) Valid() bool {
 
 // Defines values for CodeAccountAdapter.
 const (
-	CodeAccountAdapterCodex       CodeAccountAdapter = "codex"
-	CodeAccountAdapterLessThannil CodeAccountAdapter = "<nil>"
-	CodeAccountAdapterOpencodeGo  CodeAccountAdapter = "opencode_go"
-	CodeAccountAdapterZaiCoding   CodeAccountAdapter = "zai_coding"
+	CodeAccountAdapterCodex         CodeAccountAdapter = "codex"
+	CodeAccountAdapterKimiCode      CodeAccountAdapter = "kimi_code"
+	CodeAccountAdapterLessThannil   CodeAccountAdapter = "<nil>"
+	CodeAccountAdapterMinimaxPlan   CodeAccountAdapter = "minimax_plan"
+	CodeAccountAdapterOpencodeGo    CodeAccountAdapter = "opencode_go"
+	CodeAccountAdapterQwenTokenPlan CodeAccountAdapter = "qwen_token_plan"
+	CodeAccountAdapterZaiCoding     CodeAccountAdapter = "zai_coding"
 )
 
 // Valid indicates whether the value is a known member of the CodeAccountAdapter enum.
@@ -668,9 +671,15 @@ func (e CodeAccountAdapter) Valid() bool {
 	switch e {
 	case CodeAccountAdapterCodex:
 		return true
+	case CodeAccountAdapterKimiCode:
+		return true
 	case CodeAccountAdapterLessThannil:
 		return true
+	case CodeAccountAdapterMinimaxPlan:
+		return true
 	case CodeAccountAdapterOpencodeGo:
+		return true
+	case CodeAccountAdapterQwenTokenPlan:
 		return true
 	case CodeAccountAdapterZaiCoding:
 		return true
@@ -858,9 +867,12 @@ func (e CodeAttemptState) Valid() bool {
 
 // Defines values for CodeClientConfigurationAdapters.
 const (
-	CodeClientConfigurationAdaptersCodex      CodeClientConfigurationAdapters = "codex"
-	CodeClientConfigurationAdaptersOpencodeGo CodeClientConfigurationAdapters = "opencode_go"
-	CodeClientConfigurationAdaptersZaiCoding  CodeClientConfigurationAdapters = "zai_coding"
+	CodeClientConfigurationAdaptersCodex         CodeClientConfigurationAdapters = "codex"
+	CodeClientConfigurationAdaptersKimiCode      CodeClientConfigurationAdapters = "kimi_code"
+	CodeClientConfigurationAdaptersMinimaxPlan   CodeClientConfigurationAdapters = "minimax_plan"
+	CodeClientConfigurationAdaptersOpencodeGo    CodeClientConfigurationAdapters = "opencode_go"
+	CodeClientConfigurationAdaptersQwenTokenPlan CodeClientConfigurationAdapters = "qwen_token_plan"
+	CodeClientConfigurationAdaptersZaiCoding     CodeClientConfigurationAdapters = "zai_coding"
 )
 
 // Valid indicates whether the value is a known member of the CodeClientConfigurationAdapters enum.
@@ -868,7 +880,13 @@ func (e CodeClientConfigurationAdapters) Valid() bool {
 	switch e {
 	case CodeClientConfigurationAdaptersCodex:
 		return true
+	case CodeClientConfigurationAdaptersKimiCode:
+		return true
+	case CodeClientConfigurationAdaptersMinimaxPlan:
+		return true
 	case CodeClientConfigurationAdaptersOpencodeGo:
+		return true
+	case CodeClientConfigurationAdaptersQwenTokenPlan:
 		return true
 	case CodeClientConfigurationAdaptersZaiCoding:
 		return true
@@ -1020,9 +1038,12 @@ func (e CodeResearchToolsServices) Valid() bool {
 
 // Defines values for CodeRouteAdapters.
 const (
-	CodeRouteAdaptersCodex      CodeRouteAdapters = "codex"
-	CodeRouteAdaptersOpencodeGo CodeRouteAdapters = "opencode_go"
-	CodeRouteAdaptersZaiCoding  CodeRouteAdapters = "zai_coding"
+	CodeRouteAdaptersCodex         CodeRouteAdapters = "codex"
+	CodeRouteAdaptersKimiCode      CodeRouteAdapters = "kimi_code"
+	CodeRouteAdaptersMinimaxPlan   CodeRouteAdapters = "minimax_plan"
+	CodeRouteAdaptersOpencodeGo    CodeRouteAdapters = "opencode_go"
+	CodeRouteAdaptersQwenTokenPlan CodeRouteAdapters = "qwen_token_plan"
+	CodeRouteAdaptersZaiCoding     CodeRouteAdapters = "zai_coding"
 )
 
 // Valid indicates whether the value is a known member of the CodeRouteAdapters enum.
@@ -1030,7 +1051,13 @@ func (e CodeRouteAdapters) Valid() bool {
 	switch e {
 	case CodeRouteAdaptersCodex:
 		return true
+	case CodeRouteAdaptersKimiCode:
+		return true
+	case CodeRouteAdaptersMinimaxPlan:
+		return true
 	case CodeRouteAdaptersOpencodeGo:
+		return true
+	case CodeRouteAdaptersQwenTokenPlan:
 		return true
 	case CodeRouteAdaptersZaiCoding:
 		return true
@@ -6794,7 +6821,7 @@ type ClassifierPredicate struct {
 
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
-	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
 	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
 	CredentialId openapi_types.UUID                    `json:"credential_id"`
@@ -6817,7 +6844,7 @@ type CodeAccount struct {
 	ResearchServices *[]CodeAccountResearchServices `json:"research_services,omitempty"`
 }
 
-// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
 // CodeAccountGrantState defines model for CodeAccount.GrantState.
@@ -7144,7 +7171,7 @@ type CodeRevisionList struct {
 
 // CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
-	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
+	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
 	Adapters []CodeRouteAdapters `json:"adapters"`
 	Enabled  bool                `json:"enabled"`
 	Etag     openapi_types.UUID  `json:"etag"`
