@@ -356,6 +356,57 @@ func TestOCRInputPolicyRefusalAndNoCache(t *testing.T) {
 	}
 }
 
+func vertexOCRProviders(s *routing.Snapshot) {
+	for id, p := range s.Providers {
+		p.Kind, p.VendorID, p.ProfileID, p.ProfileRevision = "vertex_ai", "google-vertex", "vertex-document-processing-ocr", "1"
+		p.AuthMode, p.CloudRegion, p.CloudProject = "service_account", "us", "example-project"
+		model := p.Capabilities[0].Model
+		p.Capabilities = []routing.Capability{
+			{Model: model, Operation: "ocr", Surface: "openai", Mode: "unary"},
+			{Model: model, Operation: "ocr", Surface: "native", Mode: "unary"},
+		}
+		s.Providers[id] = p
+	}
+}
+
+func TestVertexOCRMappingRefusalsDispatchNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"https://example.com/report.pdf"}}`,
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"data:application/pdf;base64,AAA"},"table_format":"markdown"}`,
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"data:application/pdf;base64,AAA"},"extract_header":true}`,
+	} {
+		h := strictHarness(t, func(s *routing.Snapshot) {
+			route := s.Routes[routeSlug]
+			route.Operations = []string{"ocr"}
+			route.Fidelity.Mode = routing.FidelityTransformed
+			s.Routes[routeSlug] = route
+			vertexOCRProviders(s)
+		})
+		resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(body), nil)
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("unmappable vertex ocr dispatched: %d %s", resp.StatusCode, out)
+		}
+	}
+}
+
+func TestVertexOCRDocumentLocationRefusedWithoutPrefixGrant(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"ocr"}
+		s.Routes[routeSlug] = route
+		vertexOCRProviders(s)
+	})
+	body := `{"gcsDocument":{"gcsUri":"gs://docs-bucket/reports/a.pdf","mimeType":"application/pdf"}}`
+	resp := h.do(t.Context(), http.MethodPost, "/native/vertex-document-processing-ocr/models/"+routeSlug, fullKey, []byte(body), nil)
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || !strings.Contains(string(out), "storage_scope") || h.mock.count("a")+h.mock.count("b") != 0 {
+		t.Fatalf("ungranted document location: %d %s calls=%d", resp.StatusCode, out, h.mock.count("a")+h.mock.count("b"))
+	}
+}
+
 func TestSearchMutatingGuardrailRefused(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]

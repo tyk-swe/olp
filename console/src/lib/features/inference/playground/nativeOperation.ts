@@ -34,7 +34,7 @@ export const nativeOperationDialects = {
     'bedrock-count-tokens',
     'tei-tokenize'
   ],
-  ocr: ['mistral-ocr'],
+  ocr: ['mistral-ocr', 'vertex-document-processing-ocr'],
   search: [
     'perplexity-search',
     'tavily-search',
@@ -154,7 +154,7 @@ export async function runNativeOperation(
         ? dialect === 'systemone'
           ? '/v1/systemone'
           : '/v1/decisions'
-        : operation === 'ocr'
+        : operation === 'ocr' && dialect === 'mistral-ocr'
           ? '/v1/ocr'
           : dialect === 'perplexity-search'
             ? '/v1/search'

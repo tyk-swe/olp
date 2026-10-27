@@ -68,6 +68,39 @@ func TestOCRSimulationAdmitsAndReadsBoundaries(t *testing.T) {
 	}
 }
 
+func TestVertexOCRSimulationAdmitsInlineAndRefusesLocations(t *testing.T) {
+	snapshot, _ := estimateSnapshot("processor-1")
+	for id, provider := range snapshot.Providers {
+		provider.Kind = "vertex_ai"
+		provider.VendorID = "google-vertex"
+		provider.ProfileID = "vertex-document-processing-ocr"
+		provider.ProfileRevision = "1"
+		provider.AuthMode = "service_account"
+		provider.CloudRegion, provider.CloudProject = "us", "example-project"
+		provider.Endpoint = "https://us-documentai.googleapis.com/v1/projects/example-project/locations/us"
+		provider.Capabilities = []routing.Capability{{Model: "processor-1", Operation: "ocr", Surface: "openai", Mode: "unary"}}
+		snapshot.Providers[id] = provider
+	}
+	route := snapshot.Routes["route"]
+	route.Operations = []string{"ocr"}
+	route.Fidelity.Mode = routing.FidelityTransformed
+	snapshot.Routes["route"] = route
+
+	inline := `{"model":"route","document":{"type":"document_url","document_url":"data:application/pdf;base64,JVBERi0xLjQ="}}`
+	decisions := simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(inline)}, "ocr")
+	d := decisionFor(t, decisions, "processor-1")
+	if d.Interaction == nil || d.Interaction.Status != "admitted" || !d.Eligible || d.Interaction.EgressDialect != "vertex-document-processing-ocr" {
+		t.Fatalf("inline vertex ocr not admitted: %+v", d)
+	}
+
+	remote := `{"model":"route","document":{"type":"document_url","document_url":"https://example.com/report.pdf"}}`
+	decisions = simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(remote)}, "ocr")
+	d = decisionFor(t, decisions, "processor-1")
+	if d.Interaction != nil && d.Interaction.Status == "admitted" {
+		t.Fatalf("provider-fetched https document admitted for vertex ocr: %+v", d)
+	}
+}
+
 func TestSearchSimulationMapsAndRefusesControls(t *testing.T) {
 	snapshot, _ := operationSnapshot([]string{"tavily-model"}, "tavily", "tavily-search", "search", false)
 	decisions := simulateOperation(t, snapshot, simulationInput{Request: json.RawMessage(`{"query":"q"}`)}, "search")

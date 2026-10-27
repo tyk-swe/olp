@@ -77,6 +77,7 @@ type Dialect struct {
 	RequiredClient                func(oif.View) string
 	InputText                     func(oif.Request) ([]Text, error)
 	OutputText                    func(oif.Result) ([]Text, error)
+	DocumentLocation              func(oif.Request) (string, bool)
 	Probe                         func(string) []byte
 	Evidence                      string
 }

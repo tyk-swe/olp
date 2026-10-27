@@ -71,6 +71,25 @@
     values.profileId === 'vertex-batch-prediction'
       ? `gs://bucket/${field}/`
       : `s3://bucket/${field}/`;
+  const documentProcessingProfile = $derived(
+    values.profileId === 'vertex-document-processing-ocr'
+  );
+  const documentPrefixes = () => {
+    const prefixes = values.document?.at(['options', 'document_uri_prefixes']);
+    return Array.isArray(prefixes)
+      ? prefixes.filter((value) => typeof value === 'string').join('\n')
+      : '';
+  };
+  function setDocumentPrefixes(value: string) {
+    values.document?.set(
+      ['options', 'document_uri_prefixes'],
+      value
+        .split('\n')
+        .map((prefix) => prefix.trim())
+        .filter(Boolean)
+    );
+    onChange?.();
+  }
 </script>
 
 <div class="form-field">
@@ -231,6 +250,26 @@
       />
     </div>
   {/if}
+{/if}
+{#if documentProcessingProfile}
+  <div class="form-field full">
+    <label for={`${idPrefix}-document-uri-prefixes`}
+      >Document URI prefixes</label
+    >
+    <textarea
+      id={`${idPrefix}-document-uri-prefixes`}
+      value={documentPrefixes()}
+      oninput={(event) => setDocumentPrefixes(event.currentTarget.value)}
+      disabled={fieldsDisabled}
+      placeholder="gs://bucket/documents/"
+      rows="3"></textarea>
+    <small
+      >One GCS prefix per line. Native document locations outside these prefixes
+      are refused, and an empty list grants no document locations. Inline
+      documents need no prefix. The cloud region is the Document AI location,
+      such as us or eu, and each model names a processor ID.</small
+    >
+  </div>
 {/if}
 {#if hasDeployment(spec)}
   <div class="form-field">

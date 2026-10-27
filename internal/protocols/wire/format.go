@@ -30,6 +30,7 @@ const (
 	BedrockEmbeddings     Format = "bedrock_embeddings"
 	Rerank                Format = "rerank"
 	OCR                   Format = "ocr"
+	DocumentAIProcess     Format = "documentai_process"
 	Search                Format = "search"
 	BedrockRerank         Format = "bedrock_rerank"
 	// Media families name their operation tag directly so the accounting
@@ -79,6 +80,8 @@ func (f Format) Operation() string {
 		return "moderation"
 	case Rerank, BedrockRerank:
 		return "rerank"
+	case DocumentAIProcess:
+		return "ocr"
 	case AnthropicFile, GeminiFile:
 		return "file"
 	case AnthropicBatch, GeminiBatch, CloudBatch:

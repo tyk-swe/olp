@@ -5148,39 +5148,40 @@ func (e SimulatedRouteLegVia) Valid() bool {
 
 // Defines values for SimulationDialect.
 const (
-	SimulationDialectAnthropicCountTokens     SimulationDialect = "anthropic-count-tokens"
-	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
-	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
-	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
-	SimulationDialectBraveSearch              SimulationDialect = "brave-search"
-	SimulationDialectExaSearch                SimulationDialect = "exa-search"
-	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
-	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
-	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
-	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
-	SimulationDialectMistralOcr               SimulationDialect = "mistral-ocr"
-	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
-	SimulationDialectOpenaiCompletions        SimulationDialect = "openai-completions"
-	SimulationDialectOpenaiDecisions          SimulationDialect = "openai-decisions"
-	SimulationDialectOpenaiEmbeddings         SimulationDialect = "openai-embeddings"
-	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
-	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
-	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
-	SimulationDialectParallelSearch           SimulationDialect = "parallel-search"
-	SimulationDialectPerplexitySearch         SimulationDialect = "perplexity-search"
-	SimulationDialectRerank                   SimulationDialect = "rerank"
-	SimulationDialectSystemone                SimulationDialect = "systemone"
-	SimulationDialectTavilySearch             SimulationDialect = "tavily-search"
-	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
-	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
-	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
-	SimulationDialectTeiRerank                SimulationDialect = "tei-rerank"
-	SimulationDialectTeiScoring               SimulationDialect = "tei-scoring"
-	SimulationDialectTeiSparseEmbeddings      SimulationDialect = "tei-sparse-embeddings"
-	SimulationDialectTeiTokenize              SimulationDialect = "tei-tokenize"
-	SimulationDialectVertexEmbeddings         SimulationDialect = "vertex-embeddings"
-	SimulationDialectVoyageEmbeddings         SimulationDialect = "voyage-embeddings"
-	SimulationDialectVoyageRerank             SimulationDialect = "voyage-rerank"
+	SimulationDialectAnthropicCountTokens        SimulationDialect = "anthropic-count-tokens"
+	SimulationDialectAnthropicMessages           SimulationDialect = "anthropic-messages"
+	SimulationDialectBedrockCountTokens          SimulationDialect = "bedrock-count-tokens"
+	SimulationDialectBedrockEmbeddings           SimulationDialect = "bedrock-embeddings"
+	SimulationDialectBraveSearch                 SimulationDialect = "brave-search"
+	SimulationDialectExaSearch                   SimulationDialect = "exa-search"
+	SimulationDialectGeminiBatchEmbeddings       SimulationDialect = "gemini-batch-embeddings"
+	SimulationDialectGeminiCountTokens           SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiEmbeddings            SimulationDialect = "gemini-embeddings"
+	SimulationDialectGeminiGenerateContent       SimulationDialect = "gemini-generate-content"
+	SimulationDialectMistralOcr                  SimulationDialect = "mistral-ocr"
+	SimulationDialectOpenaiChat                  SimulationDialect = "openai-chat"
+	SimulationDialectOpenaiCompletions           SimulationDialect = "openai-completions"
+	SimulationDialectOpenaiDecisions             SimulationDialect = "openai-decisions"
+	SimulationDialectOpenaiEmbeddings            SimulationDialect = "openai-embeddings"
+	SimulationDialectOpenaiInputTokens           SimulationDialect = "openai-input-tokens"
+	SimulationDialectOpenaiModeration            SimulationDialect = "openai-moderation"
+	SimulationDialectOpenaiResponses             SimulationDialect = "openai-responses"
+	SimulationDialectParallelSearch              SimulationDialect = "parallel-search"
+	SimulationDialectPerplexitySearch            SimulationDialect = "perplexity-search"
+	SimulationDialectRerank                      SimulationDialect = "rerank"
+	SimulationDialectSystemone                   SimulationDialect = "systemone"
+	SimulationDialectTavilySearch                SimulationDialect = "tavily-search"
+	SimulationDialectTeiClassification           SimulationDialect = "tei-classification"
+	SimulationDialectTeiEmbeddings               SimulationDialect = "tei-embeddings"
+	SimulationDialectTeiMultivectorEmbeddings    SimulationDialect = "tei-multivector-embeddings"
+	SimulationDialectTeiRerank                   SimulationDialect = "tei-rerank"
+	SimulationDialectTeiScoring                  SimulationDialect = "tei-scoring"
+	SimulationDialectTeiSparseEmbeddings         SimulationDialect = "tei-sparse-embeddings"
+	SimulationDialectTeiTokenize                 SimulationDialect = "tei-tokenize"
+	SimulationDialectVertexDocumentProcessingOcr SimulationDialect = "vertex-document-processing-ocr"
+	SimulationDialectVertexEmbeddings            SimulationDialect = "vertex-embeddings"
+	SimulationDialectVoyageEmbeddings            SimulationDialect = "voyage-embeddings"
+	SimulationDialectVoyageRerank                SimulationDialect = "voyage-rerank"
 )
 
 // Valid indicates whether the value is a known member of the SimulationDialect enum.
@@ -5245,6 +5246,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectTeiSparseEmbeddings:
 		return true
 	case SimulationDialectTeiTokenize:
+		return true
+	case SimulationDialectVertexDocumentProcessingOcr:
 		return true
 	case SimulationDialectVertexEmbeddings:
 		return true
@@ -7904,10 +7907,13 @@ type ConnectionOptions struct {
 	Commitment *Commitment `json:"commitment,omitempty"`
 
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
-	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
-	HealthProbe       nullable.Nullable[HealthProbe]      `json:"health_probe,omitempty"`
-	Limits            nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
-	Models            *map[string]ModelMetadata           `json:"models,omitempty"`
+	CredentialHeaders *[]string `json:"credential_headers,omitempty"`
+
+	// DocumentUriPrefixes Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations.
+	DocumentUriPrefixes *[]string                           `json:"document_uri_prefixes,omitempty"`
+	HealthProbe         nullable.Nullable[HealthProbe]      `json:"health_probe,omitempty"`
+	Limits              nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
+	Models              *map[string]ModelMetadata           `json:"models,omitempty"`
 
 	// Network Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.
 	Network *ProviderNetworkOptions `json:"network,omitempty"`

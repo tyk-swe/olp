@@ -87,6 +87,7 @@ var profileRegistry = []Profile{
 	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
 	{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "vertex-document-processing-ocr", Label: "Google Cloud Document AI document processing", Kind: "vertex_ai", Dialect: "vertex-document-processing-ocr", DialectRevision: "v1", Hosting: "google-document-ai"},
 	{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
 	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
 	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
@@ -203,6 +204,13 @@ func init() {
 			p.Authentication = []string{"adc", "service_account"}
 			p.Operations = []string{"batch"}
 			p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/batch-prediction"
+		case "vertex-document-processing-ocr":
+			p.Authentication = []string{"adc", "service_account"}
+			p.Operations = []string{"ocr"}
+			p.OperationDialects = map[string]string{"ocr": "vertex-document-processing-ocr"}
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.Documentation = "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/projects.locations.processors/process"
 		case "bedrock-batch-inference":
 			p.Authentication = []string{"static", "default_chain"}
 			p.Operations = []string{"batch"}
@@ -446,6 +454,7 @@ func (c Config) ValidateProfile() error {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
 	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
+		p.Dialect == "vertex-document-processing-ocr" && c.VendorID != "google-vertex" ||
 		p.ID == "groq-files-batches" && c.VendorID != "groq" ||
 		p.ID == "together-files-batches" && c.VendorID != "together" ||
 		p.ID == "mistral-files-batches" && c.VendorID != "mistral" ||
@@ -548,6 +557,9 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 	case "moderation":
 		return wire.Moderation, nil
 	case "ocr":
+		if p.Hosting == "google-document-ai" {
+			return wire.DocumentAIProcess, nil
+		}
 		return wire.OCR, nil
 	case "search":
 		return wire.Search, nil
@@ -731,6 +743,11 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
 	switch c.Hosting() {
+	case "google-document-ai":
+		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
+			return errors.New("Document AI endpoint must match its configured project and location")
+		}
+		return nil
 	case "vertex-rag-engine":
 		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
 			return errors.New("Vertex RAG endpoint must match its configured project and location")

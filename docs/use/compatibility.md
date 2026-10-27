@@ -206,6 +206,29 @@ meters as media units. OCR follows the
 non-exempt cost caps refuse `422 unbounded_work_budget` before dispatch,
 waived only for caller-paid cost-exempt routes.
 
+Transformed OCR serving also maps the frozen Mistral request to
+`vertex-document-processing-ocr`, the Google Cloud Document AI profile on
+the `vertex_ai` connector with vendor `google-vertex`. Document AI is a
+separate Google API from the Vertex AI publisher API. Its endpoint is
+`https://LOCATION-documentai.googleapis.com/v1/projects/PROJECT/locations/LOCATION`,
+where the connection's cloud region is the Document AI location, such as
+`us` or `eu`, and each provider model names a processor ID. Calls go to
+`processors/{processor}:process` with the bound connection's Google
+credential (`adc` or `service_account`) and no other. The mapping carries
+only inline `data:` documents with a base64 payload and a supported mime
+type, plus `pages`, which become a provider page selector. `https:`
+documents are refused before dispatch because Document AI cannot fetch
+them and the gateway never fetches document bytes. `document_name`, `id`,
+`include_image_base64`, `image_limit`, `image_min_size`, `table_format`,
+`extract_header` and `extract_footer` have no Document AI equivalent and
+are refused before dispatch. The native dialect additionally admits
+`gcsDocument` locations. A location is served only under one of the
+connection's operator configured `document_uri_prefixes`, and an empty
+list grants no locations. Results project into the frozen page shape from
+the document text and its page anchors. Observed pages meter as media
+units at the target's `unit_price`, and a result with no observed pages
+stays billing uncertain rather than free.
+
 The `perplexity-search` profile (vendor Perplexity) admits the frozen
 ApiSearchRequest: a string `query` (arrays refused), `max_results` 1–20,
 `search_type`, `max_tokens`, `max_tokens_per_page`, `country`,
@@ -242,10 +265,9 @@ Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json),
 the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
 `tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
 required; this evidence does not qualify unimplemented API families. Azure
-Document Intelligence (202/poll transport) and Vertex document processing
-(GCP-authenticated profile) stay pending; Google's Custom Search JSON API is
-excluded because the provider discontinued new enrollment and the API
-sunsets on 2027-01-01.
+Document Intelligence (202/poll transport) stays pending. Google's Custom
+Search JSON API is excluded because the provider discontinued new enrollment
+and the API sunsets on 2027-01-01.
 
 ### Files, batches, realtime, and provider-retained state
 

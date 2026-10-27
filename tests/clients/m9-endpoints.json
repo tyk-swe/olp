@@ -6960,13 +6960,36 @@
       "transport": "http",
       "mode": "unary",
       "sdk": null,
-      "supported_fields": [],
-      "status": "pending",
+      "supported_fields": [
+        "model",
+        "document (data: document_url/image_url with a base64 payload and a supported mime type)",
+        "pages"
+      ],
+      "status": "implemented",
       "expected_refusal": null,
-      "evidence": [],
+      "evidence": [
+        "internal/operations/ocr/vertex.go",
+        "internal/operations/ocr/mapping.go",
+        "internal/operations/ocr/vertex_test.go",
+        "internal/operations/ocr/mapping_test.go",
+        "internal/operationplan/ocr_vertex_test.go",
+        "internal/gateway/ocr_search_test.go",
+        "internal/routes/ocr_search_test.go",
+        "internal/connectors/document_storage_test.go",
+        "tests/fixtures/vendors/vertex/contract.json",
+        "tests/fixtures/vendors/vertex/ocr.response.json"
+      ],
       "live_qualification": "required",
-      "refusals": [],
-      "reference_revision": "unqualified: requires a GCP-authenticated document-processing profile",
+      "refusals": [
+        "https document URLs (the provider cannot fetch them and the gateway never fetches document bytes)",
+        "document_name, id, include_image_base64, image_limit, image_min_size, table_format, extract_header and extract_footer have no Document AI equivalent",
+        "non-base64 data: documents and unsupported mime types",
+        "GCS document locations outside the connection's document_uri_prefixes (native dialect, empty grants nothing)",
+        "input guardrails",
+        "response caching",
+        "token and non-exempt cost caps unless the route is caller-paid cost-exempt"
+      ],
+      "reference_revision": "Google Cloud Document AI v1 processors.process REST reference, observed 2026-10-27",
       "admission_contract": "execution-foundations-1"
     },
     {

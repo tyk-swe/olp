@@ -128,6 +128,7 @@ func cloneProvider(p Provider) Provider {
 	p.Network = c.Network
 	p.BatchStorage = c.BatchStorage
 	p.TuningDatasetURIPrefixes = c.TuningDatasetURIPrefixes
+	p.DocumentURIPrefixes = c.DocumentURIPrefixes
 	p.SemanticHeaders = c.SemanticHeaders
 	p.QuerySettings = c.QuerySettings
 	p.OperationDefaults = c.OperationDefaults
@@ -238,9 +239,10 @@ func cloneCodeRoute(r codemode.Route) codemode.Route {
 	return r
 }
 func cloneConfiguration(c Configuration) Configuration {
-	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()
+	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()
 	c.BatchStorage = cfg.BatchStorage
 	c.Options.TuningDatasetURIPrefixes = cfg.TuningDatasetURIPrefixes
+	c.Options.DocumentURIPrefixes = cfg.DocumentURIPrefixes
 	c.Options.Network = cfg.Network
 	c.Options.SemanticHeaders = cfg.SemanticHeaders
 	c.Options.QuerySettings = cfg.QuerySettings

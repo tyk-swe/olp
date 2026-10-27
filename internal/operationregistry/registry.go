@@ -25,7 +25,7 @@ func builtins() *operations.Registry {
 			}
 		}
 	}
-	for _, m := range append(append(mappings(), decision.Mappings()...), search.Mappings()...) {
+	for _, m := range append(append(append(mappings(), decision.Mappings()...), search.Mappings()...), ocr.Mappings()...) {
 		if err := r.RegisterMapping(m); err != nil {
 			panic(err)
 		}

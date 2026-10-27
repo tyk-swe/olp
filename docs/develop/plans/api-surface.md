@@ -334,9 +334,11 @@ provider family.
 Brave search runs on the reviewed GET-query unary transport, where the
 lowered request document becomes bounded query parameters on a bodyless GET.
 The same transport shape leaves room for a bounded submit-then-poll shape
-beside it. Azure Document Intelligence still needs that 202/poll transport
-and Vertex document processing still needs its GCP-authenticated profile, so
-those two remain pending in the endpoint ledger. Certify pagination, filters,
+beside it, and Azure Document Intelligence still needs that 202/poll
+transport, so it remains pending in the endpoint ledger. Vertex document
+processing serves through its GCP-authenticated Google Cloud Document AI
+profile, with GCS document locations bounded by the connection's configured
+document URI prefixes. Certify pagination, filters,
 citations, time ranges and result limits independently, refusing unmappable
 fields before paid work. Provider-fetched OCR URLs remain an explicit content-egress
 choice; the gateway does not become a general URL fetcher. Search prices request
@@ -509,7 +511,7 @@ unresolved realtime exposure additionally requires RM4.2–RM4.3.
 - [ ] **RM6.2 — Add Azure Document Intelligence polling:** implement bounded
   202/poll transport; test deadline/cancellation, observed page/document pricing,
   output fidelity and provider-fetched URL egress boundaries.
-- [ ] **RM6.3 — Add Vertex document processing:** implement its GCP-authenticated
+- [x] **RM6.3 — Add Vertex document processing:** implement its GCP-authenticated
   profile; verify credential isolation, field fidelity, egress and observed units.
 - [x] **RM6.4 — Add governed WebRTC:** implement OpenAI server-mediated session
   creation/control first. Pass browser faults and live admission, five-second
