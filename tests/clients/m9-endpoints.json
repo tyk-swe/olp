@@ -6698,8 +6698,12 @@
         "version": "3.78.0"
       },
       "supported_fields": [],
-      "status": "pending",
-      "expected_refusal": null,
+      "status": "excluded",
+      "expected_refusal": {
+        "code": "webrtc_contract_unavailable",
+        "status": 422,
+        "reason": "Azure WebRTC ships only under its own separately certified transport contract proving the same session control and metering. The certified OpenAI WebRTC tuple does not qualify Azure hosting on its own, so the tuple stays excluded until that contract exists."
+      },
       "evidence": [],
       "live_qualification": "required",
       "refusals": [

@@ -375,8 +375,8 @@ budgets until it is reconciled, so a lost session never reads as free.
 Installations without shared state settle on the lease path alone. SDP and media payloads are never logged
 or stored. The target must hold a certified `realtime`/`openai`/`webrtc`
 capability, which is distinct from the WebSocket `realtime` mode. Azure
-WebRTC is not supported yet and stays pending until its own transport
-contract is certified.
+WebRTC is not supported yet and its ledger tuple is excluded until its own
+transport contract is certified.
 
 Native duplex profiles serve at `GET /native/{dialect}/sessions/{route}` on
 strict routes, with dialect `xai-realtime` for xAI, `vertex-realtime` for

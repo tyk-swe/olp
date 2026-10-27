@@ -39,7 +39,7 @@ identifies implementation boundaries and owners.
 | [RM3: Current APIs](#rm3-current-apis) | Done | Current completions, text Decisions, OCR/search, files and batches |
 | [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Done | Operation contracts, durable debits, recovery, settlement and agent contracts |
 | [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Done | Fine-tuning, vector stores, retrieval and retained resource families |
-| [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Planned | Additional OCR/search transports, realtime profiles and pass-through |
+| [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Done | Additional OCR/search transports, realtime profiles and pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution, per-user grants, HTTP+SSE and stdio |
 | [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
 | [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | AWS CUR, Google billing and Azure Cost Management imports |
@@ -166,7 +166,7 @@ Families remain independent. Retrieval-backed tools need only the implemented
 
 ### RM6: Protocol and provider expansion
 
-**Status: Planned.** **Owners:** connector maintainers for RM6.1–RM6.3,
+**Status: Done.** **Owners:** connector maintainers for RM6.1–RM6.3,
 realtime maintainers for RM6.4–RM6.5, and routing maintainers for RM6.6.
 **Dependencies:** RM4 operation contracts plus transport-specific control,
 metering, revocation and egress behavior. Realtime exposure uses the shared
@@ -185,7 +185,7 @@ durable accounting foundation.
   creation/control, five-second revocation checks, close/usage accounting,
   session expiry and lost-control exposure. Extend Azure through its separate
   transport contract. The OpenAI slice is implemented and the Azure tuple
-  stays pending until its own contract is certified.
+  is excluded in the endpoint ledger until its own contract is certified.
 - [x] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
   Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
   declared transcription support, cancellation and terminal usage accounting.
