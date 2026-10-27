@@ -1,0 +1,12 @@
+{
+  "transport": "wss://<location>-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent",
+  "client": [
+    { "setup": { "model": "projects/<project>/locations/<location>/publishers/google/models/<model>", "generationConfig": { "responseModalities": ["AUDIO"] } } },
+    { "realtimeInput": { "audio": { "data": "<base64>", "mimeType": "audio/pcm;rate=16000" } } },
+    { "clientContent": { "turnComplete": true } }
+  ],
+  "server": [
+    { "setupComplete": {} },
+    { "serverContent": { "turnComplete": true }, "usageMetadata": { "promptTokenCount": 9, "responseTokenCount": 5, "totalTokenCount": 14 } }
+  ]
+}

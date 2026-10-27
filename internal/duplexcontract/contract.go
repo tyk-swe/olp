@@ -39,6 +39,7 @@ type Profile struct {
 
 var profiles = []Profile{
 	{Dialect: XAIRealtime, ProfileID: "xai-realtime", Kind: "openai_compatible", Hosting: "xai-realtime", Vendor: "xai", Transport: TransportWebSocket},
+	{Dialect: VertexRealtime, ProfileID: "vertex-realtime", Kind: "vertex_ai", Hosting: "vertex-live", Vendor: "google-vertex", Transport: TransportWebSocket},
 }
 
 func Profiles() []Profile { return slices.Clone(profiles) }
@@ -94,6 +95,9 @@ func Compile(c Config) (*Template, error) {
 		if _, urlErr := c.Provider.DuplexURL(c.Model); urlErr != nil {
 			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
+		if _, modelErr := c.Provider.DuplexBoundModel(c.Model); modelErr != nil {
+			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
+		}
 	}
 	if c.Policy != nil && len(c.Policy.Rules) > 0 {
 		return nil, refuse("policy_conflict", "/content_policy", "inspectable_policy", "Native duplex frames cannot be admitted with a content policy this relay cannot enforce.")
@@ -136,6 +140,8 @@ func InspectProfileSetup(profile Profile, frame []byte, maxBytes int) (Setup, er
 	switch profile.Dialect {
 	case XAIRealtime:
 		return inspectXAISetup(frame, maxBytes)
+	case VertexRealtime:
+		return inspectVertexSetup(frame, maxBytes)
 	}
 	return Setup{}, refuse("target_capability", "/profile", "native_duplex_contract", "This duplex profile has no setup inspector.")
 }
@@ -151,6 +157,8 @@ func (t *Template) BindSetup(frame []byte, boundModel string) ([]byte, error) {
 	switch t.profile.Dialect {
 	case XAIRealtime:
 		return frame, nil
+	case VertexRealtime:
+		return bindVertexSetup(frame, boundModel, len(frame)+len(boundModel)+2048)
 	}
 	return nil, refuse("target_capability", "/profile", "native_duplex_contract", "This duplex profile cannot bind its setup frame.")
 }

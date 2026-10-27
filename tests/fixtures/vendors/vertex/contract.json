@@ -1,5 +1,13 @@
 {
   "vendor": "google-vertex",
+  "realtime": {
+    "basis": "documented",
+    "documentation_links": {
+      "live_sessions": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api/start-manage-session"
+    },
+    "notes": "Live evidence added 2026-10-27. Vertex AI Live is the BidiGenerateContent WebSocket on the aiplatform host for the configured location, authenticated with the bound Google Cloud credential. Setup names the full publisher model resource and completes with setupComplete before content flows. Frames in realtime.frames.json are schema-built offline fixtures from those documented message names, not captured traffic",
+    "fixtures": ["realtime.frames.json"]
+  },
   "batch_jobs": {
     "basis": "documented",
     "documentation_links": {

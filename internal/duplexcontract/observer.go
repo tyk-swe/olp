@@ -4,6 +4,7 @@ import "github.com/tyk-swe/olp/internal/protocols/wire"
 
 type ServerFrame struct {
 	ProviderError bool
+	SetupComplete bool
 }
 
 type frameObserver interface {
@@ -19,8 +20,8 @@ type Observer struct {
 
 func (t *Template) Observer(maxBytes int) *Observer {
 	switch t.profile.Dialect {
-	case XAIRealtime:
-		return &Observer{inner: &xaiObserver{maxBytes: maxBytes}}
+	case VertexRealtime:
+		return &Observer{inner: &vertexObserver{maxBytes: maxBytes}}
 	}
 	return &Observer{inner: &xaiObserver{maxBytes: maxBytes}}
 }

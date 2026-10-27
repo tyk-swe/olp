@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -130,6 +131,63 @@ func TestNativeDuplexMissingUsageStaysUncertain(t *testing.T) {
 	env := h.sink.last(t)
 	if len(env.Attempts) != 1 || !env.Attempts[0].BillingUncertain || env.Attempts[0].UsageObserved {
 		t.Fatalf("missing terminal usage must settle uncertain, got %+v", env.Attempts)
+	}
+}
+
+type recordingPeer struct {
+	frames chan []byte
+	writes chan []byte
+}
+
+func (p *recordingPeer) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
+	select {
+	case frame := <-p.frames:
+		return websocket.MessageText, frame, nil
+	case <-ctx.Done():
+		return 0, nil, ctx.Err()
+	}
+}
+
+func (p *recordingPeer) Write(_ context.Context, _ websocket.MessageType, data []byte) error {
+	p.writes <- data
+	return nil
+}
+
+func (*recordingPeer) Ping(context.Context) error               { return nil }
+func (*recordingPeer) Close(websocket.StatusCode, string) error { return nil }
+func (*recordingPeer) CloseNow() error                          { return nil }
+
+func TestDuplexSetupAckRequiresSetupComplete(t *testing.T) {
+	template, err := duplexcontract.Compile(duplexcontract.Config{
+		Provider: connectors.Config{
+			Kind: "vertex_ai", VendorID: "google-vertex", AuthMode: "service_account",
+			Endpoint:     connectors.DefaultEndpoint("vertex_ai", "us-central1", "example-project"),
+			CloudRegion:  "us-central1",
+			CloudProject: "example-project",
+			ProfileID:    "vertex-realtime", ProfileRevision: connectors.ProfileRevision,
+		},
+		Model: "gemini-live-example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &recordingPeer{frames: make(chan []byte, 1), writes: make(chan []byte, 4)}
+	client := &recordingPeer{frames: make(chan []byte), writes: make(chan []byte, 4)}
+	upstream.frames <- []byte(`{"serverContent":{"turnComplete":true}}`)
+	if err := awaitDuplexSetupAck(t.Context(), upstream, client, template.Observer(1<<20), time.Second); err == nil {
+		t.Fatal("content before setup completion was admitted as an acknowledgement")
+	}
+	upstream.frames <- []byte(`{"setupComplete":{}}`)
+	if err := awaitDuplexSetupAck(t.Context(), upstream, client, template.Observer(1<<20), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ack := <-client.writes:
+		if string(ack) != `{"setupComplete":{}}` {
+			t.Fatalf("forwarded ack = %s", ack)
+		}
+	default:
+		t.Fatal("setup acknowledgement was not forwarded to the client")
 	}
 }
 

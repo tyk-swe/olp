@@ -195,7 +195,11 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer upstream.Close(websocket.StatusNormalClosure, "")
-	bound, bindErr := template.BindSetup(initial, p.provider.Connector().Model(p.model))
+	boundModel, modelErr := p.provider.Connector().DuplexBoundModel(p.model)
+	bound, bindErr := template.BindSetup(initial, boundModel)
+	if modelErr != nil {
+		bindErr = modelErr
+	}
 	if bindErr != nil || int64(len(bound)) > limit {
 		client.Close(websocket.StatusPolicyViolation, "invalid setup")
 		x.failure, status = invalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
@@ -209,6 +213,19 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	observer := template.Observer(int(limit))
+	if template.SetupAck() {
+		if ackErr := awaitDuplexSetupAck(ctx, upstream, client, observer, p.attempt.Timeout); ackErr != nil {
+			client.Close(websocket.StatusInternalError, "setup uncertain")
+			if errors.Is(ackErr, errDuplexProtocol) {
+				x.failure, status = serverError(http.StatusBadGateway, "provider_protocol_error", "The duplex provider sent an invalid setup acknowledgement."), http.StatusBadGateway
+				markDuplexFactUncertain(x, classProtocol)
+			} else {
+				x.failure, status = serverError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex provider did not acknowledge setup."), http.StatusBadGateway
+				markDuplexFactUncertain(x, classAmbiguous)
+			}
+			return
+		}
+	}
 	x.delivered(s.now())
 	if len(x.facts) > 0 && x.facts[len(x.facts)-1].Interaction != nil {
 		x.facts[len(x.facts)-1].Interaction.UpstreamState = usage.UpstreamAccepted
@@ -432,6 +449,23 @@ loop:
 		return observer.Usage(), observer.Complete(), nil
 	}
 	return observer.Usage(), false, first.err
+}
+
+func awaitDuplexSetupAck(ctx context.Context, upstream, client duplexPeer, observer *duplexcontract.Observer, timeout time.Duration) error {
+	ackCtx, stopAck := context.WithTimeout(ctx, timeout)
+	kind, ack, err := upstream.Read(ackCtx)
+	stopAck()
+	if err != nil {
+		return err
+	}
+	if kind != websocket.MessageText {
+		return errDuplexProtocol
+	}
+	frame, err := observer.ServerFrame(ack)
+	if err != nil || !frame.SetupComplete {
+		return fmt.Errorf("%w: setup acknowledgement required", errDuplexProtocol)
+	}
+	return writeGeminiLiveFrame(ctx, client, kind, ack)
 }
 
 func markDuplexFactUncertain(x *call, class string) {
