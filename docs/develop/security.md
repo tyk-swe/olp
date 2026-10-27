@@ -162,7 +162,7 @@ names are bound into stored data and never change:
 <!-- purposes -->
 | Kind | Purposes |
 | --- | --- |
-| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation`, `batch_submission`, `batch_line`, `agent_approval`, `agent_principal`, `retained_submission` |
+| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation`, `batch_submission`, `batch_line`, `agent_approval`, `agent_principal`, `retained_submission`, `tool_input` |
 | Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `billing_credential`, `guardrail_credential`, `response_cache`, `provider_upload_session`, `agent_credential` |
 <!-- /purposes -->
 

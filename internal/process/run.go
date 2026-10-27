@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -377,6 +378,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
+			var toolLedger mcp.Ledger
+			if limiter != nil {
+				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
+			}
+			toolServer := &mcp.Server{Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
+			}}
+			toolServer.Register(public)
 		}
 		// Every process that can spend against shared budgets owns a durable
 		// producer epoch, including control-only playground calls and worker-only

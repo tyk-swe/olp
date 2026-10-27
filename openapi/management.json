@@ -23079,6 +23079,120 @@
           "next_cursor"
         ]
       },
+      "MCPToolCallResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolset_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tool_alias": {
+            "type": "string",
+            "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+          },
+          "input_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "result_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "upstream_error",
+              "outcome_unknown"
+            ]
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "dispatch_id",
+          "api_key_id",
+          "project_id",
+          "toolset_id",
+          "toolset_revision_id",
+          "server_id",
+          "server_revision_id",
+          "tool_alias",
+          "input_digest",
+          "result_digest",
+          "status",
+          "is_error",
+          "started_at",
+          "completed_at",
+          "created_at"
+        ]
+      },
+      "MCPToolCallList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPToolCallResponse"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
       "MCPServerRevisionResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -57216,6 +57330,142 @@
           },
           "428": {
             "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls": {
+      "get": {
+        "operationId": "list_mcp_tool_calls",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp tool calls",
+        "description": "Content-free tool call attempt records. Arguments, results and credentials are never stored.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "toolset_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool call records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls/{call_id}": {
+      "get": {
+        "operationId": "get_mcp_tool_call",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp tool call",
+        "description": "One content-free tool call attempt record.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool call record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
           }
         }
       }
