@@ -191,6 +191,68 @@ func TestDuplexSetupAckRequiresSetupComplete(t *testing.T) {
 	}
 }
 
+func TestNativeDuplexBedrockBridgesWebSocketToBidirectionalStream(t *testing.T) {
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		for id, provider := range snapshot.Providers {
+			if provider.Name != "a" {
+				continue
+			}
+			endpoint, err := connectors.BedrockEndpoint("us-east-1", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider.Kind = "bedrock"
+			provider.ProfileID, provider.ProfileRevision = "bedrock-realtime", connectors.ProfileRevision
+			provider.VendorID = "amazon-bedrock"
+			provider.AuthMode = "static"
+			provider.CloudRegion = "us-east-1"
+			provider.Endpoint = endpoint
+			provider.Capabilities = []routing.Capability{{Model: modelA, Operation: "realtime", Surface: "native", Mode: "realtime"}}
+			snapshot.Providers[id] = provider
+		}
+		route := snapshot.Routes[routeSlug]
+		route.Operations = []string{"realtime"}
+		route.Targets = route.Targets[:1]
+		snapshot.Routes[routeSlug] = route
+	})
+	upstream := &recordingPeer{frames: make(chan []byte, 4), writes: make(chan []byte, 4)}
+	upstream.frames <- []byte(`{"event":{"contentStart":{"contentId":"c1","type":"TEXT","role":"ASSISTANT"}}}`)
+	upstream.frames <- []byte(`{"event":{"textOutput":{"content":"hello from sonic"}}}`)
+	opens := 0
+	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
+		opens++
+		return upstream, nil
+	}
+	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case setup := <-upstream.writes:
+		if !strings.Contains(string(setup), "sessionStart") {
+			t.Fatalf("forwarded setup = %s", setup)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup frame never reached the bidirectional stream")
+	}
+	if _, frame, err := conn.Read(ctx); err != nil || !strings.Contains(string(frame), "contentStart") {
+		t.Fatalf("first relayed frame = %q err=%v", frame, err)
+	}
+	if _, frame, err := conn.Read(ctx); err != nil || !strings.Contains(string(frame), "textOutput") {
+		t.Fatalf("second relayed frame = %q err=%v", frame, err)
+	}
+	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatal(err)
+	}
+	if opens != 1 {
+		t.Fatalf("bidirectional streams opened = %d, want exactly one pinned stream", opens)
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 || !env.Attempts[0].BillingUncertain || env.Attempts[0].UsageObserved {
+		t.Fatalf("Nova Sonic terminal usage must settle uncertain, never zero, got %+v", env.Attempts)
+	}
+}
+
 func TestNativeDuplexRefusesForeignKeyAndUnknownDialect(t *testing.T) {
 	h := xaiDuplexHarness(t, true)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

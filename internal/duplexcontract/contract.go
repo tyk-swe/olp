@@ -40,6 +40,7 @@ type Profile struct {
 var profiles = []Profile{
 	{Dialect: XAIRealtime, ProfileID: "xai-realtime", Kind: "openai_compatible", Hosting: "xai-realtime", Vendor: "xai", Transport: TransportWebSocket},
 	{Dialect: VertexRealtime, ProfileID: "vertex-realtime", Kind: "vertex_ai", Hosting: "vertex-live", Vendor: "google-vertex", Transport: TransportWebSocket},
+	{Dialect: BedrockRealtime, ProfileID: "bedrock-realtime", Kind: "bedrock", Hosting: "bedrock-nova-sonic", Vendor: "amazon-bedrock", Transport: TransportBedrockBidi},
 }
 
 func Profiles() []Profile { return slices.Clone(profiles) }
@@ -90,6 +91,11 @@ func Compile(c Config) (*Template, error) {
 		!slices.Contains(p.Operations, "realtime") ||
 		!c.Provider.Supports("realtime", "native", "realtime") {
 		return nil, refuse("target_capability", "/profile", "native_duplex_contract", "This provider profile has no native duplex contract.")
+	}
+	if descriptor.Transport == TransportBedrockBidi {
+		if _, endpointErr := c.Provider.BedrockDuplexEndpoint(); endpointErr != nil {
+			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
+		}
 	}
 	if descriptor.Transport == TransportWebSocket {
 		if _, urlErr := c.Provider.DuplexURL(c.Model); urlErr != nil {
@@ -142,6 +148,8 @@ func InspectProfileSetup(profile Profile, frame []byte, maxBytes int) (Setup, er
 		return inspectXAISetup(frame, maxBytes)
 	case VertexRealtime:
 		return inspectVertexSetup(frame, maxBytes)
+	case BedrockRealtime:
+		return inspectBedrockSetup(frame, maxBytes)
 	}
 	return Setup{}, refuse("target_capability", "/profile", "native_duplex_contract", "This duplex profile has no setup inspector.")
 }
@@ -155,7 +163,7 @@ func AdmitProfileSetup(profile Profile, setup Setup) error {
 
 func (t *Template) BindSetup(frame []byte, boundModel string) ([]byte, error) {
 	switch t.profile.Dialect {
-	case XAIRealtime:
+	case XAIRealtime, BedrockRealtime:
 		return frame, nil
 	case VertexRealtime:
 		return bindVertexSetup(frame, boundModel, len(frame)+len(boundModel)+2048)

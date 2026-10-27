@@ -138,6 +138,10 @@ type Server struct {
 	shadows   *shadowing
 	now       func() time.Time
 	counted   func(estimate.Family)
+	// bedrockStream opens a Bedrock bidirectional stream for a native
+	// duplex session. It is a field so tests can substitute the upstream
+	// transport; nil selects the SDK opener.
+	bedrockStream func(ctx context.Context, x *call, p *pin) (duplexPeer, error)
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the

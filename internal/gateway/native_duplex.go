@@ -300,6 +300,8 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) duplexDial(ctx context.Context, x *call, p *pin, template *duplexcontract.Template) (duplexPeer, *Error) {
 	switch template.Transport() {
+	case duplexcontract.TransportBedrockBidi:
+		return s.bedrockDuplexDial(ctx, x, p)
 	case duplexcontract.TransportWebSocket:
 		endpoint, err := p.provider.Connector().DuplexURL(p.model)
 		if err != nil {

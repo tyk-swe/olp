@@ -22,6 +22,8 @@ func (t *Template) Observer(maxBytes int) *Observer {
 	switch t.profile.Dialect {
 	case VertexRealtime:
 		return &Observer{inner: &vertexObserver{maxBytes: maxBytes}}
+	case BedrockRealtime:
+		return &Observer{inner: &bedrockObserver{maxBytes: maxBytes}}
 	}
 	return &Observer{inner: &xaiObserver{maxBytes: maxBytes}}
 }

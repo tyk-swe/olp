@@ -80,6 +80,7 @@ var profileRegistry = []Profile{
 	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
 	{ID: "xai-realtime", Label: "xAI Realtime", Kind: "openai_compatible", Dialect: "xai-realtime", DialectRevision: "1", Hosting: "xai-realtime"},
 	{ID: "vertex-realtime", Label: "Vertex AI Live", Kind: "vertex_ai", Dialect: "vertex-realtime", DialectRevision: "v1", Hosting: "vertex-live"},
+	{ID: "bedrock-realtime", Label: "Bedrock Nova Sonic", Kind: "bedrock", Dialect: "bedrock-realtime", DialectRevision: "v1", Hosting: "bedrock-nova-sonic"},
 	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
 	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
 	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
@@ -244,6 +245,14 @@ func init() {
 			p.QuerySettings = []string{}
 			p.OperationDialects = map[string]string{}
 			p.Documentation = "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api/start-manage-session"
+		case "bedrock-realtime":
+			p.Operations = []string{"realtime"}
+			p.Authentication = []string{"static", "default_chain"}
+			p.Transport = "bedrock-bidi"
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.OperationDialects = map[string]string{}
+			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html"
 		}
 		completeProfileMetadata(p)
 	}
