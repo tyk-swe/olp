@@ -143,6 +143,20 @@ func TestBedrockObserverSettlesCumulativeUsage(t *testing.T) {
 	if observer.Complete() {
 		t.Fatal("session settled as complete after submitting input that never started")
 	}
+	serve(
+		`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c3"}}}`,
+		`{"event":{"usageEvent":{"sessionId":"s1","promptName":"p1","completionId":"c3","totalInputTokens":130,"totalOutputTokens":50,"totalTokens":180}}}`,
+		`{"event":{"completionEnd":{"sessionId":"s1","promptName":"p1","completionId":"c3","stopReason":"END_TURN"}}}`,
+	)
+	if !observer.Complete() {
+		t.Fatal("submitted input settled by later cumulative usage is not complete")
+	}
+	if err := observer.ClientFrame([]byte(`{"event":{"toolResult":{"promptName":"p1","contentName":"t1","content":[{"text":"result"}]}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after submitting a tool result that never started")
+	}
 	if _, err := observer.ServerFrame([]byte(`{"event":{"completionStart":{"sessionId":"s1","promptName":"p1","completionId":"c2"}}}`)); err != nil {
 		t.Fatal(err)
 	}

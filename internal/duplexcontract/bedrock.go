@@ -126,7 +126,7 @@ func (o *bedrockObserver) clientFrame(frame []byte) error {
 	if !bedrockClientEvents[kind] {
 		return refuse("invalid_duplex_frame", "/event", "registered_event", "The duplex client sent an unregistered Nova Sonic event.")
 	}
-	if kind == "textInput" || kind == "audioInput" {
+	if kind == "textInput" || kind == "audioInput" || kind == "toolResult" {
 		o.inputAfterUsage = true
 	}
 	return nil

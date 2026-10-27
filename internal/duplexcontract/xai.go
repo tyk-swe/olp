@@ -27,11 +27,12 @@ func inspectXAISetup(frame []byte, maxBytes int) (Setup, error) {
 }
 
 type xaiObserver struct {
-	maxBytes   int
-	usage      *wire.Usage
-	pending    int
-	requested  int
-	incomplete bool
+	maxBytes        int
+	usage           *wire.Usage
+	pending         int
+	requested       int
+	inputAfterUsage bool
+	incomplete      bool
 }
 
 func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
@@ -80,6 +81,7 @@ func (o *xaiObserver) serverFrame(frame []byte) (ServerFrame, error) {
 		if secondsOK {
 			o.setBillableSeconds(seconds)
 		}
+		o.inputAfterUsage = false
 		return ServerFrame{}, nil
 	}
 	return ServerFrame{}, nil
@@ -103,15 +105,18 @@ func (o *xaiObserver) clientFrame(frame []byte) error {
 	if err != nil {
 		return err
 	}
-	if kind, _ := textField(doc.Root(), "type"); kind == "response.create" {
+	switch kind, _ := textField(doc.Root(), "type"); kind {
+	case "response.create":
 		o.requested++
+	case "input_audio_buffer.append", "input_audio_buffer.commit", "conversation.item.create":
+		o.inputAfterUsage = true
 	}
 	return nil
 }
 
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
 func (o *xaiObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && o.requested == 0 && !o.incomplete
+	return o.usage != nil && o.pending == 0 && o.requested == 0 && !o.inputAfterUsage && !o.incomplete
 }
 
 func (o *xaiObserver) setBillableSeconds(seconds string) {

@@ -175,6 +175,30 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *Error) {
 	return out, nil
 }
 
+func webrtcTranscriptionConfigured(members map[string]json.RawMessage) bool {
+	configured := func(raw json.RawMessage) bool {
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(raw, &nested) != nil {
+			return false
+		}
+		model, ok := nested["model"]
+		return ok && string(model) != "null"
+	}
+	if raw, ok := members["input_audio_transcription"]; ok && configured(raw) {
+		return true
+	}
+	var audio map[string]json.RawMessage
+	if raw, ok := members["audio"]; !ok || json.Unmarshal(raw, &audio) != nil {
+		return false
+	}
+	var input map[string]json.RawMessage
+	if raw, ok := audio["input"]; !ok || json.Unmarshal(raw, &input) != nil {
+		return false
+	}
+	raw, ok := input["transcription"]
+	return ok && configured(raw)
+}
+
 func bindWebRTCSession(raw json.RawMessage, slug, providerModel string) (json.RawMessage, *Error) {
 	if len(raw) == 0 {
 		bound, _ := json.Marshal(map[string]string{"type": "realtime", "model": providerModel})
@@ -189,6 +213,9 @@ func bindWebRTCSession(raw json.RawMessage, slug, providerModel string) (json.Ra
 		if _, ok := members[name]; ok {
 			return nil, invalidRequest("client_secrets_unavailable", "Raw provider client secrets are not available on this surface.", strPtr("session"))
 		}
+	}
+	if webrtcTranscriptionConfigured(members) {
+		return nil, invalidRequest("unsupported_session_field", "Input transcription is not available on this surface.", strPtr("session"))
 	}
 	if rawModel, ok := members["model"]; ok {
 		var model string
@@ -415,11 +442,26 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		writeSurfaceError(w, e, "openai")
 		return
 	}
+	abandoned := serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
+	if r.Context().Err() != nil {
+		if err := s.hangupWebRTCCall(bg, sess); err != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+		}
+		s.settleWebRTC(sess, abandoned)
+		cancel()
+		return
+	}
 	go s.runWebRTCControl(sess)
 	w.Header().Set("Content-Type", "application/sdp")
 	w.Header().Set("Location", "/v1/realtime/calls/"+sess.id)
 	w.WriteHeader(status)
-	_, _ = w.Write(answer)
+	if _, err := w.Write(answer); err != nil {
+		if herr := s.hangupWebRTCCall(bg, sess); herr != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+		}
+		s.settleWebRTC(sess, abandoned)
+		cancel()
+	}
 }
 
 func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp, session []byte) ([]byte, int, *Error) {

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -64,11 +65,13 @@ type webrtcMock struct {
 	controls    int
 	session     []byte
 	hangupSeen  chan struct{}
+	createSeen  chan struct{}
+	release     chan struct{}
 	sessionSeen int
 }
 
 func newWebRTCMock(mode string) *webrtcMock {
-	return &webrtcMock{mode: mode, hangupSeen: make(chan struct{}, 4)}
+	return &webrtcMock{mode: mode, hangupSeen: make(chan struct{}, 4), createSeen: make(chan struct{}, 4), release: make(chan struct{})}
 }
 
 func (m *webrtcMock) counts() (int, int, int) {
@@ -104,6 +107,10 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			m.session = []byte(r.FormValue("session"))
 			mode := m.mode
 			m.mu.Unlock()
+			m.createSeen <- struct{}{}
+			if mode == "slow" {
+				<-m.release
+			}
 			if mode == "reject" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
@@ -136,6 +143,11 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			}
 			defer conn.CloseNow()
 			_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2,"input_token_details":{"cached_tokens":1}}}}`))
+			if mode == "transcribe" {
+				_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"hello"}`))
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
 			if mode == "close" {
 				_ = conn.Close(websocket.StatusNormalClosure, "")
 				return
@@ -514,6 +526,74 @@ func TestWebRTCRevokedKeyClosesSession(t *testing.T) {
 	fact := env.Attempts[len(env.Attempts)-1]
 	if !fact.BillingUncertain {
 		t.Fatalf("revoked session must not settle as complete: %+v", fact)
+	}
+}
+
+func TestWebRTCInputTranscriptionRefusedAndObservedWorkUncertain(t *testing.T) {
+	mock := newWebRTCMock("transcribe")
+	h := webrtcHarness(t, mock, true)
+	for _, session := range []string{
+		`{"type":"realtime","model":"` + routeSlug + `","audio":{"input":{"transcription":{"model":"whisper-1"}}}}`,
+		`{"type":"realtime","model":"` + routeSlug + `","input_audio_transcription":{"model":"whisper-1"}}`,
+	} {
+		resp := webrtcCreate(t, h, fullKey, session)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || !strings.Contains(string(body), "unsupported_session_field") {
+			t.Fatalf("transcription session admitted: %d %s", resp.StatusCode, body)
+		}
+	}
+	if creates, _, _ := mock.counts(); creates != 0 {
+		t.Fatal("provider session created for a refused transcription configuration")
+	}
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d", resp.StatusCode)
+	}
+	env := sessionEnvelope(t, waitEnvelopes(t, h, 3))
+	fact := env.Attempts[len(env.Attempts)-1]
+	if !fact.BillingUncertain {
+		t.Fatalf("observed transcription work settled as complete: %+v", fact)
+	}
+}
+
+func TestWebRTCClientCancellationDuringCreationHangsUpSession(t *testing.T) {
+	mock := newWebRTCMock("slow")
+	h := webrtcHarness(t, mock, true)
+	body, contentType := webrtcCreateBody(t, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/realtime/calls", bytes.NewReader(body))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		req.Header.Set("Content-Type", contentType)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-mock.createSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider creation never started")
+	}
+	cancel()
+	close(mock.release)
+	select {
+	case <-mock.hangupSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("abandoned creation left the provider session established")
+	}
+	<-done
+	_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	if got := h.gateway.webrtcSessionCount(); got != 0 {
+		t.Fatalf("orphaned sessions retained: %d", got)
 	}
 }
 

@@ -137,6 +137,21 @@ func TestXAIObserverPendingResponseKeepsSessionIncomplete(t *testing.T) {
 	if !observer.Complete() {
 		t.Fatal("requested response settled by terminal usage is not complete")
 	}
+	if err := observer.ClientFrame([]byte(`{"type":"input_audio_buffer.append","audio":"AA=="}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after submitting audio that never started")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r10"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"type":"response.done","response":{"id":"r10","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("submitted audio settled by terminal usage is not complete")
+	}
 	if _, err := observer.ServerFrame([]byte(`{"type":"response.created","response":{"id":"r2"}}`)); err != nil {
 		t.Fatal(err)
 	}

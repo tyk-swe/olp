@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -46,6 +47,9 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 				return
 			}
 			sess.usageMu.Lock()
+			if typ == websocket.MessageText && bytes.Contains(data, []byte("input_audio_transcription")) {
+				sess.responses.unknown = true
+			}
 			if u := sess.responses.providerFrame(typ, data, true); u != nil {
 				sess.accumulateUsage(u)
 			}
