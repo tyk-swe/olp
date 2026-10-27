@@ -88,6 +88,7 @@ type vertexObserver struct {
 	turn       *wire.Usage
 	pending    bool
 	awaiting   bool
+	submitted  int
 	incomplete bool
 	setupDone  bool
 }
@@ -133,6 +134,9 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 }
 
 func (o *vertexObserver) flushTurn() {
+	if o.submitted > 0 {
+		o.submitted--
+	}
 	if o.usage == nil {
 		o.usage = o.turn
 		o.turn = nil
@@ -165,11 +169,16 @@ func mergeShare(slot **int64, value *int64) {
 }
 
 func vertexUsage(u *geminilifecycle.LiveUsage) *wire.Usage {
-	usage := &wire.Usage{InputTokens: *u.Input, OutputTokens: *u.Output}
-	if u.Total != nil {
+	input, output := *u.Input, *u.Output
+	if u.ToolUse != nil {
+		input = addTokens(input, *u.ToolUse)
+	}
+	if u.Thoughts != nil {
+		output = addTokens(output, *u.Thoughts)
+	}
+	usage := &wire.Usage{InputTokens: input, OutputTokens: output, TotalTokens: addTokens(input, output)}
+	if u.Total != nil && *u.Total > usage.TotalTokens {
 		usage.TotalTokens = *u.Total
-	} else {
-		usage.TotalTokens = addTokens(*u.Input, *u.Output)
 	}
 	usage.CachedInputTokens = u.Cached
 	usage.ReasoningTokens = u.Thoughts
@@ -197,10 +206,22 @@ func modalityShares(details []geminilifecycle.LiveUsageDetail) (audio, image *in
 }
 
 func (o *vertexObserver) clientFrame(frame []byte) error {
-	return geminilifecycle.ValidateLiveClientFrame(frame, o.maxBytes)
+	if err := geminilifecycle.ValidateLiveClientFrame(frame, o.maxBytes); err != nil {
+		return err
+	}
+	doc, err := parseObject(frame, o.maxBytes)
+	if err != nil {
+		return err
+	}
+	if content, ok := doc.Root().Lookup("clientContent"); ok && content.Kind() == oif.Object {
+		if complete, present := content.Lookup("turnComplete"); present && complete.Kind() == oif.Boolean && complete.Raw() == "true" {
+			o.submitted++
+		}
+	}
+	return nil
 }
 
 func (o *vertexObserver) usageValue() *wire.Usage { return o.usage }
 func (o *vertexObserver) complete() bool {
-	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && !o.incomplete
+	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && o.submitted == 0 && !o.incomplete
 }

@@ -254,6 +254,7 @@ export function surfacesFor(operation: string): string[] {
   if (operation === 'generation')
     return ['openai', 'anthropic', 'gemini', 'bedrock'];
   if (operation === 'token_count') return ['openai', 'anthropic', 'gemini'];
+  if (operation === 'realtime') return ['openai', 'native', 'gemini'];
   return ['openai'];
 }
 

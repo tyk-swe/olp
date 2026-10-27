@@ -129,10 +129,16 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	}
 	var body []byte
 	if r.Body != nil && r.Body != http.NoBody {
-		stop := context.AfterFunc(ctx, func() { r.Body.Close() })
+		controller := http.NewResponseController(w)
+		if err := controller.SetReadDeadline(deadline); err != nil {
+			fail(serverError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
+			return
+		}
 		var err error
 		body, err = io.ReadAll(io.LimitReader(r.Body, limit+1))
-		stop()
+		if err == nil {
+			_ = controller.SetReadDeadline(time.Time{})
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				fail((&attemptFailure{class: classTimeout}).toError())
@@ -286,6 +292,13 @@ slots:
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
+	payload, readErr := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
+	if readErr == nil && int64(len(payload)) > responseLimit {
+		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
+		factP.recordEvidence(true)
+		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
+		return
+	}
 	for name, values := range resp.Header {
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
 		if routing.HopByHopOrCredentialHeader(canonical) {
@@ -297,7 +310,15 @@ slots:
 	}
 	w.WriteHeader(resp.StatusCode)
 	x.delivered(s.now())
-	written, copyErr := io.Copy(w, io.LimitReader(resp.Body, responseLimit+1))
+	var written int64
+	var copyErr error
+	if readErr != nil {
+		copyErr = readErr
+	} else {
+		var n int
+		n, copyErr = w.Write(payload)
+		written = int64(n)
+	}
 	factP.Duration = s.now().Sub(factP.StartedAt)
 	success := resp.StatusCode >= 200 && resp.StatusCode < 300 && copyErr == nil && written <= responseLimit
 	switch {

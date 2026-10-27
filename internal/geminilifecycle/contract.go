@@ -349,15 +349,17 @@ func ValidateLiveClientFrame(data []byte, maxBytes int) error {
 // LiveUsage is the provider's native token observation. Missing or malformed
 // counts remain absent; absence never means zero consumption.
 type LiveUsage struct {
-	Input           *int64            `json:"promptTokenCount"`
-	Output          *int64            `json:"responseTokenCount"`
-	Cached          *int64            `json:"cachedContentTokenCount"`
-	Thoughts        *int64            `json:"thoughtsTokenCount"`
-	ToolUse         *int64            `json:"toolUsePromptTokenCount"`
-	Total           *int64            `json:"totalTokenCount"`
-	PromptDetails   []LiveUsageDetail `json:"promptTokensDetails"`
-	CacheDetails    []LiveUsageDetail `json:"cacheTokensDetails"`
-	ResponseDetails []LiveUsageDetail `json:"responseTokensDetails"`
+	Input             *int64            `json:"promptTokenCount"`
+	Output            *int64            `json:"responseTokenCount"`
+	Candidates        *int64            `json:"candidatesTokenCount"`
+	Cached            *int64            `json:"cachedContentTokenCount"`
+	Thoughts          *int64            `json:"thoughtsTokenCount"`
+	ToolUse           *int64            `json:"toolUsePromptTokenCount"`
+	Total             *int64            `json:"totalTokenCount"`
+	PromptDetails     []LiveUsageDetail `json:"promptTokensDetails"`
+	CacheDetails      []LiveUsageDetail `json:"cacheTokensDetails"`
+	ResponseDetails   []LiveUsageDetail `json:"responseTokensDetails"`
+	CandidatesDetails []LiveUsageDetail `json:"candidatesTokensDetails"`
 }
 
 // LiveUsageDetail is one modality bucket in a usage detail array.
@@ -393,8 +395,16 @@ func ObserveLiveServerFrame(data []byte, maxBytes int) (LiveServerFrame, error) 
 				return LiveServerFrame{}, errors.New("Gemini Live usage metadata must be an object")
 			}
 			var u LiveUsage
-			if json.Unmarshal(member.Value.Bytes(), &u) == nil && validLiveUsage(u) {
-				observation.Usage = &u
+			if json.Unmarshal(member.Value.Bytes(), &u) == nil {
+				if u.Output == nil {
+					u.Output = u.Candidates
+				}
+				if len(u.ResponseDetails) == 0 {
+					u.ResponseDetails = u.CandidatesDetails
+				}
+				if validLiveUsage(u) {
+					observation.Usage = &u
+				}
 			}
 			continue
 		}
@@ -423,7 +433,7 @@ func validLiveUsage(u LiveUsage) bool {
 	if u.Input == nil || u.Output == nil {
 		return false
 	}
-	for _, value := range []*int64{u.Input, u.Output, u.Cached, u.Thoughts, u.ToolUse, u.Total} {
+	for _, value := range []*int64{u.Input, u.Output, u.Candidates, u.Cached, u.Thoughts, u.ToolUse, u.Total} {
 		if value != nil && *value < 0 {
 			return false
 		}

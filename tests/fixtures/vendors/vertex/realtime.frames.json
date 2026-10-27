@@ -7,6 +7,6 @@
   ],
   "server": [
     { "setupComplete": {} },
-    { "serverContent": { "turnComplete": true }, "usageMetadata": { "promptTokenCount": 9, "responseTokenCount": 5, "totalTokenCount": 14 } }
+    { "serverContent": { "turnComplete": true }, "usageMetadata": { "promptTokenCount": 9, "candidatesTokenCount": 5, "totalTokenCount": 14 } }
   ]
 }

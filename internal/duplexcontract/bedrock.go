@@ -43,6 +43,7 @@ type bedrockObserver struct {
 	maxBytes   int
 	usage      *wire.Usage
 	pending    int
+	submitted  int
 	sawUsage   bool
 	incomplete bool
 }
@@ -62,6 +63,9 @@ func (o *bedrockObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	}
 	switch kind {
 	case "completionStart":
+		if o.submitted > 0 {
+			o.submitted--
+		}
 		o.pending++
 		o.sawUsage = false
 	case "completionEnd":
@@ -124,10 +128,13 @@ func (o *bedrockObserver) clientFrame(frame []byte) error {
 	if !bedrockClientEvents[kind] {
 		return refuse("invalid_duplex_frame", "/event", "registered_event", "The duplex client sent an unregistered Nova Sonic event.")
 	}
+	if kind == "promptEnd" {
+		o.submitted++
+	}
 	return nil
 }
 
 func (o *bedrockObserver) usageValue() *wire.Usage { return o.usage }
 func (o *bedrockObserver) complete() bool {
-	return o.usage != nil && o.pending == 0 && !o.incomplete
+	return o.usage != nil && o.pending == 0 && o.submitted == 0 && !o.incomplete
 }

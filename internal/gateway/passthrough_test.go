@@ -108,6 +108,26 @@ func TestPassthroughPricedRouteReservesFeeBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestPassthroughOversizedChunkedResponseRefusedBeforeCommit(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 32*1024)
+		flusher := w.(http.Flusher)
+		for range 40 {
+			w.Write(chunk)
+			flusher.Flush()
+		}
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("oversized chunked response delivered as %d with %d bytes", resp.StatusCode, len(body))
+	}
+}
+
 func TestPassthroughCoolingSlotDispatchesNothing(t *testing.T) {
 	h := passthroughHarness(t)
 	for _, provider := range h.rt.release.Snapshot.Providers {

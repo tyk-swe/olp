@@ -109,12 +109,15 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":9,"responseTokenCount":5,"totalTokenCount":14}}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":3,"responseTokenCount":2,"totalTokenCount":5}}`)); err != nil {
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"thoughtsTokenCount":3,"toolUsePromptTokenCount":1,"totalTokenCount":9,"candidatesTokensDetails":[{"modality":"AUDIO","tokenCount":2}]}}`)); err != nil {
 		t.Fatal(err)
 	}
 	usage := observer.Usage()
-	if usage == nil || usage.InputTokens != 12 || usage.OutputTokens != 7 || usage.TotalTokens != 19 {
-		t.Fatalf("usage = %+v", usage)
+	if usage == nil || usage.InputTokens != 13 || usage.OutputTokens != 10 || usage.TotalTokens != 23 {
+		t.Fatalf("usage = %+v, want Vertex candidates usage with tool and thought tokens folded in", usage)
+	}
+	if usage.AudioOutputTokens == nil || *usage.AudioOutputTokens != 2 || usage.ReasoningTokens == nil || *usage.ReasoningTokens != 3 {
+		t.Fatalf("usage shares = %+v", usage)
 	}
 	if !observer.Complete() {
 		t.Fatal("completed turns did not produce complete usage evidence")
@@ -129,11 +132,23 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 		t.Fatalf("standalone usage message refused: %v", err)
 	}
 	usage = observer.Usage()
-	if usage == nil || usage.InputTokens != 16 || usage.OutputTokens != 8 || usage.TotalTokens != 24 {
+	if usage == nil || usage.InputTokens != 17 || usage.OutputTokens != 11 || usage.TotalTokens != 28 {
 		t.Fatalf("standalone usage not applied to the finished turn: %+v", usage)
 	}
 	if !observer.Complete() {
 		t.Fatal("standalone terminal usage did not complete the session")
+	}
+	if err := observer.ClientFrame([]byte(`{"clientContent":{"turns":[{"role":"user","parts":[{"text":"again"}]}],"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("session settled as complete after submitting a turn that never started")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("submitted turn settled by terminal usage is not complete")
 	}
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
 		t.Fatal(err)

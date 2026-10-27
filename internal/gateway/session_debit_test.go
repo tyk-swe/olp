@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type fakeSessionDebits struct {
@@ -199,6 +200,38 @@ func TestWebRTCDefinitiveCreationRejectionSettlesDebitAsUnbilled(t *testing.T) {
 	second.Body.Close()
 	if second.StatusCode == http.StatusConflict {
 		t.Fatal("corrected request blocked by exposure from a session that never existed")
+	}
+}
+
+func TestWebRTCPredispatchCredentialFailureEmitsFinalEvidence(t *testing.T) {
+	mock := newWebRTCMock("close")
+	h := webrtcHarness(t, mock, true)
+	missing := "00000000-0000-4000-8000-0000000000ff"
+	h.republish(func(s *routing.Snapshot, a, b routing.Provider) {
+		a.Slots[0].CredentialID = &missing
+		s.Providers[a.ID] = a
+	})
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusCreated {
+		t.Fatal("creation without an applicable credential was admitted")
+	}
+	env := sessionEnvelope(t, waitEnvelopes(t, h, 1))
+	fact := env.Attempts[len(env.Attempts)-1]
+	if fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
+		t.Fatalf("known-unsent failure lacks final evidence flags: %+v", fact)
+	}
+	ev, err := accountingEvent(env)
+	if err != nil || ev == nil {
+		t.Fatalf("predispatch failure envelope rejected by accounting conversion: %v", err)
+	}
+	encoded, err := usage.Encode(ev)
+	if err != nil {
+		t.Fatalf("predispatch failure envelope rejected by usage encoding: %v", err)
+	}
+	if _, err := usage.Decode(encoded); err != nil {
+		t.Fatalf("predispatch failure envelope rejected by usage validation: %v", err)
 	}
 }
 

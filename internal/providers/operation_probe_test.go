@@ -76,6 +76,20 @@ func TestNativeDuplexProfileCertifiesOverItsWebSocket(t *testing.T) {
 	}
 }
 
+func TestDefaultProbeTupleSelectsNativeRealtimeForDuplexProfiles(t *testing.T) {
+	want := CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}
+	for name, cfg := range map[string]Configuration{
+		"xai":     {Kind: KindOpenAICompatible, ProfileID: "xai-realtime", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new("https://api.x.ai/v1"), Options: Options{VendorID: new("xai")}},
+		"vertex":  {Kind: KindVertex, ProfileID: "vertex-realtime", ProfileRevision: "1", AuthMode: "service_account", CloudProject: new("example-project"), CloudRegion: new("us-central1"), Options: Options{VendorID: new("google-vertex")}},
+		"bedrock": {Kind: KindBedrock, ProfileID: "bedrock-realtime", ProfileRevision: "1", AuthMode: "aws_sigv4", Endpoint: new("https://bedrock-runtime.us-east-1.amazonaws.com"), CloudRegion: new("us-east-1"), Options: Options{VendorID: new("aws-bedrock")}},
+	} {
+		cfg.Normalize()
+		if got := defaultProbeTuple(&cfg); got != want {
+			t.Fatalf("%s default probe tuple = %+v, want %+v", name, got, want)
+		}
+	}
+}
+
 func TestBraveProfileProbesOverGetQuery(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

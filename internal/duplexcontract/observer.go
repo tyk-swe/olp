@@ -1,6 +1,10 @@
 package duplexcontract
 
-import "github.com/tyk-swe/olp/internal/protocols/wire"
+import (
+	"sync"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+)
 
 type ServerFrame struct {
 	ProviderError bool
@@ -15,6 +19,7 @@ type frameObserver interface {
 }
 
 type Observer struct {
+	mu    sync.Mutex
 	inner frameObserver
 }
 
@@ -29,11 +34,25 @@ func (t *Template) Observer(maxBytes int) *Observer {
 }
 
 func (o *Observer) ServerFrame(frame []byte) (ServerFrame, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	return o.inner.serverFrame(frame)
 }
 
-func (o *Observer) ClientFrame(frame []byte) error { return o.inner.clientFrame(frame) }
+func (o *Observer) ClientFrame(frame []byte) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.inner.clientFrame(frame)
+}
 
-func (o *Observer) Usage() *wire.Usage { return o.inner.usageValue() }
+func (o *Observer) Usage() *wire.Usage {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.inner.usageValue()
+}
 
-func (o *Observer) Complete() bool { return o.inner.complete() }
+func (o *Observer) Complete() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.inner.complete()
+}

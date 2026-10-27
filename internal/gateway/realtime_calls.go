@@ -302,11 +302,17 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(s.now().Add(requestBodyTimeout)); err != nil {
+		fail(serverError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
+		return
+	}
 	callReq, e := parseWebRTCCallRequest(r)
 	if e != nil {
 		fail(e)
 		return
 	}
+	_ = controller.SetReadDeadline(time.Time{})
 	slug, e := webrtcSessionSlug(callReq.session, callReq.slug)
 	if e != nil {
 		fail(e)
@@ -453,6 +459,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err := s.applySlotCredential(reqCtx, x, req, cfg, p.slot, body, &p.provider, p.model); err != nil {
 		fact.Class = classCredential
 		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.recordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
 	}
@@ -460,12 +467,14 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err != nil {
 		fact.Class = classCredential
 		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.recordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
 	if e := s.markSessionDispatched(reqCtx, x); e != nil {
 		fact.Class = classConnect
 		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.recordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, e
 	}

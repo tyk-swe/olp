@@ -62,6 +62,11 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 // the default tuple, such as a dedicated embeddings or rerank dialect, is
 // probed with the first unary tuple it can certify.
 func defaultProbeTuple(cfg *Configuration) CapabilityInput {
+	if duplexcontract.IsProfile(cfg.ProfileID) {
+		if tuple := (CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}); probeable(cfg, tuple) {
+			return tuple
+		}
+	}
 	operation := probeOperation(cfg)
 	if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
 		operation = "token_count"
