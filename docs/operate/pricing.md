@@ -164,7 +164,7 @@ and the attempt settles *incomplete* rather than being billed at text rates.
 | OpenAI responses | completed `web_search_call` items → `web_search`; completed `file_search_call` items → `file_search` |
 | Anthropic messages | `usage.server_tool_use.web_search_requests` → `web_search`; `web_fetch_requests` → `web_fetch`; other server-tool counters are ignored |
 | Mistral OCR | `usage_info.pages_processed` → media units × `unit_price`; other usage fields are ignored |
-| Search (Perplexity, Tavily, Exa, Parallel, Brave) | no provider usage; one successful request → `per_request`. Provider-reported credits or `costDollars` are not used for accounting |
+| Search (Perplexity, Tavily, Exa, Parallel, Brave) | no provider usage; one successful request -> `per_request`. Provider-reported credits or `costDollars` are not used for accounting |
 | Gemini generateContent / streaming / Live / interactions | `promptTokensDetails` modality `AUDIO`/`IMAGE`/`VIDEO` → audio/image input; `cacheTokensDetails` likewise → cached audio/image input; `candidatesTokensDetails` (Live: `responseTokensDetails`) `AUDIO`/`IMAGE` → audio/image output; `TEXT` and `DOCUMENT` stay in the text share; grounding `webSearchQueries` across candidates → `google_search_query` per query plus `google_search_prompt` once per grounded prompt |
 
 A price must carry a fee for every tool name a route's provider can meter —

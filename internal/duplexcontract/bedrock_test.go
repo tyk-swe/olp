@@ -7,10 +7,11 @@ import (
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 )
 
-func bedrockConfig() duplexcontract.Config {
+func bedrockConfig(t *testing.T) duplexcontract.Config {
+	t.Helper()
 	endpoint, err := connectors.BedrockEndpoint("us-east-1", false)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	return duplexcontract.Config{
 		Provider: connectors.Config{
@@ -24,7 +25,7 @@ func bedrockConfig() duplexcontract.Config {
 }
 
 func TestCompileAdmitsBedrockRealtimeProfile(t *testing.T) {
-	template, err := duplexcontract.Compile(bedrockConfig())
+	template, err := duplexcontract.Compile(bedrockConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,12 +35,12 @@ func TestCompileAdmitsBedrockRealtimeProfile(t *testing.T) {
 	if template.TranscriptionOnly() || template.SetupAck() {
 		t.Fatal("Nova Sonic declares neither transcription-only sessions nor a setup acknowledgement")
 	}
-	wrongVendor := bedrockConfig()
+	wrongVendor := bedrockConfig(t)
 	wrongVendor.Provider.VendorID = "amazon-sagemaker"
 	if _, err := duplexcontract.Compile(wrongVendor); err == nil {
 		t.Fatal("compile admitted a vendor the Bedrock profile does not review")
 	}
-	noRegion := bedrockConfig()
+	noRegion := bedrockConfig(t)
 	noRegion.Provider.CloudRegion = ""
 	if _, err := duplexcontract.Compile(noRegion); err == nil {
 		t.Fatal("compile admitted a Bedrock target with no region to address")
@@ -47,7 +48,7 @@ func TestCompileAdmitsBedrockRealtimeProfile(t *testing.T) {
 }
 
 func TestBedrockSetupAndFrameGrammar(t *testing.T) {
-	template, err := duplexcontract.Compile(bedrockConfig())
+	template, err := duplexcontract.Compile(bedrockConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}

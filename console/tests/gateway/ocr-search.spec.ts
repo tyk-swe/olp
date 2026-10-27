@@ -293,7 +293,6 @@ test('a browser user publishes OCR and search routes and drives them through the
   await addProvider(page, 'Brave', `${upstream.origin}/brave`, 'search', true);
   await addRoute(page, braveSearchRoute, 'transformed', 'Web search');
 
-  // One key allows all five routes.
   await page.goto('/api-keys/new');
   await expect(
     page.getByRole('heading', { name: 'Create a proxy key.' })
@@ -327,8 +326,6 @@ test('a browser user publishes OCR and search routes and drives them through the
 
   await resetUpstream(request);
 
-  // OCR on the strict route: the serving model is bound to the provider
-  // model and the result renders the page markdown.
   const result = page.locator('pre[data-testid="native-operation-result"]');
   await runNative(page, ocrRoute, 'ocr', 'mistral-ocr', secret);
   await expect(result).toContainText('Fixture OCR text');
@@ -337,12 +334,9 @@ test('a browser user publishes OCR and search routes and drives them through the
     fullPage: true
   });
 
-  // OCR on the transformed Azure route polls inside one request and
-  // projects into the frozen page shape.
   await runNative(page, azureOcrRoute, 'ocr', 'mistral-ocr', secret);
   await expect(result).toContainText('Azure fixture OCR text');
 
-  // Native Perplexity search keeps the upstream identity.
   await runNative(
     page,
     nativeSearchRoute,
@@ -353,8 +347,6 @@ test('a browser user publishes OCR and search routes and drives them through the
   await expect(result).toContainText('ppx_fx_1');
   await expect(result).toContainText('Fixture result');
 
-  // The transformed route projects the Tavily answer into the Perplexity
-  // shape with a gateway-minted search_ id.
   await runNative(
     page,
     mappedSearchRoute,
@@ -369,8 +361,6 @@ test('a browser user publishes OCR and search routes and drives them through the
     fullPage: true
   });
 
-  // The Brave target answers over a GET query and projects into the same
-  // Perplexity shape.
   await runNative(
     page,
     braveSearchRoute,
@@ -425,7 +415,6 @@ test('a browser user publishes OCR and search routes and drives them through the
     result_filter: 'web',
     text_decorations: 'false'
   });
-  // Only the provider credential ever reached the upstream.
   expect(JSON.stringify(observed.calls)).not.toContain(secret);
 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

@@ -267,3 +267,26 @@ func TestOCRMappingProjectAzureMissingPages(t *testing.T) {
 		t.Fatalf("missing units projected as observed: %s", doc.Bytes())
 	}
 }
+
+func TestOCRProjectRejectsForeignView(t *testing.T) {
+	source := request(t, `{"model":"route","document":{"type":"document_url","document_url":"https://x"}}`)
+	res := azureResultDoc(t, azureSucceeded)
+	foreign, err := parseRequest(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, project := range []func() error{
+		func() error { _, err := project(source, res, foreign, "route"); return err },
+		func() error { _, err := projectAzure(source, res, foreign, "route"); return err },
+	} {
+		if err := project(); err == nil {
+			t.Fatal("foreign result view projected instead of refused")
+		}
+	}
+	if usage := usageOf(foreign); usage != nil {
+		t.Fatalf("foreign view produced usage: %+v", usage)
+	}
+	if _, err := azureWire(foreign); err == nil {
+		t.Fatal("foreign request view lowered to a wire request")
+	}
+}

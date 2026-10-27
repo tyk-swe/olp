@@ -38,28 +38,33 @@ type Result struct {
 func (r Result) Schema() oif.Identity { return identity("ocr") }
 
 func Definitions() []operations.Dialect {
-	d := operations.Dialect{Identity: identity(Mistral), Operation: identity("ocr"), Surface: "openai", Label: "mistral-ocr document OCR", Documentation: "https://docs.mistral.ai/api/endpoint/ocr", Address: operations.Address{RelativePath: "ocr"}, Evidence: "mistral-ocr-pages/1",
-		Request:         parseRequest,
-		Result:          parseResult,
-		BindModel:       operations.ModelChanges,
-		BindResultModel: operations.ModelChanges,
-		FetchedDocument: mistralFetchedDocument,
-		OutputText:      outputText,
-		Usage:           func(v oif.View) *operations.Usage { return v.(Result).Usage }}
-	d.RequestSchema = operations.ObjectSchema(map[string]any{
-		"model":    map[string]any{"type": "string"},
-		"document": map[string]any{"type": "object"},
-		"pages":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
-	}, "model", "document")
-	d.ResultSchema = operations.ObjectSchema(map[string]any{
-		"model":      map[string]any{"type": "string"},
-		"pages":      map[string]any{"type": "array"},
-		"usage_info": map[string]any{"type": "object"},
-	}, "model", "pages", "usage_info")
-	d.Probe = func(model string) []byte {
-		return operations.Raw(map[string]any{"model": model, "document": map[string]any{"type": "image_url", "image_url": probeImage}})
+	return []operations.Dialect{
+		{
+			Identity: identity(Mistral), Operation: identity("ocr"), Surface: "openai", Label: "mistral-ocr document OCR", Documentation: "https://docs.mistral.ai/api/endpoint/ocr", Address: operations.Address{RelativePath: "ocr"}, Evidence: "mistral-ocr-pages/1",
+			Request:         parseRequest,
+			Result:          parseResult,
+			BindModel:       operations.ModelChanges,
+			BindResultModel: operations.ModelChanges,
+			FetchedDocument: mistralFetchedDocument,
+			OutputText:      outputText,
+			Usage:           usageOf,
+			RequestSchema: operations.ObjectSchema(map[string]any{
+				"model":    map[string]any{"type": "string"},
+				"document": map[string]any{"type": "object"},
+				"pages":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
+			}, "model", "document"),
+			ResultSchema: operations.ObjectSchema(map[string]any{
+				"model":      map[string]any{"type": "string"},
+				"pages":      map[string]any{"type": "array"},
+				"usage_info": map[string]any{"type": "object"},
+			}, "model", "pages", "usage_info"),
+			Probe: func(model string) []byte {
+				return operations.Raw(map[string]any{"model": model, "document": map[string]any{"type": "image_url", "image_url": probeImage}})
+			},
+		},
+		vertexDefinition(),
+		azureDefinition(),
 	}
-	return []operations.Dialect{d, vertexDefinition(), azureDefinition()}
 }
 
 func parseRequest(source oif.Request) (oif.View, error) {

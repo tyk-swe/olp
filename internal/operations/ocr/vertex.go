@@ -11,25 +11,26 @@ import (
 const Vertex = "vertex-document-processing-ocr"
 
 func vertexDefinition() operations.Dialect {
-	d := operations.Dialect{Identity: identity(Vertex), Operation: identity("ocr"), Surface: "native", Label: "Google Cloud Document AI document processing", Documentation: "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/projects.locations.processors/process", Address: operations.Address{FamilyPath: "documentai_process"}, Evidence: "vertex-document-processing-pages/1",
+	return operations.Dialect{
+		Identity: identity(Vertex), Operation: identity("ocr"), Surface: "native", Label: "Google Cloud Document AI document processing", Documentation: "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/projects.locations.processors/process", Address: operations.Address{FamilyPath: "documentai_process"}, Evidence: "vertex-document-processing-pages/1",
 		Request:          parseVertexRequest,
 		Result:           parseVertexResult,
 		OutputText:       vertexOutputText,
 		DocumentLocation: vertexDocumentLocation,
-		Usage:            func(v oif.View) *operations.Usage { return v.(Result).Usage }}
-	d.RequestSchema = operations.ObjectSchema(map[string]any{
-		"rawDocument":    map[string]any{"type": "object"},
-		"gcsDocument":    map[string]any{"type": "object"},
-		"processOptions": map[string]any{"type": "object"},
-	})
-	d.ResultSchema = operations.ObjectSchema(map[string]any{
-		"document": map[string]any{"type": "object"},
-	}, "document")
-	d.Probe = func(model string) []byte {
-		content := probeImage[strings.Index(probeImage, ",")+1:]
-		return operations.Raw(map[string]any{"rawDocument": map[string]any{"content": content, "mimeType": "image/png"}})
+		Usage:            usageOf,
+		RequestSchema: operations.ObjectSchema(map[string]any{
+			"rawDocument":    map[string]any{"type": "object"},
+			"gcsDocument":    map[string]any{"type": "object"},
+			"processOptions": map[string]any{"type": "object"},
+		}),
+		ResultSchema: operations.ObjectSchema(map[string]any{
+			"document": map[string]any{"type": "object"},
+		}, "document"),
+		Probe: func(model string) []byte {
+			content := probeImage[strings.Index(probeImage, ",")+1:]
+			return operations.Raw(map[string]any{"rawDocument": map[string]any{"content": content, "mimeType": "image/png"}})
+		},
 	}
-	return d
 }
 
 var vertexMimeTypes = map[string]bool{
@@ -91,32 +92,13 @@ func vertexRawDocument(v oif.Value) error {
 		}
 	}
 	content := member(v, "content")
-	if content.Kind() != oif.String || !base64Text(operations.String(content)) {
+	if content.Kind() != oif.String || !validBase64(operations.String(content)) {
 		return vertexInvalid("rawDocument.content")
 	}
 	if !vertexMimeTypes[operations.String(member(v, "mimeType"))] {
 		return vertexInvalid("rawDocument.mimeType")
 	}
 	return nil
-}
-
-func base64Text(s string) bool {
-	if s == "" || len(s)%4 != 0 {
-		return false
-	}
-	padding := 0
-	for i := len(s) - 1; i >= 0 && s[i] == '='; i-- {
-		padding++
-	}
-	if padding > 2 {
-		return false
-	}
-	for _, c := range s[:len(s)-padding] {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '/') {
-			return false
-		}
-	}
-	return true
 }
 
 func vertexGCSDocument(v oif.Value) error {
@@ -244,24 +226,7 @@ func vertexOutputText(result oif.Result) ([]operations.Text, error) {
 			return nil, conflict("/document/pages/" + strconv.Itoa(i) + "/image/content")
 		}
 	}
-	out := []operations.Text{}
-	collectText(root, "", &out)
-	return out, nil
-}
-
-func collectText(v oif.Value, path string, out *[]operations.Text) {
-	switch v.Kind() {
-	case oif.Object:
-		for _, m := range v.Members() {
-			collectText(m.Value, operations.Pointer(path, m.Name), out)
-		}
-	case oif.Array:
-		for i, e := range v.Elements() {
-			collectText(e, path+"/"+strconv.Itoa(i), out)
-		}
-	case oif.String:
-		*out = append(*out, operations.Text{Pointer: path, Value: operations.String(v)})
-	}
+	return collectText(root, "", nil), nil
 }
 
 func vertexPageText(text string, page oif.Value) string {

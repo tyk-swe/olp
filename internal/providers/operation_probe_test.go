@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/operations/ocr"
 )
 
 func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
@@ -125,7 +126,7 @@ func TestAzureOperationProbePolls(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/documentintelligence/documentModels/azure-model:analyze":
 			submits++
-			if r.URL.Query().Get("api-version") != "2024-11-30" || r.URL.Query().Get("outputContentFormat") != "markdown" {
+			if r.URL.Query().Get("api-version") != ocr.AzureAPIVersion || r.URL.Query().Get("outputContentFormat") != "markdown" {
 				t.Errorf("submit query: %s", r.URL.RawQuery)
 			}
 			w.Header().Set("Operation-Location", "http://"+r.Host+"/documentintelligence/documentModels/azure-model/analyzeResults/result-1?api-version=2024-11-30")

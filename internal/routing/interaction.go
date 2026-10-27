@@ -230,7 +230,6 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if provider.ProfileID == "gemini-live" {
 			continue
 		}
-		// Native duplex profiles compile in their own step below.
 		if duplexcontract.IsProfile(provider.ProfileID) {
 			continue
 		}

@@ -1,7 +1,9 @@
 package ocr
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +17,52 @@ func Mappings() []operations.Mapping {
 		{Source: identity(Mistral), Target: identity(Vertex), Lower: lower, Project: project, Evidence: "ocr-mistral-vertex-document-processing/1"},
 		{Source: identity(Mistral), Target: identity(AzureDocumentIntelligence), Lower: lowerAzure, Project: projectAzure, Evidence: "ocr-mistral-azure-document-intelligence/1"},
 	}
+}
+
+func resultView(v oif.View) (Result, error) {
+	result, ok := v.(Result)
+	if !ok {
+		return Result{}, operations.Violation("/result", "ocr_result_view")
+	}
+	return result, nil
+}
+
+func usageOf(v oif.View) *operations.Usage {
+	result, ok := v.(Result)
+	if !ok {
+		return nil
+	}
+	return result.Usage
+}
+
+func validBase64(s string) bool {
+	if s == "" || strings.ContainsAny(s, " \t\r\n") {
+		return false
+	}
+	_, err := base64.StdEncoding.DecodeString(s)
+	return err == nil
+}
+
+func collectText(v oif.Value, path string, skip map[string]bool) []operations.Text {
+	switch v.Kind() {
+	case oif.String:
+		return []operations.Text{{Pointer: path, Value: operations.String(v)}}
+	case oif.Array:
+		out := []operations.Text{}
+		for i, e := range v.Elements() {
+			out = append(out, collectText(e, path+"/"+strconv.Itoa(i), skip)...)
+		}
+		return out
+	case oif.Object:
+		out := []operations.Text{}
+		for _, m := range v.Members() {
+			if !skip[m.Name] {
+				out = append(out, collectText(m.Value, operations.Pointer(path, m.Name), skip)...)
+			}
+		}
+		return out
+	}
+	return []operations.Text{}
 }
 
 func documentURL(v oif.Value) (string, error) {
@@ -42,8 +90,49 @@ func azureFetchedDocument(source oif.Request) bool {
 	return present
 }
 
-func parseDocument(v any) (oif.Document, error) {
+func parseDocument(v map[string]any) (oif.Document, error) {
 	return oif.ParseJSON(operations.Raw(v), oif.Limits{})
+}
+
+func jsonNumber(n int64) json.RawMessage {
+	return json.RawMessage(strconv.FormatInt(n, 10))
+}
+
+func withMember(document map[string]any, name string, value any) map[string]any {
+	merged := maps.Clone(document)
+	merged[name] = value
+	return merged
+}
+
+func pageNumbers(root oif.Value) ([]int64, bool, error) {
+	pages := member(root, "pages")
+	if operations.Optional(pages) {
+		return nil, false, nil
+	}
+	if pages.Kind() != oif.Array {
+		return nil, false, invalid("pages")
+	}
+	elements := pages.Elements()
+	numbers := make([]int64, len(elements))
+	for i, e := range elements {
+		n, ok := operations.Int(e)
+		if !ok || n < 0 {
+			return nil, false, invalid("pages")
+		}
+		numbers[i] = n + 1
+	}
+	return numbers, true, nil
+}
+
+func withUsageInfo(document map[string]any, usage *operations.Usage, pointer string) (map[string]any, error) {
+	if usage == nil || usage.MediaUnits == nil {
+		return document, nil
+	}
+	processed, err := strconv.ParseInt(*usage.MediaUnits, 10, 64)
+	if err != nil {
+		return nil, operations.Violation(pointer, "ocr_pages_processed")
+	}
+	return withMember(document, "usage_info", map[string]any{"pages_processed": jsonNumber(processed)}), nil
 }
 
 func lower(source oif.Request, view oif.View) (oif.Document, []oif.Provenance, error) {
@@ -59,19 +148,22 @@ func lower(source oif.Request, view oif.View) (oif.Document, []oif.Provenance, e
 	if err != nil {
 		return oif.Document{}, nil, err
 	}
-	out := map[string]any{"rawDocument": map[string]any{"content": content, "mimeType": mimeType}}
-	if pages := member(root, "pages"); !operations.Optional(pages) {
-		if len(pages.Elements()) == 0 {
-			return oif.Document{}, nil, invalid("pages")
-		}
-		selected := []any{}
-		for _, e := range pages.Elements() {
-			n, _ := operations.Int(e)
-			selected = append(selected, json.RawMessage(strconv.FormatInt(n+1, 10)))
-		}
-		out["processOptions"] = map[string]any{"individualPageSelector": map[string]any{"pages": selected}}
+	numbers, present, err := pageNumbers(root)
+	if err != nil {
+		return oif.Document{}, nil, err
 	}
-	doc, err := parseDocument(out)
+	if present && len(numbers) == 0 {
+		return oif.Document{}, nil, invalid("pages")
+	}
+	selected := make([]any, len(numbers))
+	for i, n := range numbers {
+		selected[i] = jsonNumber(n)
+	}
+	document := map[string]any{"rawDocument": map[string]any{"content": content, "mimeType": mimeType}}
+	if present {
+		document = withMember(document, "processOptions", map[string]any{"individualPageSelector": map[string]any{"pages": selected}})
+	}
+	doc, err := parseDocument(document)
 	return doc, nil, err
 }
 
@@ -79,19 +171,11 @@ func lowerDocument(v oif.Value) (string, string, error) {
 	if name := member(v, "document_name"); !operations.Optional(name) {
 		return "", "", invalid("document.document_name")
 	}
-	var url oif.Value
-	switch operations.String(member(v, "type")) {
-	case "document_url":
-		url = member(v, "document_url")
-	case "image_url":
-		url = member(v, "image_url")
-		if url.Kind() == oif.Object {
-			url = member(url, "url")
-		}
-	default:
-		return "", "", invalid("document.type")
+	url, err := documentURL(v)
+	if err != nil {
+		return "", "", err
 	}
-	return dataURL(operations.String(url))
+	return dataURL(url)
 }
 
 func dataURL(s string) (string, string, error) {
@@ -100,32 +184,48 @@ func dataURL(s string) (string, string, error) {
 		return "", "", invalid("document")
 	}
 	mimeType := strings.TrimSuffix(strings.TrimPrefix(meta, "data:"), ";base64")
-	if !vertexMimeTypes[mimeType] || !base64Text(content) {
+	if !vertexMimeTypes[mimeType] || !validBase64(content) {
 		return "", "", invalid("document")
 	}
 	return content, mimeType, nil
 }
 
 func project(source oif.Request, result oif.Result, view oif.View, route string) (oif.Document, error) {
+	parsed, err := resultView(view)
+	if err != nil {
+		return oif.Document{}, err
+	}
 	document := member(result.Source().Root(), "document")
 	text := operations.String(member(document, "text"))
-	pages := []any{}
-	for i, page := range member(document, "pages").Elements() {
+	elements := member(document, "pages").Elements()
+	pages := make([]any, len(elements))
+	for i, page := range elements {
 		index := i
 		if number, ok := operations.Int(member(page, "pageNumber")); ok && number >= 1 {
 			index = int(number) - 1
 		}
-		pages = append(pages, map[string]any{"index": json.RawMessage(strconv.Itoa(index)), "markdown": vertexPageText(text, page)})
+		pages[i] = map[string]any{"index": jsonNumber(int64(index)), "markdown": vertexPageText(text, page)}
 	}
-	out := map[string]any{"model": route, "pages": pages}
-	if usage := view.(Result).Usage; usage != nil && usage.MediaUnits != nil {
-		processed, err := strconv.Atoi(*usage.MediaUnits)
-		if err != nil {
-			return oif.Document{}, operations.Violation("/document/pages", "ocr_pages_processed")
-		}
-		out["usage_info"] = map[string]any{"pages_processed": json.RawMessage(strconv.Itoa(processed))}
+	out, err := withUsageInfo(map[string]any{"model": route, "pages": pages}, parsed.Usage, "/document/pages")
+	if err != nil {
+		return oif.Document{}, err
 	}
 	return parseDocument(out)
+}
+
+func azureSourceMember(rawURL string) (string, string, error) {
+	switch {
+	case strings.HasPrefix(rawURL, "https://"):
+		return "urlSource", rawURL, nil
+	case strings.HasPrefix(rawURL, "data:"):
+		_, payload, found := strings.Cut(rawURL, ";base64,")
+		if !found || !validBase64(payload) {
+			return "", "", invalid("document")
+		}
+		return "base64Source", payload, nil
+	default:
+		return "", "", invalid("document")
+	}
 }
 
 func lowerAzure(source oif.Request, view oif.View) (oif.Document, []oif.Provenance, error) {
@@ -149,103 +249,87 @@ func lowerAzure(source oif.Request, view oif.View) (oif.Document, []oif.Provenan
 	if _, present := doc.Lookup("document_name"); present {
 		return oif.Document{}, nil, invalid("document.document_name")
 	}
-	var rawURL string
-	switch operations.String(member(doc, "type")) {
-	case "document_url":
-		rawURL = operations.String(member(doc, "document_url"))
-	case "image_url":
-		u := member(doc, "image_url")
-		if u.Kind() == oif.Object {
-			u = member(u, "url")
-		}
-		rawURL = operations.String(u)
-	default:
-		return oif.Document{}, nil, invalid("document.type")
+	rawURL, err := documentURL(doc)
+	if err != nil {
+		return oif.Document{}, nil, err
 	}
-	out := map[string]any{"model": operations.String(member(root, "model"))}
-	if strings.HasPrefix(rawURL, "https://") {
-		out["urlSource"] = rawURL
-	} else if strings.HasPrefix(rawURL, "data:") {
-		_, payload, found := strings.Cut(rawURL, ";base64,")
-		if !found || !validBase64(payload) {
-			return oif.Document{}, nil, invalid("document")
-		}
-		out["base64Source"] = payload
-	} else {
-		return oif.Document{}, nil, invalid("document")
+	sourceName, sourceValue, err := azureSourceMember(rawURL)
+	if err != nil {
+		return oif.Document{}, nil, err
 	}
-	if pages := member(root, "pages"); pages.Kind() == oif.Array && len(pages.Elements()) > 0 {
-		numbers := []int64{}
-		for _, e := range pages.Elements() {
-			n, ok := operations.Int(e)
-			if !ok || n < 0 {
-				return oif.Document{}, nil, invalid("pages")
-			}
-			numbers = append(numbers, n+1)
-		}
-		out["pages"] = azurePageRanges(numbers)
+	numbers, present, err := pageNumbers(root)
+	if err != nil {
+		return oif.Document{}, nil, err
 	}
-	doc2, err := parseDocument(out)
-	return doc2, nil, err
+	document := map[string]any{"model": operations.String(member(root, "model")), sourceName: sourceValue}
+	if present && len(numbers) > 0 {
+		document = withMember(document, "pages", azurePageRanges(numbers))
+	}
+	parsed, err := parseDocument(document)
+	return parsed, nil, err
 }
 
 func azurePageRanges(numbers []int64) string {
-	slices.Sort(numbers)
-	numbers = slices.Compact(numbers)
+	sorted := slices.Clone(numbers)
+	slices.Sort(sorted)
+	unique := slices.Compact(sorted)
 	parts := []string{}
-	for start := 0; start < len(numbers); {
+	for start := 0; start < len(unique); {
 		end := start
-		for end+1 < len(numbers) && numbers[end+1] == numbers[end]+1 {
+		for end+1 < len(unique) && unique[end+1] == unique[end]+1 {
 			end++
 		}
 		if end > start {
-			parts = append(parts, strconv.FormatInt(numbers[start], 10)+"-"+strconv.FormatInt(numbers[end], 10))
+			parts = append(parts, strconv.FormatInt(unique[start], 10)+"-"+strconv.FormatInt(unique[end], 10))
 		} else {
-			parts = append(parts, strconv.FormatInt(numbers[start], 10))
+			parts = append(parts, strconv.FormatInt(unique[start], 10))
 		}
 		start = end + 1
 	}
 	return strings.Join(parts, ",")
 }
 
+func azurePages(parsed *azureResult) ([]any, error) {
+	if len(parsed.pages) == 0 {
+		return []any{map[string]any{"index": jsonNumber(0), "markdown": parsed.content}}, nil
+	}
+	pages := make([]any, len(parsed.pages))
+	for i, page := range parsed.pages {
+		markdown := parsed.content
+		if len(parsed.pages) > 1 || page.hasSpans {
+			if !page.hasSpans || len(page.spans) == 0 {
+				return nil, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
+			}
+			text, ok := utf16Slice(parsed.content, page.spans)
+			if !ok {
+				return nil, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
+			}
+			markdown = text
+		}
+		pages[i] = map[string]any{"index": jsonNumber(page.number - 1), "markdown": markdown}
+	}
+	return pages, nil
+}
+
 func projectAzure(source oif.Request, result oif.Result, view oif.View, route string) (oif.Document, error) {
-	parsed := view.(Result).azure
+	parsedView, err := resultView(view)
+	if err != nil {
+		return oif.Document{}, err
+	}
+	parsed := parsedView.azure
 	if parsed == nil {
 		return oif.Document{}, operations.Violation("/analyzeResult", "ocr_analyze_result")
 	}
 	if parsed.indexType != "" && parsed.indexType != "utf16CodeUnit" {
 		return oif.Document{}, operations.Violation("/analyzeResult/stringIndexType", "ocr_string_index_type")
 	}
-	pages := []any{}
-	if len(parsed.pages) == 0 {
-		pages = append(pages, map[string]any{"index": jsonNumber(0), "markdown": parsed.content})
-	} else {
-		for _, page := range parsed.pages {
-			markdown := parsed.content
-			if len(parsed.pages) > 1 || page.hasSpans {
-				if !page.hasSpans || len(page.spans) == 0 {
-					return oif.Document{}, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
-				}
-				text, ok := utf16Slice(parsed.content, page.spans)
-				if !ok {
-					return oif.Document{}, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
-				}
-				markdown = text
-			}
-			pages = append(pages, map[string]any{"index": jsonNumber(page.number - 1), "markdown": markdown})
-		}
+	pages, err := azurePages(parsed)
+	if err != nil {
+		return oif.Document{}, err
 	}
-	out := map[string]any{"model": route, "pages": pages}
-	if usage := view.(Result).Usage; usage != nil && usage.MediaUnits != nil {
-		processed, err := strconv.ParseInt(*usage.MediaUnits, 10, 64)
-		if err != nil {
-			return oif.Document{}, operations.Violation("/analyzeResult/pages", "ocr_pages_processed")
-		}
-		out["usage_info"] = map[string]any{"pages_processed": jsonNumber(processed)}
+	out, err := withUsageInfo(map[string]any{"model": route, "pages": pages}, parsedView.Usage, "/analyzeResult/pages")
+	if err != nil {
+		return oif.Document{}, err
 	}
 	return parseDocument(out)
-}
-
-func jsonNumber(n int64) any {
-	return json.RawMessage(strconv.FormatInt(n, 10))
 }

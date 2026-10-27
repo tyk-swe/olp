@@ -80,46 +80,46 @@ func refuse(code, field, requirement, message string) error {
 }
 
 func Compile(c Config) (*Template, error) {
-	c.Provider = c.Provider.Clone()
-	c.Policy = c.Policy.Clone()
-	p, err := c.Provider.Profile()
-	if err != nil || c.Provider.ValidateProfile() != nil {
+	provider := c.Provider.Clone()
+	policy := c.Policy.Clone()
+	p, err := provider.Profile()
+	if err != nil || provider.ValidateProfile() != nil {
 		return nil, refuse("target_capability", "/profile", "explicit_profile", "Native duplex requires a registered versioned provider profile.")
 	}
 	descriptor, ok := Lookup(p.Dialect)
 	if !ok || descriptor.ProfileID != p.ID || descriptor.Kind != p.Kind || descriptor.Hosting != p.Hosting ||
 		!slices.Contains(p.Operations, "realtime") ||
-		!c.Provider.Supports("realtime", "native", "realtime") {
+		!provider.Supports("realtime", "native", "realtime") {
 		return nil, refuse("target_capability", "/profile", "native_duplex_contract", "This provider profile has no native duplex contract.")
 	}
 	if descriptor.Transport == TransportBedrockBidi {
-		if _, endpointErr := c.Provider.BedrockDuplexEndpoint(); endpointErr != nil {
+		if _, endpointErr := provider.BedrockDuplexEndpoint(); endpointErr != nil {
 			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
 	}
 	if descriptor.Transport == TransportWebSocket {
-		if _, urlErr := c.Provider.DuplexURL(c.Model); urlErr != nil {
+		if _, urlErr := provider.DuplexURL(c.Model); urlErr != nil {
 			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
-		if _, modelErr := c.Provider.DuplexBoundModel(c.Model); modelErr != nil {
+		if _, modelErr := provider.DuplexBoundModel(c.Model); modelErr != nil {
 			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
 	}
-	if c.Policy != nil && len(c.Policy.Rules) > 0 {
+	if policy != nil && len(policy.Rules) > 0 {
 		return nil, refuse("policy_conflict", "/content_policy", "inspectable_policy", "Native duplex frames cannot be admitted with a content policy this relay cannot enforce.")
 	}
-	if len(c.Provider.SemanticHeaders) > 0 || len(c.Provider.QuerySettings) > 0 {
+	if len(provider.SemanticHeaders) > 0 || len(provider.QuerySettings) > 0 {
 		return nil, refuse("target_capability", "/provider", "unchanged_duplex_handshake", "Native duplex has no qualified provider handshake overrides or implicit defaults.")
 	}
-	if defaults, present := c.Provider.OperationDefaults["realtime"]; present && (len(defaults.Values) > 0 || len(defaults.NativeOptions) > 0) {
+	if defaults, present := provider.OperationDefaults["realtime"]; present && (len(defaults.Values) > 0 || len(defaults.NativeOptions) > 0) {
 		return nil, refuse("target_capability", "/operation_defaults/realtime", "native_duplex_defaults", "Realtime defaults cannot be applied to opaque duplex events.")
 	}
-	if binding, present := c.Provider.Bindings[c.Model]; present {
+	if binding, present := provider.Bindings[c.Model]; present {
 		if defaults, has := binding.Defaults["realtime"]; has && (len(defaults.Values) > 0 || len(defaults.NativeOptions) > 0) {
 			return nil, refuse("target_capability", "/bindings/realtime", "native_duplex_defaults", "Realtime model defaults cannot be applied to opaque duplex events.")
 		}
 	}
-	return &Template{profile: descriptor, model: c.Provider.Model(c.Model), profileRevision: p.Revision}, nil
+	return &Template{profile: descriptor, model: provider.Model(c.Model), profileRevision: p.Revision}, nil
 }
 
 func (t *Template) Dialect() string         { return t.profile.Dialect }

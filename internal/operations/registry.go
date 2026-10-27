@@ -43,8 +43,6 @@ type Field struct {
 // are adapters, never operation IR.
 type Address struct{ FamilyPath, RelativePath string }
 
-// Transport names the reviewed unary wire shape a dialect dispatches with.
-// The zero value is the JSON body shape every existing dialect uses.
 type Transport string
 
 const (
@@ -60,7 +58,6 @@ func (t Transport) Normalized() Transport {
 	return t
 }
 
-// PollState is the terminal reading of one polling response document.
 type PollState string
 
 const (

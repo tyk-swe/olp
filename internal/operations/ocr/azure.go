@@ -1,7 +1,6 @@
 package ocr
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/url"
 	"strconv"
@@ -14,38 +13,39 @@ import (
 
 const (
 	AzureDocumentIntelligence = "azure-document-intelligence-ocr"
-	azureAPIVersion           = "2024-11-30"
+	AzureAPIVersion           = "2024-11-30"
 )
 
 const probeImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 func azureDefinition() operations.Dialect {
-	d := operations.Dialect{Identity: identity(AzureDocumentIntelligence), Operation: identity("ocr"), Surface: "native", Label: "azure-document-intelligence-ocr document OCR", Documentation: "https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document", Address: operations.Address{RelativePath: "documentintelligence/documentModels/{model}:analyze"}, Evidence: "azure-document-intelligence-pages/1",
+	return operations.Dialect{
+		Identity: identity(AzureDocumentIntelligence), Operation: identity("ocr"), Surface: "native", Label: "azure-document-intelligence-ocr document OCR", Documentation: "https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document", Address: operations.Address{RelativePath: "documentintelligence/documentModels/{model}:analyze"}, Evidence: "azure-document-intelligence-pages/1",
 		Request:         parseAzureRequest,
 		Result:          parseAzureResult,
 		BindModel:       operations.ModelChanges,
 		BindResultModel: azureBindResultModel,
 		FetchedDocument: azureFetchedDocument,
 		OutputText:      azureOutputText,
-		Usage:           func(v oif.View) *operations.Usage { return v.(Result).Usage },
+		Usage:           usageOf,
 		Transport:       operations.TransportPoll202,
 		Wire:            azureWire,
 		Poll:            azurePollState,
-		CancelPoll:      func(pollURL string) (string, string, bool) { return "DELETE", pollURL, true }}
-	d.RequestSchema = operations.ObjectSchema(map[string]any{
-		"model":        map[string]any{"type": "string"},
-		"urlSource":    map[string]any{"type": "string"},
-		"base64Source": map[string]any{"type": "string"},
-		"pages":        map[string]any{"type": "string"},
-	}, "model")
-	d.ResultSchema = operations.ObjectSchema(map[string]any{
-		"status":        map[string]any{"type": "string"},
-		"analyzeResult": map[string]any{"type": "object"},
-	}, "status", "analyzeResult")
-	d.Probe = func(model string) []byte {
-		return operations.Raw(map[string]any{"model": model, "base64Source": probeImageBase64})
+		CancelPoll:      func(pollURL string) (string, string, bool) { return "DELETE", pollURL, true },
+		RequestSchema: operations.ObjectSchema(map[string]any{
+			"model":        map[string]any{"type": "string"},
+			"urlSource":    map[string]any{"type": "string"},
+			"base64Source": map[string]any{"type": "string"},
+			"pages":        map[string]any{"type": "string"},
+		}, "model"),
+		ResultSchema: operations.ObjectSchema(map[string]any{
+			"status":        map[string]any{"type": "string"},
+			"analyzeResult": map[string]any{"type": "object"},
+		}, "status", "analyzeResult"),
+		Probe: func(model string) []byte {
+			return operations.Raw(map[string]any{"model": model, "base64Source": probeImageBase64})
+		},
 	}
-	return d
 }
 
 func azureInvalid(p string) error {
@@ -100,17 +100,6 @@ func parseAzureRequest(source oif.Request) (oif.View, error) {
 		}
 	}
 	return r, nil
-}
-
-func validBase64(s string) bool {
-	if s == "" {
-		return false
-	}
-	if _, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return true
-	}
-	_, err := base64.RawStdEncoding.DecodeString(s)
-	return err == nil
 }
 
 func validAzurePages(s string) bool {
@@ -218,24 +207,34 @@ func azurePollState(doc oif.Document) (operations.PollState, error) {
 }
 
 func azureWire(view oif.View) (operations.WireRequest, error) {
-	root := view.(Request).source.Document().Root()
+	request, ok := view.(Request)
+	if !ok {
+		return operations.WireRequest{}, azureInvalid("request")
+	}
+	root := request.source.Document().Root()
 	query := url.Values{
-		"api-version":         {azureAPIVersion},
+		"api-version":         {AzureAPIVersion},
 		"outputContentFormat": {"markdown"},
 		"stringIndexType":     {"utf16CodeUnit"},
 	}
 	if v := member(root, "pages"); v.Kind() == oif.String {
 		query.Set("pages", operations.String(v))
 	}
-	var body map[string]any
-	if v, ok := root.Lookup("urlSource"); ok {
-		body = map[string]any{"urlSource": operations.String(v)}
-	} else if v, ok := root.Lookup("base64Source"); ok {
-		body = map[string]any{"base64Source": operations.String(v)}
-	} else {
-		return operations.WireRequest{}, azureInvalid("urlSource")
+	body, err := azureWireBody(root)
+	if err != nil {
+		return operations.WireRequest{}, err
 	}
 	return operations.WireRequest{Query: query, Body: operations.Raw(body)}, nil
+}
+
+func azureWireBody(root oif.Value) (map[string]any, error) {
+	if v, ok := root.Lookup("urlSource"); ok {
+		return map[string]any{"urlSource": operations.String(v)}, nil
+	}
+	if v, ok := root.Lookup("base64Source"); ok {
+		return map[string]any{"base64Source": operations.String(v)}, nil
+	}
+	return nil, azureInvalid("urlSource")
 }
 
 func azureBindResultModel(doc oif.Document, model string) ([]oif.Change, error) {
@@ -254,26 +253,7 @@ func azureOutputText(result oif.Result) ([]operations.Text, error) {
 	if analyze.Kind() != oif.Object {
 		return nil, conflict("/analyzeResult")
 	}
-	out := []operations.Text{}
-	var walk func(v oif.Value, path string)
-	walk = func(v oif.Value, path string) {
-		switch v.Kind() {
-		case oif.String:
-			out = append(out, operations.Text{Pointer: path, Value: operations.String(v)})
-		case oif.Array:
-			for i, e := range v.Elements() {
-				walk(e, path+"/"+strconv.Itoa(i))
-			}
-		case oif.Object:
-			for _, m := range v.Members() {
-				if !azureMetadata[m.Name] {
-					walk(m.Value, operations.Pointer(path, m.Name))
-				}
-			}
-		}
-	}
-	walk(analyze, "/analyzeResult")
-	return out, nil
+	return collectText(analyze, "/analyzeResult", azureMetadata), nil
 }
 
 func utf16Slice(content string, spans []azureSpan) (string, bool) {

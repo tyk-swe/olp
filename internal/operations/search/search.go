@@ -84,45 +84,48 @@ type Result struct{ Source oif.Result }
 func (r Result) Schema() oif.Identity { return identity("search") }
 
 func Definitions() []operations.Dialect {
-	out := []operations.Dialect{}
-	for _, id := range []string{Perplexity, Tavily, Exa, Parallel, Brave} {
-		d := operations.Dialect{Identity: identity(id), Operation: identity("search"), Surface: "openai", Label: id + " web search", Address: operations.Address{RelativePath: "search"}, Evidence: id + "-results/1",
-			Request:    func(source oif.Request) (oif.View, error) { return parseRequest(source, id) },
-			Result:     func(source oif.Request, result oif.Result) (oif.View, error) { return parseResult(source, result, id) },
-			InputText:  func(request oif.Request) ([]operations.Text, error) { return inputText(request, id) },
-			OutputText: func(result oif.Result) ([]operations.Text, error) { return outputText(result, id) }}
-		d.Probe = probe(id)
-		if id != Perplexity {
-			d.Surface = "native"
-		}
-		switch id {
-		case Perplexity:
-			d.Documentation = "https://docs.perplexity.ai/api-reference/search-post"
-			d.RequestSchema = operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}, "max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": maxRows}}, "query")
-			d.ResultSchema = operations.ObjectSchema(map[string]any{"id": map[string]any{"type": "string"}, "results": map[string]any{"type": "array"}}, "id", "results")
-		case Tavily:
-			d.Documentation = "https://docs.tavily.com/api-reference/endpoint/search"
-			d.RequestSchema = operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}, "max_results": map[string]any{"type": "integer"}}, "query", "max_results")
-			d.ResultSchema = operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")
-		case Exa:
-			d.Documentation = "https://docs.exa.ai/reference/search"
-			d.RequestSchema = operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}, "numResults": map[string]any{"type": "integer"}, "contents": map[string]any{"type": "object"}}, "query", "numResults", "contents")
-			d.ResultSchema = operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")
-		case Parallel:
-			d.Documentation = "https://docs.parallel.ai/api-reference/search"
-			d.RequestSchema = operations.ObjectSchema(map[string]any{"search_queries": map[string]any{"type": "array"}, "advanced_settings": map[string]any{"type": "object"}}, "search_queries", "advanced_settings")
-			d.ResultSchema = operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")
-		case Brave:
-			d.Documentation = "https://api-dashboard.search.brave.com/api-reference/web/search/get"
-			d.Address = operations.Address{RelativePath: "res/v1/web/search"}
-			d.Transport = operations.TransportGetQuery
-			d.Query = braveQuery
-			d.RequestSchema = operations.ObjectSchema(map[string]any{"q": map[string]any{"type": "string"}, "count": map[string]any{"type": "integer", "minimum": 1, "maximum": maxRows}}, "q", "count")
-			d.ResultSchema = operations.ObjectSchema(map[string]any{"web": map[string]any{"type": "object"}}, "web")
-		}
-		out = append(out, d)
+	return []operations.Dialect{
+		searchDialect(Perplexity, "openai", "https://docs.perplexity.ai/api-reference/search-post", "search", operations.TransportJSON,
+			operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}, "max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": maxRows}}, "query"),
+			operations.ObjectSchema(map[string]any{"id": map[string]any{"type": "string"}, "results": map[string]any{"type": "array"}}, "id", "results")),
+		searchDialect(Tavily, "native", "https://docs.tavily.com/api-reference/endpoint/search", "search", operations.TransportJSON,
+			operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}, "max_results": map[string]any{"type": "integer"}}, "query", "max_results"),
+			operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")),
+		searchDialect(Exa, "native", "https://docs.exa.ai/reference/search", "search", operations.TransportJSON,
+			operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}, "numResults": map[string]any{"type": "integer"}, "contents": map[string]any{"type": "object"}}, "query", "numResults", "contents"),
+			operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")),
+		searchDialect(Parallel, "native", "https://docs.parallel.ai/api-reference/search", "search", operations.TransportJSON,
+			operations.ObjectSchema(map[string]any{"search_queries": map[string]any{"type": "array"}, "advanced_settings": map[string]any{"type": "object"}}, "search_queries", "advanced_settings"),
+			operations.ObjectSchema(map[string]any{"results": map[string]any{"type": "array"}}, "results")),
+		{
+			Identity: identity(Brave), Operation: identity("search"), Surface: "native", Label: Brave + " web search", Documentation: "https://api-dashboard.search.brave.com/api-reference/web/search/get", Address: operations.Address{RelativePath: "res/v1/web/search"}, Evidence: Brave + "-results/1",
+			Transport: operations.TransportGetQuery,
+			Query:     braveQuery,
+			Request:   func(source oif.Request) (oif.View, error) { return parseRequest(source, Brave) },
+			Result: func(source oif.Request, result oif.Result) (oif.View, error) {
+				return parseResult(source, result, Brave)
+			},
+			InputText:     func(request oif.Request) ([]operations.Text, error) { return inputText(request, Brave) },
+			OutputText:    func(result oif.Result) ([]operations.Text, error) { return outputText(result, Brave) },
+			Probe:         probe(Brave),
+			RequestSchema: operations.ObjectSchema(map[string]any{"q": map[string]any{"type": "string"}, "count": map[string]any{"type": "integer", "minimum": 1, "maximum": maxRows}}, "q", "count"),
+			ResultSchema:  operations.ObjectSchema(map[string]any{"web": map[string]any{"type": "object"}}, "web"),
+		},
 	}
-	return out
+}
+
+func searchDialect(id, surface, documentation, relativePath string, transport operations.Transport, requestSchema, resultSchema []byte) operations.Dialect {
+	return operations.Dialect{
+		Identity: identity(id), Operation: identity("search"), Surface: surface, Label: id + " web search", Documentation: documentation, Address: operations.Address{RelativePath: relativePath}, Evidence: id + "-results/1",
+		Transport:     transport,
+		Request:       func(source oif.Request) (oif.View, error) { return parseRequest(source, id) },
+		Result:        func(source oif.Request, result oif.Result) (oif.View, error) { return parseResult(source, result, id) },
+		InputText:     func(request oif.Request) ([]operations.Text, error) { return inputText(request, id) },
+		OutputText:    func(result oif.Result) ([]operations.Text, error) { return outputText(result, id) },
+		Probe:         probe(id),
+		RequestSchema: requestSchema,
+		ResultSchema:  resultSchema,
+	}
 }
 
 func probe(id string) func(string) []byte {
