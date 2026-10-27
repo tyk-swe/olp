@@ -171,8 +171,9 @@ test('browser WebRTC session is created, controlled and closed by the gateway', 
   expect(settled.calls).toEqual(['bound', 'bound']);
   expect(settled.controls).toBeGreaterThanOrEqual(2);
   expect(settled.unexpected).toEqual([]);
+  expect(settled.hangups).toBe(1);
 
-  const hangup = await page.evaluate(
+  const callerHangup = await page.evaluate(
     async ({ secret, location }) => {
       const response = await fetch(`${location}/hangup`, {
         method: 'POST',
@@ -182,8 +183,17 @@ test('browser WebRTC session is created, controlled and closed by the gateway', 
     },
     { secret: key.secret, location: created.location }
   );
-  expect(hangup).toBe(200);
+  expect(callerHangup).toBe(404);
+  expect((await mockState(request)).hangups).toBe(settled.hangups);
+
+  await checked(page, 'POST', `/api/v1/api-keys/${key.id}/revoke`, {
+    match: `/api/v1/api-keys/${key.id}`,
+    idempotency: crypto.randomUUID()
+  });
   await expect
-    .poll(async () => (await mockState(request)).hangups)
-    .toBeGreaterThanOrEqual(2);
+    .poll(async () => (await mockState(request)).hangups, {
+      timeout: 15_000,
+      intervals: [250, 500, 1_000]
+    })
+    .toBe(settled.hangups + 1);
 });
