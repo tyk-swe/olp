@@ -10,7 +10,7 @@ probes and ordinary routes, so the key serves only code-mode routes.
 
 | Profile | Account system | Upstream | Key page |
 | --- | --- | --- | --- |
-| `kimi-code` | Kimi | `https://api.kimi.ai/coding` | `https://www.kimi.com/code/console` |
+| `kimi-code` | Kimi | `https://api.kimi.ai/coding` | `https://www.kimi.ai/code/console` |
 | `kimi-code-cn` | Kimi, mainland China | `https://api.kimi.com/coding` | `https://www.kimi.com/code/console` |
 
 Code mode forwards Anthropic Messages to `v1/messages` with the key in
@@ -37,7 +37,7 @@ GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -buildmode=c-shared -o 
 
 Install it through `POST /api/v1/plugins` with `Content-Type: application/wasm`,
 or the console's Plugins page, and approve its origins: `https://api.kimi.ai`,
-`https://api.kimi.com` and `https://www.kimi.com`. Use the digest as
+`https://api.kimi.com`, `https://www.kimi.ai` and `https://www.kimi.com`. Use the digest as
 `profile_revision` in a project-owned provider:
 
 ```json

@@ -38,10 +38,11 @@ const (
 
 	KimiProfile  = "kimi-code"
 	KimiUpstream = "https://api.kimi.ai/coding"
-	KimiKeyPage  = "https://www.kimi.com/code/console"
+	KimiKeyPage  = "https://www.kimi.ai/code/console"
 
 	KimiCNProfile  = "kimi-code-cn"
 	KimiCNUpstream = "https://api.kimi.com/coding"
+	KimiCNKeyPage  = "https://www.kimi.com/code/console"
 
 	QwenTokenPlanProfile  = "qwen-token-plan"
 	QwenTokenPlanUpstream = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
@@ -76,7 +77,7 @@ func MiniMax() Adapter {
 }
 
 func Kimi() Adapter {
-	return Adapter{manifest: KimiManifest, keyPages: map[string]string{KimiProfile: KimiKeyPage, KimiCNProfile: KimiKeyPage}}
+	return Adapter{manifest: KimiManifest, keyPages: map[string]string{KimiProfile: KimiKeyPage, KimiCNProfile: KimiCNKeyPage}}
 }
 
 func QwenTokenPlan() Adapter {
@@ -120,7 +121,7 @@ func MiniMaxManifest() abi.Manifest {
 func KimiManifest() abi.Manifest {
 	return abi.Manifest{
 		Name: "kimi-code", Version: "0.1.0", Description: "Kimi Code API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
-		Origins: []string{"https://api.kimi.ai", "https://api.kimi.com", "https://www.kimi.com"},
+		Origins: []string{"https://api.kimi.ai", "https://api.kimi.com", "https://www.kimi.ai", "https://www.kimi.com"},
 		Profiles: []abi.Profile{
 			profile(KimiProfile, "Kimi Code (code-mode only)", KimiUpstream),
 			profile(KimiCNProfile, "Kimi Code, mainland China (code-mode only)", KimiCNUpstream),

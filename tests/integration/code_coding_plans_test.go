@@ -230,7 +230,7 @@ func (f *codingPlanFixture) enroll(t *testing.T, provider, key string) string {
 	pages := map[string]string{
 		codeplans.ZAIProfile: codeplans.ZAIKeyPage, codeplans.BigModelProfile: codeplans.BigModelKeyPage, codeplans.OpenCodeGoProfile: codeplans.OpenCodeGoKeyPage,
 		codeplans.MiniMaxProfile: codeplans.MiniMaxKeyPage, codeplans.MiniMaxCNProfile: codeplans.MiniMaxCNKeyPage,
-		codeplans.KimiProfile: codeplans.KimiKeyPage, codeplans.KimiCNProfile: codeplans.KimiKeyPage,
+		codeplans.KimiProfile: codeplans.KimiKeyPage, codeplans.KimiCNProfile: codeplans.KimiCNKeyPage,
 		codeplans.QwenTokenPlanProfile: codeplans.QwenTokenPlanKeyPage, codeplans.QwenTokenPlanCNProfile: codeplans.QwenTokenPlanCNKeyPage,
 	}
 	if enrollment["input"] != "secret" || enrollment["authorization_url"] != pages[f.profileOf(t, provider)] || enrollment["device"] != nil {

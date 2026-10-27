@@ -39,7 +39,7 @@ func TestStartGrantSendsOperatorsToEachPlanKeyPage(t *testing.T) {
 		{MiniMax(), MiniMaxProfile, MiniMaxKeyPage},
 		{MiniMax(), MiniMaxCNProfile, MiniMaxCNKeyPage},
 		{Kimi(), KimiProfile, KimiKeyPage},
-		{Kimi(), KimiCNProfile, KimiKeyPage},
+		{Kimi(), KimiCNProfile, KimiCNKeyPage},
 		{QwenTokenPlan(), QwenTokenPlanProfile, QwenTokenPlanKeyPage},
 		{QwenTokenPlan(), QwenTokenPlanCNProfile, QwenTokenPlanCNKeyPage},
 	} {
@@ -79,6 +79,23 @@ func TestExchangeGrantRefusesPayAsYouGoKeys(t *testing.T) {
 		grant, err := test.adapter.ExchangeGrant(context.Background(), abi.GrantExchange{Profile: test.profile, Session: start.Session, Input: test.plan})
 		if err != nil || grant.AccessToken != test.plan || grant.Principal != Principal(test.profile, test.plan) {
 			t.Fatalf("%s refused the plan key: %v %v", test.profile, grant, err)
+		}
+	}
+}
+
+// The global FAQ links the global console on kimi.ai and the mainland one on
+// kimi.com: https://www.kimi.ai/help/kimi-code/faq, checked 2026-10-27. Each
+// profile's key page must sit in the account system its upstream serves, or
+// subscribers of one are sent to enroll in the other.
+func TestKimiKeyPagesFollowEachAccountSystem(t *testing.T) {
+	for profile, upstream := range map[string]string{KimiProfile: KimiUpstream, KimiCNProfile: KimiCNUpstream} {
+		start, err := Kimi().StartGrant(context.Background(), abi.GrantStart{Profile: profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		domain := strings.SplitN(strings.TrimPrefix(upstream, "https://api."), "/", 2)[0]
+		if !strings.Contains(start.URL, "."+domain+"/") {
+			t.Fatalf("%s forwards to %s but enrolls at %s", profile, upstream, start.URL)
 		}
 	}
 }
