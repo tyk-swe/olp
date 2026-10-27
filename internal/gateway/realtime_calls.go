@@ -61,13 +61,17 @@ func (s *Server) webrtcSessionCount() int {
 	return len(s.webrtcSessions)
 }
 
-func (s *Server) registerWebRTCSession(sess *webrtcSession) {
+func (s *Server) registerWebRTCSession(sess *webrtcSession) bool {
 	s.webrtcMu.Lock()
 	defer s.webrtcMu.Unlock()
+	if len(s.webrtcSessions) >= s.admission.Capacity() {
+		return false
+	}
 	if s.webrtcSessions == nil {
 		s.webrtcSessions = map[string]*webrtcSession{}
 	}
 	s.webrtcSessions[sess.id] = sess
+	return true
 }
 
 func (s *Server) unregisterWebRTCSession(id string) {
@@ -443,7 +447,11 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		id: uuid.NewString(), keyID: authority.ID, token: token,
 		x: x, p: p, ctx: bg, cancel: cancel, started: s.now(),
 	}
-	s.registerWebRTCSession(sess)
+	if !s.registerWebRTCSession(sess) {
+		s.settleWebRTC(sess, overloaded)
+		writeSurfaceError(w, overloaded, "openai")
+		return
+	}
 	answer, status, e := s.createWebRTCCall(bg, sess, callReq.sdp, boundSession)
 	if e != nil {
 		s.settleWebRTC(sess, e)
@@ -565,16 +573,21 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		x.facts = append(x.facts, fact)
 		return nil, 0, upstreamError(&attemptFailure{status: resp.StatusCode, upstream: nativeError})
 	}
+	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
+	if ok {
+		sess.callID = callID
+	}
 	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxWebRTCSDPBytes+1))
 	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes {
 		fact.Class = classProtocol
 		fact.recordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
-		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+		if !ok || s.hangupWebRTCCall(ctx, sess) != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+		}
 		return nil, 0, serverError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
 	}
-	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
 	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.model, callID)
 	if !ok || controlErr != nil {
 		fact.Class = classProtocol

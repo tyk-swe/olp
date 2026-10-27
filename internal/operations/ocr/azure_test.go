@@ -1,10 +1,34 @@
 package ocr
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"image/png"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
+
+func TestAzureProbeUsesSupportedImage(t *testing.T) {
+	var probe struct {
+		Base64Source string `json:"base64Source"`
+	}
+	if err := json.Unmarshal(azureDefinition().Probe("model"), &probe); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(probe.Base64Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := png.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image.Width < 50 || image.Height < 50 || image.Width > 10000 || image.Height > 10000 {
+		t.Fatalf("probe image %dx%d violates https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/model-overview#input-requirements, verified 2026-10-27", image.Width, image.Height)
+	}
+}
 
 func azureRequestDoc(t *testing.T, body string) oif.Request {
 	t.Helper()

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -51,7 +52,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	snapshot := x.request.release.Snapshot
 	slug := r.PathValue("route")
 	route, ok := snapshot.Routes[slug]
-	if !ok || !route.IsPassthrough() || route.Passthrough.Dialect != r.PathValue("dialect") || !authority.Allows("inference", slug, route.ProjectID, s.now()) {
+	if !ok || !route.IsPassthrough() || route.Passthrough.Dialect != r.PathValue("dialect") || !authority.Allows("inference", slug, route.ProjectID, s.now()) || !slices.Contains(authority.Policy.AllowedRoutes, slug) {
 		fail(modelNotFound(slug))
 		return
 	}
@@ -195,18 +196,14 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	found := false
 	unmeterable := false
 slots:
-	for i := range provider.Slots {
-		candidate := &provider.Slots[i]
-		if !s.slotAvailable(x, attempt, candidate) {
-			continue
-		}
-		gate := s.gateAttempt(ctx, x, attempt, &provider, candidate, estimate, deadline)
+	for _, candidate := range s.slots(x, attempt, &provider) {
+		gate := s.gateAttempt(ctx, x, attempt, &provider, &candidate, estimate, deadline)
 		switch gate.verdict {
 		case gateAdmitted:
-			slot, hold, found = *candidate, gate.hold, true
+			slot, hold, found = candidate, gate.hold, true
 			break slots
 		case gateRejected:
-			x.facts = append(x.facts, s.rejectedFact(x, attempt, *candidate, 1, gate.rejection))
+			x.facts = append(x.facts, s.rejectedFact(x, attempt, candidate, 1, gate.rejection))
 			fail(gate.rejection.toError())
 			return
 		case gateExpired:
@@ -243,12 +240,13 @@ slots:
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider request could not be built."))
 		return
 	}
+	headers := codewire.ForwardHeaders(r.Header, true)
 	for _, name := range route.Passthrough.Headers {
-		for _, value := range r.Header.Values(name) {
+		for _, value := range headers.Values(name) {
 			req.Header.Add(name, value)
 		}
 	}
-	if ct := r.Header.Get("Content-Type"); ct != "" && len(body) > 0 {
+	if ct := headers.Get("Content-Type"); ct != "" && len(body) > 0 {
 		req.Header.Set("Content-Type", ct)
 	}
 	fact := s.newFact(x, attempt, slot, 1, &provider)
@@ -313,23 +311,7 @@ slots:
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
-	payload, readErr := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
-	if readErr != nil {
-		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
-		if ctx.Err() != nil {
-			factP.Class = classTimeout
-		}
-		factP.recordEvidence(true)
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered."))
-		return
-	}
-	if int64(len(payload)) > responseLimit {
-		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(true)
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
-		return
-	}
-	for name, values := range resp.Header {
+	for name, values := range codewire.ForwardHeaders(resp.Header, false) {
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
 		if routing.HopByHopOrCredentialHeader(canonical) {
 			continue
@@ -343,10 +325,16 @@ slots:
 	}
 	w.WriteHeader(resp.StatusCode)
 	x.delivered(s.now())
-	_, copyErr := w.Write(payload)
+	readErr, copyErr := copyPassthroughResponse(w, resp.Body, responseLimit)
 	factP.Duration = s.now().Sub(factP.StartedAt)
-	providerSuccess := resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified
+	providerSuccess := readErr == nil && (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified)
 	switch {
+	case readErr != nil:
+		factP.Class = classProtocol
+		if ctx.Err() != nil {
+			factP.Class = classTimeout
+		}
+		factP.recordEvidence(true)
 	case providerSuccess:
 		factP.Class = classSuccess
 		factP.observeUsage(&wire.Usage{}, true)
@@ -364,10 +352,39 @@ slots:
 	}
 	out := &outcome{committed: providerSuccess && copyErr == nil}
 	switch {
-	case copyErr != nil:
+	case readErr != nil || copyErr != nil:
 		out.err = serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
 	case !providerSuccess:
 		out.err = upstreamError(&attemptFailure{status: resp.StatusCode})
 	}
 	s.finish(x, out, resp.StatusCode)
+	if readErr != nil || copyErr != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func copyPassthroughResponse(w http.ResponseWriter, source io.Reader, limit int64) (error, error) {
+	bounded := &io.LimitedReader{R: source, N: limit + 1}
+	buffer := make([]byte, 32<<10)
+	controller := http.NewResponseController(w)
+	for {
+		n, readErr := bounded.Read(buffer)
+		if bounded.N == 0 {
+			return io.ErrShortBuffer, nil
+		}
+		if n > 0 {
+			if _, err := w.Write(buffer[:n]); err != nil {
+				return nil, err
+			}
+			if err := controller.Flush(); err != nil {
+				return nil, err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil, nil
+		}
+		if readErr != nil {
+			return readErr, nil
+		}
+	}
 }

@@ -8,7 +8,12 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -193,5 +198,99 @@ func TestAzureOperationProbePolls(t *testing.T) {
 	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
 	if err != nil || len(models) != 1 || models[0].Name != "prebuilt-layout" || submits != 1 || polls != 1 {
 		t.Fatalf("probe: %+v %v submits=%d polls=%d", models, err, submits, polls)
+	}
+}
+
+func TestVertexDuplexProbeRequiresBoundModelAcknowledgement(t *testing.T) {
+	transport := connectors.Config{Kind: "vertex_ai", VendorID: "google-vertex", AuthMode: "service_account", ProfileID: "vertex-realtime", ProfileRevision: connectors.ProfileRevision, CloudProject: "fixture-project", CloudRegion: "us-central1"}
+	transport.Endpoint = connectors.DefaultProfileEndpoint(transport.Kind, transport.ProfileID, transport.CloudRegion, transport.CloudProject)
+	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: "fixture-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := transport.DuplexBoundModel("fixture-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, reply string
+		accepted    bool
+	}{
+		{"accepted", `{"setupComplete":{}}`, true},
+		{"rejected", `{"error":{"code":404,"message":"unknown model"}}`, false},
+		{"missing acknowledgement", `{"serverContent":{"turnComplete":true}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer conn.CloseNow()
+				_, raw, err := conn.Read(r.Context())
+				if err != nil {
+					return
+				}
+				var setup struct {
+					Setup struct {
+						Model string `json:"model"`
+					} `json:"setup"`
+				}
+				if err := json.Unmarshal(raw, &setup); err != nil {
+					t.Error(err)
+				}
+				models <- setup.Setup.Model
+				_ = conn.Write(r.Context(), websocket.MessageText, []byte(tc.reply))
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			probeErr := probeNativeDuplexSetup(ctx, conn, template, transport, "fixture-model")
+			if (probeErr == nil) != tc.accepted {
+				t.Fatalf("certification accepted=%v err=%v", tc.accepted, probeErr)
+			}
+			select {
+			case model := <-models:
+				if model != bound {
+					t.Fatalf("setup model=%q want bound model=%q", model, bound)
+				}
+			default:
+				t.Fatal("certification never submitted model setup")
+			}
+		})
+	}
+}
+
+func TestWebRTCProbeHangsUpWhenControlDialFails(t *testing.T) {
+	var hangups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/realtime/calls":
+			w.Header().Set("Location", "/v1/realtime/calls/rtc_probe")
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, webrtcProbeSDP)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/realtime":
+			http.Error(w, "control refused", http.StatusForbidden)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/realtime/calls/rtc_probe/hangup":
+			hangups.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected probe %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1"), ProfileID: "openai-responses", ProfileRevision: connectors.ProfileRevision, Options: Options{VendorID: new("openai")}}
+	cfg.Normalize()
+	err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("secret"), "fixture-model", CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "webrtc"}, 4096)
+	if err == nil || hangups.Load() != 1 {
+		t.Fatalf("control failure left the probe call open: hangups=%d err=%v", hangups.Load(), err)
 	}
 }

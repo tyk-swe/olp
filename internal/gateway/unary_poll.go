@@ -189,6 +189,9 @@ func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 			e.fact.Status = response.StatusCode
 			raw, readFailure := e.readJSON(response)
 			if readFailure != nil {
+				if e.ctx.Err() != nil {
+					e.cancelPoll(location)
+				}
 				return nil, readFailure
 			}
 			state, err := e.plan.PollState(raw)

@@ -2,8 +2,6 @@ package ocr
 
 import (
 	"encoding/base64"
-	"encoding/json"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,18 +88,44 @@ func azureFetchedDocument(source oif.Request) bool {
 	return present
 }
 
-func parseDocument(v map[string]any) (oif.Document, error) {
-	return oif.ParseJSON(operations.Raw(v), oif.Limits{})
+type mappedPage struct {
+	Index    int64  `json:"index"`
+	Markdown string `json:"markdown"`
 }
 
-func jsonNumber(n int64) json.RawMessage {
-	return json.RawMessage(strconv.FormatInt(n, 10))
+type mappedUsage struct {
+	PagesProcessed int64 `json:"pages_processed"`
 }
 
-func withMember(document map[string]any, name string, value any) map[string]any {
-	merged := maps.Clone(document)
-	merged[name] = value
-	return merged
+type mappedResult struct {
+	Model     string       `json:"model"`
+	Pages     []mappedPage `json:"pages"`
+	UsageInfo *mappedUsage `json:"usage_info,omitempty"`
+}
+
+type mappedVertexRaw struct {
+	Content  string `json:"content"`
+	MIMEType string `json:"mimeType"`
+}
+
+type mappedVertexSelector struct {
+	Pages []int64 `json:"pages"`
+}
+
+type mappedVertexOptions struct {
+	IndividualPageSelector mappedVertexSelector `json:"individualPageSelector"`
+}
+
+type mappedVertexRequest struct {
+	RawDocument    mappedVertexRaw      `json:"rawDocument"`
+	ProcessOptions *mappedVertexOptions `json:"processOptions,omitempty"`
+}
+
+type mappedAzureRequest struct {
+	Model        string `json:"model"`
+	URLSource    string `json:"urlSource,omitempty"`
+	Base64Source string `json:"base64Source,omitempty"`
+	Pages        string `json:"pages,omitempty"`
 }
 
 func pageNumbers(root oif.Value) ([]int64, bool, error) {
@@ -124,15 +148,15 @@ func pageNumbers(root oif.Value) ([]int64, bool, error) {
 	return numbers, true, nil
 }
 
-func withUsageInfo(document map[string]any, usage *operations.Usage, pointer string) (map[string]any, error) {
+func mappedUsageInfo(usage *operations.Usage, pointer string) (*mappedUsage, error) {
 	if usage == nil || usage.MediaUnits == nil {
-		return document, nil
+		return nil, nil
 	}
 	processed, err := strconv.ParseInt(*usage.MediaUnits, 10, 64)
 	if err != nil {
 		return nil, operations.Violation(pointer, "ocr_pages_processed")
 	}
-	return withMember(document, "usage_info", map[string]any{"pages_processed": jsonNumber(processed)}), nil
+	return &mappedUsage{PagesProcessed: processed}, nil
 }
 
 func lower(source oif.Request, view oif.View) (oif.Document, []oif.Provenance, error) {
@@ -155,15 +179,14 @@ func lower(source oif.Request, view oif.View) (oif.Document, []oif.Provenance, e
 	if present && len(numbers) == 0 {
 		return oif.Document{}, nil, invalid("pages")
 	}
-	selected := make([]any, len(numbers))
-	for i, n := range numbers {
-		selected[i] = jsonNumber(n)
-	}
-	document := map[string]any{"rawDocument": map[string]any{"content": content, "mimeType": mimeType}}
-	if present {
-		document = withMember(document, "processOptions", map[string]any{"individualPageSelector": map[string]any{"pages": selected}})
-	}
-	doc, err := parseDocument(document)
+	options := func() *mappedVertexOptions {
+		if !present {
+			return nil
+		}
+		return &mappedVertexOptions{IndividualPageSelector: mappedVertexSelector{Pages: numbers}}
+	}()
+	document := mappedVertexRequest{RawDocument: mappedVertexRaw{Content: content, MIMEType: mimeType}, ProcessOptions: options}
+	doc, err := oif.ParseJSON(operations.Raw(document), oif.Limits{})
 	return doc, nil, err
 }
 
@@ -198,31 +221,31 @@ func project(source oif.Request, result oif.Result, view oif.View, route string)
 	document := member(result.Source().Root(), "document")
 	text := operations.String(member(document, "text"))
 	elements := member(document, "pages").Elements()
-	pages := make([]any, len(elements))
+	pages := make([]mappedPage, len(elements))
 	for i, page := range elements {
 		index := i
 		if number, ok := operations.Int(member(page, "pageNumber")); ok && number >= 1 {
 			index = int(number) - 1
 		}
-		pages[i] = map[string]any{"index": jsonNumber(int64(index)), "markdown": vertexPageText(text, page)}
+		pages[i] = mappedPage{Index: int64(index), Markdown: vertexPageText(text, page)}
 	}
-	out, err := withUsageInfo(map[string]any{"model": route, "pages": pages}, parsed.Usage, "/document/pages")
+	usage, err := mappedUsageInfo(parsed.Usage, "/document/pages")
 	if err != nil {
 		return oif.Document{}, err
 	}
-	return parseDocument(out)
+	return oif.ParseJSON(operations.Raw(mappedResult{Model: route, Pages: pages, UsageInfo: usage}), oif.Limits{})
 }
 
-func azureSourceMember(rawURL string) (string, string, error) {
+func azureSource(rawURL string) (string, string, error) {
 	switch {
 	case strings.HasPrefix(rawURL, "https://"):
-		return "urlSource", rawURL, nil
+		return rawURL, "", nil
 	case strings.HasPrefix(rawURL, "data:"):
 		_, payload, found := strings.Cut(rawURL, ";base64,")
 		if !found || !validBase64(payload) {
 			return "", "", invalid("document")
 		}
-		return "base64Source", payload, nil
+		return "", payload, nil
 	default:
 		return "", "", invalid("document")
 	}
@@ -253,19 +276,16 @@ func lowerAzure(source oif.Request, view oif.View) (oif.Document, []oif.Provenan
 	if err != nil {
 		return oif.Document{}, nil, err
 	}
-	sourceName, sourceValue, err := azureSourceMember(rawURL)
+	urlSource, base64Source, err := azureSource(rawURL)
 	if err != nil {
 		return oif.Document{}, nil, err
 	}
-	numbers, present, err := pageNumbers(root)
+	numbers, _, err := pageNumbers(root)
 	if err != nil {
 		return oif.Document{}, nil, err
 	}
-	document := map[string]any{"model": operations.String(member(root, "model")), sourceName: sourceValue}
-	if present && len(numbers) > 0 {
-		document = withMember(document, "pages", azurePageRanges(numbers))
-	}
-	parsed, err := parseDocument(document)
+	document := mappedAzureRequest{Model: operations.String(member(root, "model")), URLSource: urlSource, Base64Source: base64Source, Pages: azurePageRanges(numbers)}
+	parsed, err := oif.ParseJSON(operations.Raw(document), oif.Limits{})
 	return parsed, nil, err
 }
 
@@ -289,11 +309,11 @@ func azurePageRanges(numbers []int64) string {
 	return strings.Join(parts, ",")
 }
 
-func azurePages(parsed *azureResult) ([]any, error) {
+func azurePages(parsed *azureResult) ([]mappedPage, error) {
 	if len(parsed.pages) == 0 {
-		return []any{map[string]any{"index": jsonNumber(0), "markdown": parsed.content}}, nil
+		return []mappedPage{{Index: 0, Markdown: parsed.content}}, nil
 	}
-	pages := make([]any, len(parsed.pages))
+	pages := make([]mappedPage, len(parsed.pages))
 	for i, page := range parsed.pages {
 		markdown := parsed.content
 		if len(parsed.pages) > 1 || page.hasSpans {
@@ -301,7 +321,7 @@ func azurePages(parsed *azureResult) ([]any, error) {
 				return nil, operations.Violation("/analyzeResult/pages", "ocr_page_spans")
 			}
 			if len(page.spans) == 0 {
-				pages[i] = map[string]any{"index": jsonNumber(page.number - 1), "markdown": ""}
+				pages[i] = mappedPage{Index: page.number - 1, Markdown: ""}
 				continue
 			}
 			text, ok := utf16Slice(parsed.content, page.spans)
@@ -310,7 +330,7 @@ func azurePages(parsed *azureResult) ([]any, error) {
 			}
 			markdown = text
 		}
-		pages[i] = map[string]any{"index": jsonNumber(page.number - 1), "markdown": markdown}
+		pages[i] = mappedPage{Index: page.number - 1, Markdown: markdown}
 	}
 	return pages, nil
 }
@@ -331,9 +351,9 @@ func projectAzure(source oif.Request, result oif.Result, view oif.View, route st
 	if err != nil {
 		return oif.Document{}, err
 	}
-	out, err := withUsageInfo(map[string]any{"model": route, "pages": pages}, parsedView.Usage, "/analyzeResult/pages")
+	usage, err := mappedUsageInfo(parsedView.Usage, "/analyzeResult/pages")
 	if err != nil {
 		return oif.Document{}, err
 	}
-	return parseDocument(out)
+	return oif.ParseJSON(operations.Raw(mappedResult{Model: route, Pages: pages, UsageInfo: usage}), oif.Limits{})
 }

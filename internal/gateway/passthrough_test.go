@@ -15,7 +15,7 @@ import (
 
 func passthroughHarness(t *testing.T) *harness {
 	t.Helper()
-	return strictHarness(t, func(s *routing.Snapshot) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"passthrough"}
 		route.MaxAttempts = 1
@@ -30,6 +30,10 @@ func passthroughHarness(t *testing.T) *harness {
 		}
 		s.Routes[routeSlug] = route
 	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
+	return h
 }
 
 const passthroughURL = "/native/bound-native/routes/" + routeSlug + "/v1/widgets/abc"
@@ -51,6 +55,9 @@ func TestPassthroughInstallationPolicyExclusionDispatchesNothing(t *testing.T) {
 		s.Routes[routeSlug] = route
 		s.InstallationPolicy = &routing.Policy{Constraints: routing.Preferences{Only: []string{"provider:00000000-0000-0000-0000-000000000000"}}}
 	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
 	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
@@ -88,12 +95,22 @@ func TestPassthroughClientWriteFailureKeepsProviderSuccess(t *testing.T) {
 		}
 		s.Routes[routeSlug] = route
 	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "widget-result")
 	})
-	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.server.URL+passthroughURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+fullKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
 	env := h.sink.last(t)
 	if len(env.Attempts) != 1 {
 		t.Fatalf("attempts = %d", len(env.Attempts))
@@ -207,7 +224,7 @@ func TestPassthroughPricedRouteReservesFeeBeforeDispatch(t *testing.T) {
 	}
 }
 
-func TestPassthroughOversizedChunkedResponseRefusedBeforeCommit(t *testing.T) {
+func TestPassthroughOversizedChunkedResponseAbortsDelivery(t *testing.T) {
 	h := passthroughHarness(t)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -220,14 +237,17 @@ func TestPassthroughOversizedChunkedResponseRefusedBeforeCommit(t *testing.T) {
 		}
 	})
 	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("oversized chunked response delivered as %d with %d bytes", resp.StatusCode, len(body))
+	if err == nil || int64(len(body)) > h.gateway.cfg.MaxResponseBytes {
+		t.Fatalf("oversized response completed or exceeded its bound: status=%d bytes=%d err=%v", resp.StatusCode, len(body), err)
+	}
+	if fact := h.sink.last(t).Attempts[0]; fact.Class != classProtocol {
+		t.Fatalf("oversized response recorded as %s", fact.Class)
 	}
 }
 
-func TestPassthroughTruncatedResponseRefusedBeforeCommit(t *testing.T) {
+func TestPassthroughTruncatedResponseAbortsDelivery(t *testing.T) {
 	h := passthroughHarness(t)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -236,10 +256,10 @@ func TestPassthroughTruncatedResponseRefusedBeforeCommit(t *testing.T) {
 		w.Write([]byte("partial"))
 	})
 	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("truncated response delivered as %d with %q", resp.StatusCode, body)
+	if err == nil {
+		t.Fatalf("truncated response completed as %d with %q", resp.StatusCode, body)
 	}
 }
 
@@ -369,9 +389,109 @@ func TestPassthroughBodyLimit(t *testing.T) {
 		route.Passthrough = &routing.PassthroughConfig{Dialect: "bound-native", Methods: []string{"POST"}, Paths: []string{"/v1/widgets/*"}, AcknowledgeOpaqueUnmetered: true}
 		s.Routes[routeSlug] = route
 	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
 	resp := h.do(t.Context(), http.MethodPost, passthroughURL, fullKey, []byte("12345"), nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge || h.mock.count("a") != 0 {
 		t.Fatalf("body limit: %d calls=%d", resp.StatusCode, h.mock.count("a"))
+	}
+}
+
+func TestPassthroughRequiresNamedRoutePermission(t *testing.T) {
+	h := passthroughHarness(t)
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = nil
+	h.rt.keys[fullKey] = authority
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound || h.mock.count("a") != 0 {
+		t.Fatalf("unnamed pass-through route was available: status=%d dispatches=%d", resp.StatusCode, h.mock.count("a"))
+	}
+}
+
+func TestPassthroughStripsConnectionNominatedHeaders(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Widget-Mode") != "" {
+			t.Error("connection-nominated request header reached the provider")
+		}
+		w.Header().Set("Connection", "X-Internal, X-Other")
+		w.Header().Set("X-Internal", "private")
+		w.Header().Set("X-Other", "private")
+		w.Header().Set("X-Public", "visible")
+		io.WriteString(w, "widget")
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{
+		"Connection": "X-Widget-Mode", "X-Widget-Mode": "private",
+	})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "widget" || resp.Header.Get("X-Public") != "visible" || resp.Header.Get("X-Internal") != "" || resp.Header.Get("X-Other") != "" {
+		t.Fatalf("forwarded response headers=%v body=%q status=%d", resp.Header, body, resp.StatusCode)
+	}
+}
+
+func TestPassthroughHonorsCredentialSlotPriority(t *testing.T) {
+	h := passthroughHarness(t)
+	strictRelease(t, h, func(snapshot *routing.Snapshot) {
+		provider := snapshot.Providers[snapshot.Routes[routeSlug].Targets[0].ProviderID]
+		for _, other := range snapshot.Providers {
+			if other.ID == provider.ID {
+				continue
+			}
+			first := provider.Slots[0]
+			first.Priority = 20
+			preferred := other.Slots[0]
+			preferred.Priority = 10
+			provider.Slots = []routing.Slot{first, preferred}
+			snapshot.Providers[provider.ID] = provider
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, r.Header.Get("Authorization"))
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "Bearer "+secretB {
+		t.Fatalf("preferred credential not used: status=%d body=%q", resp.StatusCode, body)
+	}
+}
+
+func TestPassthroughDeliversChunksBeforeProviderCompletion(t *testing.T) {
+	h := passthroughHarness(t)
+	release := make(chan struct{})
+	defer close(release)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	defer resp.Body.Close()
+	chunk := make([]byte, len("data: first\n\n"))
+	if _, err := io.ReadFull(resp.Body, chunk); err != nil || string(chunk) != "data: first\n\n" {
+		t.Fatalf("first chunk was not delivered while the provider was open: status=%d body=%q err=%v", resp.StatusCode, chunk, err)
+	}
+}
+
+func TestPassthroughPreflightPermitsPublishedMethods(t *testing.T) {
+	h := passthroughHarness(t)
+	h.gateway.cfg.CORSAllowedOrigins = []string{"https://app.example"}
+	for _, method := range routing.PassthroughMethods {
+		resp := h.do(t.Context(), http.MethodOptions, passthroughURL, "", nil, map[string]string{
+			"Origin": "https://app.example", "Access-Control-Request-Method": method,
+		})
+		resp.Body.Close()
+		allowed := strings.FieldsFunc(resp.Header.Get("Access-Control-Allow-Methods"), func(r rune) bool { return r == ',' || r == ' ' })
+		if resp.StatusCode != http.StatusNoContent || !slices.Contains(allowed, method) || resp.Header.Get("Access-Control-Allow-Origin") != "https://app.example" {
+			t.Fatalf("preflight refused supported %s requests: status=%d headers=%v", method, resp.StatusCode, resp.Header)
+		}
 	}
 }

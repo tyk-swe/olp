@@ -341,7 +341,7 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer checkTx.Rollback(t.Context())
-	ordinaryEvent := event
+	ordinaryEvent := *event
 	ordinaryAttempt := event.Attempts[0]
 	ordinaryAttempt.Execution = nil
 	ordinaryEvent.Attempts = []usage.Attempt{ordinaryAttempt}
@@ -349,7 +349,7 @@ func TestExecutionDebitSettlementIsAtomicAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinary, err := usage.PersistEventTx(t.Context(), checkTx, ordinaryEvent, ordinaryPayload)
+	ordinary, err := usage.PersistEventTx(t.Context(), checkTx, &ordinaryEvent, ordinaryPayload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,10 +523,7 @@ func TestExecutionDebitOrphanedDispatchHoldsExposureAfterBound(t *testing.T) {
 	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Hour); err != nil || held {
 		t.Fatalf("live dispatched session already holds exposure: held=%v err=%v", held, err)
 	}
-	if _, err := f.Pool.Exec(t.Context(), `UPDATE olp.execution_debits SET dispatched_at=clock_timestamp()-interval '2 hours' WHERE id=$1`, i.ID); err != nil {
-		t.Fatal(err)
-	}
-	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Hour); err != nil || !held {
+	if held, err := s.HasUnknownDebit(t.Context(), f.Key, time.Nanosecond); err != nil || !held {
 		t.Fatalf("orphaned dispatched session holds no exposure: held=%v err=%v", held, err)
 	}
 }
@@ -684,5 +681,57 @@ func TestExecutionDebitFinalResultCannotEraseEarlierUncertainty(t *testing.T) {
 	var cost, charge string
 	if err = f.Pool.QueryRow(t.Context(), `SELECT state,observed_cost::text,observed_charge::text FROM olp.execution_debits WHERE id=$1`, i.ID).Scan(&state, &cost, &charge); err != nil || state != "settled" || cost != "1.000000000000" || charge != "1.500000000000" {
 		t.Fatalf("coverage replayed charges: %s %s %s %v", state, cost, charge, err)
+	}
+}
+
+func TestExecutionDebitSessionReplaySurvivesFactRetention(t *testing.T) {
+	f, store, project := debitFixture(t)
+	valkey, prefix, _ := acctKeyspace(t)
+	store.Limiter, _ = limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	intent := debitIntent(t, f, project)
+	prepareDebit(t, f, store, intent)
+	if err := store.Admit(t.Context(), intent.ID, intent.ClaimID, []limits.Request{{CostOwnerID: f.Key}, {CostOwnerID: f.Provider}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDispatched(t.Context(), intent.ID, intent.ClaimID); err != nil {
+		t.Fatal(err)
+	}
+	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{acctAttempt(t, f.Provider, 1, "debit-model", 200, acctObserved(1_000_000, 0, nil, nil))}})
+	event.RuntimeGenerationID = intent.Affinity.ReleaseID
+	event.Attempts[0].Routing = &usage.Routing{ProviderRevisionID: f.Revision}
+	event.Attempts[0].Execution = &usage.ExecutionReference{DispatchID: intent.ID}
+	payload, err := usage.Encode(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persist := func(data []byte) (usage.Persisted, error) {
+		tx, err := f.Pool.Begin(t.Context())
+		if err != nil {
+			return usage.Persisted{}, err
+		}
+		defer tx.Rollback(t.Context())
+		result, err := usage.PersistDebitEventTx(t.Context(), tx, event, data)
+		if err != nil {
+			return usage.Persisted{}, err
+		}
+		return result, tx.Commit(t.Context())
+	}
+	if _, err := persist(payload); err != nil {
+		t.Fatal(err)
+	}
+	acctExec(t, f.Pool, `DELETE FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID)
+	acctExec(t, f.Pool, `DELETE FROM olp.request_metadata_event_receipts WHERE event_id=$1`, event.EventID)
+	if replay, err := persist(payload); err != nil || replay.Outcome != usage.PersistOutcomeDuplicate {
+		t.Fatalf("retained session settlement was recomputed: result=%+v err=%v", replay, err)
+	}
+	if _, err := persist(append(bytes.Clone(payload), '\n')); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("changed session evidence was accepted: %v", err)
+	}
+	var state, cost string
+	if err := f.Pool.QueryRow(t.Context(), `SELECT state,observed_cost::text FROM olp.execution_debits WHERE id=$1`, intent.ID).Scan(&state, &cost); err != nil {
+		t.Fatal(err)
+	}
+	if state != "settled" || !decimal.RequireFromString(cost).Equal(decimal.NewFromInt(1)) {
+		t.Fatalf("retained settlement changed: state=%s cost=%s", state, cost)
 	}
 }

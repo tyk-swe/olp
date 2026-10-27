@@ -120,6 +120,9 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 			if mode != "noloc" {
 				w.Header().Set("Location", "/v1/realtime/calls/rtc_test1")
 			}
+			if mode == "truncated" {
+				w.Header().Set("Content-Length", "1024")
+			}
 			w.Header().Set("Content-Type", "application/sdp")
 			w.WriteHeader(http.StatusCreated)
 			io.WriteString(w, webrtcAnswerSDP)
@@ -154,6 +157,11 @@ func (m *webrtcMock) handler(t *testing.T, registeredAtCreate func() bool) http.
 				return
 			}
 			if mode == "close" {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if mode == "hold" {
+				<-m.release
 				_ = conn.Close(websocket.StatusNormalClosure, "")
 				return
 			}
@@ -733,4 +741,30 @@ func TestWebRTCSessionBoundClosesProviderSession(t *testing.T) {
 		t.Fatal("session bound never closed the provider session")
 	}
 	_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+}
+
+func TestWebRTCTruncatedAnswerHangsUpCreatedCall(t *testing.T) {
+	mock := newWebRTCMock("truncated")
+	h := webrtcHarness(t, mock, true)
+	resp := webrtcCreate(t, h, fullKey, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	resp.Body.Close()
+	creates, controls, hangups := mock.counts()
+	if resp.StatusCode != http.StatusBadGateway || creates != 1 || controls != 0 || hangups != 1 {
+		t.Fatalf("unreadable answer left a call open: status=%d creates=%d controls=%d hangups=%d", resp.StatusCode, creates, controls, hangups)
+	}
+}
+
+func TestWebRTCActiveSessionsRetainProcessCapacity(t *testing.T) {
+	mock := newWebRTCMock("hold")
+	defer close(mock.release)
+	h := webrtcHarnessCfg(t, mock, true, Config{MaxInFlight: 1})
+	session := `{"type":"realtime","model":"` + routeSlug + `"}`
+	first := webrtcCreate(t, h, fullKey, session)
+	io.Copy(io.Discard, first.Body)
+	first.Body.Close()
+	second := webrtcCreate(t, h, fullKey, session)
+	second.Body.Close()
+	if creates, _, _ := mock.counts(); first.StatusCode != http.StatusCreated || second.StatusCode != http.StatusServiceUnavailable || creates != 1 {
+		t.Fatalf("active session lost its capacity bound: first=%d second=%d creates=%d", first.StatusCode, second.StatusCode, creates)
+	}
 }

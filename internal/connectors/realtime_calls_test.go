@@ -1,7 +1,14 @@
 package connectors_test
 
 import (
+	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
+
+	smithyhttp "github.com/aws/smithy-go/transport/http"
+	"github.com/tyk-swe/olp/internal/egress"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 )
@@ -50,5 +57,34 @@ func TestRealtimeCallsURLs(t *testing.T) {
 		if _, err := cfg.RealtimeHangupURL("native-model", bad); err == nil {
 			t.Fatalf("admitted hangup call id %q", bad)
 		}
+	}
+}
+
+type duplexProbeTransport func(*http.Request) (*http.Response, error)
+
+func (f duplexProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestBedrockDuplexWaitsForProviderAcceptance(t *testing.T) {
+	cfg := connectors.Config{Kind: "bedrock", VendorID: "amazon-bedrock", AuthMode: "static", ProfileID: "bedrock-realtime", ProfileRevision: connectors.ProfileRevision, CloudRegion: "us-east-1", Endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com"}
+	client := &http.Client{Transport: duplexProbeTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusForbidden, ProtoMajor: 2, ProtoMinor: 0,
+			Header: http.Header{"Content-Type": {"application/json"}, "X-Amzn-Errortype": {"AccessDeniedException"}},
+			Body:   io.NopCloser(strings.NewReader(`{"message":"model access denied"}`)), Request: r,
+		}, nil
+	})}
+	stream, _, err := connectors.NewAuth(&egress.Policy{}).OpenBedrockDuplex(t.Context(), cfg,
+		[]byte(`{"access_key_id":"fixture-access-key","secret_access_key":"fixture-secret-key"}`), "test-model", client)
+	if stream != nil {
+		defer stream.Close()
+	}
+	if err == nil {
+		t.Fatal("provider rejection was reported as an accepted duplex stream")
+	}
+	var denied *smithyhttp.ResponseError
+	if !errors.As(err, &denied) || denied.HTTPStatusCode() != http.StatusForbidden {
+		t.Fatalf("provider rejection was not retained: %v", err)
 	}
 }

@@ -67,16 +67,14 @@ func (c *PassthroughConfig) Validate() error {
 			return invalidValue("passthrough.query", "Pass-through query names use letters, digits, dot, underscore or hyphen.")
 		}
 	}
-	if len(c.Headers) > 32 {
+	if len(c.Headers) > 32 || !distinct(c.Headers) {
 		return invalidValue("passthrough.headers", "Allow at most 32 pass-through headers.")
 	}
-	seen := map[string]bool{}
 	for _, name := range c.Headers {
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
-		if canonical != name || seen[canonical] || HopByHopOrCredentialHeader(canonical) || !validHeaderName(canonical) {
+		if canonical != name || HopByHopOrCredentialHeader(canonical) || !validHeaderName(canonical) {
 			return invalidValue("passthrough.headers", "Allow distinct canonical pass-through headers; hop-by-hop and credential headers are never forwarded.")
 		}
-		seen[canonical] = true
 	}
 	return nil
 }

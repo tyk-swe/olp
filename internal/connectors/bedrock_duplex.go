@@ -63,6 +63,16 @@ func (a *Auth) OpenBedrockDuplex(ctx context.Context, c Config, secret []byte, m
 		return nil, applied, err
 	}
 	stream := output.GetStream()
+	select {
+	case <-output.GetInitialReply():
+		if err := stream.Err(); err != nil {
+			_ = stream.Close()
+			return nil, applied, err
+		}
+	case <-ctx.Done():
+		_ = stream.Close()
+		return nil, applied, ctx.Err()
+	}
 	return &BedrockStream{stream: stream, events: stream.Events()}, applied, nil
 }
 

@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -102,6 +103,21 @@ func PersistDebitEventTx(ctx context.Context, tx pgx.Tx, event *Event, payload [
 	currency, supplyOwners, err := validateDebitEvent(ctx, tx, event, dispatchID)
 	if err != nil {
 		return Persisted{}, err
+	}
+	identity := sessionDebitResult(dispatchID, event, payload, "0", "0", false)
+	var retainedCost, retainedCharge string
+	var retainedComplete bool
+	replayErr := tx.QueryRow(ctx, `SELECT cost::text,charge::text,complete FROM olp.execution_debit_results WHERE dispatch_id=$1 AND result_digest=$2`, dispatchID, identity.ResultDigest).Scan(&retainedCost, &retainedCharge, &retainedComplete)
+	if replayErr != nil && !errors.Is(replayErr, pgx.ErrNoRows) {
+		return Persisted{}, replayErr
+	}
+	if replayErr == nil {
+		retained := sessionDebitResult(dispatchID, event, payload, retainedCost, retainedCharge, retainedComplete)
+		if duplicate, err := limits.DebitResultReplayTx(ctx, tx, retained); err != nil {
+			return Persisted{}, err
+		} else if duplicate {
+			return Persisted{Outcome: PersistOutcomeDuplicate}, nil
+		}
 	}
 	persisted, err := persistEventTx(ctx, tx, event, payload, supplyOwners)
 	if err != nil {

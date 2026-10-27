@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -698,5 +699,59 @@ func TestOCRProviderFetchedDocumentRefusedWithoutRouteChoice(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "provider_fetched_documents") && !strings.Contains(string(body), "content_egress") {
 		t.Fatalf("refusal does not name the egress choice: %s", body)
+	}
+}
+
+type cancelledPollBody struct{ cancel context.CancelFunc }
+
+func (b cancelledPollBody) Read([]byte) (int, error) {
+	b.cancel()
+	return 0, context.Canceled
+}
+
+func (cancelledPollBody) Close() error { return nil }
+
+type pollBodyTransport func(*http.Request) (*http.Response, error)
+
+func (f pollBodyTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestAzureOCRCancellationDuringPollBodyDeletesResult(t *testing.T) {
+	h := azureHarness(t, true, &azureMock{})
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	target := route.Targets[0]
+	provider := h.rt.release.Snapshot.Providers[target.ProviderID]
+	template, ok := h.rt.release.Snapshot.OperationTemplate(routeSlug, target.ID, "ocr")
+	if !ok {
+		t.Fatal("missing OCR template")
+	}
+	source, err := operationplan.Parse("mistral-ocr", []byte(ocrBody), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := template.Bind(source, operationplan.Context{Route: routeSlug})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var deletes atomic.Int32
+	client := &http.Client{Transport: pollBodyTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodDelete {
+			if r.Context().Err() != nil || r.Header.Get("Ocp-Apim-Subscription-Key") != secretA {
+				t.Error("cleanup lost its independent context or bound credential")
+			}
+			deletes.Add(1)
+			return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: cancelledPollBody{cancel: cancel}}, nil
+	})}
+	exchange := &unaryExchange{
+		server: h.gateway, ctx: ctx, x: &call{request: request{release: h.rt.release}},
+		state: &attemptState{parent: ctx}, plan: plan, client: client, slot: provider.Slots[0], provider: &provider,
+		model: target.ProviderModel, fact: &AttemptFact{StartedAt: time.Now()}, bodyCap: 1 << 20, inject: func(http.Header) {},
+	}
+	_, failure := exchange.poll(h.upstream.URL + azurePollPath)
+	if failure == nil || deletes.Load() != 1 {
+		t.Fatalf("cancelled poll body retained its result: deletes=%d failure=%+v", deletes.Load(), failure)
 	}
 }

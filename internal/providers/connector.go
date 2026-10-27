@@ -655,7 +655,7 @@ func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, creden
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
 	}
-	return s.certifyWebSocketDial(ctx, cfg, credential, endpoint)
+	return s.certifyWebSocketDial(ctx, cfg, credential, endpoint, nil)
 }
 
 func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
@@ -670,7 +670,9 @@ func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, cr
 		if err != nil {
 			return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
 		}
-		return s.certifyWebSocketDial(ctx, cfg, credential, endpoint)
+		return s.certifyWebSocketDial(ctx, cfg, credential, endpoint, func(ctx context.Context, conn *websocket.Conn) error {
+			return probeNativeDuplexSetup(ctx, conn, template, transport, model)
+		})
 	case duplexcontract.TransportBedrockBidi:
 		endpoint, err := transport.BedrockDuplexEndpoint()
 		if err != nil {
@@ -701,7 +703,7 @@ func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, cr
 	return &probeError{Code: "capability_unavailable", Detail: "The native duplex transport cannot be certified."}
 }
 
-func (s *Server) certifyWebSocketDial(ctx context.Context, cfg *Configuration, credential []byte, endpoint string) error {
+func (s *Server) certifyWebSocketDial(ctx context.Context, cfg *Configuration, credential []byte, endpoint string, exchange func(context.Context, *websocket.Conn) error) error {
 	transport := cfg.transport()
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
@@ -739,7 +741,40 @@ func (s *Server) certifyWebSocketDial(ctx context.Context, cfg *Configuration, c
 		}
 		return classify(err)
 	}
+	defer conn.CloseNow()
+	if exchange != nil {
+		if err := exchange(ctx, conn); err != nil {
+			return err
+		}
+	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+	return nil
+}
+
+func probeNativeDuplexSetup(ctx context.Context, conn *websocket.Conn, template *duplexcontract.Template, transport connectors.Config, model string) error {
+	if !template.SetupAck() {
+		return nil
+	}
+	boundModel, err := transport.DuplexBoundModel(model)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+	}
+	setup, _ := json.Marshal(map[string]map[string]string{"setup": {"model": boundModel}})
+	conn.SetReadLimit(probeBodyLimit)
+	if err := conn.Write(ctx, websocket.MessageText, setup); err != nil {
+		return classify(err)
+	}
+	kind, raw, err := conn.Read(ctx)
+	if err != nil {
+		return classify(err)
+	}
+	if kind != websocket.MessageText {
+		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not acknowledge the model setup."}
+	}
+	frame, err := template.Observer(probeBodyLimit).ServerFrame(raw)
+	if err != nil || !frame.SetupComplete {
+		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not acknowledge the model setup."}
+	}
 	return nil
 }
 
@@ -849,7 +884,15 @@ func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credenti
 	}
 	segments := strings.Split(strings.Trim(location.Path, "/"), "/")
 	callID := segments[len(segments)-1]
-	control, err := transport.RealtimeControlURL(model, callID)
+	controlErr := s.certifyWebRTCControl(ctx, cfg, credential, model, callID, client)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), probeCancelWait)
+	defer cleanupCancel()
+	hangupErr := s.hangupWebRTCProbe(cleanupCtx, cfg, credential, model, callID, client)
+	return errors.Join(controlErr, hangupErr)
+}
+
+func (s *Server) certifyWebRTCControl(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
+	control, err := cfg.transport().RealtimeControlURL(model, callID)
 	if err != nil {
 		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
 	}
@@ -857,7 +900,7 @@ func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credenti
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
 	}
-	if _, err := s.auth.Apply(ctx, probe, transport, credential, nil); err != nil {
+	if _, err := s.auth.Apply(ctx, probe, cfg.transport(), credential, nil); err != nil {
 		return &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
 	conn, dialResp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: probe.Header})
@@ -868,7 +911,11 @@ func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credenti
 		return classify(err)
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
-	hangupURL, err := transport.RealtimeHangupURL(model, callID)
+	return nil
+}
+
+func (s *Server) hangupWebRTCProbe(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
+	hangupURL, err := cfg.transport().RealtimeHangupURL(model, callID)
 	if err != nil {
 		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
 	}
@@ -876,7 +923,7 @@ func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credenti
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
 	}
-	if _, err := s.auth.Apply(ctx, hangup, transport, credential, nil); err != nil {
+	if _, err := s.auth.Apply(ctx, hangup, cfg.transport(), credential, nil); err != nil {
 		return &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
 	hangupResp, err := client.Do(hangup)
