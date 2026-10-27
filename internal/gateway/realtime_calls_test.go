@@ -193,6 +193,11 @@ func webrtcHarness(t *testing.T, mock *webrtcMock, withWebRTC bool) *harness {
 
 func webrtcHarnessCfg(t *testing.T, mock *webrtcMock, withWebRTC bool, cfg Config) *harness {
 	t.Helper()
+	return webrtcHarnessBodyLimit(t, mock, withWebRTC, cfg, nil)
+}
+
+func webrtcHarnessBodyLimit(t *testing.T, mock *webrtcMock, withWebRTC bool, cfg Config, maxBodyBytes *int64) *harness {
+	t.Helper()
 	var h *harness
 	h = strictHarnessCfg(t, cfg, func(snapshot *routing.Snapshot) {
 		for id, provider := range snapshot.Providers {
@@ -212,6 +217,7 @@ func webrtcHarnessCfg(t *testing.T, mock *webrtcMock, withWebRTC bool, cfg Confi
 		route := snapshot.Routes[routeSlug]
 		route.Operations = []string{"generation", "realtime"}
 		route.Targets = route.Targets[:1]
+		route.MaxBodyBytes = maxBodyBytes
 		snapshot.Routes[routeSlug] = route
 	})
 	h.mock.set("a", mock.handler(t, func() bool {
@@ -249,7 +255,7 @@ func webrtcCreateBody(t *testing.T, session string) ([]byte, string) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return buf.Bytes(), writer.FormDataContentType()
+	return buf.Bytes(), writer.FormDataContentType(), nil
 }
 
 func webrtcCreate(t *testing.T, h *harness, key, session string) *http.Response {
@@ -556,6 +562,57 @@ func TestWebRTCCreationHonorsDeploymentBodyLimit(t *testing.T) {
 	}
 	if creates, _, _ := mock.counts(); creates != 0 {
 		t.Fatal("provider session created for an oversized request")
+	}
+}
+
+func TestWebRTCCreationHonorsRouteBodyLimit(t *testing.T) {
+	form, contentType := webrtcCreateBody(t, `{"type":"realtime","model":"`+routeSlug+`"}`)
+	for _, offer := range []struct {
+		name        string
+		body        []byte
+		contentType string
+	}{
+		{"sdp", []byte(webrtcOfferSDP), "application/sdp"},
+		{"multipart", form, contentType},
+		{"multipart epilogue", append(bytes.Clone(form), bytes.Repeat([]byte("x"), 8192)...), contentType},
+	} {
+		for _, chunked := range []bool{false, true} {
+			for _, spare := range []int64{-1, 0, 1} {
+				t.Run(fmt.Sprintf("%s/chunked=%t/spare=%d", offer.name, chunked, spare), func(t *testing.T) {
+					mock := newWebRTCMock("close")
+					limit := int64(len(offer.body)) + spare
+					h := webrtcHarnessBodyLimit(t, mock, true, Config{}, &limit)
+					req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.server.URL+"/v1/realtime/calls?model="+routeSlug, bytes.NewReader(offer.body))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if chunked {
+						req.ContentLength = -1
+					}
+					req.Header.Set("Authorization", "Bearer "+fullKey)
+					req.Header.Set("Content-Type", offer.contentType)
+					resp, err := h.server.Client().Do(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body, readErr := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					if spare < 0 {
+						if creates, _, _ := mock.counts(); resp.StatusCode != http.StatusRequestEntityTooLarge || creates != 0 {
+							t.Fatalf("oversized offer: status=%d creates=%d body=%s", resp.StatusCode, creates, body)
+						}
+						return
+					}
+					if creates, _, _ := mock.counts(); resp.StatusCode != http.StatusCreated || creates != 1 || string(body) != webrtcAnswerSDP {
+						t.Fatalf("bounded offer: status=%d creates=%d body=%s", resp.StatusCode, creates, body)
+					}
+					_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
+				})
+			}
+		}
 	}
 }
 
