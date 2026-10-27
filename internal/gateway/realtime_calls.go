@@ -32,6 +32,7 @@ const (
 	maxWebRTCSDPBytes     = 64 << 10
 	maxWebRTCSessionBytes = 64 << 10
 	webrtcCloseTimeout    = 10 * time.Second
+	webrtcAnswerTimeout   = 30 * time.Second
 )
 
 type webrtcSession struct {
@@ -454,8 +455,13 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	go s.runWebRTCControl(sess)
 	w.Header().Set("Content-Type", "application/sdp")
 	w.Header().Set("Location", "/v1/realtime/calls/"+sess.id)
+	_ = controller.SetWriteDeadline(s.now().Add(webrtcAnswerTimeout))
 	w.WriteHeader(status)
-	if _, err := w.Write(answer); err != nil {
+	_, werr := w.Write(answer)
+	if werr == nil {
+		werr = controller.Flush()
+	}
+	if werr != nil || r.Context().Err() != nil {
 		if herr := s.hangupWebRTCCall(bg, sess); herr != nil {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}

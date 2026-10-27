@@ -88,6 +88,7 @@ type vertexObserver struct {
 	turn       *wire.Usage
 	pending    bool
 	awaiting   bool
+	boundary   int
 	submitted  int
 	inputSeq   int
 	coveredSeq int
@@ -109,7 +110,13 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	var turnUsage *wire.Usage
 	if observed.Usage != nil {
 		turnUsage = vertexUsage(observed.Usage)
-		o.coveredSeq = o.inputSeq
+		covered := o.inputSeq
+		if o.awaiting {
+			covered = o.boundary
+		}
+		if covered > o.coveredSeq {
+			o.coveredSeq = covered
+		}
 	}
 	auxiliary := observed.Kind == "serverContent" && !observed.TurnComplete && transcriptionOnly(observed.Source.Root())
 	if auxiliary && turnUsage == nil {
@@ -139,6 +146,7 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 			o.flushTurn()
 		} else {
 			o.awaiting = true
+			o.boundary = o.inputSeq
 		}
 	}
 	return ServerFrame{ProviderError: observed.Kind == "error", SetupComplete: observed.Kind == "setupComplete"}, nil
@@ -256,6 +264,11 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 	}
 	if inputOK && input.Kind() == oif.Object && len(input.Members()) > 0 {
 		o.inputSeq++
+	}
+	for _, name := range []string{"toolResponse", "tool_response"} {
+		if tool, ok := doc.Root().Lookup(name); ok && tool.Kind() == oif.Object && len(tool.Members()) > 0 {
+			o.inputSeq++
+		}
 	}
 	return nil
 }

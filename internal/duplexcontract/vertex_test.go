@@ -219,6 +219,41 @@ func TestVertexObserverAccumulatesTurnUsage(t *testing.T) {
 	if !observer.Complete() {
 		t.Fatal("control frame between turn completion and standalone usage broke settlement")
 	}
+	for _, frame := range []string{
+		`{"toolResponse":{"functionResponses":[{"id":"call_1","response":{"result":"ok"}}]}}`,
+		`{"tool_response":{"function_responses":[{"id":"call_2","response":{"result":"ok"}}]}}`,
+	} {
+		if err := observer.ClientFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+		if observer.Complete() {
+			t.Fatal("session settled as complete after a tool response that never started")
+		}
+		if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+			t.Fatal(err)
+		}
+		if !observer.Complete() {
+			t.Fatal("tool response settled by terminal usage is not complete")
+		}
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ClientFrame([]byte(`{"realtimeInput":{"audio":{"mimeType":"audio/pcm;rate=16000","data":"AQIDBA=="}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observer.ServerFrame([]byte(`{"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.Complete() {
+		t.Fatal("delayed usage for the finished turn covered newer realtime input")
+	}
+	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.Complete() {
+		t.Fatal("newer realtime input settled by its own terminal usage is not complete")
+	}
 	if _, err := observer.ServerFrame([]byte(`{"serverContent":{"turnComplete":true}}`)); err != nil {
 		t.Fatal(err)
 	}
