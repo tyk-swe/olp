@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/plugin-index/v1",
-  "published_at": "2026-10-26T14:35:00Z",
+  "published_at": "2026-10-27T08:53:37Z",
   "plugins": [
     {
       "name": "codex",
@@ -37,9 +37,9 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "febf61b408c6e5f3f6c4baaaa2d34986d2bb3355820c15f61719f26f7009b981",
+          "digest": "ffa521eda47fbce25292a3b5e2b0925f6e9976c8814193d790b189889e307702",
           "abi_version": 1,
-          "size_bytes": 5232083,
+          "size_bytes": 5232084,
           "origins": [
             "https://api.kimi.ai",
             "https://api.kimi.com",
@@ -49,8 +49,8 @@
             "kimi-code",
             "kimi-code-cn"
           ],
-          "commit": "9e08390af588adadd6fc96954ca24fa0fcb88811",
-          "reviewed_at": "2026-10-26T14:34:18Z"
+          "commit": "09a0c7c92777995c3252b6f1907c02fe7cb61094",
+          "reviewed_at": "2026-10-27T08:53:34Z"
         }
       ]
     },
@@ -64,9 +64,9 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "57317ed718bd2cbae6e47f3a45f5c8a0a648137e048314e795945dd52a036514",
+          "digest": "e84d939ab0139167a6efa06515724b805f89b846b603619e9c53be21ce855077",
           "abi_version": 1,
-          "size_bytes": 5232916,
+          "size_bytes": 5232917,
           "origins": [
             "https://api.minimax.cn",
             "https://api.minimax.io",
@@ -77,8 +77,8 @@
             "minimax-plan",
             "minimax-plan-cn"
           ],
-          "commit": "9e08390af588adadd6fc96954ca24fa0fcb88811",
-          "reviewed_at": "2026-10-26T14:34:17Z"
+          "commit": "09a0c7c92777995c3252b6f1907c02fe7cb61094",
+          "reviewed_at": "2026-10-27T08:53:35Z"
         }
       ]
     },
@@ -116,9 +116,9 @@
       "releases": [
         {
           "version": "0.1.0",
-          "digest": "61600fd900f929f553ed55ef1541d1cee155a76ab092db1e128ed7a05d593196",
+          "digest": "751d2672bc70fa2c84407db3e586f3f426f482373a8f7ff043f7a3e68532503f",
           "abi_version": 1,
-          "size_bytes": 5233150,
+          "size_bytes": 5233151,
           "origins": [
             "https://bailian.console.aliyun.com",
             "https://modelstudio.console.alibabacloud.com",
@@ -129,8 +129,8 @@
             "qwen-token-plan",
             "qwen-token-plan-cn"
           ],
-          "commit": "9e08390af588adadd6fc96954ca24fa0fcb88811",
-          "reviewed_at": "2026-10-26T14:34:19Z"
+          "commit": "09a0c7c92777995c3252b6f1907c02fe7cb61094",
+          "reviewed_at": "2026-10-27T08:53:37Z"
         }
       ]
     },
