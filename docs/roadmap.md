@@ -188,7 +188,7 @@ durable accounting foundation.
 - [ ] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
   Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
   declared transcription support, cancellation and terminal usage accounting.
-- [ ] **RM6.6 — Governed pass-through:** implement the separate route kind
+- [x] **RM6.6 — Governed pass-through:** implement the separate route kind
   and anchored namespace, path normalization, query/header allowlists,
   redirect refusal, credential isolation, bounds, policy compatibility and
   per-request pricing or explicit unpriced accounting.

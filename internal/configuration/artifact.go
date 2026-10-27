@@ -111,26 +111,27 @@ func targetEntry(t routing.PublishedTarget) TargetEntry {
 }
 
 type RouteEntry struct {
-	Cache                *cache.Policy       `json:"cache,omitempty"`
-	PromptCache          *cache.PromptPolicy `json:"prompt_cache,omitempty"`
-	ExposeUpstreamModels bool                `json:"expose_upstream_models,omitempty"`
-	CallerCostExempt     bool                `json:"caller_cost_exempt,omitempty"`
-	MaxBodyBytes         *int64              `json:"max_body_bytes,omitempty"`
-	Slug                 string              `json:"slug"`
-	Project              *string             `json:"project"`
-	Operations           []string            `json:"operations"`
-	OverallTimeoutMS     int                 `json:"overall_timeout_ms"`
-	MaxAttempts          int                 `json:"max_attempts"`
-	Targets              []TargetEntry       `json:"targets"`
-	RoutingPolicy        *routing.Policy     `json:"routing_policy"`
-	ContentPolicy        json.RawMessage     `json:"content_policy,omitempty"`
-	Fidelity             json.RawMessage     `json:"fidelity"`
-	Fallbacks            []routing.Fallback  `json:"fallbacks,omitempty"`
-	Selectors            []routing.Selector  `json:"selectors,omitempty"`
-	Retry                routing.Retry       `json:"retry,omitempty"`
-	Affinity             *routing.Affinity   `json:"affinity,omitempty"`
-	Budget               *routing.CostLimits `json:"budget,omitempty"`
-	Retired              bool                `json:"retired"`
+	Cache                *cache.Policy              `json:"cache,omitempty"`
+	PromptCache          *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
+	ExposeUpstreamModels bool                       `json:"expose_upstream_models,omitempty"`
+	CallerCostExempt     bool                       `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes         *int64                     `json:"max_body_bytes,omitempty"`
+	Slug                 string                     `json:"slug"`
+	Project              *string                    `json:"project"`
+	Operations           []string                   `json:"operations"`
+	OverallTimeoutMS     int                        `json:"overall_timeout_ms"`
+	MaxAttempts          int                        `json:"max_attempts"`
+	Targets              []TargetEntry              `json:"targets"`
+	RoutingPolicy        *routing.Policy            `json:"routing_policy"`
+	ContentPolicy        json.RawMessage            `json:"content_policy,omitempty"`
+	Fidelity             json.RawMessage            `json:"fidelity"`
+	Fallbacks            []routing.Fallback         `json:"fallbacks,omitempty"`
+	Selectors            []routing.Selector         `json:"selectors,omitempty"`
+	Retry                routing.Retry              `json:"retry,omitempty"`
+	Affinity             *routing.Affinity          `json:"affinity,omitempty"`
+	Budget               *routing.CostLimits        `json:"budget,omitempty"`
+	Passthrough          *routing.PassthroughConfig `json:"passthrough,omitempty"`
+	Retired              bool                       `json:"retired"`
 }
 
 // TemplateEntry is a route template. Apply stores it; provider activation and
@@ -168,7 +169,7 @@ func (t *TemplateEntry) normalize() error {
 }
 
 func (r *RouteEntry) behavior() routing.Behavior {
-	return routing.Behavior{Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget}
+	return routing.Behavior{Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
 }
 
 func (r *RouteEntry) setBehavior(raw []byte) error {
@@ -180,6 +181,29 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 	r.CallerCostExempt = behavior.CallerCostExempt
 	r.Cache, r.PromptCache = behavior.Cache, behavior.PromptCache
 	r.Fallbacks, r.Selectors, r.Retry, r.Affinity, r.Budget = behavior.Fallbacks, behavior.Selectors, behavior.Retry, behavior.Affinity, behavior.Budget
+	r.Passthrough = behavior.Passthrough
+	return nil
+}
+
+func (r *RouteEntry) validatePassthrough() error {
+	fidelity, err := routing.DecodeFidelity(r.Fidelity)
+	if err != nil {
+		return err
+	}
+	route := routing.Route{Slug: r.Slug, Operations: r.Operations, OverallTimeout: int64(r.OverallTimeoutMS), MaxAttempts: r.MaxAttempts, Fidelity: fidelity, Behavior: r.behavior()}
+	for _, t := range r.Targets {
+		route.Targets = append(route.Targets, routing.Target{ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: int64(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow})
+	}
+	if len(r.ContentPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(r.ContentPolicy), []byte("null")) {
+		policy, err := contentpolicy.Decode(r.ContentPolicy)
+		if err != nil {
+			return err
+		}
+		route.ContentPolicy = policy
+	}
+	if err := route.ValidatePassthrough(); err != nil {
+		return routes.PassthroughAccessError(err)
+	}
 	return nil
 }
 

@@ -193,6 +193,13 @@ func cloneBehavior(b Behavior) Behavior {
 	}
 	b.Retry = maps.Clone(b.Retry)
 	b.Affinity = copyPointer(b.Affinity)
+	b.Passthrough = copyPointer(b.Passthrough)
+	if b.Passthrough != nil {
+		b.Passthrough.Methods = slices.Clone(b.Passthrough.Methods)
+		b.Passthrough.Paths = slices.Clone(b.Passthrough.Paths)
+		b.Passthrough.Query = slices.Clone(b.Passthrough.Query)
+		b.Passthrough.Headers = slices.Clone(b.Passthrough.Headers)
+	}
 	b.Budget = copyPointer(b.Budget)
 	if b.Budget != nil {
 		b.Budget.DailyCostLimit = copyPointer(b.Budget.DailyCostLimit)

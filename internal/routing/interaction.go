@@ -20,6 +20,22 @@ import (
 // ValidateRouteContracts validates the complete configured links of a route.
 // Request values are bound later; no provider request or discovery runs here.
 func (s *Snapshot) ValidateRouteContracts(route Route) error {
+	if err := route.ValidatePassthrough(); err != nil {
+		return err
+	}
+	if route.IsPassthrough() {
+		if s.Guardrails != nil {
+			view := *s
+			view.Routes = map[string]Route{route.Slug: route}
+			if err := view.compileGuardrails(); err != nil {
+				return err
+			}
+			if view.GuardrailEngine(route.Slug, "") != nil {
+				return &Refusal{Code: "passthrough_conflict", Message: "A pass-through route cannot carry guardrails."}
+			}
+		}
+		return nil
+	}
 	if s.Guardrails != nil {
 		view := *s
 		view.Routes = map[string]Route{route.Slug: route}
@@ -136,6 +152,9 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
+		if op == PassthroughOperation {
+			continue
+		}
 		if op == "agent_resource" {
 			if !route.Fidelity.Strict() {
 				return nil, fmt.Errorf("agent resources require a strict route")

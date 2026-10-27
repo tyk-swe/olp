@@ -86,6 +86,7 @@ type Behavior struct {
 	Retry            Retry               `json:"retry,omitempty"`
 	Affinity         *Affinity           `json:"affinity,omitempty"`
 	Budget           *CostLimits         `json:"budget,omitempty"`
+	Passthrough      *PassthroughConfig  `json:"passthrough,omitempty"`
 }
 
 // Fallback names another route that serves the request when this one ends
@@ -277,7 +278,7 @@ func DecodeBehavior(raw []byte) (Behavior, error) {
 
 // IsZero reports whether the behavior declares nothing.
 func (b Behavior) IsZero() bool {
-	return b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil
+	return b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil && b.Passthrough == nil
 }
 
 // Validate checks the behavior's own shape. tagged reports whether a primary
