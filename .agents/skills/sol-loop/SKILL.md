@@ -54,8 +54,22 @@ only if exposed. Use `delegate_task` every round (`role: "review"`,
 
 If T3 tools are not listed, try one direct capability call. Outside T3, use
 a native Sol subagent and keep its ID. In Claude Code, use a custom subagent
-only if it is set up to run Sol. If no route runs Sol, report the blocker. Do
-not substitute a model.
+only if it is set up to run Sol.
+
+With no T3 tools and no Sol subagent, use an installed Codex app-server
+through [`scripts/codex-sol-review`](scripts/codex-sol-review) in this skill.
+Check `command -v codex` first. The script starts `codex app-server` itself,
+picks the latest Sol from `model/list` (or the Sol the user named, with
+`--model`), and runs one read-only turn with approvals off, so the reviewer
+cannot edit. Pipe the brief on stdin with `--cwd <repo>`. The reply prints
+on stdout. Thread id, model, effort, and usage print as JSON on stderr
+(`sol-review-thread:` when the thread opens, `sol-review:` at the end). Save
+the thread id in the ledger and pass `--thread <id>` on later rounds. One
+run is one round. Do not run a second one alongside it. A non-zero exit
+(no `codex`, no Sol model, failed or timed out turn) is a blocker, never
+approval. The script never falls back to a non-Sol model.
+
+If no route runs Sol, report the blocker. Do not substitute a model.
 
 Do not edit scoped files while review runs. Wait for the notice. Do not
 poll or start a second reviewer. Timeout, error, or no reply is not
@@ -95,7 +109,8 @@ review grew the diff, cut first. Do not agree just to end the loop.
 
 Start one only if budget remains and a blocker or should is open, behavior code
 changed, or approval does not cover the current behavior diff. Use a fresh
-`delegate_task` in T3, or follow up the saved native ID. Send the round 1 brief,
+`delegate_task` in T3, follow up the saved native ID, or re-run
+`codex-sol-review` with the saved thread id. Send the round 1 brief,
 the ledger (`fixed:` / `disagree:` / `declined:` + evidence), the same base
 diff, and the change since last round. Tell Sol: open ids and changed code only.
 Mark each old id `resolved` or `still open: <reason>`.
