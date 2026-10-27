@@ -164,3 +164,45 @@ func TestBedrockObserverSettlesCumulativeUsage(t *testing.T) {
 		t.Fatal("session settled as complete while a later completion has no usage")
 	}
 }
+
+func TestBedrockObserverRequiresUsageAfterEveryInputKind(t *testing.T) {
+	template, err := duplexcontract.Compile(bedrockConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"textInput", "audioInput", "imageInput", "toolResult"} {
+		t.Run(kind, func(t *testing.T) {
+			observer := template.Observer(1 << 20)
+			for _, frame := range []string{
+				`{"event":{"completionStart":{"completionId":"c1"}}}`,
+				`{"event":{"usageEvent":{"totalInputTokens":3,"totalOutputTokens":2,"totalTokens":5}}}`,
+				`{"event":{"completionEnd":{"completionId":"c1"}}}`,
+			} {
+				if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !observer.Complete() {
+				t.Fatal("initial metered completion remains unsettled")
+			}
+			if err := observer.ClientFrame([]byte(`{"event":{"` + kind + `":{"promptName":"p1","contentName":"i2","content":"AA=="}}}`)); err != nil {
+				t.Fatal(err)
+			}
+			if observer.Complete() {
+				t.Fatal("admitted input without subsequent usage settled as complete")
+			}
+			for _, frame := range []string{
+				`{"event":{"completionStart":{"completionId":"c2"}}}`,
+				`{"event":{"usageEvent":{"totalInputTokens":4,"totalOutputTokens":3,"totalTokens":7}}}`,
+				`{"event":{"completionEnd":{"completionId":"c2"}}}`,
+			} {
+				if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !observer.Complete() {
+				t.Fatal("subsequent cumulative usage did not settle the admitted input")
+			}
+		})
+	}
+}
