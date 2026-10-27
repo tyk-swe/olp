@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"testing"
 
@@ -141,5 +144,41 @@ func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T
 	got = state.providerFrame(websocket.MessageText, []byte(`{"TYPE":"response.done","Response":{"ID":"resp_1","Usage":{"Input_Tokens":3,"Output_Tokens":2}}}`), true)
 	if got == nil || got.InputTokens != 3 || got.OutputTokens != 2 || state.pending() {
 		t.Fatalf("accepted case-folded native fields changed classification: usage=%+v state=%+v", got, state)
+	}
+}
+
+func TestRealtimeBrowserOriginSchemeAndTrustedProxy(t *testing.T) {
+	for _, tc := range []struct {
+		name, target, origin, forwarded string
+		trusted, allowlisted, want     bool
+	}{
+		{"http same origin", "http://gateway.example", "http://gateway.example", "", false, false, true},
+		{"https same origin", "https://gateway.example", "https://gateway.example", "", false, false, true},
+		{"http origin on TLS", "https://gateway.example", "http://gateway.example", "", false, false, false},
+		{"https origin on HTTP", "http://gateway.example", "https://gateway.example", "", false, false, false},
+		{"trusted proxy TLS", "http://gateway.example", "https://gateway.example", "https", true, false, true},
+		{"trusted proxy cross scheme", "http://gateway.example", "http://gateway.example", "https", true, false, false},
+		{"untrusted forwarded scheme", "http://gateway.example", "https://gateway.example", "https", false, false, false},
+		{"untrusted header ignored", "http://gateway.example", "http://gateway.example", "https", false, false, true},
+		{"explicit allowance", "https://gateway.example", "http://gateway.example", "", false, true, true},
+		{"foreign host", "https://gateway.example", "https://evil.example", "", false, false, false},
+		{"different port", "https://gateway.example:8443", "https://gateway.example:9443", "", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{}
+			if tc.trusted {
+				s.cfg.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+			}
+			if tc.allowlisted {
+				s.cfg.CORSAllowedOrigins = []string{tc.origin}
+			}
+			r := httptest.NewRequest(http.MethodGet, tc.target+"/v1/realtime", nil)
+			r.RemoteAddr = "192.0.2.1:1234"
+			r.Header.Set("Origin", tc.origin)
+			r.Header.Set("X-Forwarded-Proto", tc.forwarded)
+			if got := s.browserOriginAllowed(r); got != tc.want {
+				t.Fatalf("allowed=%v, want %v", got, tc.want)
+			}
+		})
 	}
 }
