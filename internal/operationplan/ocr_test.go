@@ -51,10 +51,12 @@ func TestAzureSubmitAndPoll(t *testing.T) {
 	if plan.Transport() != operations.TransportPoll202 {
 		t.Fatalf("transport: %q", plan.Transport())
 	}
-	method, submit, body, err := plan.Submit()
+	method := plan.Method()
+	submit, err := plan.RequestURL()
 	if err != nil {
 		t.Fatal(err)
 	}
+	body := plan.WireBody()
 	u, err := url.Parse(submit)
 	if err != nil {
 		t.Fatal(err)

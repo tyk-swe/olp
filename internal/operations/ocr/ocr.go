@@ -1,5 +1,4 @@
-// Package ocr owns the frozen Mistral OCR document contract and the reviewed
-// native OCR dialects its qualified mappings serve. Document bytes are
+// Package ocr owns the frozen Mistral OCR document contract. Document bytes are
 // fetched by the provider; annotations, provider-retained file documents and
 // block-level extraction carry separate pricing or contracts and stay refused.
 package ocr
@@ -12,21 +11,15 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
-const (
-	Mistral                   = "mistral-ocr"
-	AzureDocumentIntelligence = "azure-document-intelligence-ocr"
-	azureAPIVersion           = "2024-11-30"
-	azureDocumentation        = "https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document"
-)
+const Mistral = "mistral-ocr"
 
 // probeImage is a 1x1 transparent PNG the certification probe reads back.
 const probeImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-const probeImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 func identity(id string) oif.Identity        { return oif.Identity{ID: id, Revision: operations.Revision} }
 func member(v oif.Value, k string) oif.Value { return operations.Member(v, k) }
 func invalid(p string) error {
-	return operations.Invalid(p, "The field is outside the frozen native OCR contract.")
+	return operations.Invalid(p, "The field is outside the frozen Mistral OCR contract.")
 }
 func conflict(p string) error {
 	return operations.Error("policy_conflict", p, "output_policy_coverage", "The output policy cannot inspect this native OCR result.")
@@ -45,63 +38,30 @@ type Result struct {
 func (r Result) Schema() oif.Identity { return identity("ocr") }
 
 func Definitions() []operations.Dialect {
-	mistral := operations.Dialect{Identity: identity(Mistral), Operation: identity("ocr"), Surface: "openai", Label: "mistral-ocr document OCR", Documentation: "https://docs.mistral.ai/api/endpoint/ocr", Address: operations.Address{RelativePath: "ocr"}, Evidence: "mistral-ocr-pages/1",
-		Request: func(source oif.Request) (oif.View, error) { return parseRequest(source, Mistral) },
-		Result: func(request oif.Request, source oif.Result) (oif.View, error) {
-			return parseResult(request, source, Mistral)
-		},
+	d := operations.Dialect{Identity: identity(Mistral), Operation: identity("ocr"), Surface: "openai", Label: "mistral-ocr document OCR", Documentation: "https://docs.mistral.ai/api/endpoint/ocr", Address: operations.Address{RelativePath: "ocr"}, Evidence: "mistral-ocr-pages/1",
+		Request:         parseRequest,
+		Result:          parseResult,
 		BindModel:       operations.ModelChanges,
 		BindResultModel: operations.ModelChanges,
-		OutputText:      func(result oif.Result) ([]operations.Text, error) { return outputText(result, Mistral) },
+		OutputText:      outputText,
 		Usage:           func(v oif.View) *operations.Usage { return v.(Result).Usage }}
-	mistral.RequestSchema = operations.ObjectSchema(map[string]any{
+	d.RequestSchema = operations.ObjectSchema(map[string]any{
 		"model":    map[string]any{"type": "string"},
 		"document": map[string]any{"type": "object"},
 		"pages":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
 	}, "model", "document")
-	mistral.ResultSchema = operations.ObjectSchema(map[string]any{
+	d.ResultSchema = operations.ObjectSchema(map[string]any{
 		"model":      map[string]any{"type": "string"},
 		"pages":      map[string]any{"type": "array"},
 		"usage_info": map[string]any{"type": "object"},
 	}, "model", "pages", "usage_info")
-	mistral.Probe = func(model string) []byte {
+	d.Probe = func(model string) []byte {
 		return operations.Raw(map[string]any{"model": model, "document": map[string]any{"type": "image_url", "image_url": probeImage}})
 	}
-	azure := operations.Dialect{Identity: identity(AzureDocumentIntelligence), Operation: identity("ocr"), Surface: "native", Label: "azure-document-intelligence-ocr document OCR", Documentation: azureDocumentation, Address: operations.Address{RelativePath: "documentintelligence/documentModels/{model}:analyze"}, Evidence: "azure-document-intelligence-pages/1",
-		Request: func(source oif.Request) (oif.View, error) { return parseRequest(source, AzureDocumentIntelligence) },
-		Result: func(request oif.Request, source oif.Result) (oif.View, error) {
-			return parseResult(request, source, AzureDocumentIntelligence)
-		},
-		BindModel:       operations.ModelChanges,
-		BindResultModel: azureBindResultModel,
-		OutputText: func(result oif.Result) ([]operations.Text, error) {
-			return outputText(result, AzureDocumentIntelligence)
-		},
-		Usage:      func(v oif.View) *operations.Usage { return v.(Result).Usage },
-		Transport:  operations.TransportPoll202,
-		Wire:       azureWire,
-		Poll:       azurePollState,
-		CancelPoll: func(pollURL string) (string, string, bool) { return "DELETE", pollURL, true }}
-	azure.RequestSchema = operations.ObjectSchema(map[string]any{
-		"model":        map[string]any{"type": "string"},
-		"urlSource":    map[string]any{"type": "string"},
-		"base64Source": map[string]any{"type": "string"},
-		"pages":        map[string]any{"type": "string"},
-	}, "model")
-	azure.ResultSchema = operations.ObjectSchema(map[string]any{
-		"status":        map[string]any{"type": "string"},
-		"analyzeResult": map[string]any{"type": "object"},
-	}, "status", "analyzeResult")
-	azure.Probe = func(model string) []byte {
-		return operations.Raw(map[string]any{"model": model, "base64Source": probeImageBase64})
-	}
-	return []operations.Dialect{mistral, azure}
+	return []operations.Dialect{d, vertexDefinition(), azureDefinition()}
 }
 
-func parseRequest(source oif.Request, id string) (oif.View, error) {
-	if id == AzureDocumentIntelligence {
-		return azureRequest(source)
-	}
+func parseRequest(source oif.Request) (oif.View, error) {
 	r := Request{source: source}
 	root := source.Document().Root()
 	if root.Kind() != oif.Object {
@@ -201,11 +161,8 @@ func remoteURL(v oif.Value) bool {
 	return strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "data:")
 }
 
-func parseResult(request oif.Request, source oif.Result, id string) (oif.View, error) {
-	if id == AzureDocumentIntelligence {
-		return azureResultParse(request, source)
-	}
-	if _, err := parseRequest(request, id); err != nil {
+func parseResult(request oif.Request, source oif.Result) (oif.View, error) {
+	if _, err := parseRequest(request); err != nil {
 		return nil, err
 	}
 	r := Result{Source: source}
@@ -243,10 +200,7 @@ func parseResult(request oif.Request, source oif.Result, id string) (oif.View, e
 // header, footer and table content. Reviewed structural fields pass without
 // inspection; anything the contract does not name fails closed unless it
 // carries no text.
-func outputText(result oif.Result, id string) ([]operations.Text, error) {
-	if id == AzureDocumentIntelligence {
-		return azureOutputText(result)
-	}
+func outputText(result oif.Result) ([]operations.Text, error) {
 	out := []operations.Text{}
 	root := result.Source().Root()
 	for _, f := range root.Members() {

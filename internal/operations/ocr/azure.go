@@ -12,6 +12,45 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
+const (
+	AzureDocumentIntelligence = "azure-document-intelligence-ocr"
+	azureAPIVersion           = "2024-11-30"
+)
+
+const probeImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+func azureDefinition() operations.Dialect {
+	d := operations.Dialect{Identity: identity(AzureDocumentIntelligence), Operation: identity("ocr"), Surface: "native", Label: "azure-document-intelligence-ocr document OCR", Documentation: "https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document", Address: operations.Address{RelativePath: "documentintelligence/documentModels/{model}:analyze"}, Evidence: "azure-document-intelligence-pages/1",
+		Request:         parseAzureRequest,
+		Result:          parseAzureResult,
+		BindModel:       operations.ModelChanges,
+		BindResultModel: azureBindResultModel,
+		OutputText:      azureOutputText,
+		Usage:           func(v oif.View) *operations.Usage { return v.(Result).Usage },
+		Transport:       operations.TransportPoll202,
+		Wire:            azureWire,
+		Poll:            azurePollState,
+		CancelPoll:      func(pollURL string) (string, string, bool) { return "DELETE", pollURL, true }}
+	d.RequestSchema = operations.ObjectSchema(map[string]any{
+		"model":        map[string]any{"type": "string"},
+		"urlSource":    map[string]any{"type": "string"},
+		"base64Source": map[string]any{"type": "string"},
+		"pages":        map[string]any{"type": "string"},
+	}, "model")
+	d.ResultSchema = operations.ObjectSchema(map[string]any{
+		"status":        map[string]any{"type": "string"},
+		"analyzeResult": map[string]any{"type": "object"},
+	}, "status", "analyzeResult")
+	d.Probe = func(model string) []byte {
+		return operations.Raw(map[string]any{"model": model, "base64Source": probeImageBase64})
+	}
+	return d
+}
+
+func azureInvalid(p string) error {
+	return operations.Invalid(p, "The field is outside the reviewed Azure Document Intelligence analyze contract.")
+}
+
 type azureSpan struct{ offset, length int64 }
 
 type azurePage struct {
@@ -27,36 +66,36 @@ type azureResult struct {
 	indexType string
 }
 
-func azureRequest(source oif.Request) (oif.View, error) {
+func parseAzureRequest(source oif.Request) (oif.View, error) {
 	r := Request{source: source}
 	root := source.Document().Root()
 	if root.Kind() != oif.Object {
-		return r, invalid("request")
+		return r, azureInvalid("request")
 	}
 	for _, m := range root.Members() {
 		switch m.Name {
 		case "model", "urlSource", "base64Source", "pages":
 		default:
-			return r, invalid(m.Name)
+			return r, azureInvalid(m.Name)
 		}
 	}
 	if member(root, "model").Kind() != oif.String || operations.String(member(root, "model")) == "" {
-		return r, invalid("model")
+		return r, azureInvalid("model")
 	}
 	urlValue, hasURL := root.Lookup("urlSource")
 	b64Value, hasB64 := root.Lookup("base64Source")
 	if hasURL == hasB64 {
-		return r, invalid("urlSource")
+		return r, azureInvalid("urlSource")
 	}
 	if hasURL && (urlValue.Kind() != oif.String || !strings.HasPrefix(operations.String(urlValue), "https://")) {
-		return r, invalid("urlSource")
+		return r, azureInvalid("urlSource")
 	}
 	if hasB64 && (b64Value.Kind() != oif.String || !validBase64(operations.String(b64Value))) {
-		return r, invalid("base64Source")
+		return r, azureInvalid("base64Source")
 	}
 	if v := member(root, "pages"); !operations.Optional(v) {
 		if v.Kind() != oif.String || !validAzurePages(operations.String(v)) {
-			return r, invalid("pages")
+			return r, azureInvalid("pages")
 		}
 	}
 	return r, nil
@@ -98,8 +137,8 @@ func validAzurePages(s string) bool {
 	return true
 }
 
-func azureResultParse(request oif.Request, source oif.Result) (oif.View, error) {
-	if _, err := azureRequest(request); err != nil {
+func parseAzureResult(request oif.Request, source oif.Result) (oif.View, error) {
+	if _, err := parseAzureRequest(request); err != nil {
 		return nil, err
 	}
 	r := Result{Source: source}
@@ -193,7 +232,7 @@ func azureWire(view oif.View) (operations.WireRequest, error) {
 	} else if v, ok := root.Lookup("base64Source"); ok {
 		body = map[string]any{"base64Source": operations.String(v)}
 	} else {
-		return operations.WireRequest{}, invalid("urlSource")
+		return operations.WireRequest{}, azureInvalid("urlSource")
 	}
 	return operations.WireRequest{Query: query, Body: operations.Raw(body)}, nil
 }

@@ -16,70 +16,24 @@ const (
 	pollLocationHeader = "Operation-Location"
 )
 
-func (p *Plan) Transport() operations.Transport {
-	if p.template.codec.Transport == "" {
-		return operations.TransportJSON
-	}
-	return p.template.codec.Transport
-}
-
-func (p *Plan) Submit() (string, string, []byte, error) {
-	endpoint, err := p.Endpoint()
-	if err != nil {
-		return "", "", nil, err
-	}
-	transport := p.Transport()
-	if transport == operations.TransportJSON {
-		return http.MethodPost, endpoint, p.Body(), nil
-	}
-	wire, err := p.template.codec.Wire(p.view)
-	if err != nil {
-		return "", "", nil, err
-	}
-	submit, err := wireURL(endpoint, wire.Query)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if transport == operations.TransportGetQuery {
-		if len(wire.Body) != 0 {
-			return "", "", nil, fail("fidelity_protocol_violation", "/transport", "get_query_body", "A GET query transport submits no body.")
-		}
-		return http.MethodGet, submit, nil, nil
-	}
-	if len(wire.Body) == 0 {
-		return "", "", nil, fail("fidelity_protocol_violation", "/transport", "poll_submit_body", "A polling transport submits a body.")
-	}
-	return http.MethodPost, submit, wire.Body, nil
-}
-
-func wireURL(endpoint string, query url.Values) (string, error) {
+func validateWireQuery(query url.Values) error {
 	if len(query) > maxWireQueryParams {
-		return "", fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
+		return fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
 	}
 	for name, values := range query {
 		if name == "" || len(name) > 128 || len(values) == 0 || len(values) > 8 {
-			return "", fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
+			return fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
 		}
 		for _, value := range values {
 			if len(value) > maxWireQueryValue || strings.ContainsAny(value, "\r\n\x00") {
-				return "", fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
+				return fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
 			}
 		}
 	}
-	u, err := url.Parse(endpoint)
-	if err != nil || !u.IsAbs() || u.Host == "" {
-		return "", fail("fidelity_protocol_violation", "/transport", "absolute_endpoint", "The operation endpoint is invalid.")
+	if len(query.Encode()) > maxWireURL {
+		return fail("fidelity_protocol_violation", "/transport", "bounded_query", "The wire query is too large.")
 	}
-	merged := u.Query()
-	for name, values := range query {
-		merged[name] = values
-	}
-	u.RawQuery = merged.Encode()
-	out := u.String()
-	if len(out) > maxWireURL {
-		return "", fail("fidelity_protocol_violation", "/transport", "bounded_url", "The submit URL is too large.")
-	}
-	return out, nil
+	return nil
 }
 
 func (p *Plan) PollLocation(submit string, header http.Header) (string, error) {

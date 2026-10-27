@@ -317,6 +317,19 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'vertex-document-processing-ocr',
+    label: 'OCR · Vertex document processing',
+    operation: 'ocr',
+    nativeDialect: 'vertex-document-processing-ocr',
+    request: {
+      rawDocument: {
+        content:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+        mimeType: 'image/png'
+      }
+    }
+  },
+  {
     key: 'perplexity-search',
     label: 'Web search · Perplexity',
     operation: 'search',
@@ -350,6 +363,13 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
       search_queries: ['What is an API gateway?'],
       advanced_settings: { max_results: 3 }
     }
+  },
+  {
+    key: 'brave-search',
+    label: 'Web search · Brave',
+    operation: 'search',
+    nativeDialect: 'brave-search',
+    request: { q: 'What is an API gateway?', count: 3 }
   },
   {
     key: 'tei-classification',

@@ -13,6 +13,7 @@ const ocrRoute = 'e2e-mistral-ocr';
 const azureOcrRoute = 'e2e-azure-ocr';
 const nativeSearchRoute = 'e2e-perplexity-search';
 const mappedSearchRoute = 'e2e-search-tavily';
+const braveSearchRoute = 'e2e-search-brave';
 const keyName = 'OCR search route key';
 
 async function resetUpstream(request: APIRequestContext) {
@@ -33,6 +34,8 @@ async function upstreamRequests(request: APIRequestContext) {
   return (await observed.json()) as {
     calls: {
       path: string;
+      method: string;
+      query: Record<string, string>;
       raw: string;
       body: unknown;
       headers: Record<string, string>;
@@ -287,7 +290,10 @@ test('a browser user publishes OCR and search routes and drives them through the
   );
   await addRoute(page, mappedSearchRoute, 'transformed', 'Web search');
 
-  // One key allows all four routes.
+  await addProvider(page, 'Brave', `${upstream.origin}/brave`, 'search', true);
+  await addRoute(page, braveSearchRoute, 'transformed', 'Web search');
+
+  // One key allows all five routes.
   await page.goto('/api-keys/new');
   await expect(
     page.getByRole('heading', { name: 'Create a proxy key.' })
@@ -298,7 +304,8 @@ test('a browser user publishes OCR and search routes and drives them through the
     ocrRoute,
     azureOcrRoute,
     nativeSearchRoute,
-    mappedSearchRoute
+    mappedSearchRoute,
+    braveSearchRoute
   ]) {
     await page
       .getByRole('group', { name: 'Allowed route slugs' })
@@ -362,6 +369,18 @@ test('a browser user publishes OCR and search routes and drives them through the
     fullPage: true
   });
 
+  // The Brave target answers over a GET query and projects into the same
+  // Perplexity shape.
+  await runNative(
+    page,
+    braveSearchRoute,
+    'search',
+    'perplexity-search',
+    secret
+  );
+  await expect(result).toContainText(/search_[0-9a-f]{32}/);
+  await expect(result).toContainText('Fixture description.');
+
   const observed = await upstreamRequests(request);
   expect(observed.unexpected).toEqual([]);
   const byPath = new Map(observed.calls.map((call) => [call.path, call]));
@@ -395,6 +414,17 @@ test('a browser user publishes OCR and search routes and drives them through the
   expect(
     observed.calls.filter((call) => call.path === azureSubmit)
   ).toHaveLength(1);
+  const brave = byPath.get('/brave/res/v1/web/search');
+  expect(brave?.method).toBe('GET');
+  expect(brave?.raw).toBe('');
+  expect(brave?.headers['x-subscription-token']).toBe(upstream.credential);
+  expect(brave?.headers.authorization).toBeUndefined();
+  expect(brave?.query).toEqual({
+    q: 'What is an API gateway?',
+    count: '3',
+    result_filter: 'web',
+    text_decorations: 'false'
+  });
   // Only the provider credential ever reached the upstream.
   expect(JSON.stringify(observed.calls)).not.toContain(secret);
 

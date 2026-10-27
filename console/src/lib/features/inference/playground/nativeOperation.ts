@@ -34,12 +34,17 @@ export const nativeOperationDialects = {
     'bedrock-count-tokens',
     'tei-tokenize'
   ],
-  ocr: ['mistral-ocr', 'azure-document-intelligence-ocr'],
+  ocr: [
+    'mistral-ocr',
+    'azure-document-intelligence-ocr',
+    'vertex-document-processing-ocr'
+  ],
   search: [
     'perplexity-search',
     'tavily-search',
     'exa-search',
-    'parallel-search'
+    'parallel-search',
+    'brave-search'
   ]
 } as const;
 
@@ -154,7 +159,7 @@ export async function runNativeOperation(
         ? dialect === 'systemone'
           ? '/v1/systemone'
           : '/v1/decisions'
-        : dialect === 'mistral-ocr'
+        : operation === 'ocr' && dialect === 'mistral-ocr'
           ? '/v1/ocr'
           : dialect === 'perplexity-search'
             ? '/v1/search'

@@ -1,0 +1,11 @@
+{
+  "rawDocument": {
+    "content": "JVBERi0xLjQ=",
+    "mimeType": "application/pdf"
+  },
+  "processOptions": {
+    "individualPageSelector": {
+      "pages": [1, 3]
+    }
+  }
+}

@@ -158,8 +158,11 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | --- | --- | --- |
 | Legacy completions | Protocol/gateway, probes, route inspection, guards/capture, token/usage and pinned SDK fixtures | Console/browser, each provider live, release performance |
 | Text Decisions | Native and one-way mapping, labels/order/usage/pricing, caller-paid budget and inspection fixtures | Console/browser, configuration promotion, each provider live |
-| OCR/search | Codecs, raw-HTTP process fixtures (including the Azure Document Intelligence 202/poll submit-once, cancellation and missing-units cases), route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
+| OCR/search | Codecs (including the Brave GET-query transport), raw-HTTP process fixtures (including the Azure Document Intelligence 202/poll submit-once, cancellation and missing-units cases), route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples (including the exact Brave tuple) and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
+| Native duplex (RM6.5) | Compiled-profile contract tests, gateway WebSocket relay fixtures in process, a fake Bedrock stream behind the SDK opener seam, per-vendor frame fixtures, and the endpoint ledger rows for xAI, Vertex AI Live and Bedrock Nova Sonic | Live sessions per exact tuple with real xAI, Google Cloud and AWS accounts, including the 8-minute Nova Sonic stream bound and Vertex setup acknowledgement against the aiplatform endpoint |
+| Governed pass-through (RM6.6) | Adversarial routing normalization and publication refusals, gateway credential isolation, redirect and bound fixtures, configuration plan refusals and console editor units; no locked SDK covers the bound-native namespace, so raw HTTP fixtures are the evidence | Live tuple per bound connection and endpoint family, full `make integration`, release performance |
+| Governed WebRTC (RM6.4) | Gateway session-control fixtures against a mock calls/control/hangup provider, compiled contract, distinct `webrtc` capability tuple, certification probe, ledger rows and a Chromium journey spec with mock provider | Full `make integration` browser run, live OpenAI tuple, durable debit-intent settlement with restart recovery (the slice settles on the realtime lease path and claims no durable settlement), Azure tuple under its own contract |
 | Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
 
 Run `CLIENTS=m9-go tests/clients/run.sh` for locked OpenAI Go completions and
@@ -176,6 +179,17 @@ pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.sve
 ```
 
 The OCR/search journey is `console/tests/gateway/ocr-search.spec.ts`.
+The governed WebRTC journey is
+`console/tests/gateway/realtime-webrtc.spec.ts` against
+`console/tests/gateway/mock-realtime-webrtc.mjs`. It is integration-gated and
+has not run outside `make integration` yet.
+Vertex document processing (RM6.3) local evidence covers the Document AI
+dialect and Mistral mapping, plan-level processor addressing and page
+projection, document-location prefix refusals at the gateway, and route
+simulation. Its exact live tuple stays unqualified until an opt-in run of
+`TestVertexDocumentProcessingLive` under the `liveproviders` build tag
+sets `OLP_LIVE_DOCUMENTAI_PROJECT`, `OLP_LIVE_DOCUMENTAI_LOCATION` and
+`OLP_LIVE_MODEL` naming a processor ID under ADC credentials.
 A dedicated resource/accounting integration selection remains required;
 compiling fixtures does not execute it. Every new family needs lifecycle,
 nested-ID/pagination isolation, ambiguous-create, restart, cleanup, revocation,

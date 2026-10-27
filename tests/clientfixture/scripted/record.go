@@ -49,6 +49,7 @@ var credentialHeaders = map[string]bool{
 	"x-goog-api-key":            true,
 	"api-key":                   true,
 	"ocp-apim-subscription-key": true,
+	"x-subscription-token":      true,
 	"cookie":                    true,
 }
 

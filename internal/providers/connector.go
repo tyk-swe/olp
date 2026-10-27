@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"slices"
 	"strings"
@@ -426,6 +427,8 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	switch {
 	case tuple.Operation == "batch":
 		return s.certifyBatch(ctx, cfg, credential)
+	case tuple.Operation == "realtime" && tuple.Mode == "webrtc":
+		return s.certifyWebRTC(ctx, cfg, credential, model)
 	case tuple.Operation == "realtime":
 		return s.certifyRealtime(ctx, cfg, credential, model)
 	case tuple.Surface == "bedrock":
@@ -686,6 +689,154 @@ func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, creden
 		return classify(err)
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+	return nil
+}
+
+const webrtcProbeSDP = "v=0\r\n" +
+	"o=- 4611731400430051336 2 IN IP4 127.0.0.1\r\n" +
+	"s=-\r\n" +
+	"t=0 0\r\n" +
+	"a=group:BUNDLE 0 1\r\n" +
+	"a=extmap-allow-mixed\r\n" +
+	"a=msid-semantic: WMS olp-probe\r\n" +
+	"m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n" +
+	"c=IN IP4 0.0.0.0\r\n" +
+	"a=rtcp:9 IN IP4 0.0.0.0\r\n" +
+	"a=ice-ufrag:olpp\r\n" +
+	"a=ice-pwd:olp-probe-password-0000000000\r\n" +
+	"a=ice-options:trickle\r\n" +
+	"a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n" +
+	"a=setup:actpass\r\n" +
+	"a=mid:0\r\n" +
+	"a=sendrecv\r\n" +
+	"a=rtcp-mux\r\n" +
+	"a=rtpmap:111 opus/48000/2\r\n" +
+	"m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" +
+	"c=IN IP4 0.0.0.0\r\n" +
+	"a=ice-ufrag:olpp\r\n" +
+	"a=ice-pwd:olp-probe-password-0000000000\r\n" +
+	"a=ice-options:trickle\r\n" +
+	"a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n" +
+	"a=setup:actpass\r\n" +
+	"a=mid:1\r\n" +
+	"a=sctp-port:5000\r\n"
+
+func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+	transport := cfg.transport()
+	endpoint, err := transport.RealtimeCallsURL(model)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	u.RawQuery = ""
+	if _, err := s.Egress.ValidateEndpoint(u.String()); err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	select {
+	case s.probes <- struct{}{}:
+		defer func() { <-s.probes }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	session, _ := json.Marshal(map[string]string{"type": "realtime", "model": transport.Model(model)})
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	sdpPart, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="sdp"`},
+		"Content-Type":        {"application/sdp"},
+	})
+	if err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	if _, err := io.WriteString(sdpPart, webrtcProbeSDP); err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	sessionPart, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="session"`},
+		"Content-Type":        {"application/json"},
+	})
+	if err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	if _, err := sessionPart.Write(session); err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	if err := writer.Close(); err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	body := form.Bytes()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Accept", "application/sdp")
+	if _, err := s.auth.Apply(ctx, req, transport, credential, body); err != nil {
+		return &probeError{Code: "credential_invalid", Detail: err.Error()}
+	}
+	client, err := s.connectionClient(ctx, cfg, credential)
+	if err != nil {
+		return &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return classify(err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, probeBodyLimit))
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return statusError(cfg, resp.StatusCode, nil)
+	}
+	location, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil || location.Path == "" {
+		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
+	}
+	segments := strings.Split(strings.Trim(location.Path, "/"), "/")
+	callID := segments[len(segments)-1]
+	control, err := transport.RealtimeControlURL(model, callID)
+	if err != nil {
+		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
+	}
+	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, control, nil)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	if _, err := s.auth.Apply(ctx, probe, transport, credential, nil); err != nil {
+		return &probeError{Code: "credential_invalid", Detail: err.Error()}
+	}
+	conn, dialResp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: probe.Header})
+	if err != nil {
+		if dialResp != nil && dialResp.StatusCode != 0 {
+			return statusError(cfg, dialResp.StatusCode, nil)
+		}
+		return classify(err)
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+	hangupURL, err := transport.RealtimeHangupURL(model, callID)
+	if err != nil {
+		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
+	}
+	hangup, err := http.NewRequestWithContext(ctx, http.MethodPost, hangupURL, nil)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	if _, err := s.auth.Apply(ctx, hangup, transport, credential, nil); err != nil {
+		return &probeError{Code: "credential_invalid", Detail: err.Error()}
+	}
+	hangupResp, err := client.Do(hangup)
+	if err != nil {
+		return classify(err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(hangupResp.Body, probeBodyLimit))
+	hangupResp.Body.Close()
+	if hangupResp.StatusCode < 200 || hangupResp.StatusCode > 299 {
+		return statusError(cfg, hangupResp.StatusCode, nil)
+	}
 	return nil
 }
 

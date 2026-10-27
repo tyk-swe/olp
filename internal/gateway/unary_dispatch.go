@@ -61,7 +61,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	method, submit, body, err := plan.Submit()
+	submit, err := plan.RequestURL()
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -94,7 +94,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 			trace.InjectUpstream(header, x.request.trace.PropagateUpstream())
 		}
 	}}
-	raw, failure := exchange.run(method, submit, body)
+	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
 	if failure != nil {
 		return fail(failure.class, failure.failure)
 	}

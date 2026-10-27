@@ -13,6 +13,7 @@ const (
 	TavilyPrefix     = "/tavily"
 	ExaPrefix        = "/exa"
 	ParallelPrefix   = "/parallel/v1"
+	BravePrefix      = "/brave"
 
 	MistralModel    = "fixture-mistral"
 	AzureModel      = "fixture-azure"
@@ -20,6 +21,7 @@ const (
 	TavilyModel     = "fixture-tavily"
 	ExaModel        = "fixture-exa"
 	ParallelModel   = "fixture-parallel"
+	BraveModel      = "fixture-brave"
 )
 
 func bearer(name string) vendor {
@@ -63,6 +65,15 @@ var (
 			writeJSON(w, status, map[string]any{"requestId": "exa_fx", "error": message, "tag": kind})
 		},
 	}
+	brave = vendor{
+		name: "brave",
+		authorized: func(r *http.Request, credential string) bool {
+			return r.Header.Get("X-Subscription-Token") == credential
+		},
+		fail: func(w http.ResponseWriter, status int, kind, message string) {
+			writeJSON(w, status, map[string]any{"type": "ErrorResponse", "error": map[string]any{"id": "brave_fx", "status": status, "detail": message, "code": kind}})
+		},
+	}
 )
 
 // failDetail answers in the FastAPI validation envelope Mistral, Perplexity
@@ -80,6 +91,7 @@ func (f *Fixture) registerOperations() {
 	f.mux.HandleFunc("POST "+TavilyPrefix+"/search", f.handle(tavily, "tavily.search", f.tavilySearch))
 	f.mux.HandleFunc("POST "+ExaPrefix+"/search", f.handle(exa, "exa.search", f.exaSearch))
 	f.mux.HandleFunc("POST "+ParallelPrefix+"/search", f.handle(parallel, "parallel.search", f.parallelSearch))
+	f.mux.HandleFunc("GET "+BravePrefix+"/res/v1/web/search", f.handle(brave, "brave.search", f.braveSearch))
 }
 
 func (f *Fixture) mistralOCR(x *request) {
@@ -216,4 +228,25 @@ func (f *Fixture) azurePoll(x *request) {
 
 func (f *Fixture) azureDelete(x *request) {
 	x.w.WriteHeader(http.StatusNoContent)
+}
+func (f *Fixture) braveSearch(x *request) {
+	query := x.r.URL.Query()
+	if query.Get("q") == "" {
+		x.fail(http.StatusUnprocessableEntity, "VALIDATION", "Missing query parameter: q")
+		return
+	}
+	x.note("search", false)
+	writeJSON(x.w, http.StatusOK, map[string]any{
+		"type":  "search",
+		"query": map[string]any{"original": query.Get("q"), "more_results_available": false},
+		"web": map[string]any{
+			"type": "search",
+			"results": []any{map[string]any{
+				"title": "Fixture result", "url": "https://fixture.example/result",
+				"description": "Fixture description.", "page_age": "2026-10-01T00:00:00Z",
+				"family_friendly": true, "type": "search_result",
+			}},
+			"family_friendly": true,
+		},
+	})
 }

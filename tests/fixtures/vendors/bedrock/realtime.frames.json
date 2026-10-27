@@ -1,0 +1,18 @@
+{
+  "transport": "InvokeModelWithBidirectionalStream (Bedrock Runtime, SigV4-signed event stream)",
+  "client": [
+    { "event": { "sessionStart": { "inferenceConfig": { "maxTokens": 1024, "topP": 0.9, "temperature": 0.7 } } } },
+    { "event": { "promptStart": { "promptName": "<id>", "textOutputConfiguration": { "mediaType": "text/plain" }, "audioOutputConfiguration": { "mediaType": "audio/lpcm", "sampleRateHertz": 24000, "sampleSizeBits": 16, "channelCount": 1, "voiceId": "matthew", "encoding": "base64", "audioType": "SPEECH" } } } },
+    { "event": { "contentStart": { "promptName": "<id>", "contentName": "<id>", "type": "AUDIO", "interactive": true, "role": "USER", "audioInputConfiguration": { "mediaType": "audio/lpcm", "sampleRateHertz": 16000, "sampleSizeBits": 16, "channelCount": 1, "audioType": "SPEECH", "encoding": "base64" } } } },
+    { "event": { "audioInput": { "promptName": "<id>", "contentName": "<id>", "content": "<base64>" } } },
+    { "event": { "contentEnd": { "promptName": "<id>", "contentName": "<id>" } } },
+    { "event": { "promptEnd": { "promptName": "<id>" } } },
+    { "event": { "sessionEnd": {} } }
+  ],
+  "server": [
+    { "event": { "contentStart": { "contentId": "<id>", "type": "TEXT", "role": "ASSISTANT" } } },
+    { "event": { "textOutput": { "content": "example transcript" } } },
+    { "event": { "audioOutput": { "content": "<base64>" } } },
+    { "event": { "contentEnd": { "contentId": "<id>", "stopReason": "END_TURN" } } }
+  ]
+}

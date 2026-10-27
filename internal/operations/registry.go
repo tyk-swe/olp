@@ -53,6 +53,13 @@ const (
 	TransportPoll202  Transport = "poll-202"
 )
 
+func (t Transport) Normalized() Transport {
+	if t == "" {
+		return TransportJSON
+	}
+	return t
+}
+
 // PollState is the terminal reading of one polling response document.
 type PollState string
 
@@ -75,9 +82,11 @@ type Dialect struct {
 	Identity, Operation           oif.Identity
 	Surface, Label, Documentation string
 	Address                       Address
+	Transport                     Transport
 	RequestSchema, ResultSchema   json.RawMessage
 	Defaults                      map[string]Field
 	Request                       func(oif.Request) (oif.View, error)
+	Query                         func(oif.Request) (url.Values, error)
 	Result                        func(oif.Request, oif.Result) (oif.View, error)
 	ValidateRoute                 func(oif.Request, string) error
 	BindModel                     func(oif.Document, string) ([]oif.Change, error)
@@ -87,9 +96,9 @@ type Dialect struct {
 	RequiredClient                func(oif.View) string
 	InputText                     func(oif.Request) ([]Text, error)
 	OutputText                    func(oif.Result) ([]Text, error)
+	DocumentLocation              func(oif.Request) (string, bool)
 	Probe                         func(string) []byte
 	Evidence                      string
-	Transport                     Transport
 	Wire                          func(oif.View) (WireRequest, error)
 	Poll                          func(oif.Document) (PollState, error)
 	CancelPoll                    func(pollURL string) (method, url string, ok bool)
@@ -122,22 +131,23 @@ func (r *Registry) Register(d Dialect) error {
 	if d.Address.FamilyPath == "" && d.Address.RelativePath == "" || d.Address.FamilyPath != "" && d.Address.RelativePath != "" {
 		return errors.New("unary dialect requires one addressing contract")
 	}
-	switch d.Transport {
-	case "", TransportJSON:
-		if d.Wire != nil || d.Poll != nil || d.CancelPoll != nil {
-			return errors.New("json transport takes no wire or polling hooks")
+	switch d.Transport.Normalized() {
+	case TransportJSON:
+		if d.Query != nil || d.Wire != nil || d.Poll != nil || d.CancelPoll != nil {
+			return errors.New("json unary dialect must not lower to query parameters or polling hooks")
 		}
 	case TransportGetQuery:
-		if d.Wire == nil || d.Poll != nil || d.CancelPoll != nil {
-			return errors.New("get-query transport requires a wire lowering and no polling hooks")
+		if d.Query == nil || d.Wire != nil || d.Poll != nil || d.CancelPoll != nil {
+			return errors.New("get-query unary dialect requires query lowering and no polling hooks")
 		}
 	case TransportPoll202:
-		if d.Wire == nil || d.Poll == nil {
-			return errors.New("poll-202 transport requires a wire lowering and a poll reading")
+		if d.Wire == nil || d.Poll == nil || d.Query != nil {
+			return errors.New("poll-202 unary dialect requires a wire lowering and a poll reading")
 		}
 	default:
-		return errors.New("unary dialect transport is not reviewed")
+		return errors.New("unary dialect transport is not registered")
 	}
+	d.Transport = d.Transport.Normalized()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.dialects[d.Identity]; exists || len(r.dialects) >= 256 {

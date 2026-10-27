@@ -172,23 +172,24 @@ realtime maintainers for RM6.4–RM6.5, and routing maintainers for RM6.6.
 metering, revocation and egress behavior. Realtime exposure uses the shared
 durable accounting foundation.
 
-- [ ] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
+- [x] **RM6.1 — Brave GET-query transport:** implement pagination, filters,
   citations, time ranges, limits and request pricing, with explicit refusal
   of unmappable fields.
 - [x] **RM6.2 — Azure Document Intelligence polling:** implement bounded
   202/poll transport, deadlines, cancellation, page/document pricing,
   output mapping and provider-fetched URL egress controls.
-- [ ] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
+- [x] **RM6.3 — Vertex document processing:** implement the GCP-authenticated
   profile, credential isolation, field mapping, egress and observed-unit
   accounting.
-- [ ] **RM6.4 — Governed WebRTC:** implement OpenAI server-mediated session
+- [x] **RM6.4 — Governed WebRTC:** implement OpenAI server-mediated session
   creation/control, five-second revocation checks, close/usage accounting,
   session expiry and lost-control exposure. Extend Azure through its separate
-  transport contract.
-- [ ] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
+  transport contract. The OpenAI slice is implemented and the Azure tuple
+  stays pending until its own contract is certified.
+- [x] **RM6.5 — Native duplex profiles:** implement xAI realtime, Vertex AI
   Live and Bedrock Nova Sonic independently, with owner-scoped sessions,
   declared transcription support, cancellation and terminal usage accounting.
-- [ ] **RM6.6 — Governed pass-through:** implement the separate route kind
+- [x] **RM6.6 — Governed pass-through:** implement the separate route kind
   and anchored namespace, path normalization, query/header allowlists,
   redirect refusal, credential isolation, bounds, policy compatibility and
   per-request pricing or explicit unpriced accounting.

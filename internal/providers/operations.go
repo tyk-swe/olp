@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -39,6 +40,9 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 	}
 	if cfg.ProfileID == "gemini-live" {
 		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	}
+	if duplexcontract.IsProfile(cfg.ProfileID) {
+		return tuple.Operation == "realtime" && tuple.Surface == "native" && tuple.Mode == "realtime" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
 	if tuple.Operation == "batch" {
 		return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
@@ -108,11 +112,11 @@ func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, crede
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The native operation probe cannot bind its configured defaults."}
 	}
-	method, submit, body, err := plan.Submit()
+	submit, err := plan.RequestURL()
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The native operation probe could not be addressed."}
 	}
-	status, header, raw, err := s.callWithHeaders(ctx, cfg, credential, method, submit, body)
+	status, header, raw, err := s.callWithHeaders(ctx, cfg, credential, plan.Method(), submit, plan.WireBody())
 	if err != nil {
 		return err
 	}

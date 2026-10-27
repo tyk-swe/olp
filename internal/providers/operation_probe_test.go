@@ -44,6 +44,35 @@ func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
 	}
 }
 
+func TestBraveProfileProbesOverGetQuery(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.Path != "/res/v1/web/search" {
+			t.Errorf("unexpected probe %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("count") != "1" || r.URL.Query().Get("q") == "" {
+			t.Errorf("probe query: %v", r.URL.Query())
+		}
+		if r.Header.Get("X-Subscription-Token") != "secret" {
+			t.Errorf("probe credential: %v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"type":"search","query":{"original":"probe"},"web":{"type":"search","results":[{"title":"t","url":"https://a","description":"d"}],"family_friendly":true}}`)
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "brave-search", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL), Options: Options{VendorID: new("brave")}, ProbeModels: []string{"brave-model"}}
+	cfg.Normalize()
+	if tuple := defaultProbeTuple(&cfg); tuple != (CapabilityInput{Operation: "search", Surface: "openai", Mode: ModeUnary}) {
+		t.Fatalf("probe tuple = %+v", tuple)
+	}
+	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
+	if err != nil || len(models) != 1 || models[0].Name != "brave-model" || calls != 1 {
+		t.Fatalf("probe: %+v %v calls=%d", models, err, calls)
+	}
+}
+
 // A route left with less than two probe budgets still reserves about half
 // of what remains, so a late probe cannot run up to the route deadline,
 // and an unbounded caller adds no fixed cap over its per-call timeouts.

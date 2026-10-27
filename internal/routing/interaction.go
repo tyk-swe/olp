@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
@@ -20,6 +21,22 @@ import (
 // ValidateRouteContracts validates the complete configured links of a route.
 // Request values are bound later; no provider request or discovery runs here.
 func (s *Snapshot) ValidateRouteContracts(route Route) error {
+	if err := route.ValidatePassthrough(); err != nil {
+		return err
+	}
+	if route.IsPassthrough() {
+		if s.Guardrails != nil {
+			view := *s
+			view.Routes = map[string]Route{route.Slug: route}
+			if err := view.compileGuardrails(); err != nil {
+				return err
+			}
+			if view.GuardrailEngine(route.Slug, "") != nil {
+				return &Refusal{Code: "passthrough_conflict", Message: "A pass-through route cannot carry guardrails."}
+			}
+		}
+		return nil
+	}
 	if s.Guardrails != nil {
 		view := *s
 		view.Routes = map[string]Route{route.Slug: route}
@@ -39,6 +56,12 @@ func (s *Snapshot) ValidateRouteContracts(route Route) error {
 	}
 	if err == nil {
 		_, err = s.compileRealtime(route)
+	}
+	if err == nil {
+		_, err = s.compileWebRTC(route)
+	}
+	if err == nil {
+		_, err = s.compileDuplex(route)
 	}
 	return err
 }
@@ -136,6 +159,9 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
+		if op == PassthroughOperation {
+			continue
+		}
 		if op == "agent_resource" {
 			if !route.Fidelity.Strict() {
 				return nil, fmt.Errorf("agent resources require a strict route")
@@ -204,6 +230,10 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if provider.ProfileID == "gemini-live" {
 			continue
 		}
+		// Native duplex profiles compile in their own step below.
+		if duplexcontract.IsProfile(provider.ProfileID) {
+			continue
+		}
 		if !provider.Supports(target.ProviderModel, "realtime", "openai", "realtime") {
 			return nil, fmt.Errorf("target %s has no certified OpenAI realtime capability", target.ID)
 		}
@@ -221,6 +251,72 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 
 func (s *Snapshot) RealtimeTemplate(slug, target string) (*realtimecontract.Template, bool) {
 	template, ok := s.realtime[slug][target]
+	return template, ok
+}
+
+func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Template, error) {
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
+		return nil, nil
+	}
+	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	for _, target := range route.Targets {
+		provider, ok := s.Providers[target.ProviderID]
+		if !ok {
+			return nil, fmt.Errorf("route target references an unavailable provider")
+		}
+		if provider.ProfileID == "gemini-live" {
+			continue
+		}
+		if !provider.Supports(target.ProviderModel, "realtime", "openai", "webrtc") {
+			continue
+		}
+		if len(provider.ParameterDefaults) > 0 {
+			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
+		}
+		template, err := realtimecontract.CompileWebRTC(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		if err != nil {
+			return nil, err
+		}
+		templates[target.ID] = template
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) WebRTCTemplate(slug, target string) (*realtimecontract.Template, bool) {
+	template, ok := s.webrtc[slug][target]
+	return template, ok
+}
+
+func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Template, error) {
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
+		return nil, nil
+	}
+	templates := make(map[string]*duplexcontract.Template)
+	for _, target := range route.Targets {
+		provider, ok := s.Providers[target.ProviderID]
+		if !ok {
+			return nil, fmt.Errorf("route target references an unavailable provider")
+		}
+		if !duplexcontract.IsProfile(provider.ProfileID) {
+			continue
+		}
+		if !provider.Supports(target.ProviderModel, "realtime", "native", "realtime") {
+			return nil, fmt.Errorf("target %s has no certified native duplex capability", target.ID)
+		}
+		if len(provider.ParameterDefaults) > 0 {
+			return nil, fmt.Errorf("target %s has unqualified duplex parameter defaults", target.ID)
+		}
+		template, err := duplexcontract.Compile(duplexcontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		if err != nil {
+			return nil, err
+		}
+		templates[target.ID] = template
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) DuplexTemplate(slug, target string) (*duplexcontract.Template, bool) {
+	template, ok := s.duplex[slug][target]
 	return template, ok
 }
 

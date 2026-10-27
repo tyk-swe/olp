@@ -681,6 +681,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		if err := rt.behavior().Validate(rt.Slug, tagged); err != nil {
 			return nil, err
 		}
+		if err := rt.validatePassthrough(); err != nil {
+			return nil, err
+		}
 		for j, t := range rt.Targets {
 			tfield := prefix + ".targets." + strconv.Itoa(j)
 			provider, ok := docProviders[strings.ToLower(t.Provider)]

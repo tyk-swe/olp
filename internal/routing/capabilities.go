@@ -60,6 +60,9 @@ func EffectiveCapabilities(snapshot *Snapshot, route Route) RouteCapabilities {
 		}
 		capabilities.OperationSupport[operation] = status
 	}
+	if route.IsPassthrough() {
+		capabilities.OperationSupport[PassthroughOperation] = "uncertified"
+	}
 	unknown := []string{}
 	minimum := func(name string, fact func(ModelMetadata) *int64) *int64 {
 		var result *int64
