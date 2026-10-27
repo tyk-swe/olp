@@ -150,7 +150,7 @@ func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T
 func TestRealtimeBrowserOriginSchemeAndTrustedProxy(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, origin, forwarded string
-		trusted, allowlisted, want     bool
+		trusted, allowlisted, want      bool
 	}{
 		{"http same origin", "http://gateway.example", "http://gateway.example", "", false, false, true},
 		{"https same origin", "https://gateway.example", "https://gateway.example", "", false, false, true},
