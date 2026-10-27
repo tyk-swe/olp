@@ -78,6 +78,90 @@ func TestCertificationNegotiatesSessionsAndBoundsSchemasWithoutExecutingTools(t 
 		})
 	}
 }
+func TestTransportCallsUpstreamToolsAndRefusesRedirects(t *testing.T) {
+	for _, sse := range []bool{false, true} {
+		t.Run(fmt.Sprint(sse), func(t *testing.T) {
+			var closed atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+"fixture-only" {
+					t.Error("missing bearer credential")
+				}
+				if r.Method == "DELETE" {
+					closed.Store(true)
+					w.WriteHeader(204)
+					return
+				}
+				var request struct {
+					ID     int    `json:"id"`
+					Method string `json:"method"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					t.Error("bad request")
+					return
+				}
+				var result any
+				switch request.Method {
+				case "initialize":
+					w.Header().Set("Mcp-Session-Id", "fixture-session")
+					result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}}}
+				case "notifications/initialized":
+					w.WriteHeader(202)
+					return
+				case "tools/call":
+					if r.Header.Get("Mcp-Session-Id") != "fixture-session" || r.Header.Get("MCP-Protocol-Version") != "2025-03-26" {
+						t.Error("missing negotiated context")
+					}
+					result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "ok"}}, "isError": false}
+				default:
+					t.Errorf("unexpected method %s", request.Method)
+					w.WriteHeader(400)
+					return
+				}
+				body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+				if sse {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "event: message\ndata: %s\n\n", body)
+					w.(http.Flusher).Flush()
+					<-r.Context().Done()
+				} else {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(body)
+				}
+			}))
+			defer server.Close()
+			transport, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("fixture-only"), TransportOptions{})
+			if err != nil || transport.Protocol() != "2025-03-26" {
+				t.Fatalf("dial: %v, %v", transport, err)
+			}
+			var out struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+				IsError bool `json:"isError"`
+			}
+			if err := transport.Call(t.Context(), "tools/call", map[string]any{"name": "lookup", "arguments": map[string]any{}}, &out); err != nil || len(out.Content) != 1 || out.Content[0].Text != "ok" || out.IsError {
+				t.Fatalf("call: %v, %v", out, err)
+			}
+			transport.Close(t.Context())
+			if !closed.Load() {
+				t.Fatal("session not closed")
+			}
+		})
+	}
+	var redirected atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Store(true)
+		w.WriteHeader(200)
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	if _, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("private-bearer"), TransportOptions{}); err != ErrTransport || strings.Contains(err.Error(), "private-bearer") || redirected.Load() {
+		t.Fatalf("redirect: %v redirected=%v", err, redirected.Load())
+	}
+}
 func TestCertificationRejectsRemoteSchemasPrivateDestinationsAndReflectedSecrets(t *testing.T) {
 	var escaped any
 	if json.Unmarshal([]byte(`{"properties":{"token":{"default":"\u003cprivate-bearer\u003e"}}}`), &escaped) != nil || !reflectsCredential(escaped, "<private-bearer>") {

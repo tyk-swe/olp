@@ -1,0 +1,201 @@
+package mcpservers
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/oif"
+)
+
+var ErrTransport = errors.New("upstream MCP transport failed")
+var protocols = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
+
+type TransportOptions struct {
+	ClientName string
+	Timeout    time.Duration
+}
+
+type Transport struct {
+	client                             *http.Client
+	endpoint, token, session, protocol string
+	nextID                             int
+}
+
+func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, opts TransportOptions) (*Transport, error) {
+	if policy == nil {
+		return nil, ErrTransport
+	}
+	u, err := policy.ValidateEndpoint(endpoint)
+	if err != nil {
+		return nil, ErrTransport
+	}
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	clientName := opts.ClientName
+	if clientName == "" {
+		clientName = "openllmproxy-certifier"
+	}
+	c := &Transport{client: policy.Client(timeout), endpoint: u.String(), token: string(credential), nextID: 2}
+	var init struct {
+		Protocol     string `json:"protocolVersion"`
+		Capabilities struct {
+			Tools json.RawMessage `json:"tools"`
+		} `json:"capabilities"`
+	}
+	if err = c.call(ctx, 1, "initialize", map[string]any{"protocolVersion": protocols[0], "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": clientName, "version": "1"}}, &init); err != nil || !slices.Contains(protocols, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
+		c.Close(ctx)
+		return nil, ErrTransport
+	}
+	c.protocol = init.Protocol
+	if err = c.call(ctx, 0, "notifications/initialized", nil, nil); err != nil {
+		c.Close(ctx)
+		return nil, ErrTransport
+	}
+	return c, nil
+}
+
+func (c *Transport) Protocol() string { return c.protocol }
+
+func (c *Transport) Call(ctx context.Context, method string, params any, out any) error {
+	id := c.nextID
+	c.nextID++
+	return c.call(ctx, id, method, params, out)
+}
+
+func (c *Transport) call(ctx context.Context, id int, method string, params any, out any) error {
+	message := map[string]any{"jsonrpc": "2.0", "method": method}
+	if id != 0 {
+		message["id"] = id
+	}
+	if params != nil {
+		message["params"] = params
+	}
+	body, _ := json.Marshal(message)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return ErrTransport
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if c.session != "" {
+		req.Header.Set("Mcp-Session-Id", c.session)
+	}
+	if c.protocol != "" {
+		req.Header.Set("MCP-Protocol-Version", c.protocol)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return ErrTransport
+	}
+	defer resp.Body.Close()
+	if id == 0 {
+		if resp.StatusCode != 202 && resp.StatusCode != 204 && resp.StatusCode != 200 {
+			return ErrTransport
+		}
+		return nil
+	}
+	if resp.StatusCode != 200 {
+		return ErrTransport
+	}
+	if method == "initialize" {
+		c.session = resp.Header.Get("Mcp-Session-Id")
+		if len(c.session) > 256 || strings.ContainsAny(c.session, "\r\n\x00") {
+			return ErrTransport
+		}
+	}
+	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		return ErrTransport
+	}
+	reader := &io.LimitedReader{R: resp.Body, N: (1 << 20) + 1}
+	if media == "application/json" {
+		raw, err := io.ReadAll(reader)
+		if err != nil || len(raw) > 1<<20 {
+			return ErrTransport
+		}
+		return decodeResult(raw, id, out)
+	}
+	if media != "text/event-stream" {
+		return ErrTransport
+	}
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 4096), 128<<10)
+	var data []byte
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if len(data) != 0 {
+				if err = decodeResult(data, id, out); err == nil {
+					return nil
+				}
+				data = nil
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			if len(data) > 0 {
+				data = append(data, '\n')
+			}
+			data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
+		}
+		if len(data) > 128<<10 || reader.N == 0 {
+			return ErrTransport
+		}
+	}
+	return ErrTransport
+}
+
+func decodeResult(raw []byte, id int, out any) error {
+	if _, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 1 << 20, MaxDepth: 64, MaxNodes: 1 << 16}); err != nil {
+		return ErrTransport
+	}
+	var reply struct {
+		Version string          `json:"jsonrpc"`
+		ID      int             `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(raw, &reply) != nil || reply.Version != "2.0" || reply.ID != id || len(reply.Error) != 0 || len(reply.Result) == 0 || bytes.Equal(reply.Result, []byte("null")) {
+		return ErrTransport
+	}
+	if json.Unmarshal(reply.Result, out) != nil {
+		return ErrTransport
+	}
+	return nil
+}
+
+func (c *Transport) Close(ctx context.Context) {
+	defer c.client.CloseIdleConnections()
+	if c.session == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint, nil)
+	if err != nil {
+		return
+	}
+	r.Header.Set("Mcp-Session-Id", c.session)
+	r.Header.Set("MCP-Protocol-Version", c.protocol)
+	if c.token != "" {
+		r.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if response, err := c.client.Do(r); err == nil {
+		response.Body.Close()
+	}
+}

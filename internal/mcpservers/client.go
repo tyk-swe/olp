@@ -3,18 +3,13 @@
 package mcpservers
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
-	"mime"
-	"net/http"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +20,6 @@ import (
 )
 
 var ErrCertification = errors.New("upstream MCP certification failed")
-var protocols = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 var toolName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 type Tool struct {
@@ -38,10 +32,6 @@ type Catalog struct {
 	Tools    []Tool `json:"tools"`
 	Digest   string `json:"digest"`
 }
-type rpcConnection struct {
-	client                             *http.Client
-	endpoint, token, session, protocol string
-}
 type noSchemaNetwork struct{}
 
 func (noSchemaNetwork) Load(string) (any, error) { return nil, ErrCertification }
@@ -49,32 +39,14 @@ func (noSchemaNetwork) Load(string) (any, error) { return nil, ErrCertification 
 // Certify negotiates a bounded Streamable HTTP session and captures a stable,
 // validated tool catalog. It never invokes tools or runs schema network loaders.
 func Certify(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte) (*Catalog, error) {
-	if policy == nil {
-		return nil, ErrCertification
-	}
-	u, err := policy.ValidateEndpoint(endpoint)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	c, err := DialTransport(ctx, policy, endpoint, credential, TransportOptions{ClientName: "openllmproxy-certifier", Timeout: 10 * time.Second})
 	if err != nil {
 		return nil, ErrCertification
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	c := &rpcConnection{client: policy.Client(10 * time.Second), endpoint: u.String(), token: string(credential)}
-	defer c.client.CloseIdleConnections()
-	defer c.close(ctx)
-	var init struct {
-		Protocol     string `json:"protocolVersion"`
-		Capabilities struct {
-			Tools json.RawMessage `json:"tools"`
-		} `json:"capabilities"`
-	}
-	if err = c.call(ctx, 1, "initialize", map[string]any{"protocolVersion": protocols[0], "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "openllmproxy-certifier", "version": "1"}}, &init); err != nil || !slices.Contains(protocols, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
-		return nil, ErrCertification
-	}
-	c.protocol = init.Protocol
-	if err = c.call(ctx, 0, "notifications/initialized", nil, nil); err != nil {
-		return nil, ErrCertification
-	}
-	result := &Catalog{Protocol: init.Protocol, Tools: []Tool{}}
+	defer c.Close(ctx)
+	result := &Catalog{Protocol: c.Protocol(), Tools: []Tool{}}
 	seen := map[string]bool{}
 	cursors := map[string]bool{}
 	cursor := ""
@@ -91,7 +63,7 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		if err = c.call(ctx, page+2, "tools/list", params, &listing); err != nil || listing.Tools == nil {
+		if err = c.Call(ctx, "tools/list", params, &listing); err != nil || listing.Tools == nil {
 			return nil, ErrCertification
 		}
 		for _, t := range listing.Tools {
@@ -154,129 +126,6 @@ func validateSchema(raw json.RawMessage) error {
 		return ErrCertification
 	}
 	return nil
-}
-func (c *rpcConnection) call(ctx context.Context, id int, method string, params any, out any) error {
-	message := map[string]any{"jsonrpc": "2.0", "method": method}
-	if id != 0 {
-		message["id"] = id
-	}
-	if params != nil {
-		message["params"] = params
-	}
-	body, _ := json.Marshal(message)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return ErrCertification
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if c.session != "" {
-		req.Header.Set("Mcp-Session-Id", c.session)
-	}
-	if c.protocol != "" {
-		req.Header.Set("MCP-Protocol-Version", c.protocol)
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return ErrCertification
-	}
-	defer resp.Body.Close()
-	if id == 0 {
-		if resp.StatusCode != 202 && resp.StatusCode != 204 && resp.StatusCode != 200 {
-			return ErrCertification
-		}
-		return nil
-	}
-	if resp.StatusCode != 200 {
-		return ErrCertification
-	}
-	if method == "initialize" {
-		c.session = resp.Header.Get("Mcp-Session-Id")
-		if len(c.session) > 256 || strings.ContainsAny(c.session, "\r\n\x00") {
-			return ErrCertification
-		}
-	}
-	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil {
-		return ErrCertification
-	}
-	reader := &io.LimitedReader{R: resp.Body, N: (1 << 20) + 1}
-	if media == "application/json" {
-		raw, err := io.ReadAll(reader)
-		if err != nil || len(raw) > 1<<20 {
-			return ErrCertification
-		}
-		return decodeResult(raw, id, out)
-	}
-	if media != "text/event-stream" {
-		return ErrCertification
-	}
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4096), 128<<10)
-	var data []byte
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if len(data) != 0 {
-				if err = decodeResult(data, id, out); err == nil {
-					return nil
-				}
-				data = nil
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "data:") {
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
-		}
-		if len(data) > 128<<10 || reader.N == 0 {
-			return ErrCertification
-		}
-	}
-	return ErrCertification
-}
-func decodeResult(raw []byte, id int, out any) error {
-	if _, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 1 << 20, MaxDepth: 64, MaxNodes: 1 << 16}); err != nil {
-		return ErrCertification
-	}
-	var reply struct {
-		Version string          `json:"jsonrpc"`
-		ID      int             `json:"id"`
-		Result  json.RawMessage `json:"result"`
-		Error   json.RawMessage `json:"error"`
-	}
-	if json.Unmarshal(raw, &reply) != nil || reply.Version != "2.0" || reply.ID != id || len(reply.Error) != 0 || len(reply.Result) == 0 || bytes.Equal(reply.Result, []byte("null")) {
-		return ErrCertification
-	}
-	if json.Unmarshal(reply.Result, out) != nil {
-		return ErrCertification
-	}
-	return nil
-}
-
-func (c *rpcConnection) close(ctx context.Context) {
-	if c.session == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint, nil)
-	if err != nil {
-		return
-	}
-	r.Header.Set("Mcp-Session-Id", c.session)
-	r.Header.Set("MCP-Protocol-Version", c.protocol)
-	if c.token != "" {
-		r.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if response, err := c.client.Do(r); err == nil {
-		response.Body.Close()
-	}
 }
 
 func reflectsCredential(value any, credential string) bool {
