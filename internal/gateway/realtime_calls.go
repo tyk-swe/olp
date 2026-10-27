@@ -32,8 +32,8 @@ import (
 const (
 	maxWebRTCSDPBytes     = 64 << 10
 	maxWebRTCSessionBytes = 64 << 10
-	webrtcCloseTimeout    = 10 * time.Second
-	webrtcAnswerTimeout   = 30 * time.Second
+	webrtcCloseTimeout   = 10 * time.Second
+	webrtcAnswerTimeout  = 30 * time.Second
 )
 
 type webrtcSession struct {
@@ -104,9 +104,10 @@ func (s *Server) webrtcExposureHeld(keyID string) bool {
 }
 
 type webrtcCallRequest struct {
-	sdp     []byte
-	session json.RawMessage
-	slug    string
+	sdp       []byte
+	session   json.RawMessage
+	slug      string
+	bodyBytes int64
 }
 
 func readWebRTCPart(part *multipart.Part, limit int64) ([]byte, error) {
@@ -125,19 +126,20 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *Error) {
 	if err != nil {
 		return invalid("The realtime call content type is malformed.", nil)
 	}
+	body := &io.LimitedReader{R: r.Body, N: bodylimit.Maximum + 1}
 	out := &webrtcCallRequest{slug: r.URL.Query().Get("model")}
 	switch mediaType {
 	case "application/sdp":
 		if len(r.URL.Query()["model"]) != 1 {
 			return invalid("model must name exactly one published route slug.", strPtr("model"))
 		}
-		data, err := io.ReadAll(io.LimitReader(r.Body, maxWebRTCSDPBytes+1))
+		data, err := io.ReadAll(io.LimitReader(body, maxWebRTCSDPBytes+1))
 		if err != nil || len(data) == 0 || len(data) > maxWebRTCSDPBytes {
 			return invalid("The SDP offer is missing or too large.", strPtr("sdp"))
 		}
 		out.sdp = data
 	case "multipart/form-data":
-		reader := multipart.NewReader(r.Body, params["boundary"])
+		reader := multipart.NewReader(body, params["boundary"])
 		for {
 			part, err := reader.NextPart()
 			if errors.Is(err, io.EOF) {
@@ -175,6 +177,13 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *Error) {
 	default:
 		return nil, invalidRequest("unsupported_media_type", "Realtime calls require multipart form data or an SDP body.", nil)
 	}
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return invalid("The realtime call body could not be read.", nil)
+	}
+	if body.N == 0 {
+		return nil, bodyTooLarge()
+	}
+	out.bodyBytes = bodylimit.Maximum + 1 - body.N
 	return out, nil
 }
 
@@ -365,6 +374,10 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	x.route = &route
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		fail(permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
+		return
+	}
+	if route.MaxBodyBytes != nil && callReq.bodyBytes > *route.MaxBodyBytes {
+		fail(bodyTooLarge())
 		return
 	}
 	if !slices.Contains(route.Operations, "realtime") {
