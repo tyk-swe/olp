@@ -32,6 +32,32 @@ describe('retained price fields', () => {
     expect(priceEntryFields(values).storage_per_gib_day).toBe('0');
     expect(containerFeeRows([{ tier: '', fee: '' }])).toBeNull();
   });
+  it('accepts tool names that also name inherited object properties', () => {
+    const result = priceEntryFields({
+      ...emptyPriceFields(),
+      toolFees: [
+        { name: ' constructor ', fee: ' 0.125000000001 ' },
+        { name: 'search', fee: '0' }
+      ]
+    });
+    expect(result.tool_calls).toEqual({
+      constructor: '0.125000000001',
+      search: '0'
+    });
+  });
+  it('refuses duplicate tool fees after trimming their names', () => {
+    for (const name of ['constructor', 'search']) {
+      expect(() =>
+        priceEntryFields({
+          ...emptyPriceFields(),
+          toolFees: [
+            { name, fee: '1' },
+            { name: ` ${name} `, fee: '2' }
+          ]
+        })
+      ).toThrow(`Tool ${name} is listed twice.`);
+    }
+  });
   it('refuses malformed, duplicate or unpriced memory tiers', () => {
     for (const rows of [
       [
