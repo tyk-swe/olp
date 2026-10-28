@@ -227,3 +227,17 @@ it('starts, continues and claims a key enrollment without leaving the page', asy
     )
   ).toBe(false);
 });
+
+it('completes the upstream callback for its enrollment without retaining callback secrets in the URL', async () => {
+  window.history.replaceState(
+    null,
+    '',
+    '/agents/grants?code=fixture-code&state=enrollment.fixture-state'
+  );
+  const { host } = page();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('Complete authorization');
+  });
+  expect(window.location.search).toBe('');
+});

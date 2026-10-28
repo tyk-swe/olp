@@ -5,8 +5,10 @@ package integration_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +22,9 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/testutil"
 )
 
 func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
@@ -467,4 +471,450 @@ func exercisePersonalGrantDispatch(t *testing.T, h *accessHarness, owner *browse
 	}
 	h.want(owner, "DELETE", "/api/v1/mcp-user-grants/"+grantID, nil, nil, http.StatusNoContent)
 	call(secret, "revoked-grant", http.StatusForbidden)
+}
+
+type personalOAuthFixture struct {
+	h         *accessHarness
+	owner     *browser
+	upstream  *testutil.OAuthServer
+	serverID  string
+	toolsetID string
+	alias     string
+	key       mcpPersonalKey
+}
+
+func newPersonalOAuthFixture(t *testing.T) personalOAuthFixture {
+	t.Helper()
+	return newPersonalOAuthFixtureWithHook(t, nil)
+}
+
+func newPersonalOAuthFixtureWithHook(t *testing.T, hook func(*http.Request)) personalOAuthFixture {
+	t.Helper()
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "OAuth tools")
+	authority := testutil.NewOAuthServer(t)
+	oauthEndpoint := func() string {
+		if hook == nil {
+			return authority.URL
+		}
+		proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/token" {
+				hook(r)
+			}
+			authority.Config.Handler.ServeHTTP(w, r)
+		}))
+		t.Cleanup(proxy.Close)
+		return proxy.URL
+	}()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if request.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := func() json.RawMessage {
+			switch request.Method {
+			case "initialize":
+				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "oauth-fixture", Version: "1"}})
+			case "tools/call":
+				identity, authorized := authority.Authorized(r)
+				if !authorized {
+					return mustJSON(&mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "unauthorized"}}})
+				}
+				return mustJSON(&mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: identity.Account}}})
+			default:
+				return mustJSON(mcpsdk.ListToolsResult{Tools: []*mcpsdk.Tool{{Name: "identity", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
+			}
+		}()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      int             `json:"id"`
+			Result  json.RawMessage `json:"result"`
+		}{"2.0", request.ID, result})
+	}))
+	t.Cleanup(upstream.Close)
+	oauth := routing.MCPOAuth{ClientID: "fixture-client", Audience: "fixture-tools", Scopes: []string{"tools.read"}, AuthorizationEndpoint: oauthEndpoint + "/authorize", TokenEndpoint: oauthEndpoint + "/token", DeviceAuthorizationEndpoint: oauthEndpoint + "/device/code"}
+	registered := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{"name": "OAuth server", "project_id": project, "transport": "streamable_http", "endpoint": upstream.URL, "enabled": true, "oauth": oauth, "unit_price": "0"}, idem("oauth-server"), 201)
+	id := mcpExecString(t, registered, "id")
+	tool := agentcontract.Tool{ServerID: id, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "identity", Alias: agentcontract.ToolAlias(id, "identity")}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "OAuth tools", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}, idem("oauth-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("oauth-publish")), 200)
+	keyResponse := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "OAuth caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID}}, idem("oauth-key"), 201)
+	var key mcpPersonalKey
+	if err := json.Unmarshal(mustJSON(keyResponse), &key); err != nil {
+		t.Fatal(err)
+	}
+	return personalOAuthFixture{h: h, owner: owner, upstream: authority, serverID: id, toolsetID: toolsetID, alias: tool.Alias, key: key}
+}
+
+func (f personalOAuthFixture) claim(t *testing.T) string {
+	t.Helper()
+	return f.claimKey(t, f.key)
+}
+
+func (f personalOAuthFixture) claimKey(t *testing.T, key mcpPersonalKey) string {
+	t.Helper()
+	response := f.h.want(f.owner, "POST", "/api/v1/mcp-servers/"+f.serverID+"/grant-enrollments", struct {
+		APIKeyID string `json:"api_key_id"`
+	}{key.ID}, nil, 200)
+	var handoff mcpgrants.Handoff
+	if err := json.Unmarshal(mustJSON(response), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	_, fragment, _ := strings.Cut(handoff.EnrollmentURL, "#")
+	id, token, _ := strings.Cut(fragment, ".")
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/claim", mcpPersonalClaimInput{EnrollmentID: id, HandoffToken: token}, nil, 200)
+	return id
+}
+
+func TestMCPPersonalOAuthPKCECompletesAndRunsTool(t *testing.T) {
+	f := newPersonalOAuthFixture(t)
+	id := f.claim(t)
+	authorization := f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/authorize", map[string]string{"flow": "authorization_code"}, nil, 200)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Get(mcpExecString(t, authorization, "authorization_url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	callback, err := url.Parse(response.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", map[string]string{"code": callback.Query().Get("code"), "state": callback.Query().Get("state")}, nil, 200)
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", map[string]string{"code": callback.Query().Get("code"), "state": callback.Query().Get("state")}, nil, 409)
+	handler := f.consumer(t)
+	assertPersonalCall(t, handler, f, f.key, "pkce-dispatch", http.StatusOK, "acct-reference")
+	standing := f.h.want(f.owner, "GET", "/api/v1/mcp-user-grants", nil, nil, 200)
+	if mcpExecItem(t, mcpExecItems(t, standing, "items"), 0, standing)["state"] != "active" {
+		t.Fatalf("grant did not become active: %v", standing)
+	}
+}
+
+func (f personalOAuthFixture) consumer(t *testing.T) http.Handler {
+	t.Helper()
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, sessionErr := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":"))
+	if sessionErr != nil {
+		t.Fatal(sessionErr)
+	}
+	server := &mcp.Server{Runtime: f.h.Runtime, Egress: &f.h.Policy, Auth: f.h.AuthKey, Grants: &mcpgrants.Store{Pool: f.h.Pool, Keys: f.h.Server.Keys, Auth: f.h.AuthKey, Installation: f.h.Server.Installation, Egress: &f.h.Policy}, Limiter: limiter, Sessions: sessions, Ledger: &mcp.DurableLedger{Pool: f.h.Pool, Store: &limits.DebitStore{Pool: f.h.Pool, Limiter: limiter}, Auth: f.h.AuthKey}}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	return mux
+}
+
+func personalCall(handler http.Handler, f personalOAuthFixture, key mcpPersonalKey, id string) (int, string) {
+	request := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", bytes.NewReader(mustJSON(struct {
+		ToolsetID string   `json:"toolset_id"`
+		Name      string   `json:"name"`
+		Arguments struct{} `json:"arguments"`
+		CallID    string   `json:"call_id"`
+	}{ToolsetID: f.toolsetID, Name: f.alias, CallID: id})))
+	request.Header.Set("Authorization", "Bearer "+key.Secret)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response.Code, response.Body.String()
+}
+
+func assertPersonalCall(t *testing.T, handler http.Handler, f personalOAuthFixture, key mcpPersonalKey, id string, want int, account string) {
+	t.Helper()
+	status, body := personalCall(handler, f, key, id)
+	if status != want {
+		t.Fatalf("personal call status %d, want %d: %s", status, want, body)
+	}
+	if account != "" {
+		var result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(body), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Content) != 1 || result.Content[0].Text != account {
+			t.Fatalf("personal call returned another account: %s", body)
+		}
+	}
+}
+
+func (f personalOAuthFixture) completePKCE(t *testing.T, id string, identity testutil.OAuthIdentity) {
+	t.Helper()
+	f.upstream.SignInAs(identity)
+	authorization := f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/authorize", map[string]string{"flow": "authorization_code"}, nil, 200)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Get(mcpExecString(t, authorization, "authorization_url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	callback, parseErr := url.Parse(response.Header.Get("Location"))
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", map[string]string{"code": callback.Query().Get("code"), "state": callback.Query().Get("state")}, nil, 200)
+}
+
+func TestMCPPersonalOAuthDeviceApprovalDenialAndPolling(t *testing.T) {
+	f := newPersonalOAuthFixture(t)
+	handler := f.consumer(t)
+	id := f.claim(t)
+	authorization := f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/authorize", map[string]string{"flow": "device_code"}, nil, 200)
+	challenge := mcpExecObject(t, authorization, "device")
+	poll := func() map[string]any {
+		return f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/poll", nil, nil, 200)
+	}
+	if poll()["state"] != "pending" {
+		t.Fatal("unapproved device became active")
+	}
+	before := f.upstream.DevicePolls()
+	poll()
+	if f.upstream.DevicePolls() != before {
+		t.Fatal("poll lease allowed an early token request")
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.mcp_grant_enrollments SET poll_at=now()-interval '1 second' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	poll()
+	var interval int64
+	if err := f.h.Pool.QueryRow(t.Context(), `SELECT poll_interval FROM olp.mcp_grant_enrollments WHERE id=$1`, id).Scan(&interval); err != nil {
+		t.Fatal(err)
+	}
+	if interval <= int64(testutil.DeviceInterval/time.Second) {
+		t.Fatal("slow_down did not extend the polling interval")
+	}
+	testutil.DecideDevice(t, mcpExecString(t, challenge, "verification_url"), mcpExecString(t, challenge, "user_code"), "approve")
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.mcp_grant_enrollments SET poll_at=now()-interval '1 second' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if poll()["state"] != "active" {
+		t.Fatal("approved device did not become active")
+	}
+	assertPersonalCall(t, handler, f, f.key, "device-approved", http.StatusOK, "acct-reference")
+	deniedID := f.claim(t)
+	denied := f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+deniedID+"/authorize", map[string]string{"flow": "device_code"}, nil, 200)
+	deniedChallenge := mcpExecObject(t, denied, "device")
+	testutil.DecideDevice(t, mcpExecString(t, deniedChallenge, "verification_url"), mcpExecString(t, deniedChallenge, "user_code"), "deny")
+	if f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+deniedID+"/poll", nil, nil, 200)["state"] != "denied" {
+		t.Fatal("denied device did not report denied standing")
+	}
+	expiredID := f.claim(t)
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+expiredID+"/authorize", map[string]string{"flow": "device_code"}, nil, 200)
+	f.upstream.ExpireDevices()
+	if f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+expiredID+"/poll", nil, nil, 200)["state"] != "expired" {
+		t.Fatal("expired upstream device remained pending")
+	}
+
+}
+
+func TestMCPPersonalOAuthRefreshSerializesAndKeepsIndividualsSeparate(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var refreshes atomic.Int64
+	f := newPersonalOAuthFixtureWithHook(t, func(r *http.Request) {
+		if r.ParseForm() != nil || r.Form.Get("grant_type") != "refresh_token" {
+			return
+		}
+		refreshes.Add(1)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	})
+	firstID := f.claim(t)
+	f.completePKCE(t, firstID, testutil.OAuthIdentity{Subject: "first", Account: "first-account"})
+	server := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
+	secondResponse := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Second OAuth caller", "project_id": mcpExecString(t, server, "project_id"), "scopes": []string{"tools"}, "allowed_toolsets": []string{f.toolsetID}}, idem("second-oauth-key"), 201)
+	var second mcpPersonalKey
+	if err := json.Unmarshal(mustJSON(secondResponse), &second); err != nil {
+		t.Fatal(err)
+	}
+	secondID := f.claimKey(t, second)
+	f.completePKCE(t, secondID, testutil.OAuthIdentity{Subject: "second", Account: "second-account"})
+	handler := f.consumer(t)
+	assertPersonalCall(t, handler, f, second, "before-refresh-second", http.StatusOK, "second-account")
+	firstSession := f.session(t, handler, f.key)
+	secondSession := f.session(t, handler, second)
+	if firstSession == secondSession {
+		t.Fatal("individuals shared an MCP session")
+	}
+	stolen := personalRPC(handler, second, "/mcp", firstSession, "tools/list", json.RawMessage(`{}`))
+	if stolen.Code != http.StatusNotFound {
+		t.Fatalf("another individual adopted a session: %d", stolen.Code)
+	}
+
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE enrollment_id=$1`, firstID); err != nil {
+		t.Fatal(err)
+	}
+	type callResult struct {
+		status int
+		body   string
+	}
+	results := make(chan callResult, 4)
+	for n := range 4 {
+		go func(index int) {
+			status, body := personalCall(handler, f, f.key, fmt.Sprintf("concurrent-refresh-%d", index))
+			results <- callResult{status, body}
+		}(n)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh did not reach token endpoint")
+	}
+	tx, beginErr := f.h.Pool.Begin(t.Context())
+	if beginErr != nil {
+		t.Fatal(beginErr)
+	}
+	if _, err := tx.Exec(t.Context(), `SET LOCAL lock_timeout='500ms'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `SELECT id FROM olp.installation WHERE singleton FOR UPDATE`); err != nil {
+		t.Errorf("token exchange held the installation mutation lock: %v", err)
+	}
+	if _, err := tx.Exec(t.Context(), `SELECT id FROM olp.mcp_user_grants WHERE enrollment_id=$1 FOR UPDATE`, firstID); err != nil {
+		t.Errorf("token exchange held the grant row lock: %v", err)
+	}
+	_ = tx.Rollback(t.Context())
+	assertPersonalCall(t, handler, f, second, "during-refresh-second", http.StatusOK, "second-account")
+	close(release)
+	for range 4 {
+		select {
+		case result := <-results:
+			if result.status != http.StatusOK || !strings.Contains(result.body, `"text":"first-account"`) {
+				t.Errorf("refresh crossed account or refused: %d %s", result.status, result.body)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent refresh did not finish")
+		}
+	}
+	if refreshes.Load() != 1 || len(f.upstream.Reused()) != 0 {
+		t.Fatal("concurrent callers repeated a rotating refresh")
+	}
+	f.upstream.RevokeRefreshTokens()
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE enrollment_id=$1`, firstID); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, handler, f, f.key, "revoked-refresh", http.StatusForbidden, "")
+	assertPersonalCall(t, handler, f, f.key, "revoked-refresh-again", http.StatusForbidden, "")
+	if refreshes.Load() != 2 {
+		t.Fatal("failed refresh was retried")
+	}
+}
+
+func TestMCPPersonalOAuthRefusesForeignCompletionAndTokenRedirect(t *testing.T) {
+	f := newPersonalOAuthFixture(t)
+	hits := &atomic.Int64{}
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.WriteHeader(http.StatusTeapot) }))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	registered := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
+	var current struct {
+		Name     string           `json:"name"`
+		Endpoint string           `json:"endpoint"`
+		OAuth    routing.MCPOAuth `json:"oauth"`
+	}
+	if err := json.Unmarshal(mustJSON(registered), &current); err != nil {
+		t.Fatal(err)
+	}
+	changed := routing.MCPOAuth{ClientID: current.OAuth.ClientID, Audience: current.OAuth.Audience, Scopes: current.OAuth.Scopes, AuthorizationEndpoint: current.OAuth.AuthorizationEndpoint, TokenEndpoint: redirect.URL, DeviceAuthorizationEndpoint: current.OAuth.DeviceAuthorizationEndpoint}
+	f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, struct {
+		Name     string           `json:"name"`
+		Endpoint string           `json:"endpoint"`
+		Enabled  bool             `json:"enabled"`
+		OAuth    routing.MCPOAuth `json:"oauth"`
+	}{current.Name, current.Endpoint, true, changed}, withMatch(registered, idem("redirecting-oauth")), 200)
+	id := f.claim(t)
+	authorization := f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/authorize", map[string]string{"flow": "authorization_code"}, nil, 200)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Get(mcpExecString(t, authorization, "authorization_url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	callback, parseErr := url.Parse(response.Header.Get("Location"))
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	other := f.h.invite(f.owner, "foreign-oauth@example.test", "viewer")
+	completion := map[string]string{"code": callback.Query().Get("code"), "state": callback.Query().Get("state")}
+	f.h.want(other, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", completion, nil, 404)
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", map[string]string{"code": callback.Query().Get("code"), "state": "wrong"}, nil, 422)
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", completion, nil, 422)
+	if hits.Load() != 0 {
+		t.Fatal("token exchange followed a redirect")
+	}
+	f.h.want(f.owner, "POST", "/api/v1/mcp-grant-enrollments/"+id+"/complete", completion, nil, 409)
+}
+
+func TestMCPPersonalOAuthRefreshRejectsAbandonedAttempt(t *testing.T) {
+	attempts := &atomic.Int64{}
+	f := newPersonalOAuthFixtureWithHook(t, func(r *http.Request) {
+		if r.ParseForm() == nil && r.Form.Get("grant_type") == "refresh_token" {
+			attempts.Add(1)
+		}
+	})
+	id := f.claim(t)
+	f.completePKCE(t, id, testutil.OAuthIdentity{Subject: "abandoned", Account: "abandoned"})
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second',refresh_attempt_id=$2 WHERE enrollment_id=$1`, id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, f.consumer(t), f, f.key, "abandoned-refresh", http.StatusForbidden, "")
+	if attempts.Load() != 0 {
+		t.Fatal("an abandoned rotating token was reused")
+	}
+}
+
+func personalRPC(handler http.Handler, key mcpPersonalKey, path, session, method string, params json.RawMessage) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(mustJSON(struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      int             `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}{"2.0", 1, method, params})))
+	request.Header.Set("Authorization", "Bearer "+key.Secret)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Mcp-Protocol-Version", "2025-11-25")
+	if session != "" {
+		request.Header.Set("Mcp-Session-Id", session)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func (f personalOAuthFixture) session(t *testing.T, handler http.Handler, key mcpPersonalKey) string {
+	t.Helper()
+	response := personalRPC(handler, key, "/mcp?toolset_id="+f.toolsetID, "", "initialize", mustJSON(mcpsdk.InitializeParams{Capabilities: &mcpsdk.ClientCapabilities{}, ClientInfo: &mcpsdk.Implementation{Name: "personal-fixture", Version: "1"}, ProtocolVersion: "2025-11-25"}))
+	if response.Code != http.StatusOK || response.Header().Get("Mcp-Session-Id") == "" {
+		t.Fatalf("personal session failed: %d %s", response.Code, response.Body.String())
+	}
+	return response.Header().Get("Mcp-Session-Id")
 }

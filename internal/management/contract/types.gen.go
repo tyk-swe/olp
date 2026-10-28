@@ -3277,6 +3277,51 @@ func (e KeyExpiringEventReason) Valid() bool {
 	}
 }
 
+// Defines values for MCPGrantAuthorizationState.
+const (
+	MCPGrantAuthorizationStateActive  MCPGrantAuthorizationState = "active"
+	MCPGrantAuthorizationStateDenied  MCPGrantAuthorizationState = "denied"
+	MCPGrantAuthorizationStateExpired MCPGrantAuthorizationState = "expired"
+	MCPGrantAuthorizationStateFailed  MCPGrantAuthorizationState = "failed"
+	MCPGrantAuthorizationStatePending MCPGrantAuthorizationState = "pending"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantAuthorizationState enum.
+func (e MCPGrantAuthorizationState) Valid() bool {
+	switch e {
+	case MCPGrantAuthorizationStateActive:
+		return true
+	case MCPGrantAuthorizationStateDenied:
+		return true
+	case MCPGrantAuthorizationStateExpired:
+		return true
+	case MCPGrantAuthorizationStateFailed:
+		return true
+	case MCPGrantAuthorizationStatePending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPGrantAuthorizationRequestFlow.
+const (
+	AuthorizationCode MCPGrantAuthorizationRequestFlow = "authorization_code"
+	DeviceCode        MCPGrantAuthorizationRequestFlow = "device_code"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantAuthorizationRequestFlow enum.
+func (e MCPGrantAuthorizationRequestFlow) Valid() bool {
+	switch e {
+	case AuthorizationCode:
+		return true
+	case DeviceCode:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPGrantClaimResponseState.
 const (
 	MCPGrantClaimResponseStatePending MCPGrantClaimResponseState = "pending"
@@ -3475,7 +3520,9 @@ func (e MCPToolCallResponseStatus) Valid() bool {
 // Defines values for MCPUserGrantStandingState.
 const (
 	MCPUserGrantStandingStateActive  MCPUserGrantStandingState = "active"
+	MCPUserGrantStandingStateDenied  MCPUserGrantStandingState = "denied"
 	MCPUserGrantStandingStateExpired MCPUserGrantStandingState = "expired"
+	MCPUserGrantStandingStateFailed  MCPUserGrantStandingState = "failed"
 	MCPUserGrantStandingStatePending MCPUserGrantStandingState = "pending"
 	MCPUserGrantStandingStateRevoked MCPUserGrantStandingState = "revoked"
 )
@@ -3485,7 +3532,11 @@ func (e MCPUserGrantStandingState) Valid() bool {
 	switch e {
 	case MCPUserGrantStandingStateActive:
 		return true
+	case MCPUserGrantStandingStateDenied:
+		return true
 	case MCPUserGrantStandingStateExpired:
+		return true
+	case MCPUserGrantStandingStateFailed:
 		return true
 	case MCPUserGrantStandingStatePending:
 		return true
@@ -9500,6 +9551,24 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// MCPGrantAuthorization defines model for MCPGrantAuthorization.
+type MCPGrantAuthorization struct {
+	AuthorizationUrl *string                    `json:"authorization_url,omitempty"`
+	Device           *MCPGrantDeviceChallenge   `json:"device,omitempty"`
+	State            MCPGrantAuthorizationState `json:"state"`
+}
+
+// MCPGrantAuthorizationState defines model for MCPGrantAuthorization.State.
+type MCPGrantAuthorizationState string
+
+// MCPGrantAuthorizationRequest defines model for MCPGrantAuthorizationRequest.
+type MCPGrantAuthorizationRequest struct {
+	Flow MCPGrantAuthorizationRequestFlow `json:"flow"`
+}
+
+// MCPGrantAuthorizationRequestFlow defines model for MCPGrantAuthorizationRequest.Flow.
+type MCPGrantAuthorizationRequestFlow string
+
 // MCPGrantBinding defines model for MCPGrantBinding.
 type MCPGrantBinding struct {
 	Endpoint string           `json:"endpoint"`
@@ -9519,6 +9588,20 @@ type MCPGrantClaimResponse struct {
 
 // MCPGrantClaimResponseState defines model for MCPGrantClaimResponse.State.
 type MCPGrantClaimResponseState string
+
+// MCPGrantCompletionRequest defines model for MCPGrantCompletionRequest.
+type MCPGrantCompletionRequest struct {
+	Code  *string `json:"code,omitempty"`
+	State *string `json:"state,omitempty"`
+}
+
+// MCPGrantDeviceChallenge defines model for MCPGrantDeviceChallenge.
+type MCPGrantDeviceChallenge struct {
+	ExpiresAt       time.Time `json:"expires_at"`
+	Interval        int       `json:"interval"`
+	UserCode        string    `json:"user_code"`
+	VerificationUrl string    `json:"verification_url"`
+}
 
 // MCPGrantEnrollment defines model for MCPGrantEnrollment.
 type MCPGrantEnrollment struct {
@@ -16797,6 +16880,12 @@ type ManagementMcpJSONRequestBody ManagementMcpJSONBody
 
 // ClaimMcpGrantEnrollmentJSONRequestBody defines body for ClaimMcpGrantEnrollment for application/json ContentType.
 type ClaimMcpGrantEnrollmentJSONRequestBody = ClaimMCPGrantEnrollmentRequest
+
+// AuthorizeMcpGrantJSONRequestBody defines body for AuthorizeMcpGrant for application/json ContentType.
+type AuthorizeMcpGrantJSONRequestBody = MCPGrantAuthorizationRequest
+
+// CompleteMcpGrantJSONRequestBody defines body for CompleteMcpGrant for application/json ContentType.
+type CompleteMcpGrantJSONRequestBody = MCPGrantCompletionRequest
 
 // CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
 type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
