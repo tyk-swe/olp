@@ -5,16 +5,20 @@ package integration_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/scim"
+	"github.com/tyk-swe/olp/sdk/management"
 )
 
 func scimToken(h *accessHarness, owner *browser, scopes []string) string {
@@ -219,5 +223,47 @@ func TestSCIMNullFiltersMatchUnassignedDefinedAttributes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSCIMSDKConditionalWriteRoundTrip(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	user := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("etag-roundtrip"), "", 201)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := management.NewClient(h.HTTP.URL, tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get, _ := management.Lookup("scim_users_get")
+	patch, _ := management.Lookup("scim_users_patch")
+	path := map[string]string{"scim_id": user["id"].(string)}
+	response, err := client.Call(t.Context(), get, management.Arguments{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(scimPatch(map[string]any{"op": "replace", "path": "displayName", "value": "Changed"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := management.Arguments{Path: path, IfMatch: response.ETag, Body: body}
+	updated, err := client.Call(t.Context(), patch, args)
+	if err != nil {
+		t.Fatalf("unchanged SCIM version refused: %v", err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(updated.Body, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["displayName"] != "Changed" {
+		t.Fatalf("patch did not update resource: %s", updated.Body)
+	}
+	_, stale := client.Call(t.Context(), patch, args)
+	var problem *management.APIError
+	if !errors.As(stale, &problem) || problem.Status != http.StatusPreconditionFailed {
+		t.Fatalf("stale version accepted: %v", stale)
 	}
 }
