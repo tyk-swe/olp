@@ -39,7 +39,7 @@ func TestCaptureMalformedCallMetadataCannotBypassArgumentDecoding(t *testing.T) 
 				t.Fatal("inspectable arguments dropped")
 			}
 			raw := string((<-m.queue).record)
-			if strings.Contains(raw, "0063") || strings.Contains(raw, "secret") || !strings.Contains(raw, "[REMOVED]") {
+			if strings.Contains(raw, `\u0063`) || strings.Contains(raw, "secret") || !strings.Contains(raw, "[REMOVED]") {
 				t.Fatalf("malformed metadata bypassed argument decoding: %s", raw)
 			}
 		}

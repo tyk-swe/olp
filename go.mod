@@ -13,8 +13,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
 	github.com/aws/aws-sdk-go-v2/service/bedrock v1.73.4
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.4
-	github.com/aws/aws-sdk-go-v2/service/kms v1.61.4
-	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.4
+	github.com/aws/aws-sdk-go-v2/service/kms v1.61.5
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.5
 	github.com/beevik/etree v1.8.1
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-oidc/v3 v3.21.0

@@ -37,7 +37,7 @@ The three coding clients use `latest`; other versions below remain exact pins.
 | LangChain | `langchain` | 1.5.14 | `createAgent` tool loops over each chat model below |
 | LangChain core | `@langchain/core` | 1.2.13 | Messages, tools, tool-call chunk assembly and `withStructuredOutput` |
 | LangChain OpenAI provider | `@langchain/openai` | 1.6.0 | `ChatOpenAI` over Chat Completions and Responses, and `OpenAIEmbeddings` |
-| LangChain Anthropic provider | `@langchain/anthropic` | 1.5.11 | `ChatAnthropic`, prompt caching, extended thinking replayed with its signature |
+| LangChain Anthropic provider | `@langchain/anthropic` | 1.5.13 | `ChatAnthropic`, prompt caching, extended thinking replayed with its signature |
 | LangChain Google provider | `@langchain/google-genai` | 2.3.2 | `ChatGoogleGenerativeAI` and `GoogleGenerativeAIEmbeddings` on a strict route |
 | LlamaIndex.TS | `llamaindex` | 0.12.1 | Tool definitions and message helpers |
 | LlamaIndex.TS core | `@llamaindex/core` | 0.6.23 | Message and tool types, pinned to one copy by a pnpm override |
@@ -53,8 +53,8 @@ of the gateway's module and runtime inventory.
 
 | SDK | Module | Pinned version | Qualification |
 | --- | --- | --- | --- |
-| OpenAI Go | `github.com/openai/openai-go/v3` | v3.74.0 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
-| Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.79.1 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
+| OpenAI Go | `github.com/openai/openai-go/v3` | v3.85.1 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
+| Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
 | Google Gen AI Go | `google.golang.org/genai` | v1.73.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
 
 ## Gemini managed-agent resources
