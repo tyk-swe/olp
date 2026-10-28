@@ -14,13 +14,13 @@ func toolDebitResult() DebitResult {
 	}
 }
 
-func TestSettleToolDebitRefusesNonZeroOrIncompleteEvidence(t *testing.T) {
+func TestSettleToolDebitRefusesIncompleteEvidence(t *testing.T) {
 	for name, mutate := range map[string]func(*DebitResult){
-		"nonzero cost":   func(r *DebitResult) { r.Cost = "0.01" },
-		"nonzero charge": func(r *DebitResult) { r.Charge = "1" },
-		"not final":      func(r *DebitResult) { r.Final = false },
-		"incomplete":     func(r *DebitResult) { r.Complete = false },
-		"resolutions":    func(r *DebitResult) { r.ResolvesResultDigests = [][]byte{bytes.Repeat([]byte{3}, 32)} },
+		"not final":        func(r *DebitResult) { r.Final = false },
+		"incomplete":       func(r *DebitResult) { r.Complete = false },
+		"resolutions":      func(r *DebitResult) { r.ResolvesResultDigests = [][]byte{bytes.Repeat([]byte{3}, 32)} },
+		"malformed cost":   func(r *DebitResult) { r.Cost = "-1" },
+		"malformed charge": func(r *DebitResult) { r.Charge = "1e3" },
 	} {
 		result := toolDebitResult()
 		mutate(&result)
@@ -30,6 +30,37 @@ func TestSettleToolDebitRefusesNonZeroOrIncompleteEvidence(t *testing.T) {
 	}
 	if !validToolDebitResult(toolDebitResult()) {
 		t.Fatal("complete final zero-cost tool evidence refused")
+	}
+	priced := toolDebitResult()
+	priced.Cost, priced.Charge = "0.25", "0.25"
+	if !validToolDebitResult(priced) {
+		t.Fatal("complete final priced tool evidence refused")
+	}
+}
+
+func TestToolSettleWithinBoundsComparesObservedAgainstBounds(t *testing.T) {
+	result := toolDebitResult()
+	result.Cost, result.Charge = "0.25", "0.5"
+	if !toolSettleWithinBounds("0.25", "0.5", "0", "0", result) {
+		t.Fatal("settlement exactly at both bounds refused")
+	}
+	if !toolSettleWithinBounds("1", "1", "0.75", "0.5", result) {
+		t.Fatal("settlement reaching both bounds from prior observed refused")
+	}
+	for name, bounds := range map[string][4]string{
+		"cost over bound":                 {"0.24", "0.5", "0", "0"},
+		"charge over bound":               {"0.25", "0.49", "0", "0"},
+		"prior cost pushes over":          {"1", "1", "0.76", "0"},
+		"prior charge pushes over":        {"1", "1", "0", "0.51"},
+		"zero bound with priced evidence": {"0", "0", "0", "0"},
+	} {
+		if toolSettleWithinBounds(bounds[0], bounds[1], bounds[2], bounds[3], result) {
+			t.Fatalf("%s settled beyond its bound", name)
+		}
+	}
+	free := toolDebitResult()
+	if !toolSettleWithinBounds("0", "0", "0", "0", free) {
+		t.Fatal("explicit zero settlement against zero bounds refused")
 	}
 }
 

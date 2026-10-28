@@ -729,3 +729,95 @@ func (a Authority) KeyDebitRequest(leaseTTL time.Duration) limits.Request {
 		LeaseTTL:         leaseTTL,
 	}
 }
+
+func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ([]limits.DebitOwner, []limits.Request, bool, bool) {
+	owners := []limits.DebitOwner{a.KeyDebitOwner()}
+	requests := []limits.Request{a.KeyDebitRequest(leaseTTL)}
+	add := func(owner limits.DebitOwner, request limits.Request) {
+		owners = append(owners, owner)
+		requests = append(requests, request)
+	}
+	if a.BudgetGroupID != nil && a.GroupLimits().CostBudgeted() {
+		add(limits.DebitOwner{ID: *a.BudgetGroupID, Kind: "group", Basis: limits.Basis(a.BudgetGroupCostBasis)}, limits.Request{
+			CostOwnerID: *a.BudgetGroupID, CostBasis: limits.Basis(a.BudgetGroupCostBasis),
+			LookupID: limits.BudgetGroupLookup(*a.BudgetGroupID), CostIncreases: a.BudgetIncreases[*a.BudgetGroupID],
+			DailyCostLimit: a.BudgetGroupDailyCostLimit, WeeklyCostLimit: a.BudgetGroupWeeklyCostLimit,
+			MonthlyCostLimit: a.BudgetGroupMonthlyCostLimit, LeaseTTL: leaseTTL,
+		})
+	}
+	subject := func(value *string) string {
+		if value == nil {
+			return ""
+		}
+		return *value
+	}
+	for _, boundary := range [...]struct {
+		level, subject string
+		policy         *BudgetPolicy
+	}{
+		{"installation", a.InstallationID, a.InstallationBudget},
+		{"organization", subject(a.OrganizationID), a.OrganizationBudget},
+		{"project", subject(a.ProjectID), a.ProjectBudget},
+	} {
+		if !boundary.policy.Limited() {
+			continue
+		}
+		if boundary.subject == "" {
+			return nil, nil, false, false
+		}
+		owner := limits.AggregateBudgetID(boundary.level, boundary.subject)
+		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: boundary.policy.Basis()}, limits.Request{
+			CostOwnerID: owner, CostBasis: boundary.policy.Basis(), LookupID: limits.AggregateBudgetLookup(owner),
+			CostIncreases:  a.BudgetIncreases[owner],
+			DailyCostLimit: boundary.policy.DailyCostLimit, WeeklyCostLimit: boundary.policy.WeeklyCostLimit,
+			MonthlyCostLimit: boundary.policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
+		})
+	}
+	for _, key := range slices.Sorted(maps.Keys(a.Attribution)) {
+		policy, found := a.ProjectAttributionBudgets[key][a.Attribution[key]]
+		if !found || !policy.Limited() {
+			continue
+		}
+		if a.ProjectID == nil {
+			return nil, nil, false, false
+		}
+		owner := limits.AttributionBudgetID(*a.ProjectID, key, a.Attribution[key])
+		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: policy.Basis()}, limits.Request{
+			CostOwnerID: owner, CostBasis: policy.Basis(), LookupID: limits.AggregateBudgetLookup(owner),
+			CostIncreases:  a.BudgetIncreases[owner],
+			DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+			MonthlyCostLimit: policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
+		})
+	}
+	if a.EndUserDigest != "" {
+		for _, boundary := range [...]struct {
+			policy  *EndUserPolicy
+			project bool
+		}{
+			{a.ProjectEndUserPolicy, true}, {a.Policy.EndUserPolicy, false},
+		} {
+			policy := boundary.policy.Limits(a.EndUserDigest)
+			if !policy.CostBudgeted() {
+				continue
+			}
+			owner := limits.EndUserKeyID(a.ID, a.EndUserDigest)
+			if boundary.project {
+				if a.ProjectID == nil {
+					return nil, nil, false, false
+				}
+				owner = limits.EndUserProjectID(*a.ProjectID, a.EndUserDigest)
+			}
+			add(limits.DebitOwner{ID: owner, Kind: "end_user", Basis: limits.Basis(policy.CostBasis)}, limits.Request{
+				CostOwnerID: owner, CostBasis: limits.Basis(policy.CostBasis), LookupID: limits.EndUserLookup(owner),
+				CostIncreases:  a.BudgetIncreases[owner],
+				DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+				MonthlyCostLimit: policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
+			})
+		}
+	}
+	costBudgeted := false
+	for _, request := range requests {
+		costBudgeted = costBudgeted || request.HasCostBudget()
+	}
+	return owners, requests, costBudgeted, true
+}

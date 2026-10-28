@@ -326,14 +326,17 @@ func debitResultMatches(r DebitResult, resolutionDigest, evidence, resolutions [
 }
 
 type debitSettleHead struct {
-	state     DebitState
-	kind      string
-	zeroBound bool
+	state          DebitState
+	kind           string
+	costBound      string
+	chargeBound    string
+	observedCost   string
+	observedCharge string
 }
 
 func beginDebitSettleTx(ctx context.Context, tx pgx.Tx, r DebitResult) (debitSettleHead, bool, error) {
 	var head debitSettleHead
-	if err := tx.QueryRow(ctx, `SELECT state,kind,cost_bound=0 AND charge_bound=0 FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&head.state, &head.kind, &head.zeroBound); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT state,kind,cost_bound::text,charge_bound::text,observed_cost::text,observed_charge::text FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&head.state, &head.kind, &head.costBound, &head.chargeBound, &head.observedCost, &head.observedCharge); err != nil {
 		return head, false, err
 	}
 	duplicate, err := DebitResultReplayTx(ctx, tx, r)
