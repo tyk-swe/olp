@@ -195,28 +195,29 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
-	AgentPublications  []agentcontract.Revision `json:"agent_publications,omitempty"`
-	MCPServers         []MCPServer              `json:"mcp_servers,omitempty"`
-	mcpTools           map[string]MCPToolsetResolution
-	Commitments        map[string][]Commitment `json:"commitments,omitempty"`
-	Guardrails         *guardrails.Registry    `json:"guardrails,omitempty"`
-	guardrailEngines   map[string]*guardrails.Engine
-	hasBodyLimits      bool
-	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
-	CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
-	codeRevisions      map[string]codeRevision
-	interactions       map[string]map[string]*interaction.Template
-	operations         map[string]map[string]*operationplan.Template
-	media              map[string]map[string]*mediacontract.Template
-	durable            map[string]map[string]*durablecontract.Template
-	realtime           map[string]map[string]*realtimecontract.Template
-	webrtc             map[string]map[string]*realtimecontract.Template
-	duplex             map[string]map[string]*duplexcontract.Template
-	Generation         Generation          `json:"generation"`
-	Providers          map[string]Provider `json:"providers"`
-	Routes             map[string]Route    `json:"routes"`
-	InstallationPolicy *Policy             `json:"installation_policy,omitempty"`
-	KeyPolicies        map[string]*Policy  `json:"key_policies,omitempty"`
+	AgentPublications    []agentcontract.Revision `json:"agent_publications,omitempty"`
+	MCPServers           []MCPServer              `json:"mcp_servers,omitempty"`
+	mcpTools             map[string]MCPToolsetResolution
+	Commitments          map[string][]Commitment `json:"commitments,omitempty"`
+	Guardrails           *guardrails.Registry    `json:"guardrails,omitempty"`
+	guardrailEngines     map[string]*guardrails.Engine
+	toolGuardrailEngines map[string]*guardrails.Engine
+	hasBodyLimits        bool
+	CodeRoutes           map[string]codemode.Route `json:"code_routes,omitempty"`
+	CodeConnections      map[string]Configuration  `json:"code_connections,omitempty"`
+	codeRevisions        map[string]codeRevision
+	interactions         map[string]map[string]*interaction.Template
+	operations           map[string]map[string]*operationplan.Template
+	media                map[string]map[string]*mediacontract.Template
+	durable              map[string]map[string]*durablecontract.Template
+	realtime             map[string]map[string]*realtimecontract.Template
+	webrtc               map[string]map[string]*realtimecontract.Template
+	duplex               map[string]map[string]*duplexcontract.Template
+	Generation           Generation          `json:"generation"`
+	Providers            map[string]Provider `json:"providers"`
+	Routes               map[string]Route    `json:"routes"`
+	InstallationPolicy   *Policy             `json:"installation_policy,omitempty"`
+	KeyPolicies          map[string]*Policy  `json:"key_policies,omitempty"`
 }
 
 // Digest returns the SHA-256 of the canonical JSON encoding of the serving

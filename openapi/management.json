@@ -23314,7 +23314,9 @@
               "upstream_error",
               "outcome_unknown",
               "settled",
-              "not_accepted"
+              "not_accepted",
+              "refused_unpriced",
+              "guardrail_blocked"
             ]
           },
           "is_error": {
@@ -23397,6 +23399,13 @@
             ],
             "pattern": "^[A-Z]{3}$",
             "description": "Installation pricing currency the bounds and observed amounts use."
+          },
+          "guardrail_decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
           }
         },
         "required": [
@@ -23426,7 +23435,8 @@
           "remaining_charge",
           "unit_price",
           "pricing_state",
-          "currency"
+          "currency",
+          "guardrail_decisions"
         ]
       },
       "MCPToolCallResolveRequest": {
@@ -25771,6 +25781,7 @@
               "organization",
               "project",
               "route",
+              "toolset",
               "api-key"
             ]
           },
@@ -26054,6 +26065,7 @@
               "organization",
               "project",
               "route",
+              "toolset",
               "api-key"
             ]
           },
@@ -61357,7 +61369,7 @@
             }
           }
         },
-        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write."
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write."
       }
     },
     "/api/v1/guardrail-attachments/{attachment_id}": {
@@ -61460,7 +61472,7 @@
             }
           }
         ],
-        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write."
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write."
       }
     },
     "/api/v1/guardrails/evaluate": {

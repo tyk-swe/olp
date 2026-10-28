@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 const (
@@ -246,6 +247,63 @@ func TestSnapshotRefusesMalformedToolPricesAndLimits(t *testing.T) {
 	clone.MCPServers[0].ToolPrices["lookup"] = "9"
 	if snapshot.MCPServers[0].ToolPrices["lookup"] != "0.5" {
 		t.Fatal("snapshot clone shares mutable tool prices")
+	}
+}
+
+func TestSnapshotCompilesToolGuardrailEnginesPerToolsetAndKey(t *testing.T) {
+	snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
+	definition := func(id string) guardrails.Revision {
+		return guardrails.Revision{ID: id, GuardrailID: id, ProjectID: mcpProject, Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+	}
+	policy := func(id, definitionID, phase string) guardrails.PolicyRevision {
+		return guardrails.PolicyRevision{ID: id, PolicyID: id, ProjectID: mcpProject, Entries: []guardrails.Entry{{GuardrailID: definitionID, RevisionID: definitionID, Phase: phase, Action: guardrails.Block, Mandatory: true}}}
+	}
+	const (
+		toolDef    = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50621"
+		toolPol    = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50622"
+		projectDef = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50623"
+		projectPol = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50624"
+		keyDef     = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50625"
+		keyPol     = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50626"
+		keyID      = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50627"
+	)
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{toolDef: definition(toolDef), projectDef: definition(projectDef), keyDef: definition(keyDef)},
+		Policies: map[string]guardrails.PolicyRevision{
+			toolPol:    policy(toolPol, toolDef, guardrails.Input),
+			projectPol: policy(projectPol, projectDef, guardrails.Output),
+			keyPol:     policy(keyPol, keyDef, guardrails.OutputStream),
+		},
+		Attachments: []guardrails.Attachment{
+			{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50628", Scope: "toolset", ScopeID: mcpToolset, PolicyRevisionID: toolPol},
+			{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50629", Scope: "project", ScopeID: mcpProject, PolicyRevisionID: projectPol},
+			{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50630", Scope: "api-key", ScopeID: keyID, PolicyRevisionID: keyPol},
+		},
+		ProjectOrganizations: map[string]string{},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	engine := snapshot.ToolGuardrailEngine(mcpToolset, "")
+	if engine == nil || !engine.HasPhase(guardrails.Input) || !engine.HasPhase(guardrails.Output) {
+		t.Fatalf("tool engine lost its toolset or project policies: %v", engine)
+	}
+	if engine.HasPhase(guardrails.OutputStream) {
+		t.Fatal("a key policy reached calls from other keys")
+	}
+	keyEngine := snapshot.ToolGuardrailEngine(mcpToolset, keyID)
+	if keyEngine == nil || !keyEngine.HasPhase(guardrails.Input) || !keyEngine.HasPhase(guardrails.OutputStream) {
+		t.Fatalf("key tool engine lost its inherited policies: %v", keyEngine)
+	}
+	if snapshot.ToolGuardrailEngine("0192cf87-d4ab-7f2e-a8b1-c2d3e4f50699", "") != nil {
+		t.Fatal("an unknown toolset resolved a guardrail engine")
+	}
+	plain := mcpSnapshot(t, strings.Repeat("a", 64))
+	if err := plain.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	if plain.ToolGuardrailEngine(mcpToolset, "") != nil {
+		t.Fatal("a snapshot without guardrails compiled a tool engine")
 	}
 }
 
