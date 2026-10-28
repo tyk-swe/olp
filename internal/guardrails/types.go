@@ -74,7 +74,7 @@ type Attachment struct {
 	Order            int    `json:"order"`
 }
 
-type Boundary struct{ OrganizationID, ProjectID, RouteID, KeyID string }
+type Boundary struct{ OrganizationID, ProjectID, RouteID, ToolsetID, KeyID string }
 
 type Segment struct {
 	ID        string `json:"id"`
