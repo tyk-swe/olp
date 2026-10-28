@@ -1,6 +1,7 @@
 package scim
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,5 +98,24 @@ func TestNullAttributeMembershipRespectsResourceSchema(t *testing.T) {
 				t.Fatalf("%s defined=%v, want %v", tc.expression, got, tc.defined)
 			}
 		})
+	}
+}
+
+func TestSchemaFiltersPreserveValuesAndRejectInvalidNullComparisons(t *testing.T) {
+	for _, schema := range []string{"", UserSchema} {
+		for _, value := range []string{"O'Reilly", "x' OR true --"} {
+			compiler := SQLFilter{Schema: schema}
+			if _, err := compiler.Compile(`externalId eq "`+value+`"`, "document"); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(compiler.Args, any(value)) {
+				t.Fatalf("filter lost comparison value %q", value)
+			}
+		}
+		for _, operator := range []string{"gt", "ge", "lt", "le", "co", "sw", "ew"} {
+			if _, err := (&SQLFilter{Schema: schema}).Compile("externalId "+operator+" null", "document"); err == nil {
+				t.Fatalf("accepted invalid null comparison %s", operator)
+			}
+		}
 	}
 }
