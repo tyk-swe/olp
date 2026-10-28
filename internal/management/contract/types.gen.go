@@ -1382,6 +1382,7 @@ const (
 	ConfigurationGuardrailAttachmentScopeOrganization ConfigurationGuardrailAttachmentScope = "organization"
 	ConfigurationGuardrailAttachmentScopeProject      ConfigurationGuardrailAttachmentScope = "project"
 	ConfigurationGuardrailAttachmentScopeRoute        ConfigurationGuardrailAttachmentScope = "route"
+	ConfigurationGuardrailAttachmentScopeToolset      ConfigurationGuardrailAttachmentScope = "toolset"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationGuardrailAttachmentScope enum.
@@ -1396,6 +1397,8 @@ func (e ConfigurationGuardrailAttachmentScope) Valid() bool {
 	case ConfigurationGuardrailAttachmentScopeProject:
 		return true
 	case ConfigurationGuardrailAttachmentScopeRoute:
+		return true
+	case ConfigurationGuardrailAttachmentScopeToolset:
 		return true
 	default:
 		return false
@@ -2639,6 +2642,7 @@ const (
 	GuardrailAttachmentScopeOrganization GuardrailAttachmentScope = "organization"
 	GuardrailAttachmentScopeProject      GuardrailAttachmentScope = "project"
 	GuardrailAttachmentScopeRoute        GuardrailAttachmentScope = "route"
+	GuardrailAttachmentScopeToolset      GuardrailAttachmentScope = "toolset"
 )
 
 // Valid indicates whether the value is a known member of the GuardrailAttachmentScope enum.
@@ -2653,6 +2657,8 @@ func (e GuardrailAttachmentScope) Valid() bool {
 	case GuardrailAttachmentScopeProject:
 		return true
 	case GuardrailAttachmentScopeRoute:
+		return true
+	case GuardrailAttachmentScopeToolset:
 		return true
 	default:
 		return false
@@ -3399,12 +3405,14 @@ func (e MCPToolCallResponsePricingState) Valid() bool {
 
 // Defines values for MCPToolCallResponseStatus.
 const (
-	MCPToolCallResponseStatusDispatched     MCPToolCallResponseStatus = "dispatched"
-	MCPToolCallResponseStatusNotAccepted    MCPToolCallResponseStatus = "not_accepted"
-	MCPToolCallResponseStatusOutcomeUnknown MCPToolCallResponseStatus = "outcome_unknown"
-	MCPToolCallResponseStatusSettled        MCPToolCallResponseStatus = "settled"
-	MCPToolCallResponseStatusSucceeded      MCPToolCallResponseStatus = "succeeded"
-	MCPToolCallResponseStatusUpstreamError  MCPToolCallResponseStatus = "upstream_error"
+	MCPToolCallResponseStatusDispatched       MCPToolCallResponseStatus = "dispatched"
+	MCPToolCallResponseStatusGuardrailBlocked MCPToolCallResponseStatus = "guardrail_blocked"
+	MCPToolCallResponseStatusNotAccepted      MCPToolCallResponseStatus = "not_accepted"
+	MCPToolCallResponseStatusOutcomeUnknown   MCPToolCallResponseStatus = "outcome_unknown"
+	MCPToolCallResponseStatusRefusedUnpriced  MCPToolCallResponseStatus = "refused_unpriced"
+	MCPToolCallResponseStatusSettled          MCPToolCallResponseStatus = "settled"
+	MCPToolCallResponseStatusSucceeded        MCPToolCallResponseStatus = "succeeded"
+	MCPToolCallResponseStatusUpstreamError    MCPToolCallResponseStatus = "upstream_error"
 )
 
 // Valid indicates whether the value is a known member of the MCPToolCallResponseStatus enum.
@@ -3412,9 +3420,13 @@ func (e MCPToolCallResponseStatus) Valid() bool {
 	switch e {
 	case MCPToolCallResponseStatusDispatched:
 		return true
+	case MCPToolCallResponseStatusGuardrailBlocked:
+		return true
 	case MCPToolCallResponseStatusNotAccepted:
 		return true
 	case MCPToolCallResponseStatusOutcomeUnknown:
+		return true
+	case MCPToolCallResponseStatusRefusedUnpriced:
 		return true
 	case MCPToolCallResponseStatusSettled:
 		return true
@@ -9573,14 +9585,15 @@ type MCPToolCallResponse struct {
 	CreatedAt   time.Time                    `json:"created_at"`
 
 	// Currency Installation pricing currency the bounds and observed amounts use.
-	Currency       nullable.Nullable[string]     `json:"currency"`
-	DebitState     MCPToolCallResponseDebitState `json:"debit_state"`
-	DispatchId     openapi_types.UUID            `json:"dispatch_id"`
-	Id             openapi_types.UUID            `json:"id"`
-	InputDigest    string                        `json:"input_digest"`
-	IsError        bool                          `json:"is_error"`
-	ObservedCharge string                        `json:"observed_charge"`
-	ObservedCost   string                        `json:"observed_cost"`
+	Currency           nullable.Nullable[string]     `json:"currency"`
+	DebitState         MCPToolCallResponseDebitState `json:"debit_state"`
+	DispatchId         openapi_types.UUID            `json:"dispatch_id"`
+	GuardrailDecisions []GuardrailEvidence           `json:"guardrail_decisions"`
+	Id                 openapi_types.UUID            `json:"id"`
+	InputDigest        string                        `json:"input_digest"`
+	IsError            bool                          `json:"is_error"`
+	ObservedCharge     string                        `json:"observed_charge"`
+	ObservedCost       string                        `json:"observed_cost"`
 
 	// PricingState Whether the call settled at a price, at an explicit free price, or without any price.
 	PricingState      MCPToolCallResponsePricingState `json:"pricing_state"`

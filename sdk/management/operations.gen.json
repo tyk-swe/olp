@@ -4180,6 +4180,7 @@
                 "organization",
                 "project",
                 "route",
+                "toolset",
                 "api-key"
               ]
             },
@@ -6670,7 +6671,7 @@
     "method": "POST",
     "read_only": false,
     "path": "/api/v1/guardrail-attachments",
-    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write.",
     "scopes": [
       [
         "configure"
@@ -6731,6 +6732,7 @@
                 "organization",
                 "project",
                 "route",
+                "toolset",
                 "api-key"
               ]
             },
@@ -12836,7 +12838,7 @@
     "method": "DELETE",
     "read_only": false,
     "path": "/api/v1/guardrail-attachments/{attachment_id}",
-    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write.",
     "scopes": [
       [
         "configure"
@@ -26520,6 +26522,7 @@
                 "organization",
                 "project",
                 "route",
+                "toolset",
                 "api-key"
               ]
             },
