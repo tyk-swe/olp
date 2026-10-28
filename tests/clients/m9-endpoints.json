@@ -5,7 +5,7 @@
   "sdk_locks": {
     "openai": {
       "module": "github.com/openai/openai-go/v3",
-      "version": "3.78.0"
+      "version": "3.85.1"
     },
     "anthropic": {
       "module": "github.com/anthropics/anthropic-sdk-go",
