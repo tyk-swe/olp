@@ -159,8 +159,8 @@ importers:
   tests/sdk-smoke:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: 0.134.0
-        version: 0.134.0(zod@4.6.7)
+        specifier: 1.1.0
+        version: 1.1.0(zod@4.6.7)
       '@google/genai':
         specifier: 2.30.0
         version: 2.30.0(supports-color@10.2.2)
@@ -213,18 +213,18 @@ packages:
       zod:
         optional: true
 
-  '@anthropic-ai/sdk@0.134.0':
-    resolution: {integrity: sha512-j0DNXXKUKkr3kKyVR/I3pPWVv93g7vgHjgGYgh9uCXv5IKoXZPWmTwXKiVq/SZSbhBaD3KmtKhIszzt8dBnzog==}
+  '@anthropic-ai/sdk@0.58.0':
+    resolution: {integrity: sha512-wF8w+LB0AlKVLYUQho0nbK0uDv0K5Cgb92dbh8213t4roilnQ9Tm6zndheIaUxQdoEAeb0uoOT+GkkoIkqD8+A==}
+    hasBin: true
+
+  '@anthropic-ai/sdk@1.1.0':
+    resolution: {integrity: sha512-Op/fKMsfVwFCfObc87leLOFlORE0RjOvLzRzPCWWLI7Ww6bobpKR6YmYC8ZYgulRh+m2a/3/61VUXoWHFtCXIw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
     peerDependenciesMeta:
       zod:
         optional: true
-
-  '@anthropic-ai/sdk@0.58.0':
-    resolution: {integrity: sha512-wF8w+LB0AlKVLYUQho0nbK0uDv0K5Cgb92dbh8213t4roilnQ9Tm6zndheIaUxQdoEAeb0uoOT+GkkoIkqD8+A==}
-    hasBin: true
 
   '@asamuzakjp/css-color@7.1.5':
     resolution: {integrity: sha512-jCpAvj8apa7SKHZYogk0rbXB3Kb0hLFrpkWF+Ap+vBA5rirItnpv9NKyAyEuDuFizvl0qwnj6JWR70RGJ0rOlw==}
@@ -2985,15 +2985,15 @@ snapshots:
     optionalDependencies:
       zod: 4.6.7
 
-  '@anthropic-ai/sdk@0.134.0(zod@4.6.7)':
+  '@anthropic-ai/sdk@0.58.0': {}
+
+  '@anthropic-ai/sdk@1.1.0(zod@4.6.7)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.1.1
     optionalDependencies:
       zod: 4.6.7
-
-  '@anthropic-ai/sdk@0.58.0': {}
 
   '@asamuzakjp/css-color@7.1.5':
     dependencies:
