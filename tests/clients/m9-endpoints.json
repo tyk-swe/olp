@@ -9,7 +9,7 @@
     },
     "anthropic": {
       "module": "github.com/anthropics/anthropic-sdk-go",
-      "version": "1.82.0"
+      "version": "1.84.0"
     },
     "gemini": {
       "module": "google.golang.org/genai",
