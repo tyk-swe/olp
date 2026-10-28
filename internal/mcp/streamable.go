@@ -381,7 +381,7 @@ func (s *Server) createSessionRecord(r *http.Request, authority access.Authority
 		refused := failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable)
 		return sessionRecord{}, &refused
 	}
-	certifications := s.certifyToolsetServers(r.Context(), resolved)
+	certifications := s.certifyToolsetServers(r.Context(), authority, resolved)
 	for _, state := range certifications {
 		if state == certificationInvalid {
 			refused := failureRPC(errCatalogUnavailable.status, rpcServerError, errCatalogUnavailable)

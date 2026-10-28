@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"github.com/tyk-swe/olp/internal/access"
 	"sync"
 	"time"
 
@@ -25,7 +26,7 @@ func certifyTransport(ctx context.Context, transport *mcpservers.Transport, pinn
 	return certificationCertified
 }
 
-func (s *Server) certifyToolsetServers(ctx context.Context, resolved resolvedToolset) map[string]certificationState {
+func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Authority, resolved resolvedToolset) map[string]certificationState {
 	representatives := map[string]routing.MCPToolsetTool{}
 	for _, tool := range resolved.tools {
 		if _, ok := representatives[tool.ServerID]; !ok {
@@ -52,7 +53,7 @@ func (s *Server) certifyToolsetServers(ctx context.Context, resolved resolvedToo
 				states[index] = certificationInvalid
 				return
 			}
-			states[index] = s.certifyServer(ctx, tool)
+			states[index] = s.certifyServer(ctx, authority, tool)
 		}()
 	}
 	pending.Wait()
@@ -63,11 +64,11 @@ func (s *Server) certifyToolsetServers(ctx context.Context, resolved resolvedToo
 	return certified
 }
 
-func (s *Server) certifyServer(ctx context.Context, tool routing.MCPToolsetTool) certificationState {
+func (s *Server) certifyServer(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) certificationState {
 	if s.Egress == nil {
 		return certificationInvalid
 	}
-	credential, failure := s.loadCredential(ctx, tool)
+	credential, failure := s.loadCredential(ctx, authority, tool)
 	if failure != nil {
 		return certificationInvalid
 	}

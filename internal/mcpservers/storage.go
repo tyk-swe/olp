@@ -57,7 +57,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by,unit_price,tool_prices) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10)", next.RevisionID, next.ID, next.Revision, next.Endpoint, next.Catalog.Protocol, next.Catalog.Tools, next.Catalog.Digest, actor, next.UnitPrice, next.ToolPrices)
+	_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by,unit_price,tool_prices,oauth) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10,$11)", next.RevisionID, next.ID, next.Revision, next.Endpoint, next.Catalog.Protocol, next.Catalog.Tools, next.Catalog.Digest, actor, next.UnitPrice, next.ToolPrices, next.OAuth)
 	return err
 }
 

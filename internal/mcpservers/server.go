@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ type Server struct {
 	Egress *egress.Policy
 }
 type Definition struct {
+	OAuth                *routing.MCPOAuth `json:"oauth"`
 	ID                   string            `json:"id"`
 	ProjectID            string            `json:"project_id"`
 	Name                 string            `json:"name"`
@@ -44,6 +46,7 @@ type Definition struct {
 	CredentialID         *string           `json:"-"`
 }
 type Input struct {
+	OAuth                *routing.MCPOAuth `json:"oauth"`
 	present              map[string]bool   `json:"-"`
 	ProjectID            *string           `json:"project_id,omitempty"`
 	Name                 string            `json:"name"`
@@ -59,12 +62,12 @@ type Input struct {
 	PerKeyMaxConcurrency *int64            `json:"per_key_max_concurrency"`
 }
 
-const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency"
+const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth"
 const joined = " FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id"
 
 func scan(row pgx.Row) (*Definition, error) {
 	d := &Definition{Catalog: &Catalog{}}
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency)
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth)
 	d.HasCredential = d.CredentialID != nil
 	if d.ToolPrices == nil {
 		d.ToolPrices = map[string]string{}
@@ -112,7 +115,7 @@ func cloneToolPrices(values map[string]string) map[string]string {
 
 func definitionFromInput(in Input, catalog *Catalog) *Definition {
 	return &Definition{
-		Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
+		OAuth: in.OAuth.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
 		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute:       routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -200,15 +203,16 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	var endpoint string
 	var certified time.Time
 	var unitPrice *string
+	var oauth *routing.MCPOAuth
 	toolPrices := map[string]string{}
-	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices)
+	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices,oauth FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices, &oauth)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if toolPrices == nil {
 		toolPrices = map[string]string{}
 	}
-	return access.Detail(map[string]any{"id": revision, "server_id": id, "revision": version, "endpoint": endpoint, "catalog": catalog, "certified_at": certified, "unit_price": unitPrice, "tool_prices": toolPrices, "calls_per_minute": d.CallsPerMinute, "max_concurrency": d.MaxConcurrency, "per_key_calls_per_minute": d.PerKeyCallsPerMinute, "per_key_max_concurrency": d.PerKeyMaxConcurrency}, revision), nil
+	return access.Detail(map[string]any{"oauth": oauth, "id": revision, "server_id": id, "revision": version, "endpoint": endpoint, "catalog": catalog, "certified_at": certified, "unit_price": unitPrice, "tool_prices": toolPrices, "calls_per_minute": d.CallsPerMinute, "max_concurrency": d.MaxConcurrency, "per_key_calls_per_minute": d.PerKeyCallsPerMinute, "per_key_max_concurrency": d.PerKeyMaxConcurrency}, revision), nil
 }
 func Validate(in *Input, policy *egress.Policy) error {
 	in.Name = strings.TrimSpace(in.Name)
@@ -226,6 +230,9 @@ func Validate(in *Input, policy *egress.Policy) error {
 		return access.Invalid("endpoint", "The MCP endpoint is not permitted by provider egress policy.")
 	}
 	in.Endpoint = u.String()
+	if err := validateOAuth(in.OAuth, policy); err != nil {
+		return err
+	}
 	if in.Transport != "" && !routing.MCPTransport(in.Transport).Valid() {
 		return access.Invalid("transport", "Use streamable_http or sse.")
 	}
@@ -343,6 +350,9 @@ func definitionTransport(in Input, previous *Definition) routing.MCPTransport {
 }
 
 func mergeAbsentPricingAndLimits(in *Input, previous *Definition) {
+	if !in.Present("oauth") {
+		in.OAuth = previous.OAuth.Clone()
+	}
 	if !in.Present("unit_price") {
 		in.UnitPrice = clonePrice(previous.UnitPrice)
 	}
@@ -379,7 +389,7 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 	if in.Name != previous.Name || in.Endpoint != previous.Endpoint || *in.Enabled != previous.Enabled {
 		return false
 	}
-	if len(in.Credential) != 0 || !samePrice(in.UnitPrice, previous.UnitPrice) {
+	if !reflect.DeepEqual(in.OAuth, previous.OAuth) || len(in.Credential) != 0 || !samePrice(in.UnitPrice, previous.UnitPrice) {
 		return false
 	}
 	if len(in.ToolPrices) != len(previous.ToolPrices) {

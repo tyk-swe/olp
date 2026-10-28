@@ -12,6 +12,7 @@ import type { MCPServer, Publication } from './api';
 
 const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
 const server: MCPServer = {
+  oauth: null,
   id,
   project_id: id,
   name: 'Certified tools',
