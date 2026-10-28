@@ -724,8 +724,8 @@ evidence retries only within retention; no guessed job or blind resubmission.
 
 ## SDK and live-provider checks
 
-The deterministic JavaScript smoke suite pins OpenAI `7.4.0`, Anthropic
-`0.116.0` and Google GenAI `2.16.0` in `tests/sdk-smoke/package.json`. These
+The deterministic JavaScript smoke suite pins its OpenAI, Anthropic and Google
+GenAI SDK versions in `tests/sdk-smoke/package.json`. These
 are mock protocol checks, not a claim that every upstream model or every SDK
 version has live certification. Live-provider checks are dispatched separately
 with selected-provider credentials; use their result for the actual provider,
