@@ -36,7 +36,7 @@ The three coding clients use `latest`; other versions below remain exact pins.
 | Vercel AI SDK Google provider | `@ai-sdk/google` | 4.0.87 | `generateContent`, `streamGenerateContent` and native embeddings on a strict route |
 | LangChain | `langchain` | 1.5.14 | `createAgent` tool loops over each chat model below |
 | LangChain core | `@langchain/core` | 1.2.13 | Messages, tools, tool-call chunk assembly and `withStructuredOutput` |
-| LangChain OpenAI provider | `@langchain/openai` | 1.6.0 | `ChatOpenAI` over Chat Completions and Responses, and `OpenAIEmbeddings` |
+| LangChain OpenAI provider | `@langchain/openai` | 1.6.3 | `ChatOpenAI` over Chat Completions and Responses, and `OpenAIEmbeddings` |
 | LangChain Anthropic provider | `@langchain/anthropic` | 1.5.11 | `ChatAnthropic`, prompt caching, extended thinking replayed with its signature |
 | LangChain Google provider | `@langchain/google-genai` | 2.3.2 | `ChatGoogleGenerativeAI` and `GoogleGenerativeAIEmbeddings` on a strict route |
 | LlamaIndex.TS | `llamaindex` | 0.12.1 | Tool definitions and message helpers |
