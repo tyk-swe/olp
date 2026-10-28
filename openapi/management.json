@@ -27923,7 +27923,9 @@
               "pending",
               "active",
               "expired",
-              "revoked"
+              "revoked",
+              "denied",
+              "failed"
             ]
           },
           "expires_at": {
@@ -27998,6 +28000,98 @@
         "required": [
           "enrollment_id",
           "handoff_token"
+        ]
+      },
+      "MCPGrantAuthorizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "type": "string",
+            "enum": [
+              "authorization_code",
+              "device_code"
+            ]
+          }
+        },
+        "required": [
+          "flow"
+        ]
+      },
+      "MCPGrantCompletionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "writeOnly": true
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ]
+      },
+      "MCPGrantDeviceChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "verification_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "verification_url",
+          "user_code",
+          "interval",
+          "expires_at"
+        ]
+      },
+      "MCPGrantAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "expired",
+              "denied",
+              "failed"
+            ]
+          },
+          "authorization_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "device": {
+            "$ref": "#/components/schemas/MCPGrantDeviceChallenge"
+          }
+        },
+        "required": [
+          "state"
         ]
       }
     },
@@ -65109,6 +65203,200 @@
         "parameters": [
           {
             "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/authorize": {
+      "post": {
+        "operationId": "authorize_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "authorize mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPGrantAuthorizationRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/complete": {
+      "post": {
+        "operationId": "complete_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "complete mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPGrantCompletionRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/poll": {
+      "post": {
+        "operationId": "poll_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "poll mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
             "in": "path",
             "required": true,
             "schema": {

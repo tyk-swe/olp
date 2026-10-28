@@ -18,15 +18,15 @@ import (
 // Device authorization bounds. The interval's default and its slow-down step
 // are RFC 8628's.
 const (
-	maxDeviceTTL    = 30 * time.Minute
+	MaxDeviceTTL    = 30 * time.Minute
 	maxUserCode     = 64
 	maxInterval     = 5 * time.Minute
 	defaultInterval = 5 * time.Second
 	slowDown        = 5 * time.Second
-	// pollLease outlasts a status request, which runs one poll step: another
+	// PollLease outlasts a status request, which runs one poll step: another
 	// status request polls the enrollment again only once the lease ends,
 	// should the request that holds it never record what it found.
-	pollLease = time.Minute
+	PollLease = time.Minute
 )
 
 // Status is where a grant enrollment by device authorization stands.
@@ -68,7 +68,7 @@ type Credential struct {
 
 // authorizeDevice checks a device authorization the plugin started and makes
 // it the enrollment's, which lasts as long as its user code, within
-// maxDeviceTTL.
+// MaxDeviceTTL.
 func (e *Enrollment) authorizeDevice(manifest abi.Manifest, device abi.DeviceAuthorization) error {
 	switch {
 	case !approved(manifest, device.VerificationURL):
@@ -85,7 +85,7 @@ func (e *Enrollment) authorizeDevice(manifest abi.Manifest, device abi.DeviceAut
 		e.interval = defaultInterval
 	}
 	device.Interval = seconds(e.interval)
-	e.ExpiresAt = time.Now().Add(time.Duration(min(device.ExpiresIn, seconds(maxDeviceTTL))) * time.Second)
+	e.ExpiresAt = time.Now().Add(time.Duration(min(device.ExpiresIn, seconds(MaxDeviceTTL))) * time.Second)
 	e.Device = &device
 	return nil
 }
@@ -104,7 +104,7 @@ func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 	var interval int64
 	err := tx.QueryRow(ctx, `UPDATE olp.grant_enrollments SET poll_at=now()+$4::integer*interval '1 second'
 		WHERE id=$1 AND provider_id=$2 AND started_by=$3 AND continued_at IS NULL AND expires_at>now() AND poll_at<=now()
-		RETURNING slot_id::text,plugin_digest,profile_id,expires_at,poll_interval,expected_credential_id::text`, id, providerID, principal, seconds(pollLease)).
+		RETURNING slot_id::text,plugin_digest,profile_id,expires_at,poll_interval,expected_credential_id::text`, id, providerID, principal, seconds(PollLease)).
 		Scan(&e.SlotID, &e.PluginDigest, &e.ProfileID, &e.ExpiresAt, &interval, &e.ExpectedCredentialID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if ended, err := expire(ctx, tx, providerID, id, principal); err != nil || ended {
@@ -205,7 +205,7 @@ func (e Enrollment) Settle(ctx context.Context, db *pgxpool.Pool, failed error) 
 	switch code {
 	case abi.CodeAuthorizationPending, abi.CodeSlowDown:
 		if code == abi.CodeSlowDown {
-			e.interval = min(e.interval+slowDown, maxInterval)
+			e.interval = DevicePollInterval(e.interval, true)
 		}
 		err := e.settle(ctx, db, "poll_interval=$2::integer,poll_at=now()+$2::integer*interval '1 second'", false, seconds(e.interval))
 		return Standing{Status: Pending, Interval: e.interval}, err
@@ -237,3 +237,13 @@ func (e Enrollment) settle(ctx context.Context, db *pgxpool.Pool, set string, en
 }
 
 func seconds(d time.Duration) int64 { return int64(d / time.Second) }
+
+func DevicePollInterval(interval time.Duration, slowed bool) time.Duration {
+	if interval <= 0 {
+		return defaultInterval
+	}
+	if slowed {
+		return min(interval+slowDown, maxInterval)
+	}
+	return min(interval, maxInterval)
+}

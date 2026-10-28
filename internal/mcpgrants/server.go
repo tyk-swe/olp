@@ -21,6 +21,8 @@ const (
 	Active  StandingState = "active"
 	Expired StandingState = "expired"
 	Revoked StandingState = "revoked"
+	Denied  StandingState = "denied"
+	Failed  StandingState = "failed"
 )
 
 type Standing struct {
@@ -46,11 +48,14 @@ type claimResponse struct {
 }
 
 func (s *Server) store() *Store {
-	return &Store{Pool: s.Access.Pool, Keys: s.Access.Keys, Auth: s.Access.Auth, Installation: s.Access.Installation}
+	return &Store{Pool: s.Access.Pool, Keys: s.Access.Keys, Auth: s.Access.Auth, Installation: s.Access.Installation, Egress: s.Access.Egress}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/mcp-user-grants", s.list)
+	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/{enrollment_id}/authorize", s.authorize)
+	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/{enrollment_id}/complete", s.complete)
+	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/{enrollment_id}/poll", s.poll)
 	s.Access.Route(mux, "POST /api/v1/mcp-servers/{server_id}/grant-enrollments", s.start)
 	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/claim", s.claim)
 	s.Access.Route(mux, "DELETE /api/v1/mcp-user-grants/{grant_id}", s.revoke)
@@ -137,7 +142,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT e.id::text,g.id::text,e.binding,
- CASE WHEN g.revoked_at IS NOT NULL THEN 'revoked' WHEN g.id IS NOT NULL AND g.expires_at<=now() THEN 'expired' WHEN g.id IS NOT NULL THEN 'active' WHEN e.expires_at<=now() THEN 'expired' ELSE 'pending' END,
+ CASE WHEN g.revoked_at IS NOT NULL THEN 'revoked' WHEN g.id IS NOT NULL AND (g.expires_at<=now() OR g.failure_code IS NOT NULL) THEN 'expired' WHEN g.id IS NOT NULL THEN 'active' WHEN e.outcome IS NOT NULL AND e.outcome<>'completed' THEN e.outcome WHEN e.expires_at<=now() THEN 'expired' ELSE 'pending' END,
  COALESCE(g.expires_at,e.expires_at),e.created_at
  FROM olp.mcp_grant_enrollments e LEFT JOIN olp.mcp_user_grants g ON g.enrollment_id=e.id
  WHERE (e.claimed_by=$1 OR e.started_by=$1 OR $2 OR e.project_id=ANY($3::uuid[])) AND e.id<$4::uuid ORDER BY e.id DESC LIMIT $5`, p.UserID(), p.AllProjects, p.ProjectIDs(), page.Before, page.Limit+1)

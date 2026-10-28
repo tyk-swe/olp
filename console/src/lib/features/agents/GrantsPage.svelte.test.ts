@@ -11,7 +11,9 @@ vi.mock('./api', async (original) => ({
   getServer: vi.fn(),
   saveServer: vi.fn(),
   startMCPGrant: vi.fn(),
-  claimMCPGrant: vi.fn()
+  claimMCPGrant: vi.fn(),
+  authorizeMCPGrant: vi.fn(),
+  pollMCPGrant: vi.fn()
 }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ allows: () => true })
@@ -226,4 +228,160 @@ it('starts, continues and claims a key enrollment without leaving the page', asy
       (item) => item.textContent === 'Claim enrollment'
     )
   ).toBe(false);
+});
+
+it('completes the upstream callback for its enrollment without retaining callback secrets in the URL', async () => {
+  window.history.replaceState(
+    null,
+    '',
+    '/agents/grants?code=fixture-code&state=enrollment.fixture-state'
+  );
+  const { host } = page();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('Complete authorization');
+  });
+  expect(window.location.search).toBe('');
+});
+
+const claimedEnrollment = (
+  id: string
+): Awaited<ReturnType<typeof api.claimMCPGrant>> => ({
+  state: 'pending',
+  enrollment: {
+    id,
+    expires_at: '2026-10-22T00:10:00Z',
+    claimed_at: null,
+    binding: {
+      server_id: a.id,
+      project_id: a.project_id,
+      endpoint: a.endpoint,
+      oauth: a.oauth,
+      identity: { kind: 'api_key', id: `key-${id}` }
+    }
+  }
+});
+
+async function enroll(host: HTMLElement, id: string) {
+  vi.mocked(api.startMCPGrant).mockResolvedValueOnce({
+    enrollment_id: id,
+    enrollment_url: `/agents/grants#${id}.private-${id}`,
+    expires_at: '2026-10-22T00:10:00Z'
+  });
+  vi.mocked(api.claimMCPGrant).mockResolvedValueOnce(claimedEnrollment(id));
+  fill(host, 'API key UUID', `key-${id}`);
+  button(host, 'Start key enrollment').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(
+      host.querySelector(`a[href$="#${id}.private-${id}"]`)
+    ).not.toBeNull();
+  });
+  host
+    .querySelector<HTMLAnchorElement>(`a[href$="#${id}.private-${id}"]`)
+    ?.click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(button(host, 'Claim enrollment').disabled).toBe(false);
+  });
+  button(host, 'Claim enrollment').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain(
+      'Enrollment claimed. Authorization is pending'
+    );
+    expect(
+      [...host.querySelectorAll('button')].some(
+        (item) => item.textContent?.trim() === 'Claim enrollment'
+      )
+    ).toBe(false);
+  });
+}
+
+const deviceAuthorization = (id: string): api.MCPGrantAuthorization => ({
+  state: 'pending',
+  device: {
+    user_code: `${id}-code`,
+    verification_url: `https://identity.example.test/${id}`,
+    expires_at: '2026-10-22T00:10:00Z',
+    interval: 5
+  }
+});
+
+it.each(['active', 'pending', 'denied'] as const)(
+  'starts a second enrollment after a device authorization is %s',
+  async (previousState) => {
+    vi.mocked(api.authorizeMCPGrant).mockImplementation(async (id) =>
+      deviceAuthorization(id)
+    );
+    vi.mocked(api.pollMCPGrant).mockResolvedValueOnce({ state: previousState });
+    const { host } = page();
+    await choose(host, a);
+    await enroll(host, 'first');
+    button(host, 'Use device authorization').click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.textContent).toContain('first-code');
+    });
+    button(host, 'Check device approval').click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.textContent).toContain(
+        `Personal authorization is ${previousState}`
+      );
+    });
+    await enroll(host, 'second');
+    expect(button(host, 'Authorize in browser').disabled).toBe(false);
+    expect(button(host, 'Use device authorization').disabled).toBe(false);
+    expect(host.textContent).not.toContain('first-code');
+    button(host, 'Use device authorization').click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.textContent).toContain('second-code');
+      expect(
+        host.querySelector('a[href="https://identity.example.test/second"]')
+      ).not.toBeNull();
+    });
+  }
+);
+
+it('ignores a late device result after another enrollment is adopted', async () => {
+  const pending = Promise.withResolvers<api.MCPGrantAuthorization>();
+  vi.mocked(api.authorizeMCPGrant).mockImplementation(async (id) =>
+    deviceAuthorization(id)
+  );
+  vi.mocked(api.pollMCPGrant).mockReturnValueOnce(pending.promise);
+  const { host } = page();
+  await choose(host, a);
+  await enroll(host, 'first');
+  button(host, 'Use device authorization').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('first-code');
+  });
+  button(host, 'Check device approval').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(button(host, 'Check device approval').disabled).toBe(true);
+  });
+  window.history.replaceState(null, '', '/agents/grants#second.private-second');
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(button(host, 'Claim enrollment').disabled).toBe(false);
+  });
+  vi.mocked(api.claimMCPGrant).mockResolvedValueOnce(
+    claimedEnrollment('second')
+  );
+  button(host, 'Claim enrollment').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(button(host, 'Use device authorization').disabled).toBe(false);
+  });
+  pending.resolve({ state: 'active' });
+  await pending.promise;
+  flushSync();
+  expect(host.textContent).not.toContain('Personal authorization is active');
+  expect(host.textContent).not.toContain('first-code');
+  expect(button(host, 'Use device authorization').disabled).toBe(false);
 });
