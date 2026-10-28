@@ -22,10 +22,12 @@ describe('API key SDK snippets', () => {
         construct(options);
       }
     }
-    const source = sdkSnippet('anthropic', secret, `${endpoint}/`, route).replace(
-      /^import[^\n]+\n/,
-      ''
-    );
+    const source = sdkSnippet(
+      'anthropic',
+      secret,
+      `${endpoint}/`,
+      route
+    ).replace(/^import[^\n]+\n/, '');
     const run = runInNewContext(`(async (Anthropic) => { ${source} })`) as (
       client: typeof Anthropic
     ) => Promise<void>;
@@ -68,7 +70,10 @@ describe('API key SDK snippets', () => {
       apiKey: secret,
       httpOptions: { baseUrl: `${endpoint}/gemini`, apiVersion: 'v1beta' }
     });
-    expect(generateContent).toHaveBeenCalledWith({ model: route, contents: 'Hello' });
+    expect(generateContent).toHaveBeenCalledWith({
+      model: route,
+      contents: 'Hello'
+    });
   });
 
   it('includes the selected credentials, endpoint and route in the OpenAI snippet', () => {
