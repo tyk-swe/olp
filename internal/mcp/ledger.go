@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -228,7 +229,7 @@ WHERE i.api_key_id=$1 AND i.call_digest=$2 FOR UPDATE OF i`, reservation.APIKeyI
 	}
 	status := existing.status
 	switch status {
-	case StatusSucceeded, StatusUpstreamError, StatusOutcomeUnknown, StatusSettled, StatusNotAccepted:
+	case StatusSucceeded, StatusUpstreamError, StatusOutcomeUnknown, StatusSettled, StatusNotAccepted, StatusGuardrailBlocked:
 	case StatusDispatched:
 		status = StatusInProgress
 	default:
@@ -320,13 +321,45 @@ func (l *DurableLedger) ReleaseUndispatched(ctx context.Context, reservation *Re
 	return l.Store.ReleaseUndispatched(ctx, reservation.DispatchID, reservation.ClaimID)
 }
 
+func evidenceDecisions(evidence AttemptEvidence) []byte {
+	if len(evidence.GuardrailDecisions) == 0 {
+		return []byte("[]")
+	}
+	raw, err := json.Marshal(evidence.GuardrailDecisions)
+	if err != nil {
+		return []byte("[]")
+	}
+	return raw
+}
+
+func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error {
+	tx, err := l.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'guardrail_blocked',false,$12,$13,$14::numeric,$15,$16,$17)`,
+		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
+		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
+		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.StartedAt, evidence.CompletedAt,
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence)); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return l.Store.ReleaseUndispatched(releaseCtx, reservation.DispatchID, reservation.ClaimID)
+}
+
 func insertAttemptTx(ctx context.Context, tx pgx.Tx, reservation *Reservation, evidence AttemptEvidence) error {
-	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::numeric,$18,$19) ON CONFLICT(dispatch_id) DO UPDATE SET result_digest=EXCLUDED.result_digest,status=EXCLUDED.status,is_error=EXCLUDED.is_error,completed_at=EXCLUDED.completed_at WHERE mcp_tool_calls.status='dispatched'`,
+	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::numeric,$18,$19,$20) ON CONFLICT(dispatch_id) DO UPDATE SET result_digest=EXCLUDED.result_digest,status=EXCLUDED.status,is_error=EXCLUDED.is_error,completed_at=EXCLUDED.completed_at,guardrail_decisions=EXCLUDED.guardrail_decisions WHERE mcp_tool_calls.status='dispatched'`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.ResultDigest, string(evidence.Status), evidence.IsError,
 		evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation))
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence))
 	return err
 }
 

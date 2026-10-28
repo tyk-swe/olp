@@ -85,12 +85,15 @@ type executeInput struct {
 	arguments json.RawMessage
 	releaseID string
 	callID    string
+	release   *runtime.Release
+	snapshot  *routing.Snapshot
 }
 
 type execution struct {
 	reservation    *Reservation
 	result         mcpservers.ToolResult
 	failure        *apiError
+	blocked        *apiError
 	retryAfter     time.Duration
 	outcomeUnknown bool
 	unknownMessage string
@@ -200,8 +203,26 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTo
 	}
 }
 
-func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool, reservation *Reservation, dispatched dispatchResult) execution {
+func (s *Server) settleToolCall(ctx context.Context, in executeInput, reservation *Reservation, dispatched dispatchResult, state *toolGuardrailState) execution {
+	tool := in.tool
 	result := dispatched.result
+	rawEncoded, _ := json.Marshal(result)
+	guarded, refusal := s.guardResult(ctx, in, reservation, state, result)
+	if refusal != nil {
+		evidence := AttemptEvidence{
+			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
+			Status: StatusGuardrailBlocked, IsError: result.IsError, ResultDigest: digestBytes(rawEncoded),
+			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
+			GuardrailDecisions: stateDecisions(state),
+		}
+		if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
+			evidence.Status = StatusOutcomeUnknown
+			_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
+			return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
+		}
+		return execution{reservation: reservation, blocked: guardrailRefusal(refusal), listChanged: dispatched.listChanged, certification: dispatched.certification}
+	}
+	result = guarded
 	encoded, _ := json.Marshal(result)
 	status := StatusSucceeded
 	if result.IsError {
@@ -211,12 +232,14 @@ func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool
 		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 		Status: status, IsError: result.IsError, ResultDigest: digestBytes(encoded),
 		StartedAt: dispatched.started, CompletedAt: dispatched.completed,
+		GuardrailDecisions: stateDecisions(state),
 	}
 	if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
 		unknownEvidence := AttemptEvidence{
 			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 			Status: StatusOutcomeUnknown, IsError: result.IsError, ResultDigest: digestBytes(encoded),
 			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
+			GuardrailDecisions: stateDecisions(state),
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
 		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
@@ -248,7 +271,12 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved
 	}
-	dispatchedResult := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)
+	state := s.toolGuardrails(in)
+	arguments, refusal := s.guardArguments(ctx, in, reservation, state)
+	if refusal != nil {
+		return execution{reservation: reservation, blocked: refusal}
+	}
+	dispatchedResult := s.dispatchToolCall(ctx, in.tool, credential, reservation, arguments)
 	dispatched = dispatchedResult.dispatched
 	if dispatchedResult.failure != nil {
 		return execution{failure: dispatchedResult.failure, certification: dispatchedResult.certification}
@@ -259,9 +287,10 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 			Status: StatusOutcomeUnknown, IsError: false,
 			ResultDigest: digestBytes([]byte(string(StatusOutcomeUnknown) + ":" + reservation.DispatchID)),
 			StartedAt:    dispatchedResult.started, CompletedAt: dispatchedResult.completed,
+			GuardrailDecisions: stateDecisions(state),
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
 		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed.", listChanged: dispatchedResult.listChanged, certification: dispatchedResult.certification}
 	}
-	return s.settleToolCall(ctx, in.tool, reservation, dispatchedResult)
+	return s.settleToolCall(ctx, in, reservation, dispatchedResult, state)
 }

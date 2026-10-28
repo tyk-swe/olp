@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -59,13 +60,14 @@ func cloneUnitPrice(price *string) *string {
 type Status string
 
 const (
-	StatusDispatched      Status = "dispatched"
-	StatusSucceeded       Status = "succeeded"
-	StatusUpstreamError   Status = "upstream_error"
-	StatusOutcomeUnknown  Status = "outcome_unknown"
-	StatusSettled         Status = "settled"
-	StatusNotAccepted     Status = "not_accepted"
-	StatusRefusedUnpriced Status = "refused_unpriced"
+	StatusDispatched       Status = "dispatched"
+	StatusSucceeded        Status = "succeeded"
+	StatusUpstreamError    Status = "upstream_error"
+	StatusOutcomeUnknown   Status = "outcome_unknown"
+	StatusSettled          Status = "settled"
+	StatusNotAccepted      Status = "not_accepted"
+	StatusRefusedUnpriced  Status = "refused_unpriced"
+	StatusGuardrailBlocked Status = "guardrail_blocked"
 
 	defaultCallTimeout = 30 * time.Second
 	maxCallBodyBytes   = 1 << 20
@@ -115,21 +117,33 @@ func (r *Reservation) amount() string {
 }
 
 type AttemptEvidence struct {
-	ServerID         string
-	ServerRevisionID string
-	Status           Status
-	IsError          bool
-	ResultDigest     string
-	StartedAt        time.Time
-	CompletedAt      time.Time
+	ServerID           string
+	ServerRevisionID   string
+	Status             Status
+	IsError            bool
+	ResultDigest       string
+	StartedAt          time.Time
+	CompletedAt        time.Time
+	GuardrailDecisions []guardrails.Evidence
 }
 
 type Ledger interface {
 	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
 	MarkDispatched(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
 	ReleaseUndispatched(ctx context.Context, reservation *Reservation) error
+	RefuseUndispatched(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
 	MarkUnknown(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
 	Settle(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
+}
+
+type GuardrailEvaluation struct {
+	Authority access.Authority
+	Release   *runtime.Release
+	Engine    *guardrails.Engine
+	RequestID string
+	Phase     string
+	Segments  []guardrails.Segment
+	Masks     *guardrails.Masking
 }
 
 type Server struct {
@@ -142,6 +156,7 @@ type Server struct {
 	Sessions       *SessionStore
 	TrustedProxies []netip.Prefix
 	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
+	Guardrails     func(ctx context.Context, in GuardrailEvaluation) (guardrails.Result, error)
 	Now            func() time.Time
 
 	resultsMu sync.Mutex
@@ -238,9 +253,22 @@ func writeOutcomeUnknown(w http.ResponseWriter, attemptID, dispatchID, message s
 	})
 }
 
+var errGuardrailBlocked = fail(http.StatusBadRequest, "guardrail_blocked", "invalid_request_error", "The tool call could not satisfy the configured guardrails.")
+
+func writeGuardrailRefusal(w http.ResponseWriter, reservation *Reservation, refusal *apiError) {
+	writeJSON(w, refusal.status, map[string]any{
+		"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID, "status": StatusGuardrailBlocked,
+		"error": map[string]any{"message": refusal.msg, "type": refusal.kind, "code": refusal.code},
+	})
+}
+
 func writeRepeat(w http.ResponseWriter, resolved resolvedToolset, tool routing.MCPToolsetTool, outcome execution) {
 	repeat := outcome.repeat
 	kind := repeatOutcome(repeat, outcome.repeatRetained)
+	if kind == repeatGuardrailBlocked {
+		writeGuardrailRefusal(w, &Reservation{AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}, errGuardrailBlocked)
+		return
+	}
 	if kind == repeatRetainedResult {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
@@ -570,10 +598,12 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	releaseID := releaseIDFor(release, snapshot)
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID, callID: *request.CallID})
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID, callID: *request.CallID, release: release, snapshot: snapshot})
 	switch {
 	case outcome.repeat != nil:
 		writeRepeat(w, resolved, tool, outcome)
+	case outcome.blocked != nil:
+		writeGuardrailRefusal(w, outcome.reservation, outcome.blocked)
 	case outcome.failure != nil:
 		if outcome.retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.FormatInt(int64((outcome.retryAfter+time.Second-1)/time.Second), 10))

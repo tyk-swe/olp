@@ -41,12 +41,15 @@ const (
 	repeatOutcomeUnknown
 	repeatRetainedResult
 	repeatResultNotRetained
+	repeatGuardrailBlocked
 )
 
 func repeatOutcome(repeat *RetainedCall, hasResult bool) repeatKind {
 	switch {
 	case repeat.Conflict:
 		return repeatConflict
+	case repeat.Status == StatusGuardrailBlocked:
+		return repeatGuardrailBlocked
 	case repeat.Status == StatusInProgress:
 		return repeatInProgress
 	case repeat.Status == StatusOutcomeUnknown:
