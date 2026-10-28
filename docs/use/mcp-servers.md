@@ -85,30 +85,43 @@ that opened it. Where no shared store is configured, session creation refuses
 as unavailable while the JSON tool endpoints keep serving.
 
 Opening a session certifies the live catalog of every server in the pinned
-toolset against the digest recorded in its pinned server revision, and each
-JSON tool call certifies its server the same way before anything is
-dispatched. Certification only lists tools and never invokes one. When the
-live definitions differ from the pinned ones, calls to that server refuse with
-a `tool_definition_changed` error and nothing is dispatched or settled. The
-same refusal applies when a server has since been certified into a newer
-revision than the one the toolset pins. The published toolset and the retained
-server revision stay readable through the management API while calls are
-blocked, so the change can be reviewed and a fresh revision published on
-purpose. Publishing a reviewed revision that pins the current catalog
-unblocks new JSON calls and newly opened sessions, and it leaves toolsets
-pinned to other servers alone. A session opened before the re-publish stays
-bound to the revision it started with.
+toolset against the digest recorded in its pinned server revision. If a
+catalog cannot be verified at all, the session is not opened. Each JSON tool
+call and each session `tools/call` dispatch certifies its server the same way
+before anything is dispatched, because upstream transports dial per call and
+no upstream session pool exists yet. Certification therefore runs per dispatch
+until a session pool exists. Certification only lists tools and never invokes
+one. When the live definitions differ from the pinned ones, calls to that
+server refuse with a `tool_definition_changed` error and nothing is dispatched
+or settled, and a server found drifted in a session stays blocked for that
+session. The same refusal applies per server when a server has since been
+certified into a newer revision than the one the toolset pins, and healthy
+servers in the same toolset stay callable. A pinned schema that cannot compile
+refuses with `tool_schema_invalid` instead, since nothing about the upstream
+definition changed. The published toolset and the retained server revision
+stay readable through the management API while calls are blocked, so the
+change can be reviewed and a fresh revision published on purpose. Publishing a
+reviewed revision that pins the current catalog unblocks new JSON calls and
+newly opened sessions, and it leaves toolsets pinned to other servers alone. A
+session opened before the re-publish stays bound to the revision it started
+with.
+
+Listings surface drift instead of quietly dropping tools. A JSON listing that
+selects one toolset with `toolset_id` refuses with `tool_definition_changed`
+when any of its pins has drifted from the serving snapshot, and a session
+`tools/list` does the same for its bound toolset. The unfiltered JSON listing
+may omit toolsets and tools it cannot resolve, so use the management API reads
+as the review surface for a blocked definition.
 
 A `notifications/tools/list_changed` notification seen on an upstream response
 stream invalidates that server certification for the session, and the next
-call to the server certifies again before it can dispatch. Calls on an
-already certified session do not rediscover the catalog. Certification
-compares tool definitions at the moment it runs, and it does not attest how
-the upstream implementation behaves between checks.
+call to the server certifies again before it can dispatch, as every dispatch
+now does. Certification compares tool definitions at the moment it runs, and
+it does not attest how the upstream implementation behaves between checks.
 
 Revoking a key, removing a toolset from its allowlist, retiring a publication
 and disabling or retiring a server all refuse new calls and end live session
 eligibility once the gateway authority view refreshes, which is the same
 freshness boundary the rest of the gateway enforces. A session that loses its
-authority this way is closed, while a temporary authority outage only refuses
-requests until authority is readable again.
+authority this way is refused and closed on next use, while a temporary
+authority outage only refuses requests until authority is readable again.
