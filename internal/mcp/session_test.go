@@ -328,7 +328,7 @@ func TestStreamableHTTPSessionLifecycleAtCertifiedVersions(t *testing.T) {
 			}
 
 			called := rpcRequest(t, server, "test-key", sessionID, protocol, "/mcp",
-				`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"secret-argument"}}}`)
+				`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"secret-argument"},"_meta":{"olp.call_id":"existing-session-1"}}}`)
 			result := rpcResult(t, called)
 			content, _ := result["content"].([]any)
 			if len(content) != 1 || fx.calls.Load() != 1 {
@@ -417,7 +417,7 @@ func TestStreamableHTTPSessionsAreSharedAcrossReplicas(t *testing.T) {
 		t.Fatalf("session opened on one replica listed nothing on another: %v", listed.body)
 	}
 	called := rpcRequest(t, second, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"}}}`)
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-2"}}}`)
 	rpcResult(t, called)
 	if secondFixture.calls.Load() != 1 || len(secondLedger.evidence) != 1 {
 		t.Fatalf("cross-replica session call did not dispatch and settle: calls=%d evidence=%v", secondFixture.calls.Load(), secondLedger.evidence)
@@ -483,7 +483,7 @@ func TestStreamableHTTPSessionRefusesOtherPrincipals(t *testing.T) {
 
 	for _, body := range []string{
 		listCall,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":"x"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-3"}}}`,
 	} {
 		if response := rpcRequest(t, server, "other-key", sessionID, latestProtocol(), "/mcp", body); response.status != http.StatusNotFound {
 			t.Fatalf("another principal used the session: %d %v", response.status, response.body)
@@ -529,7 +529,7 @@ func TestStreamableHTTPSessionBindsPinnedToolsetRevision(t *testing.T) {
 		t.Fatalf("session listing silently omitted definitions changed after pinning: %v", listed.body)
 	}
 	called := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"}}}`)
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-4"}}}`)
 	if data, _ := rpcError(t, called)["data"].(map[string]any); data["code"] != "tool_definition_changed" {
 		t.Fatalf("session called a definition changed after pinning: %v", called.body)
 	}
@@ -572,8 +572,8 @@ func TestStreamableHTTPSessionCallRefusalsMatchJSONPath(t *testing.T) {
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	tl.reset()
 	for name, body := range map[string]string{
-		"invalid arguments": `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":3}}}`,
-		"unknown alias":     `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"lookup","arguments":{"query":"x"}}}`,
+		"invalid arguments": `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":3},"_meta":{"olp.call_id":"existing-session-5"}}}`,
+		"unknown alias":     `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"lookup","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-6"}}}`,
 	} {
 		response := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", body)
 		if failure := rpcError(t, response); failure["code"] != float64(rpcInvalidParams) {
@@ -590,7 +590,7 @@ func TestStreamableHTTPSessionAmbiguousCallStaysUnknown(t *testing.T) {
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	tl.reset()
 	response := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"}}}`)
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-7"}}}`)
 	data, _ := rpcError(t, response)["data"].(map[string]any)
 	if data["code"] != "outcome_unknown" || data["attempt_id"] == nil || fx.calls.Load() != 1 {
 		t.Fatalf("ambiguous session call was not reported unknown: %v", response.body)
@@ -623,7 +623,7 @@ func TestStreamableHTTPRequiresBoundSessionAndNegotiatedProtocol(t *testing.T) {
 		listCall,
 		`{"jsonrpc":"2.0","id":7,"method":"ping"}`,
 		`{"jsonrpc":"2.0","id":8,"method":"resources/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":"x"}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-8"}}}`,
 	} {
 		early := rpcRequest(t, server, "test-key", uninitializedID, latestProtocol(), "/mcp", body)
 		if failure := rpcError(t, early); failure["code"] != float64(rpcNotInitialized) {
@@ -662,7 +662,7 @@ func TestStreamableHTTPSessionStateHoldsNoBodiesOrCredentials(t *testing.T) {
 	server, _, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	called := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"secret-argument"}}}`)
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"secret-argument"},"_meta":{"olp.call_id":"existing-session-9"}}}`)
 	rpcResult(t, called)
 	commander, ok := server.Sessions.client.(*fakeSessionCommander)
 	if !ok {
@@ -691,10 +691,13 @@ func rpcDataCode(t *testing.T, response rpcResponse) string {
 	return code
 }
 
+var sessionCallSequence atomic.Int32
+
 func sessionCall(t *testing.T, server *Server, sessionID string) rpcResponse {
 	t.Helper()
+	callID := "existing-session-call-" + strconv.Itoa(int(sessionCallSequence.Add(1)))
 	return rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"}}}`)
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"},"_meta":{"olp.call_id":"`+callID+`"}}}`)
 }
 
 func TestStreamableHTTPInitializeCertifiesLiveCatalogAndBlocksDriftedCalls(t *testing.T) {
@@ -937,7 +940,7 @@ func TestStreamableHTTPSessionSnapshotDriftScopesPerServer(t *testing.T) {
 		t.Fatalf("healthy server in a partially drifted toolset did not serve in session: calls=%d", fx.calls.Load())
 	}
 	driftedCall := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"}}}`)
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"},"_meta":{"olp.call_id":"existing-session-11"}}}`)
 	if code := rpcDataCode(t, driftedCall); code != "tool_definition_changed" {
 		t.Fatalf("drifted server beside a healthy one was not refused as drift in session: %v", driftedCall.body)
 	}
@@ -951,5 +954,78 @@ func TestStreamableHTTPSessionSnapshotDriftScopesPerServer(t *testing.T) {
 	rpcResult(t, sessionCall(t, server, sessionID))
 	if fx.calls.Load() != 2 {
 		t.Fatalf("drift refusal ended the session for its healthy server: calls=%d", fx.calls.Load())
+	}
+}
+
+func sessionCallBody(id int, callID, query string) string {
+	meta := ""
+	if callID != "" {
+		meta = `,"_meta":{"olp.call_id":"` + callID + `"}`
+	}
+	return `{"jsonrpc":"2.0","id":` + strconv.Itoa(id) + `,"method":"tools/call","params":{"name":"` + alias() + `","arguments":{"query":"` + query + `"}` + meta + `}}`
+}
+
+func TestStreamableHTTPCallRequiresMetaCallID(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	response := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "", "x"))
+	if rpcDataCode(t, response) != "call_id_required" || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("session call without a meta call id dispatched: %v calls=%d", response.body, fx.calls.Load())
+	}
+}
+
+func TestStreamableHTTPExactRepeatReturnsRetainedResult(t *testing.T) {
+	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "order-session", "x"))
+	firstResult := rpcResult(t, first)
+	if fx.calls.Load() != 1 {
+		t.Fatalf("first session call did not execute once: %v", first.body)
+	}
+	second := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(3, "order-session", "x"))
+	secondResult := rpcResult(t, second)
+	if fx.calls.Load() != 1 {
+		t.Fatalf("exact session repeat re-executed upstream: calls=%d body=%v", fx.calls.Load(), second.body)
+	}
+	firstMeta, _ := firstResult["_meta"].(map[string]any)
+	secondMeta, _ := secondResult["_meta"].(map[string]any)
+	if secondMeta["olp.attempt_id"] != firstMeta["olp.attempt_id"] || secondMeta["olp.dispatch_id"] != firstMeta["olp.dispatch_id"] {
+		t.Fatalf("session repeat lost the retained attempt identity: first=%v second=%v", firstResult, secondResult)
+	}
+	firstContent, _ := firstResult["content"].([]any)
+	secondContent, _ := secondResult["content"].([]any)
+	if len(firstContent) != 1 || len(secondContent) != 1 {
+		t.Fatalf("session repeat did not return the retained result: first=%v second=%v", firstResult, secondResult)
+	}
+}
+
+func TestStreamableHTTPChangedBodyUnderSameMetaCallIDConflicts(t *testing.T) {
+	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "order-clash", "one"))
+	_ = rpcResult(t, first)
+	second := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(3, "order-clash", "two"))
+	if rpcDataCode(t, second) != "call_id_conflict" || fx.calls.Load() != 1 {
+		t.Fatalf("changed session body under one call id executed: %v calls=%d", second.body, fx.calls.Load())
+	}
+	data, _ := rpcError(t, second)["data"].(map[string]any)
+	if data["attempt_id"] == nil || data["dispatch_id"] == nil {
+		t.Fatalf("session conflict did not name the original attempt: %v", second.body)
+	}
+}
+
+func TestStreamableHTTPSameCallIDUnderAnotherPrincipalExecutesIndependently(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	other := testAuthority([]string{"tools"}, []string{testToolset})
+	other.ID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50711"
+	rt.otherAuthority = other
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "shared-name", "x"))
+	_ = rpcResult(t, first)
+	otherSession := openSession(t, server, "other-key", latestProtocol())
+	second := rpcRequest(t, server, "other-key", otherSession, latestProtocol(), "/mcp", sessionCallBody(2, "shared-name", "x"))
+	_ = rpcResult(t, second)
+	if fx.calls.Load() != 2 {
+		t.Fatalf("one principal's call id bound another principal: calls=%d body=%v", fx.calls.Load(), second.body)
 	}
 }

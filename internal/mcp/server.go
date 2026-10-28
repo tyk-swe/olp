@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +46,7 @@ type ReserveInput struct {
 	ReleaseID         string
 	ToolAlias         string
 	InputDigest       string
+	CallDigest        string
 }
 
 type Reservation struct {
@@ -88,6 +90,9 @@ type Server struct {
 	TrustedProxies []netip.Prefix
 	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
 	Now            func() time.Time
+
+	resultsMu sync.Mutex
+	results   map[string]retainedResult
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -133,6 +138,8 @@ var (
 	errSessionCreateUnavailable = fail(http.StatusServiceUnavailable, "session_unavailable", "api_error", "A session could not be created, so nothing was dispatched.")
 	errSessionNotInitialized    = fail(http.StatusBadRequest, "session_not_initialized", "invalid_request_error", "Send notifications/initialized before using this session.")
 	errSessionLimit             = fail(http.StatusTooManyRequests, "session_limit_exceeded", "rate_limit_error", "This key already has the maximum number of active sessions.")
+	errCallIDRequired           = fail(http.StatusBadRequest, "call_id_required", "invalid_request_error", "Supply a caller call identifier for this tool call.")
+	errCallIDInvalid            = fail(http.StatusBadRequest, "invalid_call_id", "invalid_request_error", "Supply a caller call identifier of 1-256 bytes without control characters.")
 )
 
 func writeError(w http.ResponseWriter, err *apiError) {
@@ -147,11 +154,50 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func writeOutcomeUnknown(w http.ResponseWriter, reservation *Reservation, message string) {
+func writeOutcomeUnknown(w http.ResponseWriter, attemptID, dispatchID, message string) {
 	writeJSON(w, http.StatusBadGateway, map[string]any{
-		"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID, "status": StatusOutcomeUnknown,
+		"attempt_id": attemptID, "dispatch_id": dispatchID, "status": StatusOutcomeUnknown,
 		"error": map[string]any{"message": message, "type": "api_error", "code": "outcome_unknown"},
 	})
+}
+
+func writeRepeat(w http.ResponseWriter, resolved resolvedToolset, tool routing.MCPToolsetTool, outcome execution) {
+	repeat := outcome.repeat
+	switch {
+	case repeat.Conflict:
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
+			"error": map[string]any{"message": "This call identifier already belongs to a different tool call.", "type": "invalid_request_error", "code": "call_id_conflict"},
+		})
+	case repeat.Status == StatusInProgress:
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
+			"error": map[string]any{"message": "This call identifier belongs to a call that is still in progress.", "type": "invalid_request_error", "code": "call_in_progress"},
+		})
+	case repeat.Status == StatusOutcomeUnknown:
+		writeOutcomeUnknown(w, repeat.AttemptID, repeat.DispatchID, "The tool call may have run upstream, but its outcome could not be confirmed.")
+	case outcome.repeatRetained:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
+			"content": outcome.repeatResult.Content, "structured_content": outcome.repeatResult.StructuredContent, "is_error": outcome.repeatResult.IsError,
+			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID,
+		})
+	default:
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
+			"error": map[string]any{"message": "This call already ran, but its result is no longer retained.", "type": "invalid_request_error", "code": "result_not_retained"},
+		})
+	}
+}
+
+func callIDFailure(callID *string) *apiError {
+	if callID == nil {
+		return errCallIDRequired
+	}
+	if !validCallID(*callID) {
+		return errCallIDInvalid
+	}
+	return nil
 }
 
 func canonicalUUID(raw string) bool {
@@ -340,6 +386,7 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 type callRequest struct {
 	ToolsetID string          `json:"toolset_id"`
 	Name      string          `json:"name"`
+	CallID    *string         `json:"call_id"`
 	Arguments json.RawMessage `json:"arguments"`
 }
 
@@ -381,6 +428,10 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object."))
 		return
 	}
+	if failure = callIDFailure(request.CallID); failure != nil {
+		writeError(w, failure)
+		return
+	}
 	resolved, failure := s.resolveToolset(authority, snapshot, request.ToolsetID)
 	if failure != nil {
 		writeError(w, failure)
@@ -412,15 +463,17 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	releaseID := releaseIDFor(release, snapshot)
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID})
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID, callID: *request.CallID})
 	switch {
+	case outcome.repeat != nil:
+		writeRepeat(w, resolved, tool, outcome)
 	case outcome.failure != nil:
 		if outcome.retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.FormatInt(int64((outcome.retryAfter+time.Second-1)/time.Second), 10))
 		}
 		writeError(w, outcome.failure)
 	case outcome.outcomeUnknown:
-		writeOutcomeUnknown(w, outcome.reservation, outcome.unknownMessage)
+		writeOutcomeUnknown(w, outcome.reservation.AttemptID, outcome.reservation.DispatchID, outcome.unknownMessage)
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{
 			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,

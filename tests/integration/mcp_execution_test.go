@@ -243,12 +243,12 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		t.Fatalf("pinned tools were not listed under their alias: %d %v", status, listed)
 	}
 
-	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": 3}})
+	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "existing-json-1", "arguments": map[string]any{"query": 3}})
 	if status != http.StatusUnprocessableEntity || calls.Load() != 0 || debitCount() != 0 {
 		t.Fatalf("invalid arguments reserved or dispatched: status=%d calls=%d debits=%d", status, calls.Load(), debitCount())
 	}
 
-	status, called := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
+	status, called := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "existing-json-2", "arguments": map[string]any{"query": argument}})
 	if status != http.StatusOK || calls.Load() != 1 {
 		t.Fatalf("valid call did not reach the upstream once: status=%d calls=%d body=%v", status, calls.Load(), called)
 	}
@@ -284,7 +284,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		t.Fatalf("management list lost the attempt: %v", listedCalls)
 	}
 
-	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50799", "name": tool.Alias, "arguments": map[string]any{"query": "x"}})
+	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50799", "name": tool.Alias, "call_id": "existing-json-3", "arguments": map[string]any{"query": "x"}})
 	if status != http.StatusNotFound || calls.Load() != 1 || debitCount() != 1 {
 		t.Fatalf("foreign toolset dispatched: status=%d calls=%d debits=%d", status, calls.Load(), debitCount())
 	}
@@ -319,7 +319,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 	status, _, sessionCalled := mcpCall("POST", "/mcp", sessionID, map[string]any{
 		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}, "_meta": map[string]any{"olp.call_id": "existing-session-1"}},
 	})
 	callResult := mcpExecObject(t, sessionCalled, "result")
 	sessionContent := mcpExecItems(t, callResult, "content")
@@ -339,7 +339,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 	if status, _, _ = mcpCallAs(otherSecret, "POST", "/mcp", sessionID, map[string]any{
 		"jsonrpc": "2.0", "id": 7, "method": "tools/call",
-		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}, "_meta": map[string]any{"olp.call_id": "existing-session-2"}},
 	}); status != http.StatusNotFound {
 		t.Fatalf("another principal called through the session at the gateway boundary: %d", status)
 	}
@@ -354,13 +354,13 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 
 	description.Store("Changed after publication")
-	status, driftedCall := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
+	status, driftedCall := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "existing-json-4", "arguments": map[string]any{"query": argument}})
 	if status != http.StatusConflict || mcpExecString(t, mcpExecObject(t, driftedCall, "error"), "code") != "tool_definition_changed" || calls.Load() != 2 {
 		t.Fatalf("drifted catalog was called over the JSON path: status=%d calls=%d body=%v", status, calls.Load(), driftedCall)
 	}
 	_, _, liveDriftedCall := mcpCall("POST", "/mcp", sessionID, map[string]any{
 		"jsonrpc": "2.0", "id": 9, "method": "tools/call",
-		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}, "_meta": map[string]any{"olp.call_id": "existing-session-3"}},
 	})
 	if data := mcpExecObject(t, mcpExecObject(t, liveDriftedCall, "error"), "data"); mcpExecString(t, data, "code") != "tool_definition_changed" || calls.Load() != 2 {
 		t.Fatalf("drifted catalog was called in an established session: calls=%d body=%v", calls.Load(), liveDriftedCall)
@@ -378,7 +378,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 	_, _, driftedSessionCall := mcpCall("POST", "/mcp", driftedSessionID, map[string]any{
 		"jsonrpc": "2.0", "id": 11, "method": "tools/call",
-		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}, "_meta": map[string]any{"olp.call_id": "existing-session-4"}},
 	})
 	if data := mcpExecObject(t, mcpExecObject(t, driftedSessionCall, "error"), "data"); mcpExecString(t, data, "code") != "tool_definition_changed" || calls.Load() != 2 {
 		t.Fatalf("drifted catalog was called in a fresh session: calls=%d body=%v", calls.Load(), driftedSessionCall)
@@ -414,7 +414,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	if err = h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
+	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "existing-json-5", "arguments": map[string]any{"query": argument}})
 	if status != http.StatusNotFound || calls.Load() != 2 {
 		t.Fatalf("retired server was called over the JSON path: status=%d calls=%d", status, calls.Load())
 	}
@@ -567,7 +567,7 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 		return resp.StatusCode, out
 	}
 
-	if status, body := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinA.Alias, "arguments": map[string]any{"query": "x"}}); status != http.StatusOK || callsA.Load() != 1 {
+	if status, body := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinA.Alias, "call_id": "existing-json-6", "arguments": map[string]any{"query": "x"}}); status != http.StatusOK || callsA.Load() != 1 {
 		t.Fatalf("healthy server did not serve before drift: status=%d calls=%d body=%v", status, callsA.Load(), body)
 	}
 
@@ -581,10 +581,10 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if status, body := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinA.Alias, "arguments": map[string]any{"query": "x"}}); status != http.StatusOK || callsA.Load() != 2 {
+	if status, body := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinA.Alias, "call_id": "existing-json-7", "arguments": map[string]any{"query": "x"}}); status != http.StatusOK || callsA.Load() != 2 {
 		t.Fatalf("snapshot drift on one server blocked the healthy server: status=%d calls=%d body=%v", status, callsA.Load(), body)
 	}
-	status, drifted := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinB.Alias, "arguments": map[string]any{"query": "x"}})
+	status, drifted := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinB.Alias, "call_id": "existing-json-8", "arguments": map[string]any{"query": "x"}})
 	if status != http.StatusConflict || mcpExecString(t, mcpExecObject(t, drifted, "error"), "code") != "tool_definition_changed" || callsB.Load() != 0 {
 		t.Fatalf("snapshot-drifted server beside a healthy one was not refused as drift: status=%d calls=%d body=%v", status, callsB.Load(), drifted)
 	}

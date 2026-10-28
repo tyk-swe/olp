@@ -35,7 +35,7 @@ func (l *DurableLedger) currency(ctx context.Context) (string, error) {
 }
 
 func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (*Reservation, error) {
-	if l.Pool == nil || l.Store == nil || l.Auth == nil || in.Authority.ProjectID == nil {
+	if l.Pool == nil || l.Store == nil || l.Auth == nil || in.Authority.ProjectID == nil || !validCallDigest(in.CallDigest) {
 		return nil, limits.ErrDebitAuthority
 	}
 	ids := make([]string, 5)
@@ -78,6 +78,9 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 	if state != limits.DebitPrepared {
 		return nil, limits.ErrDebitState
 	}
+	if err = claimCallTx(ctx, tx, in, reservation); err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -88,6 +91,56 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 		return nil, err
 	}
 	return reservation, nil
+}
+
+func claimCallTx(ctx context.Context, tx pgx.Tx, in ReserveInput, reservation *Reservation) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO olp.mcp_call_identities(api_key_id,project_id,call_digest,dispatch_id,attempt_id,toolset_id,toolset_revision_id,tool_alias,input_digest,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,clock_timestamp()+make_interval(secs=>$10)) ON CONFLICT(api_key_id,call_digest) DO NOTHING`,
+		reservation.APIKeyID, reservation.ProjectID, in.CallDigest, reservation.DispatchID, reservation.AttemptID,
+		in.ToolsetID, in.ToolsetRevisionID, in.ToolAlias, in.InputDigest, callIdentityBinding.Seconds())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	var existing struct {
+		dispatchID string
+		attemptID  string
+		projectID  string
+		revisionID string
+		alias      string
+		input      string
+		expired    bool
+		state      limits.DebitState
+		status     string
+		isError    bool
+	}
+	err = tx.QueryRow(ctx, `SELECT i.dispatch_id::text,i.attempt_id::text,i.project_id::text,i.toolset_revision_id::text,i.tool_alias,i.input_digest,i.expires_at<=clock_timestamp(),d.state,COALESCE(c.status,''),COALESCE(c.is_error,false)
+FROM olp.mcp_call_identities i JOIN olp.execution_debits d ON d.id=i.dispatch_id LEFT JOIN olp.mcp_tool_calls c ON c.dispatch_id=i.dispatch_id
+WHERE i.api_key_id=$1 AND i.call_digest=$2 FOR UPDATE OF i`, reservation.APIKeyID, in.CallDigest).
+		Scan(&existing.dispatchID, &existing.attemptID, &existing.projectID, &existing.revisionID, &existing.alias, &existing.input, &existing.expired, &existing.state, &existing.status, &existing.isError)
+	if err != nil {
+		return err
+	}
+	if existing.expired || existing.state == limits.DebitReleased {
+		_, err = tx.Exec(ctx, `UPDATE olp.mcp_call_identities SET project_id=$3,dispatch_id=$4,attempt_id=$5,toolset_id=$6,toolset_revision_id=$7,tool_alias=$8,input_digest=$9,created_at=clock_timestamp(),expires_at=clock_timestamp()+make_interval(secs=>$10) WHERE api_key_id=$1 AND call_digest=$2`,
+			reservation.APIKeyID, in.CallDigest, reservation.ProjectID, reservation.DispatchID, reservation.AttemptID,
+			in.ToolsetID, in.ToolsetRevisionID, in.ToolAlias, in.InputDigest, callIdentityBinding.Seconds())
+		return err
+	}
+	retained := RetainedCall{AttemptID: existing.attemptID, DispatchID: existing.dispatchID, IsError: existing.isError}
+	switch {
+	case existing.status != "":
+		retained.Status = Status(existing.status)
+	case existing.state == limits.DebitPrepared || existing.state == limits.DebitReady:
+		retained.Status = StatusInProgress
+	default:
+		retained.Status = StatusOutcomeUnknown
+	}
+	if existing.projectID != reservation.ProjectID || existing.revisionID != in.ToolsetRevisionID || existing.alias != in.ToolAlias || existing.input != in.InputDigest {
+		retained.Conflict = true
+	}
+	return &CallRepeatError{Retained: retained}
 }
 
 func (l *DurableLedger) MarkDispatched(ctx context.Context, reservation *Reservation) error {

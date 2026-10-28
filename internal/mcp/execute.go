@@ -20,6 +20,7 @@ type executeInput struct {
 	tool      routing.MCPToolsetTool
 	arguments json.RawMessage
 	releaseID string
+	callID    string
 }
 
 type execution struct {
@@ -31,6 +32,9 @@ type execution struct {
 	unknownMessage string
 	listChanged    bool
 	certification  certificationState
+	repeat         *RetainedCall
+	repeatResult   mcpservers.ToolResult
+	repeatRetained bool
 }
 
 type dispatchResult struct {
@@ -61,8 +65,18 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 	reservation, err := s.Ledger.Reserve(ctx, ReserveInput{
 		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
+		CallDigest: s.callDigest(in.authority, in.callID),
 	})
 	if err != nil {
+		var repeatErr *CallRepeatError
+		if errors.As(err, &repeatErr) {
+			repeat := repeatErr.Retained
+			outcome := execution{repeat: &repeat}
+			if repeat.Status == StatusSucceeded || repeat.Status == StatusUpstreamError {
+				outcome.repeatResult, outcome.repeatRetained = s.retainedResultFor(repeat.AttemptID)
+			}
+			return nil, outcome
+		}
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
 			return nil, execution{failure: fail(http.StatusTooManyRequests, "budget_exceeded", "rate_limit_error", "The call exceeds an enforced budget, so it was not dispatched."), retryAfter: exceeded.RetryAfter}
@@ -131,6 +145,7 @@ func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
 		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
 	}
+	s.retainResult(reservation.AttemptID, result)
 	return execution{reservation: reservation, result: result, listChanged: dispatched.listChanged, certification: dispatched.certification}
 }
 
@@ -145,7 +160,7 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	ctx, cancel := context.WithTimeout(parent, defaultCallTimeout)
 	defer cancel()
 	reservation, reserved := s.reserveToolCall(ctx, in)
-	if reserved.failure != nil {
+	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved
 	}
 	dispatched := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)

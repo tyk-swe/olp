@@ -534,8 +534,20 @@ func (s *Server) sessionListTools(w http.ResponseWriter, r *http.Request, author
 }
 
 type sessionCallRequest struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	Name      string           `json:"name"`
+	Arguments json.RawMessage  `json:"arguments"`
+	Meta      *callRequestMeta `json:"_meta"`
+}
+
+type callRequestMeta struct {
+	CallID *string `json:"olp.call_id"`
+}
+
+func (r sessionCallRequest) callID() *string {
+	if r.Meta == nil {
+		return nil
+	}
+	return r.Meta.CallID
 }
 
 type callMeta struct {
@@ -556,6 +568,10 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 	var params sessionCallRequest
 	if len(message.params) == 0 || json.Unmarshal(message.params, &params) != nil || params.Name == "" {
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "Supply the tool name to call.", data: rpcErrorData{Code: "invalid_params"}})
+		return
+	}
+	if failure := callIDFailure(params.callID()); failure != nil {
+		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: failure.msg, data: rpcErrorData{Code: failure.code}})
 		return
 	}
 	resolved, failure := s.pinnedToolset(current)
@@ -600,9 +616,13 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errLedger))
 		return
 	}
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: current.releaseID})
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: current.releaseID, callID: *params.callID()})
 	if outcome.failure == errPermissionDenied && s.driftScoped(authority, resolved) {
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
+		return
+	}
+	if outcome.repeat != nil {
+		s.writeSessionRepeat(w, message.id, resolved, outcome)
 		return
 	}
 	s.recordCallCertification(r.Context(), current, tool, certification, outcome)
@@ -630,6 +650,37 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 				ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
 			},
 		})
+	}
+}
+
+func (s *Server) writeSessionRepeat(w http.ResponseWriter, id json.RawMessage, resolved resolvedToolset, outcome execution) {
+	repeat := outcome.repeat
+	data := rpcErrorData{Status: string(repeat.Status), AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}
+	switch {
+	case repeat.Conflict:
+		data.Code = "call_id_conflict"
+		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "This call identifier already belongs to a different tool call.", data: data})
+	case repeat.Status == StatusInProgress:
+		data.Code = "call_in_progress"
+		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcServerError, message: "This call identifier belongs to a call that is still in progress.", data: data})
+	case repeat.Status == StatusOutcomeUnknown:
+		data.Code = "outcome_unknown"
+		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcServerError, message: "The tool call may have run upstream, but its outcome could not be confirmed.", data: data})
+	case outcome.repeatRetained:
+		content := outcome.repeatResult.Content
+		if content == nil {
+			content = []mcpservers.ToolContent{}
+		}
+		writeRPCResult(w, http.StatusOK, id, sessionCallResult{
+			Content: content, StructuredContent: outcome.repeatResult.StructuredContent, IsError: outcome.repeatResult.IsError,
+			Meta: callMeta{
+				AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID,
+				ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
+			},
+		})
+	default:
+		data.Code = "result_not_retained"
+		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcServerError, message: "This call already ran, but its result is no longer retained.", data: data})
 	}
 }
 

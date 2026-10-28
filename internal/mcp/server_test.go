@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -119,21 +120,60 @@ func (f *fakeRuntime) AuthorizeAgentResource(a access.Authority, scope, id, revi
 	return nil
 }
 
+type fakeClaim struct {
+	input       ReserveInput
+	reservation *Reservation
+	status      Status
+	isError     bool
+}
+
 type fakeLedger struct {
 	tl         *timeline
 	reserveErr error
 	settleErr  error
 	evidence   []AttemptEvidence
 	reserved   []ReserveInput
+	claims     map[string]*fakeClaim
+	sequence   int
 }
 
 func (f *fakeLedger) Reserve(_ context.Context, in ReserveInput) (*Reservation, error) {
 	if f.reserveErr != nil {
 		return nil, f.reserveErr
 	}
+	if f.claims == nil {
+		f.claims = map[string]*fakeClaim{}
+	}
+	if existing, ok := f.claims[in.CallDigest]; ok {
+		retained := RetainedCall{
+			AttemptID: existing.reservation.AttemptID, DispatchID: existing.reservation.DispatchID,
+			Status: existing.status, IsError: existing.isError,
+		}
+		if retained.Status == "" {
+			retained.Status = StatusInProgress
+		}
+		if existing.input.ToolsetRevisionID != in.ToolsetRevisionID || existing.input.ToolAlias != in.ToolAlias || existing.input.InputDigest != in.InputDigest {
+			retained.Conflict = true
+		}
+		return nil, &CallRepeatError{Retained: retained}
+	}
 	f.tl.add("reserve")
 	f.reserved = append(f.reserved, in)
-	return &Reservation{DispatchID: testGenID, ClaimID: testGenID, RunID: testGenID, StepID: testGenID, AttemptID: testRevision}, nil
+	f.sequence++
+	suffix := strconv.Itoa(7000 + f.sequence)
+	id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f5" + suffix
+	reservation := &Reservation{DispatchID: id, ClaimID: testGenID, RunID: testGenID, StepID: testGenID, AttemptID: id}
+	f.claims[in.CallDigest] = &fakeClaim{input: in, reservation: reservation}
+	return reservation, nil
+}
+
+func (f *fakeLedger) claimFor(reservation *Reservation) *fakeClaim {
+	for _, claim := range f.claims {
+		if claim.reservation == reservation {
+			return claim
+		}
+	}
+	return nil
 }
 
 func (f *fakeLedger) MarkDispatched(context.Context, *Reservation) error {
@@ -141,23 +181,36 @@ func (f *fakeLedger) MarkDispatched(context.Context, *Reservation) error {
 	return nil
 }
 
-func (f *fakeLedger) ReleaseUndispatched(context.Context, *Reservation) error {
+func (f *fakeLedger) ReleaseUndispatched(_ context.Context, reservation *Reservation) error {
 	f.tl.add("released")
+	for digest, claim := range f.claims {
+		if claim.reservation == reservation {
+			delete(f.claims, digest)
+		}
+	}
 	return nil
 }
 
-func (f *fakeLedger) MarkUnknown(_ context.Context, _ *Reservation, evidence AttemptEvidence) error {
+func (f *fakeLedger) MarkUnknown(_ context.Context, reservation *Reservation, evidence AttemptEvidence) error {
 	f.tl.add("unknown")
 	f.evidence = append(f.evidence, evidence)
+	if claim := f.claimFor(reservation); claim != nil {
+		claim.status = evidence.Status
+		claim.isError = evidence.IsError
+	}
 	return nil
 }
 
-func (f *fakeLedger) Settle(_ context.Context, _ *Reservation, evidence AttemptEvidence) error {
+func (f *fakeLedger) Settle(_ context.Context, reservation *Reservation, evidence AttemptEvidence) error {
 	if f.settleErr != nil {
 		return f.settleErr
 	}
 	f.tl.add("settled")
 	f.evidence = append(f.evidence, evidence)
+	if claim := f.claimFor(reservation); claim != nil {
+		claim.status = evidence.Status
+		claim.isError = evidence.IsError
+	}
 	return nil
 }
 
@@ -404,7 +457,7 @@ func TestListToolsEmptyAllowlistReturnsNothing(t *testing.T) {
 func TestCallToolReservesDispatchesAndSettlesExactlyOnce(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"secret-argument"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-1","arguments":{"query":"secret-argument"}}`)
 	if status != http.StatusOK {
 		t.Fatalf("call status %d: %v", status, body)
 	}
@@ -439,7 +492,7 @@ func TestCallToolReservesDispatchesAndSettlesExactlyOnce(t *testing.T) {
 func TestCallToolInvalidArgumentsRefuseBeforeAnyReservation(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":3}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-2","arguments":{"query":3}}`)
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid arguments status %d: %v", status, body)
 	}
@@ -451,9 +504,9 @@ func TestCallToolInvalidArgumentsRefuseBeforeAnyReservation(t *testing.T) {
 func TestCallToolForeignToolsetAndUnknownAliasNeverDispatch(t *testing.T) {
 	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	for _, body := range []string{
-		`{"toolset_id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50799","name":"` + alias() + `","arguments":{"query":"x"}}`,
-		`{"toolset_id":"` + testOtherTS + `","name":"` + alias() + `","arguments":{"query":"x"}}`,
-		`{"toolset_id":"` + testToolset + `","name":"lookup","arguments":{"query":"x"}}`,
+		`{"toolset_id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50799","name":"` + alias() + `","call_id":"existing-json-3","arguments":{"query":"x"}}`,
+		`{"toolset_id":"` + testOtherTS + `","name":"` + alias() + `","call_id":"existing-json-4","arguments":{"query":"x"}}`,
+		`{"toolset_id":"` + testToolset + `","name":"lookup","call_id":"existing-json-5","arguments":{"query":"x"}}`,
 	} {
 		status, _ := request(t, server, http.MethodPost, "/v1/mcp/tools/call", body)
 		if status != http.StatusNotFound {
@@ -468,7 +521,7 @@ func TestCallToolForeignToolsetAndUnknownAliasNeverDispatch(t *testing.T) {
 func TestCallToolAmbiguousUpstreamFailureStaysUnknown(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "drop")
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-6","arguments":{"query":"x"}}`)
 	if status != http.StatusBadGateway || fx.calls.Load() != 1 {
 		t.Fatalf("ambiguous failure status %d calls=%d: %v", status, fx.calls.Load(), body)
 	}
@@ -483,7 +536,7 @@ func TestCallToolAmbiguousUpstreamFailureStaysUnknown(t *testing.T) {
 func TestCallToolUpstreamToolErrorSettlesAsObservedAttempt(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "tool_error")
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-7","arguments":{"query":"x"}}`)
 	if status != http.StatusOK || body["is_error"] != true || fx.calls.Load() != 1 {
 		t.Fatalf("tool error not returned as an observed result: %d %v", status, body)
 	}
@@ -499,7 +552,7 @@ func TestCallToolReleasesReservationWhenAuthorityIsRevokedBeforeDispatch(t *test
 	server, fx, _, tl, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	rt.failAuthzOn = 2
 	status, _ := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-8","arguments":{"query":"x"}}`)
 	if status != http.StatusForbidden || fx.calls.Load() != 0 {
 		t.Fatalf("revoked call dispatched: status=%d calls=%d", status, fx.calls.Load())
 	}
@@ -512,7 +565,7 @@ func TestCallToolBudgetRefusalNeverDispatches(t *testing.T) {
 	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	ledger.reserveErr = &limits.ExceededError{Dimension: limits.DimensionDailyCost, RetryAfter: time.Minute}
 	status, _ := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-9","arguments":{"query":"x"}}`)
 	if status != http.StatusTooManyRequests || fx.calls.Load() != 0 {
 		t.Fatalf("budget refusal dispatched: status=%d calls=%d", status, fx.calls.Load())
 	}
@@ -521,7 +574,7 @@ func TestCallToolBudgetRefusalNeverDispatches(t *testing.T) {
 func TestCallToolDialFailureReleasesReservation(t *testing.T) {
 	server, fx, _, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "dial_fail")
 	status, _ := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-10","arguments":{"query":"x"}}`)
 	if status != http.StatusBadGateway || fx.calls.Load() != 0 {
 		t.Fatalf("failed session setup dispatched a tool call: status=%d calls=%d", status, fx.calls.Load())
 	}
@@ -534,7 +587,7 @@ func TestCallToolSettleFailureStaysUnknown(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	ledger.settleErr = errors.New("settle failed")
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-11","arguments":{"query":"x"}}`)
 	if status != http.StatusBadGateway || fx.calls.Load() != 1 || body["status"] != string(StatusOutcomeUnknown) {
 		t.Fatalf("unsettled dispatch was not reported unknown: status=%d calls=%d body=%v", status, fx.calls.Load(), body)
 	}
@@ -552,7 +605,7 @@ func TestToolEndpointsEnforceKeyCIDRsWithTrustedProxies(t *testing.T) {
 		t.Fatalf("list from a disallowed address succeeded: %d %v", status, body)
 	}
 	status, _ = requestFrom(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`, "192.0.2.10:1234", "10.1.2.3")
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-12","arguments":{"query":"x"}}`, "192.0.2.10:1234", "10.1.2.3")
 	if status != http.StatusForbidden || fx.calls.Load() != 0 || len(ledger.reserved) != 0 || len(tl.snapshot()) != 0 {
 		t.Fatalf("call spoofing a forwarded address through an untrusted proxy dispatched: status=%d calls=%d events=%v", status, fx.calls.Load(), tl.snapshot())
 	}
@@ -616,12 +669,12 @@ func TestCallToolSnapshotDriftScopesPerServerAndRefusesExplicitListing(t *testin
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: twoServerSnapshot(t, fx.server.URL)}
 
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-13","arguments":{"query":"x"}}`)
 	if status != http.StatusOK || fx.calls.Load() != 1 {
 		t.Fatalf("healthy server in a partially drifted toolset was not callable: %d %v", status, body)
 	}
 	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","call_id":"existing-json-14","arguments":{"query":"x"}}`)
 	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" || fx.calls.Load() != 1 {
 		t.Fatalf("drifted server beside a healthy one was not refused as drift: %d %v calls=%d", status, body, fx.calls.Load())
 	}
@@ -639,7 +692,7 @@ func TestCallToolSnapshotDriftScopesPerServerAndRefusesExplicitListing(t *testin
 	unliveRuntime.release = &runtime.Release{ID: testGenID, Snapshot: twoServerSnapshot(t, unliveFixture.server.URL)}
 	unliveRuntime.failAuthzOn = 2
 	status, body = request(t, unlive, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-15","arguments":{"query":"x"}}`)
 	if status != http.StatusOK || unliveFixture.calls.Load() != 1 {
 		t.Fatalf("authority failure caused by a drifted sibling blocked the healthy server: %d %v", status, body)
 	}
@@ -655,7 +708,7 @@ func TestCallToolUncompilablePinnedSchemaRefusesWithItsOwnError(t *testing.T) {
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: snapshot}
 
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-16","arguments":{"query":"x"}}`)
 	if status != http.StatusServiceUnavailable || jsonErrorCode(t, body) != "tool_schema_invalid" {
 		t.Fatalf("uncompilable pinned schema was not refused with its own error: %d %v", status, body)
 	}
@@ -672,7 +725,7 @@ func TestCallToolDriftedLiveCatalogRefusesWithoutDispatch(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	fx.setDescription("Changed after publication")
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-17","arguments":{"query":"x"}}`)
 	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" {
 		t.Fatalf("drifted catalog call was not refused as a definition change: %d %v", status, body)
 	}
@@ -697,7 +750,7 @@ func TestCallToolPinDriftedFromSnapshotRefusesWithDefinitionChanged(t *testing.T
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: driftedSnapshot(t, fx.server.URL)}
 	tl.reset()
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-18","arguments":{"query":"x"}}`)
 	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" {
 		t.Fatalf("snapshot drifted pin did not refuse as a definition change: %d %v", status, body)
 	}
@@ -705,7 +758,7 @@ func TestCallToolPinDriftedFromSnapshotRefusesWithDefinitionChanged(t *testing.T
 		t.Fatalf("snapshot drifted call reserved or dispatched: calls=%d events=%v", fx.calls.Load(), tl.snapshot())
 	}
 	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"lookup","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"lookup","call_id":"existing-json-19","arguments":{"query":"x"}}`)
 	if status != http.StatusNotFound || jsonErrorCode(t, body) != "tool_not_found" {
 		t.Fatalf("unpinned name masqueraded as drift: %d %v", status, body)
 	}
@@ -716,7 +769,7 @@ func TestCallToolUnliveDriftedToolsetReportsDriftOnlyToAllowlistedCallers(t *tes
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: driftedSnapshot(t, fx.server.URL)}
 	rt.failAuthzOn = 1
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-20","arguments":{"query":"x"}}`)
 	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" {
 		t.Fatalf("allowlisted caller did not learn the definition changed: %d %v", status, body)
 	}
@@ -727,7 +780,7 @@ func TestCallToolUnliveDriftedToolsetReportsDriftOnlyToAllowlistedCallers(t *tes
 	other, otherFixture, _, _, otherRuntime := newTestServer(t, testAuthority([]string{"tools"}, []string{testOtherTS}), "")
 	otherRuntime.release = &runtime.Release{ID: testGenID, Snapshot: driftedSnapshot(t, otherFixture.server.URL)}
 	status, body = request(t, other, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-21","arguments":{"query":"x"}}`)
 	if status != http.StatusNotFound || jsonErrorCode(t, body) != "toolset_not_found" {
 		t.Fatalf("caller outside the allowlist learned about drift: %d %v", status, body)
 	}
@@ -783,20 +836,130 @@ func TestRepublishedRevisionUnblocksOnlyItsOwnToolset(t *testing.T) {
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: drifted}
 
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testOtherTS+`","name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testOtherTS+`","name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","call_id":"existing-json-22","arguments":{"query":"x"}}`)
 	if status != http.StatusOK || fx.calls.Load() != 1 {
 		t.Fatalf("unrelated toolset was disturbed by drift elsewhere: %d %v", status, body)
 	}
 	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-23","arguments":{"query":"x"}}`)
 	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" || fx.calls.Load() != 1 {
 		t.Fatalf("drifted toolset dispatched beside a healthy one: %d %v calls=%d", status, body, fx.calls.Load())
 	}
 
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: testSnapshot(t, fx.server.URL)}
 	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-24","arguments":{"query":"x"}}`)
 	if status != http.StatusOK || fx.calls.Load() != 2 {
 		t.Fatalf("reviewed catalog stayed blocked after re-publish: %d %v calls=%d", status, body, fx.calls.Load())
+	}
+}
+
+func jsonCallBody(callID, query string) string {
+	return `{"toolset_id":"` + testToolset + `","name":"` + alias() + `","call_id":"` + callID + `","arguments":{"query":"` + query + `"}}`
+}
+
+func TestCallToolRequiresCallerCallID(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusBadRequest || jsonErrorCode(t, body) != "call_id_required" || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("call without a caller call id dispatched: status=%d body=%v calls=%d", status, body, fx.calls.Load())
+	}
+}
+
+func TestCallToolExactRepeatReturnsRetainedResultWithoutReexecuting(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-42", "secret-argument"))
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("first call did not execute once: status=%d body=%v calls=%d", status, first, fx.calls.Load())
+	}
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-42", "secret-argument"))
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("exact repeat re-executed upstream: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+	if second["attempt_id"] != first["attempt_id"] || second["dispatch_id"] != first["dispatch_id"] {
+		t.Fatalf("exact repeat lost the retained attempt identity: first=%v second=%v", first, second)
+	}
+	firstContent, _ := first["content"].([]any)
+	secondContent, _ := second["content"].([]any)
+	if len(firstContent) != 1 || len(secondContent) != 1 {
+		t.Fatalf("exact repeat did not return the retained result: first=%v second=%v", first, second)
+	}
+	firstText, _ := firstContent[0].(map[string]any)
+	secondText, _ := secondContent[0].(map[string]any)
+	if firstText["text"] != secondText["text"] {
+		t.Fatalf("exact repeat returned a different result: first=%v second=%v", first, second)
+	}
+	if len(ledger.reserved) != 1 || len(ledger.evidence) != 1 {
+		t.Fatalf("exact repeat reserved or settled a second debit: reserved=%d evidence=%d", len(ledger.reserved), len(ledger.evidence))
+	}
+	reserved := ledger.reserved[0]
+	if reserved.CallDigest == "" || reserved.CallDigest == "order-42" || len(reserved.CallDigest) != 64 {
+		t.Fatalf("caller call id was not reduced to a keyed digest before storage: %q", reserved.CallDigest)
+	}
+}
+
+func TestCallToolRepeatAfterTransientResultGoneReportsNotRetained(t *testing.T) {
+	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	current := time.Now()
+	server.Now = func() time.Time { return current }
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-gone", "x"))
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("first call did not execute once: status=%d body=%v", status, first)
+	}
+	current = current.Add(2 * time.Hour)
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-gone", "x"))
+	if status != http.StatusConflict || jsonErrorCode(t, second) != "result_not_retained" || fx.calls.Load() != 1 {
+		t.Fatalf("repeat with no retained result replayed upstream: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+	if second["attempt_id"] != first["attempt_id"] || second["dispatch_id"] != first["dispatch_id"] || second["status"] != string(StatusSucceeded) {
+		t.Fatalf("not-retained repeat lost the retained status and identity: first=%v second=%v", first, second)
+	}
+}
+
+func TestCallToolChangedBodyUnderSameCallIDConflicts(t *testing.T) {
+	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-7", "one"))
+	if status != http.StatusOK {
+		t.Fatalf("first call failed: status=%d body=%v", status, first)
+	}
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-7", "two"))
+	if status != http.StatusConflict || jsonErrorCode(t, second) != "call_id_conflict" || fx.calls.Load() != 1 {
+		t.Fatalf("changed body under one call id executed: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+	if second["attempt_id"] != first["attempt_id"] || second["dispatch_id"] != first["dispatch_id"] {
+		t.Fatalf("conflict did not name the original attempt: first=%v second=%v", first, second)
+	}
+}
+
+func TestCallToolAmbiguousOutcomeStaysUnknownOnRepeat(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "drop")
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-unknown", "x"))
+	if status != http.StatusBadGateway || first["status"] != string(StatusOutcomeUnknown) || fx.calls.Load() != 1 {
+		t.Fatalf("ambiguous dispatch was not held unknown: status=%d body=%v calls=%d", status, first, fx.calls.Load())
+	}
+	fx.setMode("")
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-unknown", "x"))
+	if status != http.StatusBadGateway || second["status"] != string(StatusOutcomeUnknown) || jsonErrorCode(t, second) != "outcome_unknown" || fx.calls.Load() != 1 {
+		t.Fatalf("repeat of an unknown outcome redispatched: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+	if second["attempt_id"] != first["attempt_id"] || second["dispatch_id"] != first["dispatch_id"] {
+		t.Fatalf("unknown repeat lost the held attempt identity: first=%v second=%v", first, second)
+	}
+	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusOutcomeUnknown {
+		t.Fatalf("held debit evidence changed on repeat: %+v", ledger.evidence)
+	}
+}
+
+func TestCallToolUndispatchedFailureFreesCallIDForRetry(t *testing.T) {
+	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "dial_fail")
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-retry", "x"))
+	if status != http.StatusBadGateway || fx.calls.Load() != 0 {
+		t.Fatalf("unreachable upstream was dispatched: status=%d body=%v calls=%d", status, first, fx.calls.Load())
+	}
+	fx.setMode("")
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-retry", "x"))
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("retry of a never-dispatched call stayed bound: status=%d body=%v calls=%d", status, second, fx.calls.Load())
 	}
 }
