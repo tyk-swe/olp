@@ -25,9 +25,11 @@ var protocols = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 func SupportedProtocols() []string { return slices.Clone(protocols) }
 
 type TransportOptions struct {
-	ClientName string
-	Timeout    time.Duration
-	Transport  routing.MCPTransport
+	Stdio       *routing.MCPStdioBinding
+	Executables *Executables
+	ClientName  string
+	Timeout     time.Duration
+	Transport   routing.MCPTransport
 }
 
 type ListedTool struct {
@@ -79,7 +81,7 @@ type Transport struct {
 	endpoint, token, session, protocol string
 	nextID                             atomic.Int64
 	listChanged                        atomic.Bool
-	legacy                             *legacyTransport
+	stream                             *streamTransport
 }
 
 func (c *Transport) ListChanged() bool { return c.listChanged.Load() }
@@ -99,7 +101,13 @@ func (c *Transport) observeNotification(raw []byte) {
 }
 
 func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, opts TransportOptions) (*Transport, error) {
-	if policy == nil || opts.ClientName == "" || opts.Timeout <= 0 {
+	if opts.ClientName == "" || opts.Timeout <= 0 {
+		return nil, ErrTransport
+	}
+	if opts.Transport == routing.MCPStdio {
+		return dialStdio(ctx, opts)
+	}
+	if policy == nil {
 		return nil, ErrTransport
 	}
 	u, err := policy.ValidateEndpoint(endpoint)
@@ -113,7 +121,11 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 	if wireErr != nil {
 		return nil, wireErr
 	}
-	c := &Transport{client: client, endpoint: u.String(), token: string(credential), legacy: legacy}
+	c := &Transport{client: client, endpoint: u.String(), token: string(credential), stream: legacy}
+	return finishTransport(ctx, c, opts)
+}
+
+func finishTransport(ctx context.Context, c *Transport, opts TransportOptions) (*Transport, error) {
 	c.nextID.Store(1)
 	var init struct {
 		Protocol     string `json:"protocolVersion"`
@@ -122,12 +134,12 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 		} `json:"capabilities"`
 	}
 	requested := requestedTransportProtocol(opts.Transport)
-	if err = c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: requested, ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !transportProtocolAllowed(opts.Transport, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
+	if err := c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: requested, ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !transportProtocolAllowed(opts.Transport, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
 		c.Close(ctx)
 		return nil, ErrTransport
 	}
 	c.protocol = init.Protocol
-	if err = c.call(ctx, 0, "notifications/initialized", nil, nil); err != nil {
+	if err := c.call(ctx, 0, "notifications/initialized", nil, nil); err != nil {
 		c.Close(ctx)
 		return nil, ErrTransport
 	}
@@ -165,12 +177,12 @@ func (c *Transport) applyHeaders(h http.Header) {
 }
 
 func (c *Transport) call(ctx context.Context, id int, method string, params any, out any) error {
-	if c.legacy != nil {
+	if c.stream != nil {
 		encoded, err := json.Marshal(params)
 		if err != nil {
 			return ErrTransport
 		}
-		raw, err := c.callLegacy(ctx, id, method, encoded)
+		raw, err := c.callStream(ctx, id, method, encoded)
 		if err != nil || id == 0 {
 			return err
 		}
@@ -274,9 +286,14 @@ func decodeResult(raw []byte, id int, out any) error {
 }
 
 func (c *Transport) Close(ctx context.Context) {
-	defer c.client.CloseIdleConnections()
-	if c.legacy != nil {
-		_ = c.legacy.connection.Close()
+	if c.client != nil {
+		defer c.client.CloseIdleConnections()
+	}
+	if c.stream != nil {
+		_ = c.stream.connection.Close()
+		if c.stream.process != nil {
+			_ = c.stream.process.Close()
+		}
 		return
 	}
 	if c.session == "" {

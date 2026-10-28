@@ -4031,7 +4031,6 @@
             "name",
             "project",
             "transport",
-            "endpoint",
             "enabled",
             "catalog_digest"
           ],
@@ -4050,7 +4049,8 @@
               "type": "string",
               "enum": [
                 "streamable_http",
-                "sse"
+                "sse",
+                "stdio"
               ]
             },
             "endpoint": {
@@ -4112,6 +4112,16 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "stdio": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MCPStdioBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         },
@@ -4166,6 +4176,24 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPStdioBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executable",
+            "digest"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -7144,7 +7172,8 @@
               "type": "string",
               "enum": [
                 "streamable_http",
-                "sse"
+                "sse",
+                "stdio"
               ]
             },
             "unit_price": {
@@ -7190,11 +7219,20 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "stdio": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MCPStdioBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
             "name",
-            "endpoint",
             "enabled",
             "project_id",
             "transport"
@@ -7251,6 +7289,24 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPStdioBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executable",
+            "digest"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
         }
       }
     }
@@ -26495,7 +26551,6 @@
             "name",
             "project",
             "transport",
-            "endpoint",
             "enabled",
             "catalog_digest"
           ],
@@ -26514,7 +26569,8 @@
               "type": "string",
               "enum": [
                 "streamable_http",
-                "sse"
+                "sse",
+                "stdio"
               ]
             },
             "endpoint": {
@@ -26576,6 +26632,16 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "stdio": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MCPStdioBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         },
@@ -26630,6 +26696,24 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPStdioBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executable",
+            "digest"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",

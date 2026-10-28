@@ -22870,7 +22870,8 @@
             "type": "string",
             "enum": [
               "streamable_http",
-              "sse"
+              "sse",
+              "stdio"
             ]
           },
           "unit_price": {
@@ -22916,11 +22917,20 @@
           },
           "oauth": {
             "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "name",
-          "endpoint",
           "enabled",
           "project_id",
           "transport"
@@ -23022,7 +23032,8 @@
             "type": "string",
             "enum": [
               "streamable_http",
-              "sse"
+              "sse",
+              "stdio"
             ]
           },
           "endpoint": {
@@ -23104,6 +23115,16 @@
           },
           "oauth": {
             "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -23111,7 +23132,6 @@
           "project_id",
           "name",
           "transport",
-          "endpoint",
           "enabled",
           "has_credential",
           "etag",
@@ -23148,7 +23168,8 @@
             "type": "string",
             "enum": [
               "streamable_http",
-              "sse"
+              "sse",
+              "stdio"
             ]
           },
           "endpoint": {
@@ -23227,6 +23248,16 @@
           },
           "oauth": {
             "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -23234,7 +23265,6 @@
           "project_id",
           "name",
           "transport",
-          "endpoint",
           "enabled",
           "has_credential",
           "etag",
@@ -23606,7 +23636,6 @@
           "name",
           "project",
           "transport",
-          "endpoint",
           "enabled",
           "catalog_digest"
         ],
@@ -23625,7 +23654,8 @@
             "type": "string",
             "enum": [
               "streamable_http",
-              "sse"
+              "sse",
+              "stdio"
             ]
           },
           "endpoint": {
@@ -23687,6 +23717,16 @@
           },
           "oauth": {
             "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -27999,6 +28039,85 @@
           "enrollment_id",
           "handoff_token"
         ]
+      },
+      "MCPExecutableFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "digest",
+          "size_bytes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MCPExecutablePermission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "permitted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MCPExecutableList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPExecutableFile"
+            }
+          }
+        }
+      },
+      "MCPStdioBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executable",
+          "digest"
+        ],
+        "properties": {
+          "executable": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -65117,6 +65236,410 @@
             }
           }
         ]
+      }
+    },
+    "/api/v1/mcp-executables": {
+      "get": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "mcpList_unconfined_executables",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPExecutableList"
+                }
+              }
+            },
+            "description": "Executables, by name"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OLP can't read the unconfined plugin directory the deployment names (unconfined_plugin_dir_unreadable)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-executables/{executable}/review": {
+      "post": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "mcpReview_unconfined_executable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPExecutablePermission"
+                }
+              }
+            },
+            "description": "The executable and its manifest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-executables/{executable}/permit": {
+      "post": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "mcpPermit_unconfined_plugin",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnconfinedPluginPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPExecutablePermission"
+                }
+              }
+            },
+            "description": "Unconfined plugin permitted",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "The permitted plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-executables/{executable}/permissions/{digest}": {
+      "delete": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "revokeMCPExecutable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "digest",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          },
+          "204": {
+            "description": "Permission revoked"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ],
+        "summary": "Manage an installed MCP executable"
       }
     }
   },

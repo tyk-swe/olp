@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,8 +27,36 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/testutil"
 	"golang.org/x/oauth2"
 )
+
+func TestMCPOwnerPermitsInstalledStdioProcess(t *testing.T) {
+	disabled := newAccessHarness(t)
+	owner := disabled.owner()
+	dir := t.TempDir()
+	testutil.BuildExecutablePlugin(t, filepath.Join(dir, "stdio-tools"), "./internal/mcpservers/testdata/stdio")
+	h := newUnconfinedHarness(t, disabled.Pool, disabled.DBURL, dir)
+	h.want(owner, "GET", "/api/v1/mcp-executables", nil, nil, 200)
+	reviewed := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/review", nil, nil, 200)
+	digest := mcpExecString(t, reviewed, "digest")
+	project := createProject(h, owner, "Installed tools")
+	registration := map[string]any{"name": "Installed MCP", "project_id": project, "transport": "stdio", "stdio": map[string]any{"executable": "stdio-tools", "digest": digest}, "enabled": true, "unit_price": "0"}
+	h.want(owner, "POST", "/api/v1/mcp-servers", registration, idem("stdio-unapproved"), 422)
+	request := map[string]any{"digest": digest, "acknowledge_risk": true}
+	operator := h.invite(owner, "stdio-operator@example.com", "operator")
+	h.want(operator, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, nil, 403)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, nil, 428)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", map[string]any{"digest": digest, "acknowledge_risk": false}, nil, 422)
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", map[string]any{"digest": strings.Repeat("0", 64), "acknowledge_risk": true}, nil, 409)
+	granted := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, idem("stdio-permit"), 201)
+	if granted["digest"] != digest || granted["permitted"] != true {
+		t.Fatalf("owner permission did not retain reviewed digest: %v", granted)
+	}
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, idem("stdio-permit-again"), 428)
+	h.want(owner, "POST", "/api/v1/mcp-servers", registration, idem("stdio-registration"), 201)
+}
 
 func TestMCPReferenceServerRoundTrip(t *testing.T) {
 	mcpReferenceRoundTrip(t, routing.MCPStreamableHTTP, "2025-11-25")

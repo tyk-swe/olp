@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -148,6 +149,7 @@ type GuardrailEvaluation struct {
 }
 
 type Server struct {
+	Executables    *mcpservers.Executables
 	Grants         *mcpgrants.Store
 	Log            *slog.Logger
 	Runtime        Runtime
