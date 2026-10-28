@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 )
@@ -26,6 +27,7 @@ func SupportedProtocols() []string { return slices.Clone(protocols) }
 type TransportOptions struct {
 	ClientName string
 	Timeout    time.Duration
+	Transport  string
 }
 
 type ListedTool struct {
@@ -77,6 +79,7 @@ type Transport struct {
 	endpoint, token, session, protocol string
 	nextID                             atomic.Int64
 	listChanged                        atomic.Bool
+	legacy                             *legacyTransport
 }
 
 func (c *Transport) ListChanged() bool { return c.listChanged.Load() }
@@ -104,6 +107,18 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 		return nil, ErrTransport
 	}
 	c := &Transport{client: policy.Client(opts.Timeout), endpoint: u.String(), token: string(credential)}
+	if opts.Transport != "" && opts.Transport != "streamable_http" && opts.Transport != "sse" {
+		return nil, ErrTransport
+	}
+	if opts.Transport == "sse" {
+		client := c.client
+		client.Transport = legacyRoundTripper{base: client.Transport, policy: policy, origin: u, credential: string(credential)}
+		connection, connectErr := (&sdkmcp.SSEClientTransport{Endpoint: u.String(), HTTPClient: client, MaxEventSize: 1 << 20}).Connect(ctx)
+		if connectErr != nil {
+			return nil, ErrTransport
+		}
+		c.legacy = &legacyTransport{connection: connection, gate: make(chan struct{}, 1)}
+	}
 	c.nextID.Store(1)
 	var init struct {
 		Protocol     string `json:"protocolVersion"`
@@ -111,7 +126,8 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 			Tools json.RawMessage `json:"tools"`
 		} `json:"capabilities"`
 	}
-	if err = c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: protocols[0], ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !slices.Contains(protocols, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
+	requested := requestedTransportProtocol(opts.Transport)
+	if err = c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: requested, ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !transportProtocolAllowed(opts.Transport, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
 		c.Close(ctx)
 		return nil, ErrTransport
 	}
@@ -154,6 +170,9 @@ func (c *Transport) applyHeaders(h http.Header) {
 }
 
 func (c *Transport) call(ctx context.Context, id int, method string, params any, out any) error {
+	if c.legacy != nil {
+		return c.callLegacy(ctx, id, method, params, out)
+	}
 	message := map[string]any{"jsonrpc": "2.0", "method": method}
 	if id != 0 {
 		message["id"] = id
@@ -253,6 +272,10 @@ func decodeResult(raw []byte, id int, out any) error {
 
 func (c *Transport) Close(ctx context.Context) {
 	defer c.client.CloseIdleConnections()
+	if c.legacy != nil {
+		_ = c.legacy.connection.Close()
+		return
+	}
 	if c.session == "" {
 		return
 	}
