@@ -1,4 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
+import type { BillingImport } from '../../src/lib/features/providers/api/billing';
 import { manage } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
@@ -431,6 +432,81 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await expect(
     page.getByText(/Request history is not retained by this installation/)
   ).toHaveCount(0);
+});
+
+test('billing import preserves a cleared scope', async ({ page }, info) => {
+  await signIn(page);
+  const provider = await manage<{ id: string }>(
+    page,
+    'POST',
+    '/api/v1/providers',
+    {
+      idempotency: crypto.randomUUID(),
+      body: {
+        name: `Billing scope fixture ${crypto.randomUUID()}`,
+        configuration: {
+          kind: 'openai',
+          endpoint: upstream.endpoint,
+          auth_mode: 'api_key'
+        },
+        credential: upstream.credential
+      }
+    }
+  );
+  expect(provider.status, provider.source).toBe(201);
+  const providerPath = `/api/v1/providers/${provider.body.id}`;
+  const importPath = `${providerPath}/billing-import`;
+  const storedScope = { project_ids: ['proj_fixture'] };
+  const created = await manage<BillingImport>(page, 'PUT', importPath, {
+    match: providerPath,
+    idempotency: crypto.randomUUID(),
+    body: {
+      enabled: false,
+      scope: storedScope,
+      credential: 'billing-admin-fixture-credential'
+    }
+  });
+  expect(created.status, created.source).toBe(201);
+  await page.goto(`/providers/${provider.body.id}`);
+  const scope = page.locator('#billing-scope');
+  await expect(scope).toHaveValue(storedScope.project_ids.join('\n'));
+  await expect(page.locator('#billing-admin-key')).toHaveValue('');
+  await scope.fill('');
+  await scope.blur();
+  const save = page.getByRole('button', { name: 'Save import', exact: true });
+  await expect(save).toBeEnabled();
+  await scope.screenshot({
+    path: info.outputPath('billing-scope-cleared.png')
+  });
+  await expect(scope).toHaveValue('');
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname === importPath
+  );
+  await save.click();
+  const response = await saved;
+  expect(response.status(), await response.text()).toBe(200);
+  const document = await manage<BillingImport>(page, 'GET', importPath);
+  expect(document.body).toMatchObject({
+    scope: {},
+    enabled: false,
+    credential_configured: true
+  });
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Save import', exact: true })
+  ).toBeVisible();
+  await expect(scope).toHaveValue('');
+  await page
+    .locator('#billing-admin-key')
+    .fill('replacement-billing-credential');
+  await page.locator('#billing-admin-key').fill('');
+  await expect(scope).toHaveValue('');
+  await page.screenshot({
+    path: info.outputPath('billing-scope-saved.png'),
+    fullPage: true
+  });
 });
 
 test('cloud connections support bulk model review, credential pools and policy routing', async ({
