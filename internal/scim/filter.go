@@ -176,14 +176,14 @@ func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) 
 		switch name {
 		case "userName", "displayName", "active", "name", "name.formatted", "name.familyName", "name.givenName", "name.middleName", "name.honorificPrefix", "name.honorificSuffix",
 			"emails", "emails.value", "emails.type", "emails.primary", "groups", "groups.value", "groups.display", "groups.type", "groups.$ref", "roles", "roles.value", "roles.primary",
-			UserExtension, UserExtension + ".role", UserExtension + ".accessScope":
+			UserExtension + ".role", UserExtension + ".accessScope":
 			return true
 		}
 	}
 	if s.Schema == GroupSchema {
 		switch name {
 		case "displayName", "members", "members.value", "members.display", "members.type", "members.$ref",
-			GroupExtension, GroupExtension + ".role", GroupExtension + ".accessScope", GroupExtension + ".projects", GroupExtension + ".projects.value", GroupExtension + ".projects.role":
+			GroupExtension + ".role", GroupExtension + ".accessScope", GroupExtension + ".projects", GroupExtension + ".projects.value", GroupExtension + ".projects.role":
 			return true
 		}
 	}
