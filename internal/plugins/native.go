@@ -16,7 +16,6 @@ type NativeProcess struct {
 	done   chan struct{}
 	stop   sync.Once
 	mu     sync.Mutex
-	reaped bool
 	cancel context.CancelFunc
 }
 
@@ -42,6 +41,9 @@ func (u *Unconfined) sealedCommand(name, digest string) (*exec.Cmd, *os.File, er
 }
 
 func (u *Unconfined) StartNative(ctx context.Context, name, digest string, timeout time.Duration) (*NativeProcess, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cmd, copied, err := u.sealedCommand(name, digest)
 	if err != nil {
 		return nil, err
@@ -80,9 +82,8 @@ func (p *NativeProcess) reap() {
 	p.mu.Lock()
 	kill(p.cmd.Process.Pid)
 	_ = p.cmd.Wait()
-	p.reaped = true
-	p.mu.Unlock()
 	close(p.done)
+	p.mu.Unlock()
 }
 
 func (p *NativeProcess) Close() error {
@@ -91,7 +92,9 @@ func (p *NativeProcess) Close() error {
 		p.Stdin.Close()
 		p.Stdout.Close()
 		p.mu.Lock()
-		if !p.reaped {
+		select {
+		case <-p.done:
+		default:
 			kill(p.cmd.Process.Pid)
 		}
 		p.mu.Unlock()

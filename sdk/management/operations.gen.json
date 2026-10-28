@@ -39456,7 +39456,6 @@
           },
           "required": [
             "name",
-            "endpoint",
             "enabled"
           ]
         },

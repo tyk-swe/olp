@@ -23009,7 +23009,6 @@
         },
         "required": [
           "name",
-          "endpoint",
           "enabled"
         ]
       },
@@ -23146,7 +23145,8 @@
           "max_concurrency",
           "per_key_calls_per_minute",
           "per_key_max_concurrency",
-          "oauth"
+          "oauth",
+          "endpoint"
         ]
       },
       "MCPServerSummary": {
@@ -23278,7 +23278,8 @@
           "max_concurrency",
           "per_key_calls_per_minute",
           "per_key_max_concurrency",
-          "oauth"
+          "oauth",
+          "endpoint"
         ]
       },
       "MCPServerListResponse": {
@@ -23611,6 +23612,16 @@
           },
           "oauth": {
             "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -65241,7 +65252,7 @@
     "/api/v1/mcp-executables": {
       "get": {
         "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
-        "operationId": "mcpList_unconfined_executables",
+        "operationId": "listMCPExecutables",
         "responses": {
           "200": {
             "content": {
@@ -65281,7 +65292,7 @@
                 }
               }
             },
-            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled)"
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
           },
           "503": {
             "content": {
@@ -65303,7 +65314,7 @@
           }
         ],
         "tags": [
-          "plugins"
+          "mcp"
         ],
         "summary": "Manage an installed MCP executable"
       }
@@ -65311,7 +65322,7 @@
     "/api/v1/mcp-executables/{executable}/review": {
       "post": {
         "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
-        "operationId": "mcpReview_unconfined_executable",
+        "operationId": "reviewMCPExecutable",
         "parameters": [
           {
             "description": "File name of the executable in the unconfined plugin directory",
@@ -65333,7 +65344,7 @@
                 }
               }
             },
-            "description": "The executable and its manifest"
+            "description": "Installed executable metadata and digest permission, without starting the executable"
           },
           "401": {
             "content": {
@@ -65363,7 +65374,7 @@
                 }
               }
             },
-            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
           },
           "422": {
             "content": {
@@ -65373,7 +65384,7 @@
                 }
               }
             },
-            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
+            "description": "Executable metadata or the required risk acknowledgment is invalid"
           }
         },
         "security": [
@@ -65386,7 +65397,7 @@
           }
         ],
         "tags": [
-          "plugins"
+          "mcp"
         ],
         "summary": "Manage an installed MCP executable"
       }
@@ -65394,7 +65405,7 @@
     "/api/v1/mcp-executables/{executable}/permit": {
       "post": {
         "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
-        "operationId": "mcpPermit_unconfined_plugin",
+        "operationId": "permitMCPExecutable",
         "parameters": [
           {
             "description": "File name of the executable in the unconfined plugin directory",
@@ -65480,7 +65491,7 @@
                 }
               }
             },
-            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
           },
           "409": {
             "content": {
@@ -65500,7 +65511,7 @@
                 }
               }
             },
-            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+            "description": "Executable metadata or the required risk acknowledgment is invalid"
           },
           "428": {
             "content": {
@@ -65523,7 +65534,7 @@
           }
         ],
         "tags": [
-          "plugins"
+          "mcp"
         ],
         "summary": "Manage an installed MCP executable"
       }
@@ -65591,7 +65602,7 @@
                 }
               }
             },
-            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
           },
           "409": {
             "content": {
@@ -65611,7 +65622,7 @@
                 }
               }
             },
-            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+            "description": "Executable metadata or the required risk acknowledgment is invalid"
           },
           "428": {
             "content": {
@@ -65637,7 +65648,7 @@
           }
         ],
         "tags": [
-          "plugins"
+          "mcp"
         ],
         "summary": "Manage an installed MCP executable"
       }

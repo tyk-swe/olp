@@ -108,6 +108,10 @@ func parseRPCMessage(raw []byte) (rpcMessage, int, bool) {
 	if _, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: maxCallBodyBytes, MaxDepth: 64, MaxNodes: 1 << 16}); err != nil {
 		return rpcMessage{}, rpcParseError, false
 	}
+	var selection executionSelection
+	if json.Unmarshal(raw, &selection) != nil || selection.supplied() {
+		return rpcMessage{}, rpcInvalidRequest, false
+	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil {
 		return rpcMessage{}, rpcParseError, false
@@ -558,6 +562,7 @@ func (s *Server) sessionListTools(w http.ResponseWriter, r *http.Request, author
 }
 
 type sessionCallRequest struct {
+	executionSelection
 	Name      string           `json:"name"`
 	Arguments json.RawMessage  `json:"arguments"`
 	Meta      *callRequestMeta `json:"_meta"`
@@ -592,6 +597,10 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 	var params sessionCallRequest
 	if len(message.params) == 0 || json.Unmarshal(message.params, &params) != nil || params.Name == "" {
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "Supply the tool name to call.", data: rpcErrorData{Code: "invalid_params"}})
+		return
+	}
+	if params.executionSelection.supplied() {
+		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "The registered server determines transport and executable settings.", data: rpcErrorData{Code: "invalid_params"}})
 		return
 	}
 	if failure := callIDFailure(params.callID()); failure != nil {

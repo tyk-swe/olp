@@ -186,6 +186,24 @@ func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) 
 	}
 	return access.Detail(d, d.ETag), nil
 }
+
+type revisionResponse struct {
+	Stdio                *routing.MCPStdioBinding `json:"stdio"`
+	OAuth                *routing.MCPOAuth        `json:"oauth"`
+	ID                   string                   `json:"id"`
+	ServerID             string                   `json:"server_id"`
+	Revision             int64                    `json:"revision"`
+	Endpoint             string                   `json:"endpoint"`
+	Catalog              Catalog                  `json:"catalog"`
+	CertifiedAt          time.Time                `json:"certified_at"`
+	UnitPrice            *string                  `json:"unit_price"`
+	ToolPrices           map[string]string        `json:"tool_prices"`
+	CallsPerMinute       int64                    `json:"calls_per_minute"`
+	MaxConcurrency       int64                    `json:"max_concurrency"`
+	PerKeyCallsPerMinute int64                    `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency int64                    `json:"per_key_max_concurrency"`
+}
+
 func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "server_id")
 	if err != nil {
@@ -217,7 +235,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	if toolPrices == nil {
 		toolPrices = map[string]string{}
 	}
-	return access.Detail(map[string]any{"stdio": stdio, "oauth": oauth, "id": revision, "server_id": id, "revision": version, "endpoint": endpoint, "catalog": catalog, "certified_at": certified, "unit_price": unitPrice, "tool_prices": toolPrices, "calls_per_minute": d.CallsPerMinute, "max_concurrency": d.MaxConcurrency, "per_key_calls_per_minute": d.PerKeyCallsPerMinute, "per_key_max_concurrency": d.PerKeyMaxConcurrency}, revision), nil
+	return access.Detail(revisionResponse{Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
 }
 func Validate(in *Input, policy *egress.Policy) error {
 	in.Name = strings.TrimSpace(in.Name)
@@ -350,7 +368,10 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 		if d.RetiredAt != nil {
 			return nil, nil, access.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
 		}
-		if in.ProjectID != nil || in.Transport != "" || in.Stdio != nil {
+		if in.Present("stdio") {
+			return nil, nil, access.Invalid("stdio", "The executable binding is immutable.")
+		}
+		if in.ProjectID != nil || in.Transport != "" {
 			return nil, nil, access.Invalid("project_id", "Project and transport are immutable.")
 		}
 	}
@@ -444,6 +465,10 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	if replayed != nil {
 		return *replayed, nil
 	}
+	if !retire && definitionTransport(in, previous) == routing.MCPStdio && (in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 || !definitionStdio(in, previous).Valid()) {
+		return access.Reply{}, access.Invalid("stdio", "Use only the immutable approved executable binding for stdio.")
+	}
+
 	var material []byte
 	var catalog *Catalog
 	limitsOnly := !retire && limitsOnlyUpdate(in, previous)

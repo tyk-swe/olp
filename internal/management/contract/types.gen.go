@@ -9636,7 +9636,7 @@ type MCPServerResponse struct {
 	Catalog        MCPRegisteredCatalog `json:"catalog"`
 	CertifiedAt    time.Time            `json:"certified_at"`
 	Enabled        bool                 `json:"enabled"`
-	Endpoint       *string              `json:"endpoint,omitempty"`
+	Endpoint       string               `json:"endpoint"`
 	Etag           openapi_types.UUID   `json:"etag"`
 	HasCredential  bool                 `json:"has_credential"`
 	Id             openapi_types.UUID   `json:"id"`
@@ -9689,9 +9689,10 @@ type MCPServerRevisionResponse struct {
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
 
 	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
-	PerKeyMaxConcurrency int                `json:"per_key_max_concurrency"`
-	Revision             int64              `json:"revision"`
-	ServerId             openapi_types.UUID `json:"server_id"`
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	Revision             int64                              `json:"revision"`
+	ServerId             openapi_types.UUID                 `json:"server_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
 
 	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
 	ToolPrices map[string]string `json:"tool_prices"`
@@ -9706,7 +9707,7 @@ type MCPServerSummary struct {
 	CallsPerMinute int                `json:"calls_per_minute"`
 	CertifiedAt    time.Time          `json:"certified_at"`
 	Enabled        bool               `json:"enabled"`
-	Endpoint       *string            `json:"endpoint,omitempty"`
+	Endpoint       string             `json:"endpoint"`
 	Etag           openapi_types.UUID `json:"etag"`
 	HasCredential  bool               `json:"has_credential"`
 	Id             openapi_types.UUID `json:"id"`
@@ -14248,7 +14249,7 @@ type UpdateMCPServerRequest struct {
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 	Enabled    bool                      `json:"enabled"`
-	Endpoint   string                    `json:"endpoint"`
+	Endpoint   *string                   `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
@@ -16852,8 +16853,8 @@ type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
 // ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
 type ManagementMcpJSONRequestBody ManagementMcpJSONBody
 
-// McpPermitUnconfinedPluginJSONRequestBody defines body for McpPermitUnconfinedPlugin for application/json ContentType.
-type McpPermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
+// PermitMCPExecutableJSONRequestBody defines body for PermitMCPExecutable for application/json ContentType.
+type PermitMCPExecutableJSONRequestBody = UnconfinedPluginPermitRequest
 
 // ClaimMcpGrantEnrollmentJSONRequestBody defines body for ClaimMcpGrantEnrollment for application/json ContentType.
 type ClaimMcpGrantEnrollmentJSONRequestBody = ClaimMCPGrantEnrollmentRequest
