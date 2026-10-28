@@ -111,7 +111,8 @@ export function validatePassthroughConfig(
             .toLowerCase()
             .replace(
               /(^|-)([a-z])/g,
-              (_, prefix: string, letter: string) => prefix + letter.toUpperCase()
+              (_, prefix: string, letter: string) =>
+                prefix + letter.toUpperCase()
             ) ||
         header.toLowerCase().startsWith('x-olp-') ||
         forbiddenHeaders.has(header.toLowerCase())

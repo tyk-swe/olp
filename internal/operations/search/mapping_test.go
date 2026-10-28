@@ -247,3 +247,65 @@ func resBodyFor(t *testing.T, dialect string) string {
 	}
 	return ""
 }
+
+func TestMappingProjectNormalizesCalendarDates(t *testing.T) {
+	for _, target := range []struct{ dialect, field string }{
+		{Exa, "publishedDate"},
+		{Parallel, "publish_date"},
+		{Brave, "page_age"},
+	} {
+		for _, tc := range []struct {
+			name, date, want string
+		}{
+			{"date", "2026-01-02", "2026-01-02"},
+			{"timestamp", "2026-01-02T03:04:05Z", "2026-01-02"},
+			{"leap_day", "2024-02-29", "2024-02-29"},
+			{"non_leap_day", "2025-02-29", ""},
+			{"day_overflow", "2026-04-31T03:04:05Z", ""},
+			{"month_overflow", "2026-13-01", ""},
+			{"zero_month", "2026-00-01", ""},
+			{"zero_day", "2026-01-00", ""},
+			{"malformed", "not-a-date", ""},
+			{"empty", "", ""},
+		} {
+			t.Run(target.dialect+"/"+tc.name, func(t *testing.T) {
+				row := map[string]any{"url": "https://example.test/result", target.field: tc.date}
+				results := map[string]any{"results": []any{row}}
+				body := func() []byte {
+					if target.dialect == Brave {
+						return operations.Raw(map[string]any{"web": results})
+					}
+					return operations.Raw(results)
+				}()
+				res := result(t, target.dialect, string(body))
+				view, err := parseResult(request(t, target.dialect, resBodyFor(t, target.dialect)), res, target.dialect)
+				if err != nil {
+					t.Fatal(err)
+				}
+				doc, err := mappingFor(target.dialect).Project(request(t, Perplexity, `{"query":"q"}`), res, view, "route")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var out struct {
+					Results []struct {
+						Date *string `json:"date"`
+					} `json:"results"`
+				}
+				if err := json.Unmarshal(doc.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				if len(out.Results) != 1 {
+					t.Fatalf("expected one result, got %s", doc.Bytes())
+				}
+				date := out.Results[0].Date
+				if tc.want == "" {
+					if date != nil {
+						t.Fatalf("invalid date %q projected as %q instead of null", tc.date, *date)
+					}
+				} else if date == nil || *date != tc.want {
+					t.Fatalf("valid date %q was not preserved in %s", tc.date, doc.Bytes())
+				}
+			})
+		}
+	}
+}
