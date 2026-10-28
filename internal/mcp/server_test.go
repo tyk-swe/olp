@@ -1366,3 +1366,36 @@ func TestSessionCallToolGuardrailDeniedArgumentMatchesJSONSurface(t *testing.T) 
 		t.Fatalf("session denial was not recorded as blocked: %+v", ledger.evidence)
 	}
 }
+
+func TestToolGuardrailRefreshAffectsNewSessionCallsAndKeepsInflightPolicy(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "secret_result")
+	inputPolicy := toolPolicyEntry{phase: guardrails.Input, action: guardrails.Block, config: `{"words":["forbidden"],"substrings":true}`}
+	enableToolGuardrails(t, rt, server, inputPolicy)
+	next := &fakeRuntime{release: &runtime.Release{ID: testGenID, Snapshot: testSnapshot(t, fx.server.URL)}}
+	enableToolGuardrails(t, next, &Server{}, inputPolicy, toolPolicyEntry{phase: guardrails.Output, action: guardrails.Block, config: `{"words":["private"],"substrings":true}`})
+	evaluate := server.Guardrails
+	server.Guardrails = func(ctx context.Context, in GuardrailEvaluation) (guardrails.Result, error) {
+		result, err := evaluate(ctx, in)
+		if in.Phase == guardrails.Input {
+			rt.release = next.release
+		}
+		return result, err
+	}
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"safe"},"_meta":{"olp.call_id":"guardrail-refresh-first"}}}`)
+	if _, failed := first.body["error"]; failed || fx.calls.Load() != 1 {
+		t.Fatalf("policy refresh changed an in-flight call: calls=%d body=%v", fx.calls.Load(), first.body)
+	}
+	second := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"safe"},"_meta":{"olp.call_id":"guardrail-refresh-second"}}}`)
+	failure := rpcError(t, second)
+	data, _ := failure["data"].(map[string]any)
+	if data["code"] != "guardrail_blocked" || fx.calls.Load() != 2 {
+		t.Fatalf("an existing session missed the refreshed output policy: calls=%d error=%v", fx.calls.Load(), failure)
+	}
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("guardrail-refresh-json", "safe"))
+	if status != http.StatusBadRequest || errorCode(body) != "guardrail_blocked" || fx.calls.Load() != 3 {
+		t.Fatalf("JSON and session calls diverged after refresh: status=%d calls=%d body=%v", status, fx.calls.Load(), body)
+	}
+}
