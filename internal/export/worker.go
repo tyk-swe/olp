@@ -236,7 +236,7 @@ func (w *Worker) deliverOne(ctx context.Context, sinkID, stream string) (bool, e
 	}
 	defer ftx.Rollback(finish)
 	success := sendErr == nil
-	tag, err = ftx.Exec(finish, finishRecordSQL, sinkID, id, success, DeliveryErrorCode(sendErr), backoffSeconds(attempts+1))
+	tag, err = ftx.Exec(finish, finishRecordSQL, sinkID, id, success, DeliveryErrorCode(sendErr), backoffSeconds(attempts+1), DeliveryRejected(sendErr))
 	if err != nil {
 		return false, err
 	}

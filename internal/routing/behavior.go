@@ -77,15 +77,17 @@ var (
 // steered to, how a failed attempt is retried, which requests stay together
 // and how much the route may spend. The zero value adds nothing to a route.
 type Behavior struct {
-	Cache            *cache.Policy       `json:"cache,omitempty"`
-	PromptCache      *cache.PromptPolicy `json:"prompt_cache,omitempty"`
-	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
-	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
-	Fallbacks        []Fallback          `json:"fallbacks,omitempty"`
-	Selectors        []Selector          `json:"selectors,omitempty"`
-	Retry            Retry               `json:"retry,omitempty"`
-	Affinity         *Affinity           `json:"affinity,omitempty"`
-	Budget           *CostLimits         `json:"budget,omitempty"`
+	Cache                    *cache.Policy       `json:"cache,omitempty"`
+	PromptCache              *cache.PromptPolicy `json:"prompt_cache,omitempty"`
+	CallerCostExempt         bool                `json:"caller_cost_exempt,omitempty"`
+	ProviderFetchedDocuments bool                `json:"provider_fetched_documents,omitempty"`
+	MaxBodyBytes             *int64              `json:"max_body_bytes,omitempty"`
+	Fallbacks                []Fallback          `json:"fallbacks,omitempty"`
+	Selectors                []Selector          `json:"selectors,omitempty"`
+	Retry                    Retry               `json:"retry,omitempty"`
+	Affinity                 *Affinity           `json:"affinity,omitempty"`
+	Budget                   *CostLimits         `json:"budget,omitempty"`
+	Passthrough              *PassthroughConfig  `json:"passthrough,omitempty"`
 }
 
 // Fallback names another route that serves the request when this one ends
@@ -277,7 +279,7 @@ func DecodeBehavior(raw []byte) (Behavior, error) {
 
 // IsZero reports whether the behavior declares nothing.
 func (b Behavior) IsZero() bool {
-	return b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil
+	return b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && !b.ProviderFetchedDocuments && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil && b.Passthrough == nil
 }
 
 // Validate checks the behavior's own shape. tagged reports whether a primary

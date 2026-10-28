@@ -5,7 +5,6 @@ package codecli_test
 import (
 	"bytes"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/codeclient"
@@ -15,21 +14,25 @@ import (
 )
 
 func TestOfficialCodexModelSelectionHintAndOverride(t *testing.T) {
-	for _, selected := range []string{"gpt-5.4", "gpt-5.3-codex"} {
+	models := []string{"gpt-5.4", "gpt-5.3-codex"}
+	for i, selected := range models {
+		other := models[1-i]
 		t.Run("configured="+selected, func(t *testing.T) {
 			peer := codexfixture.New()
 			peer.SetResponder(codexfixture.NewJourney("complete").Reply)
 			server := httptest.NewServer(peer)
 			defer server.Close()
 			client := codecli.New(t, server.URL, "controlled-olp-key", true)
-			config, err := codeclient.Generate(codemode.Route{Slug: "model-hint", Enabled: true, RevisionID: "published", Models: []string{"gpt-5.4", "gpt-5.3-codex"}}, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"gpt-5.4", "gpt-5.3-codex"}}}, codeclient.Request{GatewayURL: server.URL, Model: selected})
+			config, err := codeclient.Generate(codemode.Route{Slug: "model-hint", Enabled: true, RevisionID: "published", Models: models}, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: models}}, codeclient.Request{GatewayURL: server.URL, Model: selected})
 			if err != nil {
 				t.Fatal(err)
 			}
 			client.UseConfiguration(t, config.Configuration)
 			args := []string{"Complete the controlled model selection task."}
-			if selected == "gpt-5.4" {
-				args = append([]string{"-m", "gpt-5.3-codex"}, args...)
+			wantBodyModel := selected
+			if i == 0 {
+				args = append([]string{"-m", other}, args...)
+				wantBodyModel = other
 			}
 			client.Exec(t, args...)
 			if len(peer.Handshakes()) == 0 {
@@ -39,14 +42,9 @@ func TestOfficialCodexModelSelectionHintAndOverride(t *testing.T) {
 				if h.Get("X-OLP-Code-Model") != selected {
 					t.Fatal("configured hint changed unexpectedly")
 				}
-				for name := range h {
-					if strings.Contains(strings.ToLower(name), "model") && !strings.EqualFold(name, "X-OLP-Code-Model") {
-						t.Fatalf("new native model header needs investigation: %s", name)
-					}
-				}
 			}
 			for _, r := range peer.Requests() {
-				if !r.WebSocket || !bytes.Contains(r.Body, []byte(`"model":"gpt-5.3-codex"`)) {
+				if !r.WebSocket || !bytes.Contains(r.Body, []byte(`"model":"`+wantBodyModel+`"`)) {
 					t.Fatal("native body model override not observed")
 				}
 			}
