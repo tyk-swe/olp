@@ -533,6 +533,9 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 	}
 	resolved, failure := s.pinnedToolset(current)
 	if failure != nil {
+		if failure == errToolsetNotFound {
+			s.endSession(r.Context(), current)
+		}
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
 		return
 	}

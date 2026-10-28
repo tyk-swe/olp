@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -798,6 +799,30 @@ func TestStreamableHTTPSessionEndsWhenAuthorityIsRevoked(t *testing.T) {
 	ended = rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", listCall)
 	if ended.status != http.StatusNotFound || rpcDataCode(t, ended) != "session_not_found" {
 		t.Fatalf("session stayed eligible after a revoked call: %d %v", ended.status, ended.body)
+	}
+}
+
+func TestStreamableHTTPSessionEndsWhenPinnedPublicationDisappears(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	retired := testSnapshot(t, fx.server.URL)
+	retired.AgentPublications = slices.DeleteFunc(slices.Clone(retired.AgentPublications), func(revision agentcontract.Revision) bool {
+		return revision.ID == testRevision
+	})
+	if err := retired.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: retired}
+	called := sessionCall(t, server, sessionID)
+	if code := rpcDataCode(t, called); code != "toolset_not_found" {
+		t.Fatalf("call on a retired publication was not refused: %v", called.body)
+	}
+	if fx.calls.Load() != 0 {
+		t.Fatalf("retired publication dispatched: calls=%d", fx.calls.Load())
+	}
+	ended := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", listCall)
+	if ended.status != http.StatusNotFound || rpcDataCode(t, ended) != "session_not_found" {
+		t.Fatalf("session stayed eligible after its publication retired: %d %v", ended.status, ended.body)
 	}
 }
 
