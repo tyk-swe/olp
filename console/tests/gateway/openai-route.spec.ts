@@ -1,5 +1,4 @@
 import AxeBuilder from '@axe-core/playwright';
-import type { BillingImport } from '../../src/lib/features/providers/api/billing';
 import { manage } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
@@ -7,6 +6,7 @@ import { takeSecret, waitForRoutePublication } from '../journeys/fixtures';
 import { verifyDraftSave } from '../journeys/draft-saving';
 import { vertical } from '../journeys/fixtures';
 import { verifyProviderRouting } from '../journeys/provider-routing';
+import type { BillingImport } from '../../src/lib/features/providers/api/billing';
 
 const upstream = {
   origin: 'http://127.0.0.1:4187',
