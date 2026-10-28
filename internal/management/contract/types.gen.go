@@ -15035,6 +15035,7 @@ type ListMcpToolCallsParams struct {
 	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
 	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	ToolsetId *openapi_types.UUID `form:"toolset_id,omitempty" json:"toolset_id,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
 // ResolveMcpToolCallParams defines parameters for ResolveMcpToolCall.

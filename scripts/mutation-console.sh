@@ -36,11 +36,9 @@ fi
 
 relative=()
 for file in "${files[@]}"; do relative+=("${file#console/}"); done
-if (( ${#relative[@]} == 1 )); then
-  pattern=${relative[0]}
-else
-  pattern="{$(IFS=,; echo "${relative[*]}")}"
-fi
+# --mutate splits its value on commas, so join with commas directly; a
+# brace group would be split mid-pattern and match nothing.
+pattern=$(IFS=,; echo "${relative[*]}")
 
 echo "mutation-console: ${relative[*]}" >&2
 pnpm --dir console test:mutation --mutate "$pattern"

@@ -19323,6 +19323,12 @@
         "in": "query",
         "required": false,
         "type": "string"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
       }
     ],
     "response_headers": {
@@ -19349,6 +19355,10 @@
               "format": "uuid"
             },
             "toolset_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project_id": {
               "type": "string",
               "format": "uuid"
             }

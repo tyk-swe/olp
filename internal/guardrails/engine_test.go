@@ -7,7 +7,54 @@ import (
 	"hash/crc32"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/oif"
 )
+
+func TestToolJSONGuardrailsInspectDecodedValuesAndPreserveOtherContent(t *testing.T) {
+	const original = ` {"a/b~c":[{"sensitive":"forbid\u0064en","safe":"k\u0065ep"}],"count":3,"empty":{},"none":null} `
+	const replacement = `clean "quoted" \ path`
+	configuration, err := json.Marshal(KeywordConfig{Words: []string{"forbidden"}, Replacement: replacement})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{Input, Output} {
+		t.Run(phase, func(t *testing.T) {
+			document, err := oif.ParseJSON([]byte(original), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			surface := ToolJSONSurface(document, "read", phase == Output)
+			blocked, blockErr := testEngine(t, "builtin.keywords", string(configuration), phase, Block, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
+			if !errors.Is(blockErr, ErrBlocked) || !blocked.Blocked {
+				t.Fatalf("escaped blocked text was allowed: %v", blockErr)
+			}
+			redacted, redactErr := testEngine(t, "builtin.keywords", string(configuration), phase, Redact, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
+			if redactErr != nil || !redacted.Changed {
+				t.Fatalf("escaped text was not transformed: %v", redactErr)
+			}
+			updated, applyErr := surface.Apply(redacted.Segments)
+			if applyErr != nil {
+				t.Fatal(applyErr)
+			}
+			value, found := updated.Lookup("/a~1b~0c/0/sensitive")
+			text, isText := value.Text()
+			if !found || !isText || text != replacement {
+				t.Fatalf("replacement did not retain valid JSON string semantics: %q", text)
+			}
+			if !strings.Contains(updated.Raw(), `"safe":"k\u0065ep"`) || !strings.Contains(updated.Raw(), `"count":3,"empty":{},"none":null`) {
+				t.Fatal("transformation changed unrelated JSON content")
+			}
+			if document.Raw() != original {
+				t.Fatal("transformation modified the original document")
+			}
+			unchanged, unchangedErr := surface.Apply(surface.Segments())
+			if unchangedErr != nil || unchanged.Raw() != original {
+				t.Fatalf("unmodified evaluation changed source bytes: %v", unchangedErr)
+			}
+		})
+	}
+}
 
 func testEngine(t testing.TB, kind string, config string, phase, action string, monitor bool, external Evaluator) *Engine {
 	t.Helper()

@@ -16,7 +16,7 @@ const (
 	BravePrefix      = "/brave"
 
 	MistralModel    = "fixture-mistral"
-	AzureModel      = "fixture-azure"
+	AzureModel      = "prebuilt-layout"
 	PerplexityModel = "fixture-perplexity"
 	TavilyModel     = "fixture-tavily"
 	ExaModel        = "fixture-exa"

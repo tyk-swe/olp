@@ -16,6 +16,30 @@ The [gateway](../develop/architecture.md) applies shared admission and response 
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../../tests/README.md).
 
+## Consumer MCP qualification
+
+Published tools support the JSON call endpoint and Streamable HTTP at MCP
+2025-03-26, 2025-06-18 and 2025-11-25 through one authorized execution path.
+Local fixtures cover schema and drift refusal, revocation, limits, pinned
+pricing, guardrail arguments/results, durable reservation and settlement,
+unknown outcomes and call-identifier replay. The console exposes content-free
+attempt history, and capability/simulation responses use the same publication,
+price and effective-limit inputs as execution.
+
+The minimal reference check uses the official
+[Go MCP SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk/tree/v1.8.0),
+pinned in `go.mod`, as both a Streamable HTTP server and client with the
+protocol explicitly pinned to 2025-11-25. `TestMCPReferenceServerRoundTrip` in
+`tests/integration/mcp_execution_test.go` registers and certifies that server,
+publishes its tool, lists it through the consumer boundary, invokes it with
+the reference client and checks the settled record. This is local fixture
+qualification, not a claim about every third-party MCP deployment.
+
+Per-user OAuth, legacy HTTP+SSE and stdio are separate RM7 slices and remain
+unqualified here. Standalone consumer event streams, sampling, elicitation,
+roots and arbitrary resource/prompt calls are not supported by this slice.
+See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
+
 ## Guardrail compatibility
 
 [Guardrails](guardrails.md) inspect effective provider input and qualified unary
