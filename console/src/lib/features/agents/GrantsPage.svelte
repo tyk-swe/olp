@@ -1,9 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { writable } from 'svelte/store';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+  import { agentKeys } from './agentKeys';
   import {
     claimMCPGrant,
     getServer,
@@ -15,170 +20,237 @@
     type MCPServer
   } from './api';
 
+  type Fields = {
+    clientID: string;
+    audience: string;
+    scopes: string;
+    authorizationEndpoint: string;
+    tokenEndpoint: string;
+    deviceEndpoint: string;
+    keyID: string;
+  };
+  type PageState = {
+    selection: { readonly id: string };
+    server: MCPServer | null;
+    fields: Fields;
+    enrollmentID: string;
+    handoffToken: string;
+    enrollmentURL: string;
+    busy: boolean;
+    message: string;
+    error: string;
+  };
+  const initialState = (): PageState => ({
+    selection: { id: '' },
+    server: null,
+    fields: {
+      clientID: '',
+      audience: '',
+      scopes: '',
+      authorizationEndpoint: '',
+      tokenEndpoint: '',
+      deviceEndpoint: '',
+      keyID: ''
+    },
+    enrollmentID: '',
+    handoffToken: '',
+    enrollmentURL: '',
+    busy: false,
+    message: '',
+    error: ''
+  });
+  const state = writable(initialState());
   const access = useRole();
   const client = useQueryClient();
+  const intent = useMutationIntent();
   const grants = createQuery(() => ({
-    queryKey: ['mcp-grants'],
+    queryKey: agentKeys.grants(),
     queryFn: listMCPGrants
   }));
   const servers = createQuery(() => ({
-    queryKey: ['agent-publications', 'servers'],
+    queryKey: agentKeys.servers(),
     queryFn: listServers,
     enabled: access.allows('GET /api/v1/mcp-servers')
   }));
   const canManage = $derived(
     access.allows('POST /api/v1/mcp-servers/{server_id}/grant-enrollments')
   );
-  let selected = $state('');
-  let server = $state<MCPServer | null>(null);
-  let clientID = $state('');
-  let audience = $state('');
-  let scopes = $state('');
-  let authorizationEndpoint = $state('');
-  let tokenEndpoint = $state('');
-  let deviceEndpoint = $state('');
-  let keyID = $state('');
-  let enrollmentID = $state('');
-  let handoffToken = $state('');
-  let enrollmentURL = $state('');
-  let busy = $state(false);
-  let message = $state('');
-  let error = $state('');
-  const captureOwner = usePrincipalLifetime(() => {
-    server = null;
-    selected = '';
-    keyID = '';
-    enrollmentID = '';
-    handoffToken = '';
-    enrollmentURL = '';
-    busy = false;
-    message = '';
-    error = '';
-  });
+  const captureOwner = usePrincipalLifetime(() => state.set(initialState()));
+  const patch = (values: Partial<PageState>) =>
+    state.update((current) => ({ ...current, ...values }));
+  const setField = (field: keyof Fields, value: string) =>
+    state.update((current) => ({
+      ...current,
+      fields: { ...current.fields, [field]: value }
+    }));
 
-  onMount(() => {
-    const [id, token] = window.location.hash.slice(1).split('.');
-    if (id && token) {
-      enrollmentID = id;
-      handoffToken = token;
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + window.location.search
-      );
-    }
-  });
+  function consumeEnrollment(fragment: string) {
+    const [id, token] = fragment.split('.');
+    if (!id || !token) return;
+    patch({
+      enrollmentID: id,
+      handoffToken: token,
+      enrollmentURL: '',
+      error: '',
+      message: '',
+      busy: false
+    });
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + window.location.search
+    );
+  }
+  onMount(() => consumeEnrollment(window.location.hash.slice(1)));
 
-  async function loadServer() {
+  async function loadServer(requested: string) {
     const owner = captureOwner();
-    const requested = selected;
-    if (!requested) {
-      server = null;
-      return;
-    }
+    const selection = { id: requested };
+    intent.reset();
+    state.set({ ...initialState(), selection });
+    if (!requested) return;
     try {
       const loaded = await getServer(requested);
-      if (!owner() || selected !== requested) return;
-      server = loaded;
-      clientID = loaded.oauth?.client_id ?? '';
-      audience = loaded.oauth?.audience ?? '';
-      scopes = loaded.oauth?.scopes.join(' ') ?? '';
-      authorizationEndpoint = loaded.oauth?.authorization_endpoint ?? '';
-      tokenEndpoint = loaded.oauth?.token_endpoint ?? '';
-      deviceEndpoint = loaded.oauth?.device_authorization_endpoint ?? '';
+      if (!owner() || $state.selection !== selection) return;
+      patch({
+        server: loaded,
+        fields: {
+          clientID: loaded.oauth?.client_id ?? '',
+          audience: loaded.oauth?.audience ?? '',
+          scopes: loaded.oauth?.scopes.join(' ') ?? '',
+          authorizationEndpoint: loaded.oauth?.authorization_endpoint ?? '',
+          tokenEndpoint: loaded.oauth?.token_endpoint ?? '',
+          deviceEndpoint: loaded.oauth?.device_authorization_endpoint ?? '',
+          keyID: ''
+        }
+      });
     } catch (cause) {
-      if (owner()) error = errorMessage(cause);
+      if (owner() && $state.selection === selection)
+        patch({ error: errorMessage(cause) });
+    }
+  }
+
+  async function refresh(
+    queryKey:
+      | ReturnType<typeof agentKeys.grants>
+      | ReturnType<typeof agentKeys.servers>,
+    active: () => boolean
+  ) {
+    try {
+      await client.invalidateQueries({ queryKey }, { throwOnError: true });
+    } catch (cause) {
+      if (active())
+        patch({
+          error: `Write saved, but refreshing failed. ${errorMessage(cause)}`
+        });
     }
   }
 
   async function saveConfiguration() {
-    if (!server || busy) return;
+    const observed = $state;
+    if (!observed.server || observed.busy) return;
     const owner = captureOwner();
-    busy = true;
-    error = '';
-    message = '';
+    const active = () => owner() && $state.selection === observed.selection;
+    const fields = observed.fields;
+    patch({ busy: true, error: '', message: '' });
     try {
-      const saved = await saveServer(
-        server,
+      const saved = await intent.submit(
         {
-          name: server.name,
-          endpoint: server.endpoint,
-          enabled: server.enabled,
-          oauth: {
-            client_id: clientID.trim(),
-            audience: audience.trim(),
-            scopes: scopes.trim().split(/\s+/),
-            authorization_endpoint: authorizationEndpoint.trim(),
-            token_endpoint: tokenEndpoint.trim(),
-            ...(deviceEndpoint.trim()
-              ? { device_authorization_endpoint: deviceEndpoint.trim() }
-              : {})
+          current: observed.server,
+          input: {
+            name: observed.server.name,
+            endpoint: observed.server.endpoint,
+            enabled: observed.server.enabled,
+            oauth: {
+              client_id: fields.clientID.trim(),
+              audience: fields.audience.trim(),
+              scopes: fields.scopes.trim().split(/\s+/),
+              authorization_endpoint: fields.authorizationEndpoint.trim(),
+              token_endpoint: fields.tokenEndpoint.trim(),
+              ...(fields.deviceEndpoint.trim()
+                ? {
+                    device_authorization_endpoint: fields.deviceEndpoint.trim()
+                  }
+                : {})
+            }
           }
         },
-        crypto.randomUUID()
+        (submission, requestId) =>
+          saveServer(submission.current, submission.input, requestId)
       );
-      if (!owner()) return;
-      server = saved;
-      message = 'Personal authorization configuration saved';
-      await client.invalidateQueries({
-        queryKey: ['agent-publications', 'servers']
+      if (!active()) return;
+      patch({
+        server: saved,
+        message: 'Personal authorization configuration saved'
       });
+      await refresh(agentKeys.servers(), active);
     } catch (cause) {
-      if (owner()) error = errorMessage(cause);
+      if (active()) patch({ error: errorMessage(cause) });
     } finally {
-      if (owner()) busy = false;
+      if (active()) patch({ busy: false });
     }
   }
 
   async function startEnrollment() {
-    if (!server || busy) return;
+    const observed = $state;
+    if (!observed.server || observed.busy) return;
     const owner = captureOwner();
-    busy = true;
-    error = '';
-    enrollmentURL = '';
+    const active = () => owner() && $state.selection === observed.selection;
+    patch({ busy: true, error: '', enrollmentURL: '' });
     try {
-      const result = await startMCPGrant(server.id, keyID.trim());
-      if (owner()) enrollmentURL = result.enrollment_url;
+      const result = await startMCPGrant(
+        observed.server.id,
+        observed.fields.keyID.trim()
+      );
+      if (active()) patch({ enrollmentURL: result.enrollment_url });
     } catch (cause) {
-      if (owner()) error = errorMessage(cause);
+      if (active()) patch({ error: errorMessage(cause) });
     } finally {
-      if (owner()) busy = false;
+      if (active()) patch({ busy: false });
     }
   }
 
   async function claimEnrollment() {
-    if (!enrollmentID || !handoffToken || busy) return;
+    const observed = $state;
+    if (!observed.enrollmentID || !observed.handoffToken || observed.busy)
+      return;
     const owner = captureOwner();
-    busy = true;
-    error = '';
+    const active = () => owner() && $state.selection === observed.selection;
+    patch({ busy: true, error: '' });
     try {
-      await claimMCPGrant(enrollmentID, handoffToken);
-      if (!owner()) return;
-      handoffToken = '';
-      enrollmentID = '';
-      message = 'Enrollment claimed. Authorization is pending';
-      await client.invalidateQueries({ queryKey: ['mcp-grants'] });
+      await claimMCPGrant(observed.enrollmentID, observed.handoffToken);
+      if (!active() || $state.handoffToken !== observed.handoffToken) return;
+      patch({
+        handoffToken: '',
+        enrollmentID: '',
+        message: 'Enrollment claimed. Authorization is pending'
+      });
+      await refresh(agentKeys.grants(), active);
     } catch (cause) {
-      if (owner()) error = errorMessage(cause);
+      if (active() && $state.handoffToken === observed.handoffToken)
+        patch({ error: errorMessage(cause) });
     } finally {
-      if (owner()) busy = false;
+      if (active()) patch({ busy: false });
     }
   }
 
   async function revoke(grantID: string) {
     const owner = captureOwner();
-    busy = true;
-    error = '';
+    patch({ busy: true, error: '' });
     try {
       await revokeMCPGrant(grantID);
-      if (owner()) await client.invalidateQueries({ queryKey: ['mcp-grants'] });
+      if (owner()) await refresh(agentKeys.grants(), owner);
     } catch (cause) {
-      if (owner()) error = errorMessage(cause);
+      if (owner()) patch({ error: errorMessage(cause) });
     } finally {
-      if (owner()) busy = false;
+      if (owner()) patch({ busy: false });
     }
   }
 </script>
+
+<svelte:window
+  onhashchange={() => consumeEnrollment(window.location.hash.slice(1))}
+/>
 
 <svelte:head><title>Personal tool grants · OpenLLMProxy</title></svelte:head>
 <header>
@@ -189,57 +261,86 @@
     settings
   </p>
 </header>
-{#if error}<p role="alert">{error}</p>{/if}
-{#if message}<p role="status">{message}</p>{/if}
-{#if handoffToken}
+{#if $state.error}<p role="alert">{$state.error}</p>{/if}
+{#if $state.message}<p role="status">{$state.message}</p>{/if}
+{#if $state.handoffToken}
   <section>
     <h2>Claim enrollment</h2>
     <p>This one-use link binds enrollment to your signed-in account</p>
-    <button disabled={busy} onclick={claimEnrollment}>Claim enrollment</button>
+    <button disabled={$state.busy} onclick={claimEnrollment}
+      >Claim enrollment</button
+    >
   </section>
 {/if}
 {#if canManage}
   <section>
     <h2>Server authorization</h2>
     <label
-      >Registered server <select bind:value={selected} onchange={loadServer}>
+      >Registered server <select
+        value={$state.selection.id}
+        onchange={(event) => void loadServer(event.currentTarget.value)}
+      >
         <option value="">Select a server</option>
         {#each servers.data ?? [] as item (item.id)}<option value={item.id}
             >{item.name}</option
           >{/each}
       </select></label
     >
-    {#if server}
+    {#if $state.server}
       <form
         onsubmit={(event) => {
           event.preventDefault();
           void saveConfiguration();
         }}
       >
-        <label>Client ID <input required bind:value={clientID} /></label>
-        <label>Audience <input required bind:value={audience} /></label>
-        <label>Scopes <input required bind:value={scopes} /></label>
+        <label
+          >Client ID <input
+            required
+            value={$state.fields.clientID}
+            oninput={(event) => setField('clientID', event.currentTarget.value)}
+          /></label
+        >
+        <label
+          >Audience <input
+            required
+            value={$state.fields.audience}
+            oninput={(event) => setField('audience', event.currentTarget.value)}
+          /></label
+        >
+        <label
+          >Scopes <input
+            required
+            value={$state.fields.scopes}
+            oninput={(event) => setField('scopes', event.currentTarget.value)}
+          /></label
+        >
         <label
           >Authorization endpoint <input
             type="url"
             required
-            bind:value={authorizationEndpoint}
+            value={$state.fields.authorizationEndpoint}
+            oninput={(event) =>
+              setField('authorizationEndpoint', event.currentTarget.value)}
           /></label
         >
         <label
           >Token endpoint <input
             type="url"
             required
-            bind:value={tokenEndpoint}
+            value={$state.fields.tokenEndpoint}
+            oninput={(event) =>
+              setField('tokenEndpoint', event.currentTarget.value)}
           /></label
         >
         <label
           >Device authorization endpoint <input
             type="url"
-            bind:value={deviceEndpoint}
+            value={$state.fields.deviceEndpoint}
+            oninput={(event) =>
+              setField('deviceEndpoint', event.currentTarget.value)}
           /></label
         >
-        <button disabled={busy}>Save authorization settings</button>
+        <button disabled={$state.busy}>Save authorization settings</button>
       </form>
       <form
         onsubmit={(event) => {
@@ -247,11 +348,25 @@
           void startEnrollment();
         }}
       >
-        <label>API key UUID <input required bind:value={keyID} /></label>
-        <button disabled={busy || !server.oauth}>Start key enrollment</button>
+        <label
+          >API key UUID <input
+            required
+            value={$state.fields.keyID}
+            oninput={(event) => setField('keyID', event.currentTarget.value)}
+          /></label
+        >
+        <button disabled={$state.busy || !$state.server.oauth}
+          >Start key enrollment</button
+        >
       </form>
-      {#if enrollmentURL}<p>
-          <a href={enrollmentURL}>Continue personal enrollment</a>
+      {#if $state.enrollmentURL}<p>
+          <a
+            href={$state.enrollmentURL}
+            onclick={(event) => {
+              event.preventDefault();
+              consumeEnrollment($state.enrollmentURL.split('#')[1] ?? '');
+            }}>Continue personal enrollment</a
+          >
         </p>{/if}
     {/if}
   </section>
@@ -288,7 +403,7 @@
             >
             <td
               >{#if grant.grant_id && grant.state !== 'revoked'}<button
-                  disabled={busy}
+                  disabled={$state.busy}
                   onclick={() => revoke(grant.grant_id!)}>Revoke</button
                 >{/if}</td
             >

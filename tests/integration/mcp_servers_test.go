@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -280,6 +281,16 @@ func TestMCPServerCertificationPinsCatalogsAndRechecksAuthorityWithoutLocks(t *t
 }
 func mustJSON(v any) []byte { raw, _ := json.Marshal(v); return raw }
 
+type mcpPersonalKey struct {
+	ID     string `json:"id"`
+	Secret string `json:"secret"`
+}
+
+type mcpPersonalClaimInput struct {
+	EnrollmentID string `json:"enrollment_id"`
+	HandoffToken string `json:"handoff_token"`
+}
+
 func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -307,17 +318,22 @@ func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testi
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		result := func() map[string]any {
-			if request.Method == "tools/call" {
-				return map[string]any{"content": []any{map[string]any{"type": "text", "text": "personal result"}}, "isError": false}
+		result := func() json.RawMessage {
+			switch request.Method {
+			case "tools/call":
+				return mustJSON(&mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "personal result"}}})
+			case "initialize":
+				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "personal-fixture", Version: "1"}})
+			default:
+				return mustJSON(mcpsdk.ListToolsResult{Tools: []*mcpsdk.Tool{{Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
 			}
-			if request.Method == "initialize" {
-				return map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
-			}
-			return map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": map[string]any{"type": "object"}}}}
 		}()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+		_ = json.NewEncoder(w).Encode(struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      int             `json:"id"`
+			Result  json.RawMessage `json:"result"`
+		}{JSONRPC: "2.0", ID: request.ID, Result: result})
 	}))
 	defer upstream.Close()
 	oauth := map[string]any{"client_id": "personal-client", "audience": "tool-api", "scopes": []string{"tools.read"}, "authorization_endpoint": upstream.URL + "/authorize", "token_endpoint": upstream.URL + "/token"}
@@ -327,36 +343,53 @@ func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testi
 	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Personal tools", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}, idem("personal-toolset"), 201)
 	toolsetID := mcpExecString(t, toolset, "id")
 	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("personal-publish")), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Personal caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID}}, idem("personal-caller"), 201)
-	keyID := mcpExecString(t, key, "id")
-	start := func() map[string]any {
-		return h.want(owner, "POST", "/api/v1/mcp-servers/"+serverID+"/grant-enrollments", map[string]any{"api_key_id": keyID}, nil, 200)
+	keyResponse := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Personal caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID}}, idem("personal-caller"), 201)
+	var key mcpPersonalKey
+	if err := json.Unmarshal(mustJSON(keyResponse), &key); err != nil {
+		t.Fatal(err)
 	}
-	claim := func(handoff map[string]any) map[string]any {
-		_, fragment, ok := strings.Cut(mcpExecString(t, handoff, "enrollment_url"), "#")
-		if !ok {
+	keyID := key.ID
+	start := func() mcpgrants.Handoff {
+		response := h.want(owner, "POST", "/api/v1/mcp-servers/"+serverID+"/grant-enrollments", struct {
+			APIKeyID string `json:"api_key_id"`
+		}{keyID}, nil, 200)
+		var handoff mcpgrants.Handoff
+		if err := json.Unmarshal(mustJSON(response), &handoff); err != nil {
+			t.Fatal(err)
+		}
+		return handoff
+	}
+	claim := func(handoff mcpgrants.Handoff) mcpPersonalClaimInput {
+		_, fragment, hasFragment := strings.Cut(handoff.EnrollmentURL, "#")
+		if !hasFragment {
 			t.Fatal("browser enrollment link has no private fragment")
 		}
-		id, token, ok := strings.Cut(fragment, ".")
-		if !ok {
+		id, token, hasToken := strings.Cut(fragment, ".")
+		if !hasToken {
 			t.Fatal("browser enrollment link is incomplete")
 		}
-		return map[string]any{"enrollment_id": id, "handoff_token": token}
+		return mcpPersonalClaimInput{EnrollmentID: id, HandoffToken: token}
 	}
 	first := start()
 	firstClaim := claim(first)
 	h.want(other, "POST", "/api/v1/mcp-grant-enrollments/claim", firstClaim, nil, 404)
-	claimed := h.want(owner, "POST", "/api/v1/mcp-grant-enrollments/claim", firstClaim, nil, 200)
+	claimedResponse := h.want(owner, "POST", "/api/v1/mcp-grant-enrollments/claim", firstClaim, nil, 200)
+	var claimed struct {
+		Enrollment mcpgrants.Enrollment `json:"enrollment"`
+	}
+	if err := json.Unmarshal(mustJSON(claimedResponse), &claimed); err != nil {
+		t.Fatal(err)
+	}
 	h.want(owner, "POST", "/api/v1/mcp-grant-enrollments/claim", firstClaim, nil, 409)
 	standing := h.want(owner, "GET", "/api/v1/mcp-user-grants", nil, nil, 200)
 	item := mcpExecItem(t, mcpExecItems(t, standing, "items"), 0, standing)
 	if item["state"] != "pending" || mcpExecObject(t, mcpExecObject(t, item, "binding"), "identity")["id"] != keyID {
 		t.Fatalf("claimed enrollment has incorrect standing or individual: %v", standing)
 	}
-	exercisePersonalGrantDispatch(t, h, owner, key, toolsetID, tool.Alias, claimed, personalCredential)
+	exercisePersonalGrantDispatch(t, h, owner, key, toolsetID, tool.Alias, claimed.Enrollment, personalCredential)
 	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	encoded := string(mustJSON(exported))
-	if strings.Contains(encoded, mcpExecString(t, firstClaim, "handoff_token")) || strings.Contains(encoded, mcpExecString(t, first, "enrollment_id")) {
+	if strings.Contains(encoded, firstClaim.HandoffToken) || strings.Contains(encoded, first.EnrollmentID) {
 		t.Fatal("portable configuration contains personal enrollment material")
 	}
 	document := mcpExecObject(t, exported, "document")
@@ -365,7 +398,7 @@ func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testi
 		t.Fatal("portable server configuration lost the declared OAuth client")
 	}
 	second := start()
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.mcp_grant_enrollments SET expires_at=now()-interval '1 second' WHERE id=$1`, second["enrollment_id"]); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.mcp_grant_enrollments SET expires_at=now()-interval '1 second' WHERE id=$1`, second.EnrollmentID); err != nil {
 		t.Fatal(err)
 	}
 	h.want(owner, "POST", "/api/v1/mcp-grant-enrollments/claim", claim(second), nil, 410)
@@ -375,12 +408,9 @@ func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testi
 	h.want(owner, "POST", "/api/v1/mcp-grant-enrollments/claim", claim(third), nil, 409)
 }
 
-func exercisePersonalGrantDispatch(t *testing.T, h *accessHarness, owner *browser, key map[string]any, toolsetID, alias string, claimed map[string]any, credential string) {
+func exercisePersonalGrantDispatch(t *testing.T, h *accessHarness, owner *browser, key mcpPersonalKey, toolsetID, alias string, claimed mcpgrants.Enrollment, credential string) {
 	t.Helper()
-	var bound mcpgrants.Binding
-	if err := json.Unmarshal(mustJSON(mcpExecObject(t, mcpExecObject(t, claimed, "enrollment"), "binding")), &bound); err != nil {
-		t.Fatal(err)
-	}
+	bound := claimed.Binding
 	valkey, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
 	if err != nil {
@@ -404,7 +434,7 @@ func exercisePersonalGrantDispatch(t *testing.T, h *accessHarness, owner *browse
 			t.Fatalf("personal grant dispatch returned %d, want %d: %s", w.Code, want, w.Body.String())
 		}
 	}
-	secret := mcpExecString(t, key, "secret")
+	secret := key.Secret
 	call(secret, "pending-grant", http.StatusForbidden)
 	grantID, secretID := uuid.NewString(), uuid.NewString()
 	expires := time.Now().Add(time.Hour)
@@ -416,7 +446,7 @@ func exercisePersonalGrantDispatch(t *testing.T, h *accessHarness, owner *browse
 	if err := h.Server.Keys.Store(t.Context(), tx, h.Server.Installation, secretID, secrets.MCPGrantAccess, []byte(credential), &expires); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(t.Context(), `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,project_id,binding,binding_digest,member_id,access_secret_id,expires_at) SELECT $1,id,server_id,project_id,binding,$2,claimed_by,$3,$4 FROM olp.mcp_grant_enrollments WHERE id=$5`, grantID, bound.Digest(), secretID, expires, mcpExecObject(t, claimed, "enrollment")["id"]); err != nil {
+	if _, err := tx.Exec(t.Context(), `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,project_id,binding,binding_digest,member_id,access_secret_id,expires_at) SELECT $1,id,server_id,project_id,binding,$2,claimed_by,$3,$4 FROM olp.mcp_grant_enrollments WHERE id=$5`, grantID, bound.Digest(), secretID, expires, claimed.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(t.Context()); err != nil {

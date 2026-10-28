@@ -54,20 +54,20 @@ func liveBinding(ctx context.Context, q access.Queryer, expected Binding) (Bindi
 }
 
 func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, error) {
-	expected, err := Bind(authority, tool)
-	if err != nil {
-		return nil, err
+	expected, bindErr := Bind(authority, tool)
+	if bindErr != nil {
+		return nil, bindErr
 	}
 	if _, err := liveBinding(ctx, s.Pool, expected); err != nil {
 		return nil, err
 	}
 	var tokenID string
-	err = s.Pool.QueryRow(ctx, `SELECT access_secret_id::text FROM olp.mcp_user_grants WHERE binding_digest=$1 AND revoked_at IS NULL AND expires_at>now() AND access_secret_id IS NOT NULL`, expected.Digest()).Scan(&tokenID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	queryErr := s.Pool.QueryRow(ctx, `SELECT access_secret_id::text FROM olp.mcp_user_grants WHERE binding_digest=$1 AND revoked_at IS NULL AND expires_at>now() AND access_secret_id IS NOT NULL`, expected.Digest()).Scan(&tokenID)
+	if errors.Is(queryErr, pgx.ErrNoRows) {
 		return nil, ErrRequired
 	}
-	if err != nil {
-		return nil, err
+	if queryErr != nil {
+		return nil, queryErr
 	}
 	credential, err := s.Keys.Read(ctx, s.Pool, s.Installation, tokenID, secrets.MCPGrantAccess)
 	if err != nil {
