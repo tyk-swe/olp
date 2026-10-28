@@ -384,7 +384,8 @@ async function consoleSnippets() {
         globalThis.fetch = (input, init) => {
           requests++;
           if (surface === 'anthropic') {
-            assert.equal(new Request(input, init).headers.get('anthropic-version'), '2023-06-01');
+            const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+            assert.equal(headers.get('anthropic-version'), '2023-06-01');
           }
           return localOnlyFetch(input, init);
         };
