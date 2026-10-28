@@ -1,10 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
-import type { RoutingDecision } from '../../src/lib/features/routes/api';
 import { manage, provisionGenerationRoute } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
 import { takeSecret, waitForRoutePublication } from '../journeys/fixtures';
 import { verifyDraftSave } from '../journeys/draft-saving';
+import type { RoutingDecision } from '../../src/lib/features/routes/api';
 import { vertical } from '../journeys/fixtures';
 import { verifyProviderRouting } from '../journeys/provider-routing';
 
