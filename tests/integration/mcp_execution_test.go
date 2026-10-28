@@ -627,6 +627,9 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	const callerID = "integration-caller-order-9"
 	var calls atomic.Int64
 	var drop atomic.Bool
+	var block atomic.Bool
+	blockEntered := make(chan struct{}, 1)
+	blockRelease := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
@@ -662,6 +665,13 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 			if drop.Load() {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
+			}
+			if block.Load() {
+				select {
+				case blockEntered <- struct{}{}:
+				default:
+				}
+				<-blockRelease
 			}
 			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": answer}}, "isError": false}
 		default:
@@ -877,11 +887,58 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 		t.Fatalf("second settlement appended another result: count=%d err=%v", resultCount, err)
 	}
 
+	block.Store(true)
+	type concurrentResult struct {
+		status int
+		body   map[string]any
+		err    error
+	}
+	rawCall := func() concurrentResult {
+		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "integration-caller-concurrent", "arguments": map[string]any{"query": argument}})
+		resp, err := func() (*http.Response, error) {
+			req, err := http.NewRequest(http.MethodPost, restarted.URL+"/v1/mcp/tools/call", bytes.NewReader(data))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Authorization", "Bearer "+secret)
+			req.Header.Set("Content-Type", "application/json")
+			return http.DefaultClient.Do(req)
+		}()
+		if err != nil {
+			return concurrentResult{err: err}
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if err = json.Unmarshal(raw, &out); err != nil {
+			return concurrentResult{err: err}
+		}
+		return concurrentResult{status: resp.StatusCode, body: out}
+	}
+	firstCall := make(chan concurrentResult, 1)
+	go func() { firstCall <- rawCall() }()
+	<-blockEntered
+	status, concurrent := callOn(restarted, "integration-caller-concurrent", argument)
+	if status != http.StatusBadGateway || concurrent["status"] != "outcome_unknown" || calls.Load() != 4 {
+		t.Fatalf("concurrent repeat dispatched beside the in-flight call: status=%d calls=%d body=%v", status, calls.Load(), concurrent)
+	}
+	concurrentAttempt := mcpExecString(t, concurrent, "attempt_id")
+	close(blockRelease)
+	block.Store(false)
+	finished := <-firstCall
+	if finished.err != nil || finished.status != http.StatusOK || mcpExecString(t, finished.body, "attempt_id") != concurrentAttempt {
+		t.Fatalf("in-flight call did not finish as the attempt its repeat retained: %+v", finished)
+	}
+	status, afterConcurrent := callOn(restarted, "integration-caller-concurrent", argument)
+	if status != http.StatusOK || calls.Load() != 4 || mcpExecString(t, afterConcurrent, "attempt_id") != concurrentAttempt {
+		t.Fatalf("settled concurrent call re-executed on repeat: status=%d calls=%d body=%v", status, calls.Load(), afterConcurrent)
+	}
+
 	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp.mcp_call_identities SET created_at=clock_timestamp()-interval '25 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE attempt_id=$1`, attemptID); err != nil {
 		t.Fatal(err)
 	}
 	status, reused := callOn(restarted, callerID, argument)
-	if status != http.StatusOK || calls.Load() != 4 || mcpExecString(t, reused, "attempt_id") == attemptID {
+	if status != http.StatusOK || calls.Load() != 5 || mcpExecString(t, reused, "attempt_id") == attemptID {
 		t.Fatalf("expired call identity stayed bound past 24 hours: status=%d calls=%d body=%v", status, calls.Load(), reused)
 	}
 }
