@@ -189,6 +189,7 @@ func (s *Server) finishLeases(ctx context.Context, leases []*limits.Lease, dispa
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/mcp/tools", s.listTools)
+	mux.HandleFunc("POST /v1/mcp/tools/simulate", s.simulateTool)
 	mux.HandleFunc("POST /v1/mcp/tools/call", s.callTool)
 	for _, path := range []string{"/mcp", "/mcp/"} {
 		mux.HandleFunc("POST "+path, s.serveStreamableHTTP)
@@ -487,6 +488,10 @@ type listedTool struct {
 	Name              string          `json:"name"`
 	Description       string          `json:"description"`
 	InputSchema       json.RawMessage `json:"input_schema"`
+	UnitPrice         *string         `json:"unit_price"`
+	PricingState      PricingState    `json:"pricing_state"`
+	Limits            toolCallLimits  `json:"limits"`
+	BudgetRequired    bool            `json:"budget_required"`
 }
 
 func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +508,7 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 	tools := []listedTool{}
 	appendToolset := func(resolved resolvedToolset) {
 		for _, tool := range resolved.tools {
-			tools = append(tools, listedTool{ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID, Name: tool.Alias, Description: tool.Description, InputSchema: tool.InputSchema})
+			tools = append(tools, describeTool(authority, resolved, tool))
 		}
 	}
 	if requested := r.URL.Query().Get("toolset_id"); requested != "" {
@@ -564,48 +569,21 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, failure)
 		return
 	}
-	var request callRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCallBodyBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, fail(http.StatusRequestEntityTooLarge, "request_too_large", "invalid_request_error", "The call body exceeds the 1 MiB bound."))
-			return
-		}
-		writeError(w, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object."))
+	request, decodeFailure := decodeCall(w, r)
+	if decodeFailure != nil {
+		writeError(w, decodeFailure)
 		return
 	}
-	if failure = callIDFailure(request.CallID); failure != nil {
+	if failure := callIDFailure(request.CallID); failure != nil {
 		writeError(w, failure)
 		return
 	}
-	resolved, failure := s.resolveToolset(authority, snapshot, request.ToolsetID)
-	if failure != nil {
-		writeError(w, failure)
+	prepared, preparationFailure := s.prepareCall(authority, snapshot, request)
+	if preparationFailure != nil {
+		writeError(w, preparationFailure)
 		return
 	}
-	tool, found := resolved.lookup(request.Name)
-	switch found {
-	case toolFound:
-	case toolDrifted:
-		writeError(w, errToolDefinitionChanged)
-		return
-	case toolInvalidSchema:
-		writeError(w, errToolSchemaInvalid)
-		return
-	default:
-		writeError(w, errToolNotFound)
-		return
-	}
-	arguments := request.Arguments
-	if len(arguments) == 0 || string(arguments) == "null" {
-		arguments = json.RawMessage(`{}`)
-	}
-	if err := tool.ValidateArguments(arguments); err != nil {
-		writeError(w, fail(http.StatusUnprocessableEntity, "invalid_tool_arguments", "invalid_request_error", "The arguments do not match the pinned tool schema."))
-		return
-	}
+	resolved, tool, arguments := prepared.resolved, prepared.tool, prepared.arguments
 	if s.Ledger == nil || s.Egress == nil || s.Auth == nil {
 		writeError(w, errLedger)
 		return

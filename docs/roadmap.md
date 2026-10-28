@@ -199,15 +199,17 @@ resource families.
 
 ### RM7: Consumer MCP
 
-**Status: Planned.** **Owners:** MCP and access maintainers.
+**Status: In progress.** **Owners:** MCP and access maintainers.
 **Dependencies:** RM4 durable accounting and agent contracts, plus existing
 guardrail argument/result execution.
 
-- [ ] **RM7.1 — Direct Streamable HTTP execution:** publish pinned toolsets,
+- [x] **RM7.1. Direct Streamable HTTP execution:** publish pinned toolsets,
   static credentials, bounded sessions and compiled schemas. Serve `/mcp` and
   JSON tool endpoints through one authorized call path with catalog-drift
   handling, argument/result policies, limits, priced attempts and durable
   dispatch state. Repeated call IDs must not repeat effects.
+  Local fixture coverage includes the official MCP Go SDK v1.8.0 reference
+  round trip and project-scoped, content-free execution history.
 - [ ] **RM7.2 — OAuth and per-user grants:** implement server/client/audience/
   scope/project/user binding, single-flight refresh, expiry, revocation and
   isolated credentials. Missing grants must refuse execution. Include the

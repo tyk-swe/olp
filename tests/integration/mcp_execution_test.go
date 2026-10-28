@@ -18,13 +18,124 @@ import (
 	"testing"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"golang.org/x/oauth2"
 )
+
+func TestMCPReferenceServerRoundTrip(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Reference MCP tools")
+	type arguments struct {
+		Query string `json:"query"`
+	}
+	var dispatches atomic.Int64
+	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "reference-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25"}})
+	mcpsdk.AddTool(reference, &mcpsdk.Tool{Name: "echo", Description: "Return the supplied text"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input arguments) (*mcpsdk.CallToolResult, any, error) {
+		dispatches.Add(1)
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: input.Query}}}, nil, nil
+	})
+	upstream := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return reference }, &mcpsdk.StreamableHTTPOptions{JSONResponse: true}))
+	defer upstream.Close()
+	registered := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
+		"name": "Reference MCP server", "project_id": project, "transport": "streamable_http",
+		"endpoint": upstream.URL, "enabled": true, "unit_price": "0", "per_key_calls_per_minute": 20, "per_key_max_concurrency": 4,
+	}, idem("mcp-reference-server"), 201)
+	serverID := mcpExecString(t, registered, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "echo", Alias: agentcontract.ToolAlias(serverID, "echo")}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+		"project_id": project, "name": "Reference toolset", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}},
+	}, idem("mcp-reference-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("mcp-reference-publish")), 200)
+	const keyCallsPerMinute = 10
+	const keyMaxConcurrency = 2
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Reference caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID}, "requests_per_minute": keyCallsPerMinute, "max_concurrency": keyMaxConcurrency,
+	}, idem("mcp-reference-key"), 201)
+	secret := mcpExecString(t, key, "secret")
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp-reference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &mcp.Server{
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessions, Limiter: limiter,
+		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	consumer := httptest.NewServer(mux)
+	defer consumer.Close()
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: &oauth2.Transport{Source: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: secret})}}
+	response, err := client.Get(consumer.URL + "/v1/mcp/tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var capabilities struct {
+		Tools []struct {
+			Name         string `json:"name"`
+			UnitPrice    string `json:"unit_price"`
+			PricingState string `json:"pricing_state"`
+			Limits       struct {
+				KeyCallsPerMinute int64 `json:"key_calls_per_minute"`
+				KeyMaxConcurrency int64 `json:"key_max_concurrency"`
+			} `json:"limits"`
+		} `json:"tools"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&capabilities); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(capabilities.Tools) != 1 {
+		t.Fatalf("reference tool was not discoverable: %d %+v", response.StatusCode, capabilities)
+	}
+	capability := capabilities.Tools[0]
+	if capability.Name != tool.Alias || capability.UnitPrice != "0" || capability.PricingState != "free" || capability.Limits.KeyCallsPerMinute != keyCallsPerMinute || capability.Limits.KeyMaxConcurrency != keyMaxConcurrency {
+		t.Fatalf("discovery disagreed with the explicit price or tighter key policy: %+v", capability)
+	}
+	sdkClient := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "reference-caller", Version: "1"}, nil)
+	session, err := sdkClient.Connect(t.Context(), &mcpsdk.StreamableClientTransport{
+		Endpoint: consumer.URL + "/mcp?toolset_id=" + toolsetID, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true,
+	}, &mcpsdk.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	listed, err := session.ListTools(t.Context(), nil)
+	if err != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != tool.Alias {
+		t.Fatalf("reference client could not list the published tool: %+v %v", listed, err)
+	}
+	result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: tool.Alias, Arguments: arguments{Query: "reference round trip"}, Meta: mcpsdk.Meta{"olp.call_id": "reference-call"}})
+	if err != nil || result.IsError || len(result.Content) != 1 || dispatches.Load() != 1 {
+		t.Fatalf("reference round trip failed: %+v %v", result, err)
+	}
+	text, ok := result.Content[0].(*mcpsdk.TextContent)
+	if !ok || text.Text != "reference round trip" {
+		t.Fatalf("reference result did not survive both protocol boundaries: %+v", result)
+	}
+	attemptID, ok := result.Meta["olp.attempt_id"].(string)
+	if !ok {
+		t.Fatalf("reference result omitted its attempt identity: %+v", result.Meta)
+	}
+	record := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+attemptID, nil, nil, 200)
+	if record["status"] != "succeeded" || record["debit_state"] != "settled" || record["pricing_state"] != capability.PricingState || !mcpAmountIsZero(t, record, "observed_charge") {
+		t.Fatalf("reference call and its discovered price did not settle consistently: %v", record)
+	}
+}
 
 func mcpExecString(t *testing.T, body map[string]any, key string) string {
 	t.Helper()
@@ -248,6 +359,22 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	if got := mcpExecString(t, mcpExecItem(t, tools, 0, listed), "name"); got != tool.Alias {
 		t.Fatalf("pinned tools were not listed under their alias: %d %v", status, listed)
 	}
+	capability := mcpExecItem(t, tools, 0, listed)
+	if capability["pricing_state"] != "unpriced" || capability["unit_price"] != nil {
+		t.Fatalf("discovery did not distinguish an unpriced tool: %v", capability)
+	}
+	capabilityLimits := mcpExecObject(t, capability, "limits")
+	if capabilityLimits["server_calls_per_minute"] != created["calls_per_minute"] || capabilityLimits["key_max_concurrency"] != created["per_key_max_concurrency"] {
+		t.Fatalf("discovery limits disagree with the configured server: %v", capability)
+	}
+	simulatedStatus, simulated := call("POST", "/v1/mcp/tools/simulate", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
+	if simulatedStatus != http.StatusOK || simulated["configuration_valid"] != true || calls.Load() != 0 || debitCount() != 0 {
+		t.Fatalf("simulation did not describe the permitted call without executing it: %d %v", simulatedStatus, simulated)
+	}
+	invalidStatus, invalid := call("POST", "/v1/mcp/tools/simulate", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": 3}})
+	if invalidStatus != http.StatusUnprocessableEntity || mcpExecObject(t, invalid, "error")["code"] != "invalid_tool_arguments" || calls.Load() != 0 || debitCount() != 0 {
+		t.Fatalf("simulation did not refuse the same invalid arguments as execution: %d %v", invalidStatus, invalid)
+	}
 
 	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "existing-json-1", "arguments": map[string]any{"query": 3}})
 	if status != http.StatusUnprocessableEntity || calls.Load() != 0 || debitCount() != 0 {
@@ -288,6 +415,25 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	listedCalls := h.want(owner, "GET", "/api/v1/mcp-tool-calls?toolset_id="+toolsetID, nil, nil, 200)
 	if items := mcpExecItems(t, listedCalls, "items"); len(items) != 1 {
 		t.Fatalf("management list lost the attempt: %v", listedCalls)
+	}
+	otherProject := createProject(h, owner, "Other tool history")
+	otherCalls := h.want(owner, "GET", "/api/v1/mcp-tool-calls?project_id="+otherProject, nil, nil, 200)
+	if len(mcpExecItems(t, otherCalls, "items")) != 0 {
+		t.Fatalf("project history filter returned another project's calls: %v", otherCalls)
+	}
+	h.want(owner, "GET", "/api/v1/mcp-tool-calls?project_id=invalid", nil, nil, 422)
+	viewer := h.invite(owner, "tool-history@example.com", "viewer")
+	viewerSession := h.want(viewer, "GET", "/api/v1/sessions/current", nil, nil, 200)
+	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
+	viewerRecord := h.want(owner, "GET", "/api/v1/users/"+viewerID, nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), 200)
+	addMember(h, owner, otherProject, viewerID, "viewer")
+	assignedViewer := login(h, "tool-history@example.com")
+	h.want(assignedViewer, "GET", "/api/v1/mcp-tool-calls?project_id="+project, nil, nil, 404)
+	h.want(assignedViewer, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, called, "attempt_id"), nil, nil, 404)
+	filteredCalls := h.want(assignedViewer, "GET", "/api/v1/mcp-tool-calls", nil, nil, 200)
+	if len(mcpExecItems(t, filteredCalls, "items")) != 0 {
+		t.Fatalf("project viewer could read another project's attempts: %v", filteredCalls)
 	}
 
 	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50799", "name": tool.Alias, "call_id": "existing-json-3", "arguments": map[string]any{"query": "x"}})
@@ -433,6 +579,10 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("retired server dispatched: calls=%d", calls.Load())
+	}
+	retained := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, called, "attempt_id"), nil, nil, 200)
+	if retained["dispatch_id"] != detail["dispatch_id"] || retained["status"] != detail["status"] || retained["observed_charge"] != detail["observed_charge"] {
+		t.Fatalf("disabling execution changed the historical settlement: %v", retained)
 	}
 }
 
@@ -1323,6 +1473,47 @@ func TestMCPToolCallPricingLimitsAndOwnersEndToEnd(t *testing.T) {
 			}
 		}
 		return resp.StatusCode, out
+	}
+	for _, scenario := range []struct {
+		name      string
+		secret    string
+		toolsetID string
+		tool      agentcontract.Tool
+		status    int
+	}{
+		{name: "priced", secret: cappedSecret, toolsetID: pricedToolset, tool: pricedTool, status: http.StatusOK},
+		{name: "unpriced budgeted", secret: cappedSecret, toolsetID: unpricedToolset, tool: unpricedTool, status: http.StatusUnprocessableEntity},
+		{name: "unpriced unbudgeted", secret: openSecret, toolsetID: openUnpricedToolset, tool: openUnpricedTool, status: http.StatusOK},
+	} {
+		t.Run("simulate "+scenario.name, func(t *testing.T) {
+			data, err := json.Marshal(map[string]any{"toolset_id": scenario.toolsetID, "name": scenario.tool.Alias, "arguments": map[string]any{"query": "pricing simulation"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &http.Client{Transport: &oauth2.Transport{Source: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: scenario.secret})}}
+			response, err := client.Post(consumer.URL+"/v1/mcp/tools/simulate", "application/json", bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var result map[string]any
+			if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != scenario.status {
+				t.Fatalf("simulation disagreed with the configured price and budget: %d %v", response.StatusCode, result)
+			}
+			if scenario.status == http.StatusOK && result["configuration_valid"] != true {
+				t.Fatalf("permitted configuration was not reported: %v", result)
+			}
+			if scenario.status != http.StatusOK && mcpExecObject(t, result, "error")["code"] != "tool_unpriced" {
+				t.Fatalf("simulation did not explain its price refusal: %v", result)
+			}
+		})
+	}
+	var simulatedAttempts int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.mcp_tool_calls").Scan(&simulatedAttempts); err != nil || simulatedAttempts != 0 || calls.Load() != 0 {
+		t.Fatalf("simulation created execution or accounting effects: attempts=%d calls=%d error=%v", simulatedAttempts, calls.Load(), err)
 	}
 	var pricingCurrency string
 	if err = h.Pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&pricingCurrency); err != nil {

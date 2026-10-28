@@ -57781,6 +57781,14 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {

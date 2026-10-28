@@ -11,6 +11,7 @@ export type MCPServer = components['schemas']['MCPServerResponse'];
 export type MCPServerUpdate = components['schemas']['UpdateMCPServerRequest'];
 export type Revision = components['schemas']['AgentPublicationRevision'];
 export type Exposure = components['schemas']['ExecutionDebit'];
+export type ToolCall = components['schemas']['MCPToolCallResponse'];
 
 const collections = {
   toolsets: '/api/v1/toolsets',
@@ -97,6 +98,24 @@ export const listExposures = async (key?: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/execution-debits', {
       params: { query: { api_key_id: key || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const listToolCalls = async (
+  project?: string,
+  key?: string,
+  cursor?: string
+) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/mcp-tool-calls', {
+      params: {
+        query: {
+          project_id: project || undefined,
+          api_key_id: key || undefined,
+          cursor,
+          limit: 50
+        }
+      }
     })
   );
 
