@@ -8,8 +8,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -186,3 +188,83 @@ func TestCachedKeyRotationAndBoundedOutage(t *testing.T) {
 
 // The caller that starts a due refresh answers from the cache while the
 // issuer stalls, and the refresh still lands once the issuer answers.
+
+type entraUserClaims struct {
+	Issuer       string          `json:"iss"`
+	Subject      string          `json:"sub"`
+	Audience     string          `json:"aud"`
+	IssuedAt     int64           `json:"iat"`
+	Expires      int64           `json:"exp"`
+	Repository   string          `json:"repository"`
+	EndUser      string          `json:"customer"`
+	Scopes       json.RawMessage `json:"scp,omitempty"`
+	IdentityType json.RawMessage `json:"idtyp,omitempty"`
+}
+
+func TestEntraUserRequiresDelegatedClaimsOnVerifiedToken(t *testing.T) {
+	public, private, keyErr := ed25519.GenerateKey(rand.Reader)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	config := fixtureConfig()
+	keys := map[string]jose.JSONWebKey{"entra": {Key: public, KeyID: "entra", Algorithm: string(jose.EdDSA), Use: "sig"}}
+	now := time.Now()
+	for _, test := range []struct {
+		name         string
+		issuer       string
+		audience     string
+		scopes       json.RawMessage
+		identityType json.RawMessage
+		expires      time.Duration
+		accepted     bool
+	}{
+		{"delegated-user", config.Issuer, "gateway", json.RawMessage(`"tools.read tools.write"`), json.RawMessage(`"user"`), time.Minute, true},
+		{"delegated-without-type", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), nil, time.Minute, true},
+		{"wrong-issuer", config.Issuer + "/other", "gateway", json.RawMessage(`"tools.read"`), nil, time.Minute, false},
+		{"wrong-audience", config.Issuer, "other", json.RawMessage(`"tools.read"`), nil, time.Minute, false},
+		{"missing-scopes", config.Issuer, "gateway", nil, nil, time.Minute, false},
+		{"blank-scopes", config.Issuer, "gateway", json.RawMessage(`"   "`), nil, time.Minute, false},
+		{"wrong-scope-type", config.Issuer, "gateway", json.RawMessage(`["tools.read"]`), nil, time.Minute, false},
+		{"bounded-scopes", config.Issuer, "gateway", json.RawMessage(`"` + strings.Repeat("x", 4097) + `"`), nil, time.Minute, false},
+		{"application", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), json.RawMessage(`"app"`), time.Minute, false},
+		{"wrong-identity-type", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), json.RawMessage(`true`), time.Minute, false},
+		{"expired", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), nil, -time.Second, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claims := entraUserClaims{Issuer: config.Issuer, Subject: "private-subject", Audience: "gateway", IssuedAt: now.Add(-time.Minute).Unix(), Expires: now.Add(test.expires).Unix(), Repository: "example/repo", EndUser: "private-end-user", Scopes: test.scopes, IdentityType: test.identityType}
+			raw := sign(t, jose.EdDSA, private, "entra", claims)
+			token, parseErr := Parse(raw)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			if _, verifyErr := token.Verify(config, keys, now.Add(-2*time.Second)); verifyErr != nil {
+				t.Fatal(verifyErr)
+			}
+			assertion, err := token.EntraUser(test.issuer, test.audience)
+			if !test.accepted {
+				if err == nil {
+					t.Fatal("nondelegated or mismatched identity became a user assertion")
+				}
+				return
+			}
+			if err != nil || assertion.Token() != raw || !assertion.ExpiresAt().Equal(time.Unix(claims.Expires, 0)) {
+				t.Fatal("verified delegated assertion lost its token or expiry")
+			}
+			if strings.Contains(fmt.Sprint(assertion), raw) || strings.Contains(fmt.Sprint(assertion), claims.Subject) {
+				t.Fatal("formatted assertion leaked private identity")
+			}
+		})
+	}
+}
+
+func TestRequestAssertionStaysInItsRequestContext(t *testing.T) {
+	base := context.Background()
+	first := WithAssertion(base, "first-private-assertion")
+	second := WithAssertion(base, "second-private-assertion")
+	if RequestAssertion(base) != "" || RequestAssertion(first) != "first-private-assertion" || RequestAssertion(second) != "second-private-assertion" {
+		t.Fatal("request assertion crossed context boundaries")
+	}
+	if RequestAssertion(context.WithValue(first, struct{}{}, true)) != "first-private-assertion" {
+		t.Fatal("nested request context lost its assertion")
+	}
+}

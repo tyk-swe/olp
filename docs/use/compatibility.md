@@ -16,6 +16,43 @@ The [gateway](../develop/architecture.md) applies shared admission and response 
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../../tests/README.md).
 
+## Consumer MCP qualification
+
+Published tools support the JSON call endpoint and Streamable HTTP at MCP
+2025-03-26, 2025-06-18 and 2025-11-25 through one authorized execution path.
+Local fixtures cover schema and drift refusal, revocation, limits, pinned
+pricing, guardrail arguments/results, durable reservation and settlement,
+unknown outcomes and call-identifier replay. The console exposes content-free
+attempt history, and capability/simulation responses use the same publication,
+price and effective-limit inputs as execution.
+
+The minimal reference check uses the official
+[Go MCP SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk/tree/v1.8.0),
+pinned in `go.mod`, as both a Streamable HTTP server and client with the
+protocol explicitly pinned to 2025-11-25. `TestMCPReferenceServerRoundTrip` in
+`tests/integration/mcp_execution_test.go` registers and certifies that server,
+publishes its tool, lists it through the consumer boundary, invokes it with
+the reference client and checks the settled record. This is local fixture
+qualification, not a claim about every third-party MCP deployment.
+
+Explicit legacy HTTP+SSE is also qualified at MCP 2024-11-05 using the same
+SDK pin. `TestMCPLegacyReferenceServerRoundTrip` registers and recertifies a legacy
+server, round-trips its portable configuration, publishes the tool and calls it
+through a legacy reference client. It checks the resulting durable settlement.
+Public-handler fixtures cover exact argument-byte identity, authority revocation,
+modern/legacy session isolation and refusal when a replica lacks the live stream.
+Legacy deployments require connection affinity between the SSE GET and its
+POSTs. Modern sessions never fall back to the legacy transport.
+
+Per-user OAuth is qualified separately. Experimental stdio is covered by a
+locally built, owner-permitted executable fixture through the shared consumer
+path. It preserves the unconfined native execution contract and does not provide
+a sandbox. See [MCP servers](mcp-servers.md#experimental-stdio-executables) for
+deployment, permission and lifecycle requirements.
+Standalone modern consumer event streams, sampling, elicitation, roots and
+arbitrary resource/prompt calls are not supported by this slice.
+See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
+
 ## Guardrail compatibility
 
 [Guardrails](guardrails.md) inspect effective provider input and qualified unary
@@ -724,8 +761,8 @@ evidence retries only within retention; no guessed job or blind resubmission.
 
 ## SDK and live-provider checks
 
-The deterministic JavaScript smoke suite pins OpenAI `7.4.0`, Anthropic
-`0.116.0` and Google GenAI `2.16.0` in `tests/sdk-smoke/package.json`. These
+The deterministic JavaScript smoke suite pins its OpenAI, Anthropic and Google
+GenAI SDK versions in `tests/sdk-smoke/package.json`. These
 are mock protocol checks, not a claim that every upstream model or every SDK
 version has live certification. Live-provider checks are dispatched separately
 with selected-provider credentials; use their result for the actual provider,
@@ -812,3 +849,12 @@ define new dialects. Custom guardrails run as confined WASM or signed webhooks,
 not arbitrary in-process code. Durable request history excludes prompts and
 responses; explicit external capture and sealed response caching have their own
 storage contracts. Operator-authored prompt templates remain planned.
+
+Entra on-behalf-of authorization is qualified against a local Entra-shaped
+fixture. Both JSON and MCP calls require a live, verified delegated user and
+matching middle-tier audience; application tokens, generic workload identity,
+wrong issuers and cross-user sessions refuse before exchange or dispatch.
+Sealed grants reuse the existing refresh and revocation owner. Redirect refusal
+and exclusion of assertions and credentials from operator records are covered.
+This does not claim live Entra tenant qualification. See
+[the configuration contract](mcp-servers.md#entra-on-behalf-of-grants).

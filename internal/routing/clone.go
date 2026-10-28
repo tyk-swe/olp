@@ -18,6 +18,27 @@ func (s *Snapshot) Clone() *Snapshot {
 		return nil
 	}
 	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out.MCPServers = slices.Collect(func(yield func(MCPServer) bool) {
+		for _, server := range s.MCPServers {
+			if !yield(MCPServer{
+				ID: server.ID, ProjectID: server.ProjectID, RevisionID: server.RevisionID, Endpoint: server.Endpoint,
+				Transport: server.Transport, Protocol: server.Protocol, Digest: server.Digest,
+				CredentialID: copyPointer(server.CredentialID), UnitPrice: copyPointer(server.UnitPrice), ToolPrices: maps.Clone(server.ToolPrices),
+				OAuth: server.OAuth.Clone(), Delegation: server.Delegation.Clone(), Stdio: server.Stdio.Clone(),
+				CallsPerMinute: server.CallsPerMinute, MaxConcurrency: server.MaxConcurrency,
+				PerKeyCallsPerMinute: server.PerKeyCallsPerMinute, PerKeyMaxConcurrency: server.PerKeyMaxConcurrency,
+				Tools: slices.Collect(func(yieldTool func(MCPTool) bool) {
+					for _, tool := range server.Tools {
+						if !yieldTool(MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: slices.Clone(tool.InputSchema)}) {
+							return
+						}
+					}
+				}),
+			}) {
+				return
+			}
+		}
+	})
 	out.AgentPublications = slices.Clone(s.AgentPublications)
 	for i, v := range out.AgentPublications {
 		out.AgentPublications[i] = agentcontract.CloneRevision(v)

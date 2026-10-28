@@ -22814,7 +22814,8 @@
             "enum": [
               "2025-11-25",
               "2025-06-18",
-              "2025-03-26"
+              "2025-03-26",
+              "2024-11-05"
             ]
           },
           "tools": {
@@ -22868,13 +22869,87 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse",
+              "stdio"
             ]
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
+          },
+          "delegation_private_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
           }
         },
         "required": [
           "name",
-          "endpoint",
           "enabled",
           "project_id",
           "transport"
@@ -22905,11 +22980,73 @@
             "minLength": 1,
             "maxLength": 4096,
             "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
+          },
+          "delegation_private_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
           }
         },
         "required": [
           "name",
-          "endpoint",
           "enabled"
         ]
       },
@@ -22931,7 +23068,9 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse",
+              "stdio"
             ]
           },
           "endpoint": {
@@ -22969,6 +23108,63 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         },
         "required": [
@@ -22976,7 +23172,6 @@
           "project_id",
           "name",
           "transport",
-          "endpoint",
           "enabled",
           "has_credential",
           "etag",
@@ -22984,7 +23179,16 @@
           "revision",
           "catalog",
           "certified_at",
-          "retired_at"
+          "retired_at",
+          "unit_price",
+          "tool_prices",
+          "calls_per_minute",
+          "max_concurrency",
+          "per_key_calls_per_minute",
+          "per_key_max_concurrency",
+          "oauth",
+          "endpoint",
+          "delegation"
         ]
       },
       "MCPServerSummary": {
@@ -23005,7 +23209,9 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse",
+              "stdio"
             ]
           },
           "endpoint": {
@@ -23040,6 +23246,63 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         },
         "required": [
@@ -23047,14 +23310,22 @@
           "project_id",
           "name",
           "transport",
-          "endpoint",
           "enabled",
           "has_credential",
           "etag",
           "revision_id",
           "revision",
           "certified_at",
-          "retired_at"
+          "retired_at",
+          "unit_price",
+          "tool_prices",
+          "calls_per_minute",
+          "max_concurrency",
+          "per_key_calls_per_minute",
+          "per_key_max_concurrency",
+          "oauth",
+          "endpoint",
+          "delegation"
         ]
       },
       "MCPServerListResponse": {
@@ -23066,6 +23337,252 @@
             "items": {
               "$ref": "#/components/schemas/MCPServerSummary"
             }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "MCPToolCallResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolset_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tool_alias": {
+            "type": "string",
+            "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+          },
+          "input_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "result_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "dispatched",
+              "succeeded",
+              "upstream_error",
+              "outcome_unknown",
+              "settled",
+              "not_accepted",
+              "refused_unpriced",
+              "guardrail_blocked"
+            ]
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "call_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "debit_state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "ready",
+              "dispatched",
+              "outcome_unknown",
+              "settled",
+              "released",
+              "conflict",
+              "not_accepted"
+            ]
+          },
+          "cost_bound": {
+            "type": "string"
+          },
+          "charge_bound": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Pinned unit price charged for the dispatched call. Null only when pricing_state is unpriced."
+          },
+          "pricing_state": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "free",
+              "unpriced"
+            ],
+            "description": "Whether the call settled at a price, at an explicit free price, or without any price."
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "description": "Installation pricing currency the bounds and observed amounts use."
+          },
+          "guardrail_decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
+          },
+          "identity_decisions": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/MCPIdentityDecision"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "dispatch_id",
+          "api_key_id",
+          "project_id",
+          "toolset_id",
+          "toolset_revision_id",
+          "server_id",
+          "server_revision_id",
+          "tool_alias",
+          "input_digest",
+          "result_digest",
+          "status",
+          "is_error",
+          "started_at",
+          "completed_at",
+          "created_at",
+          "call_digest",
+          "debit_state",
+          "cost_bound",
+          "charge_bound",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "unit_price",
+          "pricing_state",
+          "currency",
+          "guardrail_decisions",
+          "identity_decisions"
+        ]
+      },
+      "MCPToolCallResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "settled",
+              "not_accepted"
+            ]
+          },
+          "evidence_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observed_cost": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          },
+          "observed_charge": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          }
+        },
+        "required": [
+          "outcome",
+          "evidence_digest"
+        ]
+      },
+      "MCPToolCallList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPToolCallResponse"
+            },
+            "maxItems": 200
           },
           "next_cursor": {
             "type": [
@@ -23105,6 +23622,63 @@
           "certified_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         },
         "required": [
@@ -23113,7 +23687,15 @@
           "revision",
           "endpoint",
           "catalog",
-          "certified_at"
+          "certified_at",
+          "unit_price",
+          "tool_prices",
+          "calls_per_minute",
+          "max_concurrency",
+          "per_key_calls_per_minute",
+          "per_key_max_concurrency",
+          "oauth",
+          "delegation"
         ]
       },
       "ConfigurationMCPServer": {
@@ -23123,7 +23705,6 @@
           "name",
           "project",
           "transport",
-          "endpoint",
           "enabled",
           "catalog_digest"
         ],
@@ -23141,7 +23722,9 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse",
+              "stdio"
             ]
           },
           "endpoint": {
@@ -23159,6 +23742,63 @@
           "credential_ref": {
             "type": "string",
             "description": "Logical destination sealed bearer binding; never source credential bytes."
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         }
       },
@@ -25279,6 +25919,7 @@
               "organization",
               "project",
               "route",
+              "toolset",
               "api-key"
             ]
           },
@@ -25562,6 +26203,7 @@
               "organization",
               "project",
               "route",
+              "toolset",
               "api-key"
             ]
           },
@@ -27190,6 +27832,525 @@
           "acknowledge_opaque_unmetered"
         ],
         "type": "object"
+      },
+      "MCPOAuthConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "minLength": 0
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "device_authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "entra_obo": {
+            "$ref": "#/components/schemas/MCPEntraOBO"
+          }
+        },
+        "required": [
+          "client_id",
+          "audience",
+          "scopes",
+          "token_endpoint"
+        ],
+        "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+      },
+      "MCPGrantIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "end_user"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "workload_issuer_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "MCPGrantBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/MCPGrantIdentity"
+          }
+        },
+        "required": [
+          "server_id",
+          "project_id",
+          "endpoint",
+          "oauth",
+          "identity"
+        ]
+      },
+      "MCPGrantHandoff": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "enrollment_url": {
+            "type": "string",
+            "description": "One-use browser link. Its secret remains in the URL fragment and must not be logged or retained."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "enrollment_url",
+          "expires_at"
+        ]
+      },
+      "MCPGrantEnrollment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/MCPGrantBinding"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "claimed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "binding",
+          "expires_at",
+          "claimed_at"
+        ]
+      },
+      "MCPGrantClaimResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment": {
+            "$ref": "#/components/schemas/MCPGrantEnrollment"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          }
+        },
+        "required": [
+          "enrollment",
+          "state"
+        ]
+      },
+      "MCPUserGrantStanding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "grant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/MCPGrantBinding"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "expired",
+              "revoked",
+              "denied",
+              "failed"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "grant_id",
+          "binding",
+          "state",
+          "expires_at",
+          "created_at"
+        ]
+      },
+      "MCPUserGrantList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPUserGrantStanding"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "StartMCPGrantEnrollmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "api_key_id"
+        ]
+      },
+      "ClaimMCPGrantEnrollmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "handoff_token": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 128,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "handoff_token"
+        ]
+      },
+      "MCPExecutableFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "digest",
+          "size_bytes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MCPExecutablePermission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "permitted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MCPExecutableList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPExecutableFile"
+            }
+          }
+        }
+      },
+      "MCPStdioBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executable",
+          "digest"
+        ],
+        "properties": {
+          "executable": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "MCPGrantAuthorizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "type": "string",
+            "enum": [
+              "authorization_code",
+              "device_code"
+            ]
+          }
+        },
+        "required": [
+          "flow"
+        ]
+      },
+      "MCPGrantCompletionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "writeOnly": true
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ]
+      },
+      "MCPGrantDeviceChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "verification_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "verification_url",
+          "user_code",
+          "interval",
+          "expires_at"
+        ]
+      },
+      "MCPGrantAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "expired",
+              "denied",
+              "failed"
+            ]
+          },
+          "authorization_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "device": {
+            "$ref": "#/components/schemas/MCPGrantDeviceChallenge"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "MCPDelegationConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "issuer",
+          "audience"
+        ],
+        "additionalProperties": false
+      },
+      "MCPIdentityDecision": {
+        "type": "object",
+        "properties": {
+          "hook": {
+            "type": "string",
+            "enum": [
+              "mcp_security",
+              "mcp_end_user_permission",
+              "mcp_jwt_signer",
+              "agent_365"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "denied",
+              "not_configured"
+            ]
+          }
+        },
+        "required": [
+          "hook",
+          "outcome"
+        ],
+        "additionalProperties": false
+      },
+      "MCPEntraOBO": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issuer"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Exact registered workload issuer trusted for delegated user assertions."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -57220,6 +58381,231 @@
         }
       }
     },
+    "/api/v1/mcp-tool-calls": {
+      "get": {
+        "operationId": "list_mcp_tool_calls",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp tool calls",
+        "description": "Content-free tool call attempt records. Arguments, results and credentials are never stored.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "toolset_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool call records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls/{call_id}": {
+      "get": {
+        "operationId": "get_mcp_tool_call",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp tool call",
+        "description": "One content-free tool call attempt record.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool call record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls/{call_id}/resolve": {
+      "post": {
+        "operationId": "resolve_mcp_tool_call",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "resolve mcp tool call",
+        "description": "Resolve the held debit of a tool call whose outcome is unknown, exactly once, from reviewed evidence. Settled records later observed evidence, and not_accepted records an audited finding that the upstream never accepted the call.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPToolCallResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool call record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Outcome already known or debit already resolved"
+          },
+          "422": {
+            "description": "Invalid outcome or evidence digest"
+          }
+        }
+      }
+    },
     "/api/v1/observability/capture": {
       "get": {
         "operationId": "get_capture_configuration",
@@ -60648,7 +62034,7 @@
             }
           }
         },
-        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write."
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write."
       }
     },
     "/api/v1/guardrail-attachments/{attachment_id}": {
@@ -60751,7 +62137,7 @@
             }
           }
         ],
-        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write."
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write."
       }
     },
     "/api/v1/guardrails/evaluate": {
@@ -63837,6 +65223,849 @@
         ],
         "tags": [
           "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/mcp-user-grants": {
+      "get": {
+        "operationId": "list_mcp_user_grants",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp user grants",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal grant standing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPUserGrantList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/grant-enrollments": {
+      "post": {
+        "operationId": "start_mcp_grant_enrollment",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "start mcp grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantHandoff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/claim": {
+      "post": {
+        "operationId": "claim_mcp_grant_enrollment",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "claim mcp grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantClaimResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-user-grants/{grant_id}": {
+      "delete": {
+        "operationId": "revoke_mcp_user_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "revoke mcp user grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Enrollment or grant updated"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-executables": {
+      "get": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "listMCPExecutables",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPExecutableList"
+                }
+              }
+            },
+            "description": "Executables, by name"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OLP can't read the unconfined plugin directory the deployment names (unconfined_plugin_dir_unreadable)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-executables/{executable}/review": {
+      "post": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "reviewMCPExecutable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPExecutablePermission"
+                }
+              }
+            },
+            "description": "Installed executable metadata and digest permission, without starting the executable"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Executable metadata or the required risk acknowledgment is invalid"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-executables/{executable}/permit": {
+      "post": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "permitMCPExecutable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnconfinedPluginPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPExecutablePermission"
+                }
+              }
+            },
+            "description": "Unconfined plugin permitted",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "The permitted plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Executable metadata or the required risk acknowledgment is invalid"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-executables/{executable}/permissions/{digest}": {
+      "delete": {
+        "description": "Review deployment-installed executable metadata without running it, or manage permission for its exact digest. Native execution requires owner approval and recent authentication with explicit risk acknowledgment.",
+        "operationId": "revokeMCPExecutable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "digest",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Permission revoked"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The native executable tier is disabled or the installed executable is unavailable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Executable metadata or the required risk acknowledgment is invalid"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Manage an installed MCP executable"
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/authorize": {
+      "post": {
+        "operationId": "authorize_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "authorize mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPGrantAuthorizationRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/complete": {
+      "post": {
+        "operationId": "complete_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "complete mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPGrantCompletionRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/poll": {
+      "post": {
+        "operationId": "poll_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "poll mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ]
       }
     }

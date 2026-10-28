@@ -1,14 +1,71 @@
 package secrets
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestMCPPrivateKeyPreservesSigningIdentityAndRejectsOtherMaterial(t *testing.T) {
+	publicKey, privateKey, generationErr := ed25519.GenerateKey(rand.Reader)
+	if generationErr != nil {
+		t.Fatal(generationErr)
+	}
+	privateDER, encodingErr := x509.MarshalPKCS8PrivateKey(privateKey)
+	if encodingErr != nil {
+		t.Fatal(encodingErr)
+	}
+	material := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})
+	original := bytes.Clone(material)
+	parsed, parsingErr := MCPPrivateKey(material)
+	if parsingErr != nil {
+		t.Fatal(parsingErr)
+	}
+	message := []byte("delegated tool identity")
+	if !ed25519.Verify(publicKey, message, ed25519.Sign(parsed, message)) {
+		t.Fatal("parsed key changed the signing identity")
+	}
+	if !bytes.Equal(material, original) {
+		t.Fatal("parsing changed the caller's key material")
+	}
+	otherKey, otherGenerationErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if otherGenerationErr != nil {
+		t.Fatal(otherGenerationErr)
+	}
+	otherDER, otherEncodingErr := x509.MarshalPKCS8PrivateKey(otherKey)
+	if otherEncodingErr != nil {
+		t.Fatal(otherEncodingErr)
+	}
+	for _, test := range []struct {
+		name     string
+		material []byte
+	}{
+		{name: "missing", material: nil},
+		{name: "public key", material: pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKey})},
+		{name: "invalid private key", material: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("invalid")})},
+		{name: "different algorithm", material: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: otherDER})},
+		{name: "multiple keys", material: bytes.Repeat(material, 2)},
+		{name: "oversized", material: bytes.Repeat(material, 100)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			key, err := MCPPrivateKey(test.material)
+			if err == nil || len(key) != 0 {
+				t.Fatal("invalid material produced a signing key")
+			}
+		})
+	}
+}
 
 func ringJSON(active int, keys string) []byte {
 	return fmt.Appendf(nil, `{"active_version":%d,"keys":[%s]}`, active, keys)

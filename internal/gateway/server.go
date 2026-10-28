@@ -30,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
@@ -340,35 +341,8 @@ func (s *Server) unknown(w http.ResponseWriter, r *http.Request) {
 	writeError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."))
 }
 
-// ClientIP returns the address of the calling client, honouring
-// X-Forwarded-For only from configured trusted proxies.
 func ClientIP(r *http.Request, trusted []netip.Prefix) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return host
-	}
-	isTrusted := func(a netip.Addr) bool {
-		return slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
-	}
-	if !isTrusted(addr) {
-		return addr.String()
-	}
-	chain := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	for _, c := range slices.Backward(chain) {
-		hop, err := netip.ParseAddr(strings.TrimSpace(c))
-		if err != nil {
-			break
-		}
-		if !isTrusted(hop) {
-			return hop.String()
-		}
-		addr = hop
-	}
-	return addr.String()
+	return consumerauth.ClientIP(r, trusted)
 }
 
 func (s *Server) gatewayOrigin(r *http.Request) string {

@@ -55,6 +55,18 @@
           route: 'GET /api/v1/toolsets'
         },
         {
+          label: 'Tool calls',
+          href: resolve('/tool-calls'),
+          icon: 'route',
+          route: 'GET /api/v1/mcp-tool-calls'
+        },
+        {
+          label: 'Personal tool grants',
+          href: resolve('/agents/grants'),
+          icon: 'route',
+          route: 'GET /api/v1/mcp-user-grants'
+        },
+        {
           label: 'Provisional exposure',
           href: resolve('/execution-debits'),
           icon: 'route',
