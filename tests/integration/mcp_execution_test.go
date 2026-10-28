@@ -20,6 +20,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -728,6 +729,9 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 		toolServer := &mcp.Server{
 			Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
 			Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+			Guardrails: func(ctx context.Context, evaluation mcp.GuardrailEvaluation) (guardrails.Result, error) {
+				return evaluation.Engine.Evaluate(ctx, guardrails.Evaluation{Phase: evaluation.Phase, Segments: evaluation.Segments}, evaluation.Masks)
+			},
 			Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
 			},
@@ -1018,6 +1022,117 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	status, swept := callOn(restarted, callerID, argument)
 	if status != http.StatusOK || calls.Load() != 7 {
 		t.Fatalf("swept call identity could not be reused: status=%d calls=%d body=%v", status, calls.Load(), swept)
+	}
+
+	const refusedArgument = "blocked-argument"
+	definition := h.want(owner, "POST", "/api/v1/guardrails", map[string]any{
+		"name": "Tool refusal", "project_id": project, "type": "builtin.keywords",
+		"configuration": map[string]any{"words": []string{refusedArgument, answer}, "substrings": true}, "timeout_ms": 1000, "on_error": "fail_closed",
+	}, idem("mcp-identity-guardrail"), 201)
+	h.want(owner, "POST", "/api/v1/guardrails/"+definition["id"].(string)+"/activate", map[string]any{"revision_id": definition["revision_id"]}, withMatch(definition, idem("mcp-identity-guardrail-activate")), 204)
+	policy := h.want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{
+		"name": "Tool refusals", "project_id": project, "entries": []any{
+			map[string]any{"guardrail_id": definition["id"], "revision_id": definition["revision_id"], "phase": "input", "action": "block"},
+			map[string]any{"guardrail_id": definition["id"], "revision_id": definition["revision_id"], "phase": "output", "action": "block"},
+		},
+	}, idem("mcp-identity-policy"), 201)
+	h.want(owner, "POST", "/api/v1/guardrail-policies/"+policy["id"].(string)+"/activate", map[string]any{"revision_id": policy["revision_id"]}, withMatch(policy, idem("mcp-identity-policy-activate")), 204)
+	attachment := h.want(owner, "POST", "/api/v1/guardrail-attachments", map[string]any{
+		"scope": "toolset", "scope_id": toolsetID, "policy_revision_id": policy["revision_id"], "order": 0,
+	}, idem("mcp-identity-attach"), 201)
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	beforeRefusals := calls.Load()
+	status, refused := callOn(restarted, "identity-argument-refusal", refusedArgument)
+	if status != http.StatusBadRequest || refused["status"] != "guardrail_blocked" || calls.Load() != beforeRefusals {
+		t.Fatalf("refused argument dispatched: status=%d body=%v", status, refused)
+	}
+	refusedID := mcpExecString(t, refused, "attempt_id")
+	refusedRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+refusedID, nil, nil, 200)
+	if refusedRecord["status"] != "guardrail_blocked" || refusedRecord["debit_state"] != "released" {
+		t.Fatalf("argument refusal did not release its debit: %v", refusedRecord)
+	}
+	status, outputRefused := callOn(restarted, "identity-result-refusal", "safe")
+	if status != http.StatusBadRequest || outputRefused["status"] != "guardrail_blocked" || calls.Load() != beforeRefusals+1 {
+		t.Fatalf("result refusal was not retained: status=%d body=%v", status, outputRefused)
+	}
+	outputRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, outputRefused, "attempt_id"), nil, nil, 200)
+	if outputRecord["status"] != "guardrail_blocked" || outputRecord["debit_state"] != "settled" {
+		t.Fatalf("result refusal did not settle its debit: %v", outputRecord)
+	}
+	attachments := h.want(owner, "GET", "/api/v1/guardrail-attachments", nil, nil, 200)
+	attachmentState := mcpExecItem(t, mcpExecItems(t, attachments, "items"), 0, attachments)
+	if attachmentState["id"] != attachment["id"] {
+		t.Fatalf("refusal policy attachment was not listed: %v", attachments)
+	}
+	h.want(owner, "DELETE", "/api/v1/guardrail-attachments/"+mcpExecString(t, attachment, "id"), nil, withMatch(attachmentState, idem("mcp-identity-detach")), 204)
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	refusalRestart := newConsumer()
+	status, refusedRepeat := callOn(refusalRestart, "identity-argument-refusal", refusedArgument)
+	if status != http.StatusBadRequest || refusedRepeat["attempt_id"] != refused["attempt_id"] || refusedRepeat["dispatch_id"] != refused["dispatch_id"] {
+		t.Fatalf("argument refusal lost its identity after restart and policy removal: %d %v", status, refusedRepeat)
+	}
+	status, refusedConflict := callOn(refusalRestart, "identity-argument-refusal", "safe")
+	if status != http.StatusConflict || mcpExecObject(t, refusedConflict, "error")["code"] != "call_id_conflict" {
+		t.Fatalf("refused identifier accepted different input: %d %v", status, refusedConflict)
+	}
+	mcpPost := func(path, session string, body map[string]any) (http.Header, map[string]any) {
+		t.Helper()
+		data, _ := json.Marshal(body)
+		req, requestErr := http.NewRequestWithContext(t.Context(), http.MethodPost, refusalRestart.URL+path, bytes.NewReader(data))
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if session != "" {
+			req.Header.Set("Mcp-Session-Id", session)
+			req.Header.Set("MCP-Protocol-Version", "2025-11-25")
+		}
+		response, requestErr := http.DefaultClient.Do(req)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		defer response.Body.Close()
+		if response.StatusCode == http.StatusAccepted {
+			return response.Header, nil
+		}
+		var result map[string]any
+		if decodeErr := json.NewDecoder(response.Body).Decode(&result); decodeErr != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("MCP request failed: status=%d body=%v error=%v", response.StatusCode, result, decodeErr)
+		}
+		return response.Header, result
+	}
+	headers, _ := mcpPost("/mcp?toolset_id="+toolsetID, "", map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{
+			"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "integration", "version": "1"},
+		},
+	})
+	refusalSession := headers.Get("Mcp-Session-Id")
+	if refusalSession == "" {
+		t.Fatal("refusal session has no identity")
+	}
+	mcpPost("/mcp", refusalSession, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
+	_, sessionRepeat := mcpPost("/mcp", refusalSession, map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{
+			"name": tool.Alias, "arguments": map[string]any{"query": refusedArgument}, "_meta": map[string]any{"olp.call_id": "identity-argument-refusal"},
+		},
+	})
+	sessionRefusal := mcpExecObject(t, mcpExecObject(t, sessionRepeat, "error"), "data")
+	if sessionRefusal["code"] != "guardrail_blocked" || sessionRefusal["attempt_id"] != refused["attempt_id"] || sessionRefusal["dispatch_id"] != refused["dispatch_id"] {
+		t.Fatalf("MCP did not retain the JSON refusal: %v", sessionRepeat)
+	}
+	_, sessionConflict := mcpPost("/mcp", refusalSession, map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": map[string]any{
+			"name": tool.Alias, "arguments": json.RawMessage(`{"query":"blocked-\u0061rgument"}`), "_meta": map[string]any{"olp.call_id": "identity-argument-refusal"},
+		},
+	})
+	if mcpExecObject(t, mcpExecObject(t, sessionConflict, "error"), "data")["code"] != "call_id_conflict" || calls.Load() != beforeRefusals+1 {
+		t.Fatalf("MCP did not preserve exact argument bytes for the refused identifier: %v", sessionConflict)
 	}
 }
 

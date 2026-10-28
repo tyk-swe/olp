@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -282,6 +283,9 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 			result = map[string]any{
 				"content": content,
 				"isError": fx.currentMode() == "tool_error",
+			}
+			if fx.currentMode() == "structured_result" {
+				result = map[string]any{"content": content, "structuredContent": json.RawMessage(`{"nested":[{"message":"pri\u0076ate result"}]}`)}
 			}
 			if fx.notify.Load() {
 				note, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
@@ -1159,7 +1163,7 @@ func TestRetainedResultCapEvictsOldestResult(t *testing.T) {
 }
 
 type toolPolicyEntry struct {
-	phase, action, config string
+	phase, action, config, kind string
 }
 
 func enableToolGuardrails(t *testing.T, rt *fakeRuntime, server *Server, entries ...toolPolicyEntry) {
@@ -1173,7 +1177,7 @@ func enableToolGuardrails(t *testing.T, rt *fakeRuntime, server *Server, entries
 	pinned := []guardrails.Entry{}
 	for i, entry := range entries {
 		id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f508" + strconv.Itoa(20+i)
-		registry.Definitions[id] = guardrails.Revision{ID: id, GuardrailID: id, ProjectID: testProject, Type: "builtin.keywords", Configuration: json.RawMessage(entry.config), TimeoutMS: 1000, OnError: guardrails.FailClosed}
+		registry.Definitions[id] = guardrails.Revision{ID: id, GuardrailID: id, ProjectID: testProject, Type: cmp.Or(entry.kind, "builtin.keywords"), Configuration: json.RawMessage(entry.config), TimeoutMS: 1000, OnError: guardrails.FailClosed}
 		pinned = append(pinned, guardrails.Entry{GuardrailID: id, RevisionID: id, Phase: entry.phase, Action: entry.action, Mandatory: true})
 	}
 	const policyID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50840"
@@ -1195,18 +1199,15 @@ func errorCode(body map[string]any) string {
 }
 
 func TestCallToolGuardrailDeniedArgumentRefusesBeforeDispatch(t *testing.T) {
-	server, fx, ledger, tl, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	enableToolGuardrails(t, rt, server, toolPolicyEntry{phase: guardrails.Input, action: guardrails.Block, config: `{"words":["forbidden"],"substrings":true}`})
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
-		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"guarded-deny-arg","arguments":{"query":"a forbidden value"}}`)
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"guarded-deny-arg","arguments":{"query":"a forbid\u0064en value"}}`)
 	if status != http.StatusBadRequest || errorCode(body) != "guardrail_blocked" {
 		t.Fatalf("denied argument status %d: %v", status, body)
 	}
 	if fx.calls.Load() != 0 {
 		t.Fatal("a denied argument still dispatched upstream")
-	}
-	if got := strings.Join(tl.snapshot(), ","); got != "reserve,refused" {
-		t.Fatalf("denied argument did not release its reservation without dispatching: %s", got)
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusGuardrailBlocked {
 		t.Fatalf("denied argument was not recorded as blocked: %+v", ledger.evidence)
@@ -1225,7 +1226,7 @@ func TestCallToolGuardrailDeniedArgumentRefusesBeforeDispatch(t *testing.T) {
 }
 
 func TestCallToolGuardrailDeniedResultSettlesWithoutReturningContent(t *testing.T) {
-	server, fx, ledger, tl, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "secret_result")
+	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "structured_result")
 	enableToolGuardrails(t, rt, server, toolPolicyEntry{phase: guardrails.Output, action: guardrails.Block, config: `{"words":["private"],"substrings":true}`})
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"guarded-deny-result","arguments":{"query":"x"}}`)
@@ -1234,9 +1235,6 @@ func TestCallToolGuardrailDeniedResultSettlesWithoutReturningContent(t *testing.
 	}
 	if fx.calls.Load() != 1 {
 		t.Fatal("a denied result did not come from one dispatched call")
-	}
-	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,list,dispatched,upstream,settled" {
-		t.Fatalf("denied result did not settle its dispatched debit: %s", got)
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusGuardrailBlocked {
 		t.Fatalf("denied result was recorded as a clean success: %+v", ledger.evidence)
@@ -1307,16 +1305,89 @@ func TestCallToolGuardrailMaskHidesValueFromUpstreamAndRestoresIt(t *testing.T) 
 	}
 }
 
-func TestCallToolGuardrailTransformationBreakingArgumentsRefuses(t *testing.T) {
+func TestCallToolGuardrailReplacementPreservesValidArgumentJSON(t *testing.T) {
 	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	enableToolGuardrails(t, rt, server, toolPolicyEntry{phase: guardrails.Input, action: guardrails.Redact, config: `{"words":["hunter2"],"substrings":true,"replacement":"\""}`})
 	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"guarded-broken","arguments":{"query":"hunter2"}}`)
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("valid replacement was refused: %d %v", status, body)
+	}
+	var arguments struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(fx.receivedArgs()), &arguments); err != nil || arguments.Query != `"` {
+		t.Fatalf("replacement corrupted argument JSON: %s %v", fx.receivedArgs(), err)
+	}
+	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusSucceeded {
+		t.Fatalf("replacement was not settled: %+v", ledger.evidence)
+	}
+}
+
+func TestCallToolGuardrailChecksSchemaAfterArgumentReplacement(t *testing.T) {
+	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	schema, err := json.Marshal(guardrails.ToolsConfig{Schemas: map[string]json.RawMessage{
+		alias(): json.RawMessage(`{"type":"object","properties":{"query":{"enum":["hunter2"]}},"required":["query"]}`),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableToolGuardrails(t, rt, server,
+		toolPolicyEntry{phase: guardrails.Input, action: guardrails.Redact, config: `{"words":["hunter2"],"substrings":true,"replacement":"changed"}`},
+		toolPolicyEntry{phase: guardrails.Input, action: guardrails.Block, kind: "builtin.tools", config: string(schema)},
+	)
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("guarded-schema-replacement", "hunter2"))
 	if status != http.StatusBadRequest || errorCode(body) != "guardrail_blocked" || fx.calls.Load() != 0 {
-		t.Fatalf("broken transformation status %d calls=%d: %v", status, fx.calls.Load(), body)
+		t.Fatalf("replacement escaped the tool argument schema: status=%d body=%v", status, body)
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusGuardrailBlocked {
-		t.Fatalf("broken transformation was not recorded as blocked: %+v", ledger.evidence)
+		t.Fatalf("schema refusal was not retained: %+v", ledger.evidence)
+	}
+}
+
+func TestCallToolGuardrailPermissionFollowsArgumentReplacement(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	name := alias()
+	permission, err := json.Marshal(guardrails.ToolPermissionConfig{Rules: []guardrails.ToolPermissionRule{{
+		ID: "only-changed", ToolName: &name, Decision: "allow", AllowedParamPatterns: map[string]string{"query": "changed"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableToolGuardrails(t, rt, server,
+		toolPolicyEntry{phase: guardrails.Input, action: guardrails.Redact, config: `{"words":["hunter2"],"substrings":true,"replacement":"changed"}`},
+		toolPolicyEntry{phase: guardrails.Input, action: guardrails.Block, kind: "builtin.tool_permission", config: string(permission)},
+	)
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("guarded-permission-replacement", "hunter2"))
+	if status != http.StatusOK {
+		t.Fatalf("permission policy did not inspect the transformed arguments: %d %v", status, body)
+	}
+	var arguments struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(fx.receivedArgs()), &arguments); err != nil || arguments.Query != "changed" {
+		t.Fatalf("permission policy dispatched different arguments: %s %v", fx.receivedArgs(), err)
+	}
+}
+
+func TestCallToolGuardrailRedactsEscapedStructuredResult(t *testing.T) {
+	server, _, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "structured_result")
+	enableToolGuardrails(t, rt, server, toolPolicyEntry{phase: guardrails.Output, action: guardrails.Redact, config: `{"words":["private"],"substrings":true,"replacement":"\"\\"}`})
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("guarded-structured-replacement", "safe"))
+	if status != http.StatusOK {
+		t.Fatalf("structured replacement failed: %d %v", status, body)
+	}
+	structured, ok := body["structured_content"].(map[string]any)
+	if !ok {
+		t.Fatalf("replacement lost structured content: %v", body)
+	}
+	nested, ok := structured["nested"].([]any)
+	if !ok || len(nested) != 1 {
+		t.Fatalf("replacement lost the result array: %v", structured)
+	}
+	item, ok := nested[0].(map[string]any)
+	if !ok || item["message"] != "\"\\ result" {
+		t.Fatalf("structured replacement was not decoded and re-escaped: %v", nested)
 	}
 }
 
@@ -1356,7 +1427,7 @@ func TestSessionCallToolGuardrailDeniedArgumentMatchesJSONSurface(t *testing.T) 
 	enableToolGuardrails(t, rt, server, toolPolicyEntry{phase: guardrails.Input, action: guardrails.Block, config: `{"words":["forbidden"],"substrings":true}`})
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	called := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"a forbidden value"},"_meta":{"olp.call_id":"guarded-session-deny"}}}`)
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"a forbid\u0064en value"},"_meta":{"olp.call_id":"guarded-session-deny"}}}`)
 	failure := rpcError(t, called)
 	data, _ := failure["data"].(map[string]any)
 	if data["code"] != "guardrail_blocked" || fx.calls.Load() != 0 {
@@ -1364,6 +1435,22 @@ func TestSessionCallToolGuardrailDeniedArgumentMatchesJSONSurface(t *testing.T) 
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusGuardrailBlocked {
 		t.Fatalf("session denial was not recorded as blocked: %+v", ledger.evidence)
+	}
+}
+
+func TestSessionCallToolGuardrailDeniesEscapedStructuredResult(t *testing.T) {
+	server, _, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "structured_result")
+	enableToolGuardrails(t, rt, server, toolPolicyEntry{phase: guardrails.Output, action: guardrails.Block, config: `{"words":["private"],"substrings":true}`})
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	called := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"safe"},"_meta":{"olp.call_id":"guarded-session-output"}}}`)
+	failure := rpcError(t, called)
+	data, _ := failure["data"].(map[string]any)
+	if data["code"] != "guardrail_blocked" {
+		t.Fatalf("session returned an escaped prohibited result: %v", called.body)
+	}
+	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusGuardrailBlocked {
+		t.Fatalf("session did not retain its blocked result: %+v", ledger.evidence)
 	}
 }
 

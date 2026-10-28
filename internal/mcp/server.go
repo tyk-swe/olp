@@ -255,10 +255,23 @@ func writeOutcomeUnknown(w http.ResponseWriter, attemptID, dispatchID, message s
 
 var errGuardrailBlocked = fail(http.StatusBadRequest, "guardrail_blocked", "invalid_request_error", "The tool call could not satisfy the configured guardrails.")
 
+type toolCallError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+}
+
+type toolCallRefusal struct {
+	AttemptID  string        `json:"attempt_id"`
+	DispatchID string        `json:"dispatch_id"`
+	Status     Status        `json:"status"`
+	Error      toolCallError `json:"error"`
+}
+
 func writeGuardrailRefusal(w http.ResponseWriter, reservation *Reservation, refusal *apiError) {
-	writeJSON(w, refusal.status, map[string]any{
-		"attempt_id": reservation.AttemptID, "dispatch_id": reservation.DispatchID, "status": StatusGuardrailBlocked,
-		"error": map[string]any{"message": refusal.msg, "type": refusal.kind, "code": refusal.code},
+	writeJSON(w, refusal.status, toolCallRefusal{
+		AttemptID: reservation.AttemptID, DispatchID: reservation.DispatchID, Status: StatusGuardrailBlocked,
+		Error: toolCallError{Message: refusal.msg, Type: refusal.kind, Code: refusal.code},
 	})
 }
 

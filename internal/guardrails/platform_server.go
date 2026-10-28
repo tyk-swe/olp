@@ -383,15 +383,8 @@ func AuthorizeAttachment(ctx context.Context, q access.Queryer, p access.Princip
 	case "project":
 		return p.Project(&a.ScopeID, need)
 	case "route", "api-key", "toolset":
-		var project *string
-		query := "SELECT project_id::text FROM olp.routes WHERE id=$1"
-		switch a.Scope {
-		case "api-key":
-			query = "SELECT project_id::text FROM olp.api_keys WHERE id=$1"
-		case "toolset":
-			query = "SELECT project_id::text FROM olp.agent_publications WHERE id=$1 AND kind='toolset'"
-		}
-		if err := q.QueryRow(ctx, query, a.ScopeID).Scan(&project); err != nil {
+		project, err := attachmentProject(ctx, q, a.Scope, a.ScopeID)
+		if err != nil {
 			return err
 		}
 		return p.Project(project, need)
@@ -399,6 +392,24 @@ func AuthorizeAttachment(ctx context.Context, q access.Queryer, p access.Princip
 		return access.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
 	}
 }
+
+func attachmentProject(ctx context.Context, q access.Queryer, scope, id string) (*string, error) {
+	queries := map[string]string{
+		"route":   "SELECT project_id::text FROM olp.routes WHERE id=$1",
+		"api-key": "SELECT project_id::text FROM olp.api_keys WHERE id=$1",
+		"toolset": "SELECT project_id::text FROM olp.agent_publications WHERE id=$1 AND kind='toolset'",
+	}
+	query, ok := queries[scope]
+	if !ok {
+		return nil, access.Invalid("scope", "Choose route, toolset or api-key.")
+	}
+	var project *string
+	if err := q.QueryRow(ctx, query, id).Scan(&project); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
 func (s *Server) listAttachments(r *http.Request, p access.Principal) (access.Reply, error) {
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT id::text,scope,COALESCE(scope_id::text,'installation'),policy_revision_id::text,position,etag::text FROM olp.guardrail_attachments ORDER BY position,id LIMIT 10001")
 	if err != nil {
@@ -498,15 +509,8 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 			return access.Reply{}, access.Invalid("scope_id", "The policy must belong to this project.")
 		}
 		if in.Scope == "route" || in.Scope == "api-key" || in.Scope == "toolset" {
-			query := "SELECT project_id::text FROM olp.routes WHERE id=$1"
-			switch in.Scope {
-			case "api-key":
-				query = "SELECT project_id::text FROM olp.api_keys WHERE id=$1"
-			case "toolset":
-				query = "SELECT project_id::text FROM olp.agent_publications WHERE id=$1 AND kind='toolset'"
-			}
-			var owning string
-			if err = tx.QueryRow(r.Context(), query, in.ScopeID).Scan(&owning); err != nil || owning != project {
+			owning, ownerErr := attachmentProject(r.Context(), tx, in.Scope, in.ScopeID)
+			if ownerErr != nil || owning == nil || *owning != project {
 				return access.Reply{}, access.Invalid("scope_id", "The policy must belong to this project.")
 			}
 			if in.Scope == "route" && in.Order == 0 {

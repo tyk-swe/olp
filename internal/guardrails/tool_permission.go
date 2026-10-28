@@ -109,7 +109,11 @@ func toolPermissionPattern(pattern string) (*regexp.Regexp, error) {
 func (*toolPermissionDetector) width() int { return 0 }
 
 func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluation) (Verdict, error) {
-	for _, segment := range evaluation.Segments {
+	segments, projectionErr := jsonToolSegments(evaluation.Segments)
+	if projectionErr != nil {
+		return Verdict{}, projectionErr
+	}
+	for _, segment := range segments {
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}

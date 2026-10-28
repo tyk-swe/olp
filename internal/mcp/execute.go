@@ -205,47 +205,52 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTo
 
 func (s *Server) settleToolCall(ctx context.Context, in executeInput, reservation *Reservation, dispatched dispatchResult, state *toolGuardrailState) execution {
 	tool := in.tool
-	result := dispatched.result
-	rawEncoded, _ := json.Marshal(result)
-	guarded, refusal := s.guardResult(ctx, in, reservation, state, result)
+	rawEncoded, _ := json.Marshal(dispatched.result)
+	guarded, decisions, refusal := s.guardResult(ctx, in, reservation, state, dispatched.result)
 	if refusal != nil {
 		evidence := AttemptEvidence{
 			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-			Status: StatusGuardrailBlocked, IsError: result.IsError, ResultDigest: digestBytes(rawEncoded),
+			Status: StatusGuardrailBlocked, IsError: dispatched.result.IsError, ResultDigest: digestBytes(rawEncoded),
 			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-			GuardrailDecisions: stateDecisions(state),
+			GuardrailDecisions: decisions,
 		}
 		if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
-			evidence.Status = StatusOutcomeUnknown
-			_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
+			unknownEvidence := AttemptEvidence{
+				ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
+				Status: StatusOutcomeUnknown, IsError: dispatched.result.IsError, ResultDigest: digestBytes(rawEncoded),
+				StartedAt: dispatched.started, CompletedAt: dispatched.completed, GuardrailDecisions: decisions,
+			}
+			_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
 			return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
 		}
 		return execution{reservation: reservation, blocked: guardrailRefusal(refusal), listChanged: dispatched.listChanged, certification: dispatched.certification}
 	}
-	result = guarded
-	encoded, _ := json.Marshal(result)
-	status := StatusSucceeded
-	if result.IsError {
-		status = StatusUpstreamError
-	}
+	encoded, _ := json.Marshal(guarded)
 	evidence := AttemptEvidence{
 		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-		Status: status, IsError: result.IsError, ResultDigest: digestBytes(encoded),
+		Status: completedToolStatus(guarded), IsError: guarded.IsError, ResultDigest: digestBytes(encoded),
 		StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-		GuardrailDecisions: stateDecisions(state),
+		GuardrailDecisions: decisions,
 	}
 	if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
 		unknownEvidence := AttemptEvidence{
 			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-			Status: StatusOutcomeUnknown, IsError: result.IsError, ResultDigest: digestBytes(encoded),
+			Status: StatusOutcomeUnknown, IsError: guarded.IsError, ResultDigest: digestBytes(encoded),
 			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-			GuardrailDecisions: stateDecisions(state),
+			GuardrailDecisions: decisions,
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
 		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
 	}
-	s.retainResult(reservation.AttemptID, result)
-	return execution{reservation: reservation, result: result, listChanged: dispatched.listChanged, certification: dispatched.certification}
+	s.retainResult(reservation.AttemptID, guarded)
+	return execution{reservation: reservation, result: guarded, listChanged: dispatched.listChanged, certification: dispatched.certification}
+}
+
+func completedToolStatus(result mcpservers.ToolResult) Status {
+	if result.IsError {
+		return StatusUpstreamError
+	}
+	return StatusSucceeded
 }
 
 func (s *Server) execute(parent context.Context, in executeInput) execution {
@@ -271,8 +276,7 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved
 	}
-	state := s.toolGuardrails(in)
-	arguments, refusal := s.guardArguments(ctx, in, reservation, state)
+	arguments, state, refusal := s.guardArguments(ctx, in, reservation, s.toolGuardrails(in))
 	if refusal != nil {
 		return execution{reservation: reservation, blocked: refusal}
 	}
