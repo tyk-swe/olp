@@ -2,9 +2,12 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -13,6 +16,67 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
+
+const toolRateLeaseTTL = 150 * time.Second
+
+func toolPerKeyLookup(authority access.Authority, serverID string) string {
+	sum := sha256.Sum256([]byte(authority.LimitsLookup() + "\x00" + serverID))
+	return "tk_" + hex.EncodeToString(sum[:16])
+}
+
+func toolPerServerLookup(serverID string) string {
+	return "ts_" + strings.ReplaceAll(serverID, "-", "")
+}
+
+func tighterToolLimit(server int64, key *int64) *int64 {
+	value := server
+	if key != nil && *key < value {
+		value = *key
+	}
+	return &value
+}
+
+func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
+	limiter := s.rateLimiter()
+	if limiter == nil {
+		return nil, nil, 0
+	}
+	requests := []limits.Request{
+		{
+			CostOwnerID: in.authority.ID, LookupID: toolPerKeyLookup(in.authority, in.tool.ServerID),
+			RequestsPerMinute: tighterToolLimit(in.tool.PerKeyCallsPerMinute, in.authority.Policy.RequestsPerMinute),
+			MaxConcurrency:    tighterToolLimit(in.tool.PerKeyMaxConcurrency, in.authority.Policy.MaxConcurrency),
+			LeaseTTL:          toolRateLeaseTTL,
+		},
+		{
+			CostOwnerID: in.tool.ServerID, LookupID: toolPerServerLookup(in.tool.ServerID),
+			RequestsPerMinute: &in.tool.CallsPerMinute,
+			MaxConcurrency:    &in.tool.MaxConcurrency,
+			LeaseTTL:          toolRateLeaseTTL,
+		},
+	}
+	leases := make([]*limits.Lease, 0, len(requests))
+	release := func() {
+		for _, lease := range leases {
+			_ = lease.Release(context.WithoutCancel(ctx))
+		}
+	}
+	for _, request := range requests {
+		lease, err := limiter.Reserve(ctx, request)
+		if err != nil {
+			release()
+			var exceeded *limits.ExceededError
+			if errors.As(err, &exceeded) {
+				return nil, fail(http.StatusTooManyRequests, "tool_rate_limited", "rate_limit_error", "The call exceeds a tool rate or concurrency limit, so it was not dispatched."), exceeded.RetryAfter
+			}
+			return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
+		}
+		if lease != nil {
+			leases = append(leases, lease)
+		}
+	}
+	return leases, nil, 0
+}
 
 type executeInput struct {
 	authority access.Authority
@@ -65,7 +129,7 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 	reservedResult, err := s.Ledger.Reserve(ctx, ReserveInput{
 		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
-		CallDigest: s.callDigest(in.authority, in.callID),
+		CallDigest: s.callDigest(in.authority, in.callID), UnitPrice: cloneUnitPrice(in.tool.UnitPrice),
 	})
 	if err == nil && reservedResult.Repeat != nil {
 		outcome := execution{repeat: reservedResult.Repeat}
@@ -75,6 +139,9 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 		return nil, outcome
 	}
 	if err != nil {
+		if errors.Is(err, ErrUnpricedToolCall) {
+			return nil, execution{failure: fail(http.StatusUnprocessableEntity, "tool_unpriced", "invalid_request_error", "The tool has no price and an enforced budget needs a finite bound, so the call was not dispatched.")}
+		}
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
 			return nil, execution{failure: fail(http.StatusTooManyRequests, "budget_exceeded", "rate_limit_error", "The call exceeds an enforced budget, so it was not dispatched."), retryAfter: exceeded.RetryAfter}
@@ -168,6 +235,15 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	}
 	ctx, cancel := context.WithTimeout(parent, defaultCallTimeout)
 	defer cancel()
+	leases, rateFailure, retryAfter := s.reserveToolRate(ctx, in)
+	if rateFailure != nil {
+		return execution{failure: rateFailure, retryAfter: retryAfter}
+	}
+	defer func() {
+		for _, lease := range leases {
+			_ = lease.Release(context.WithoutCancel(ctx))
+		}
+	}()
 	reservation, reserved := s.reserveToolCall(ctx, in)
 	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved

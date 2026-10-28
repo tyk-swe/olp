@@ -21,6 +21,8 @@ func (s *Snapshot) Clone() *Snapshot {
 	out.MCPServers = slices.Clone(s.MCPServers)
 	for i := range out.MCPServers {
 		out.MCPServers[i].CredentialID = copyPointer(out.MCPServers[i].CredentialID)
+		out.MCPServers[i].UnitPrice = copyPointer(out.MCPServers[i].UnitPrice)
+		out.MCPServers[i].ToolPrices = maps.Clone(out.MCPServers[i].ToolPrices)
 		out.MCPServers[i].Tools = slices.Clone(out.MCPServers[i].Tools)
 		for j := range out.MCPServers[i].Tools {
 			out.MCPServers[i].Tools[j].InputSchema = slices.Clone(out.MCPServers[i].Tools[j].InputSchema)

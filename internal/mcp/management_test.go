@@ -56,6 +56,42 @@ func TestValidateResolveInputRequiresKnownOutcomeAndEvidenceDigest(t *testing.T)
 	}
 }
 
+func TestCheckResolveBoundsSettlesObservedAgainstHeldBounds(t *testing.T) {
+	call := ToolCall{CostBound: "0.25", ChargeBound: "0.5", ObservedCost: "0", ObservedCharge: "0"}
+	if err := checkResolveBounds(call, "0.25", "0.5"); err != nil {
+		t.Fatalf("observed amounts at the held bounds refused: %v", err)
+	}
+	if err := checkResolveBounds(call, "0.10", "0.20"); err != nil {
+		t.Fatalf("observed amounts inside the held bounds refused: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		cost, charge, field string
+	}{
+		"cost over bound":   {"0.26", "0.5", "observed_cost"},
+		"charge over bound": {"0.25", "0.51", "observed_charge"},
+	} {
+		err := checkResolveBounds(call, tc.cost, tc.charge)
+		var problem *access.Problem
+		if !errors.As(err, &problem) || problem.Field != tc.field || problem.Status != 422 {
+			t.Fatalf("%s reported %v, want field %s", name, err, tc.field)
+		}
+	}
+	partial := ToolCall{CostBound: "1", ChargeBound: "1", ObservedCost: "0.75", ObservedCharge: "0"}
+	if err := checkResolveBounds(partial, "0.25", "1"); err != nil {
+		t.Fatalf("observed amount reaching the bound refused: %v", err)
+	}
+	if err := checkResolveBounds(partial, "0.26", "0"); err == nil {
+		t.Fatal("observed amount pushing past prior observed settled")
+	}
+	free := ToolCall{CostBound: "0", ChargeBound: "0", ObservedCost: "0", ObservedCharge: "0"}
+	if err := checkResolveBounds(free, "0", "0"); err != nil {
+		t.Fatalf("zero observed against a free bound refused: %v", err)
+	}
+	if err := checkResolveBounds(free, "0.01", "0"); err == nil {
+		t.Fatal("priced observed settled against a free bound")
+	}
+}
+
 func TestResolveAmountDefaultsToZeroAndRejectsMalformed(t *testing.T) {
 	if got, err := resolveAmount(nil, "observed_cost"); err != nil || got != "0" {
 		t.Fatalf("missing amount did not default to zero: %q %v", got, err)

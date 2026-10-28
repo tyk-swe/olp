@@ -18,28 +18,63 @@ type MCPTool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
+const (
+	DefaultToolCallsPerMinute = int64(60)
+	DefaultToolMaxConcurrency = int64(8)
+	MaxToolCallsPerMinute     = int64(60000)
+	MaxToolConcurrency        = int64(1024)
+)
+
 type MCPServer struct {
-	ID           string    `json:"id"`
-	ProjectID    string    `json:"project_id"`
-	RevisionID   string    `json:"revision_id"`
-	Endpoint     string    `json:"endpoint"`
-	Protocol     string    `json:"protocol_version"`
-	Digest       string    `json:"digest"`
-	CredentialID *string   `json:"credential_id,omitempty"`
-	Tools        []MCPTool `json:"tools"`
+	ID                   string            `json:"id"`
+	ProjectID            string            `json:"project_id"`
+	RevisionID           string            `json:"revision_id"`
+	Endpoint             string            `json:"endpoint"`
+	Protocol             string            `json:"protocol_version"`
+	Digest               string            `json:"digest"`
+	CredentialID         *string           `json:"credential_id,omitempty"`
+	UnitPrice            *string           `json:"unit_price"`
+	ToolPrices           map[string]string `json:"tool_prices,omitempty"`
+	CallsPerMinute       int64             `json:"calls_per_minute,omitempty"`
+	MaxConcurrency       int64             `json:"max_concurrency,omitempty"`
+	PerKeyCallsPerMinute int64             `json:"per_key_calls_per_minute,omitempty"`
+	PerKeyMaxConcurrency int64             `json:"per_key_max_concurrency,omitempty"`
+	Tools                []MCPTool         `json:"tools"`
 }
 
 type MCPToolsetTool struct {
-	Alias            string
-	Name             string
-	Description      string
-	InputSchema      json.RawMessage
-	ServerID         string
-	ServerRevisionID string
-	CatalogDigest    string
-	Endpoint         string
-	CredentialID     *string
-	schema           *jsonschema.Schema
+	Alias                string
+	Name                 string
+	Description          string
+	InputSchema          json.RawMessage
+	ServerID             string
+	ServerRevisionID     string
+	CatalogDigest        string
+	Endpoint             string
+	CredentialID         *string
+	UnitPrice            *string
+	CallsPerMinute       int64
+	MaxConcurrency       int64
+	PerKeyCallsPerMinute int64
+	PerKeyMaxConcurrency int64
+	schema               *jsonschema.Schema
+}
+
+var toolPricePattern = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
+
+func ValidToolPrice(value string) bool {
+	return toolPricePattern.MatchString(value)
+}
+
+func validToolLimit(value, ceiling int64) bool {
+	return value >= 0 && value <= ceiling
+}
+
+func toolLimitOrDefault(value, fallback int64) int64 {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }
 
 type MCPDriftedTool struct {
@@ -111,6 +146,13 @@ func (s *Snapshot) validateMCPServers() error {
 		if server.CredentialID != nil && !validUUID(*server.CredentialID) {
 			return fmt.Errorf("MCP server %q credential reference is malformed", server.ID)
 		}
+		if server.UnitPrice != nil && !ValidToolPrice(*server.UnitPrice) {
+			return fmt.Errorf("MCP server %q unit price is malformed", server.ID)
+		}
+		if !validToolLimit(server.CallsPerMinute, MaxToolCallsPerMinute) || !validToolLimit(server.PerKeyCallsPerMinute, MaxToolCallsPerMinute) ||
+			!validToolLimit(server.MaxConcurrency, MaxToolConcurrency) || !validToolLimit(server.PerKeyMaxConcurrency, MaxToolConcurrency) {
+			return fmt.Errorf("MCP server %q tool limits exceed installation limits", server.ID)
+		}
 		seen[server.ID] = true
 		names := map[string]bool{}
 		for _, tool := range server.Tools {
@@ -118,6 +160,14 @@ func (s *Snapshot) validateMCPServers() error {
 				return fmt.Errorf("MCP server %q tool is malformed", server.ID)
 			}
 			names[tool.Name] = true
+		}
+		if len(server.ToolPrices) > 128 {
+			return fmt.Errorf("MCP server %q has too many tool prices", server.ID)
+		}
+		for name, price := range server.ToolPrices {
+			if !names[name] || !ValidToolPrice(price) {
+				return fmt.Errorf("MCP server %q tool price is malformed", server.ID)
+			}
 		}
 	}
 	return nil
@@ -170,11 +220,20 @@ func (s *Snapshot) compileMCP() {
 				resolution.Invalid = append(resolution.Invalid, drifted)
 				continue
 			}
+			price := copyPointer(server.UnitPrice)
+			if toolPrice, ok := server.ToolPrices[pin.Name]; ok {
+				price = &toolPrice
+			}
 			resolution.Tools = append(resolution.Tools, MCPToolsetTool{
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint,
-				CredentialID: copyPointer(server.CredentialID), schema: schema,
+				CredentialID: copyPointer(server.CredentialID), UnitPrice: price,
+				CallsPerMinute:       toolLimitOrDefault(server.CallsPerMinute, DefaultToolCallsPerMinute),
+				MaxConcurrency:       toolLimitOrDefault(server.MaxConcurrency, DefaultToolMaxConcurrency),
+				PerKeyCallsPerMinute: toolLimitOrDefault(server.PerKeyCallsPerMinute, DefaultToolCallsPerMinute),
+				PerKeyMaxConcurrency: toolLimitOrDefault(server.PerKeyMaxConcurrency, DefaultToolMaxConcurrency),
+				schema:               schema,
 			})
 		}
 		s.mcpTools[revision.ID] = resolution
@@ -189,8 +248,13 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	if !ok {
 		return MCPToolsetResolution{}, false
 	}
+	tools := slices.Clone(resolution.Tools)
+	for i := range tools {
+		tools[i].UnitPrice = copyPointer(tools[i].UnitPrice)
+		tools[i].CredentialID = copyPointer(tools[i].CredentialID)
+	}
 	return MCPToolsetResolution{
-		Tools:   slices.Clone(resolution.Tools),
+		Tools:   tools,
 		Drifted: slices.Clone(resolution.Drifted),
 		Invalid: slices.Clone(resolution.Invalid),
 		Missing: slices.Clone(resolution.Missing),

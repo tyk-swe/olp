@@ -17,10 +17,41 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
+
+var ErrUnpricedToolCall = errors.New("tool call has no price for an enforced budget ceiling")
+
+type RateLimiter interface {
+	Reserve(ctx context.Context, request limits.Request) (*limits.Lease, error)
+}
+
+const (
+	PricingPriced   = "priced"
+	PricingFree     = "free"
+	PricingUnpriced = "unpriced"
+)
+
+func pricingStateFor(price *string) string {
+	if price == nil {
+		return PricingUnpriced
+	}
+	if resolveAmountIsZero(*price) {
+		return PricingFree
+	}
+	return PricingPriced
+}
+
+func cloneUnitPrice(price *string) *string {
+	if price == nil {
+		return nil
+	}
+	out := *price
+	return &out
+}
 
 type Status string
 
@@ -50,6 +81,7 @@ type ReserveInput struct {
 	ToolAlias         string
 	InputDigest       string
 	CallDigest        string
+	UnitPrice         *string
 }
 
 type Reservation struct {
@@ -65,6 +97,15 @@ type Reservation struct {
 	ToolAlias         string
 	InputDigest       string
 	CallDigest        string
+	UnitPrice         *string
+	Currency          string
+}
+
+func (r *Reservation) amount() string {
+	if r == nil || r.UnitPrice == nil {
+		return "0"
+	}
+	return *r.UnitPrice
 }
 
 type AttemptEvidence struct {
@@ -89,6 +130,7 @@ type Server struct {
 	Runtime        Runtime
 	Egress         *egress.Policy
 	Ledger         Ledger
+	Limiter        RateLimiter
 	Auth           *secrets.AuthKey
 	Sessions       *SessionStore
 	TrustedProxies []netip.Prefix
@@ -97,6 +139,18 @@ type Server struct {
 
 	resultsMu sync.Mutex
 	results   map[string]retainedResult
+}
+
+func (s *Server) rateLimiter() RateLimiter {
+	if s.Limiter != nil {
+		if concrete, ok := s.Limiter.(*limits.Limiter); !ok || concrete != nil {
+			return s.Limiter
+		}
+	}
+	if durable, ok := s.Ledger.(*DurableLedger); ok && durable.Store != nil && durable.Store.Limiter != nil {
+		return durable.Store.Limiter
+	}
+	return nil
 }
 
 func (s *Server) Register(mux *http.ServeMux) {

@@ -157,6 +157,98 @@ func TestSnapshotMCPCloneAndDigest(t *testing.T) {
 	}
 }
 
+func TestSnapshotResolvesPinnedToolPricesAndLimits(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	snapshot := mcpSnapshot(t, digest)
+	serverPrice := "0.10"
+	snapshot.MCPServers[0].UnitPrice = &serverPrice
+	snapshot.MCPServers[0].ToolPrices = map[string]string{"lookup": "0.25"}
+	snapshot.MCPServers[0].CallsPerMinute = 120
+	snapshot.MCPServers[0].MaxConcurrency = 4
+	snapshot.MCPServers[0].PerKeyCallsPerMinute = 30
+	snapshot.MCPServers[0].PerKeyMaxConcurrency = 2
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	resolved, ok := snapshot.MCPToolset(mcpRevision)
+	if !ok || len(resolved.Tools) != 1 {
+		t.Fatalf("priced toolset did not resolve: ok=%v resolved=%+v", ok, resolved)
+	}
+	tool := resolved.Tools[0]
+	if tool.UnitPrice == nil || *tool.UnitPrice != "0.25" {
+		t.Fatalf("per-tool price did not override the server price: %+v", tool.UnitPrice)
+	}
+	if tool.CallsPerMinute != 120 || tool.MaxConcurrency != 4 || tool.PerKeyCallsPerMinute != 30 || tool.PerKeyMaxConcurrency != 2 {
+		t.Fatalf("resolved tool lost its server limits: %+v", tool)
+	}
+
+	snapshot = mcpSnapshot(t, digest)
+	snapshot.MCPServers[0].UnitPrice = &serverPrice
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ = snapshot.MCPToolset(mcpRevision)
+	tool = resolved.Tools[0]
+	if tool.UnitPrice == nil || *tool.UnitPrice != serverPrice {
+		t.Fatalf("server price did not reach the tool: %+v", tool.UnitPrice)
+	}
+	if tool.CallsPerMinute != DefaultToolCallsPerMinute || tool.MaxConcurrency != DefaultToolMaxConcurrency ||
+		tool.PerKeyCallsPerMinute != DefaultToolCallsPerMinute || tool.PerKeyMaxConcurrency != DefaultToolMaxConcurrency {
+		t.Fatalf("default tool limits did not apply: %+v", tool)
+	}
+
+	snapshot = mcpSnapshot(t, digest)
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ = snapshot.MCPToolset(mcpRevision)
+	if resolved.Tools[0].UnitPrice != nil {
+		t.Fatalf("missing price became a price: %+v", resolved.Tools[0].UnitPrice)
+	}
+	free := "0"
+	snapshot = mcpSnapshot(t, digest)
+	snapshot.MCPServers[0].UnitPrice = &free
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ = snapshot.MCPToolset(mcpRevision)
+	if resolved.Tools[0].UnitPrice == nil || *resolved.Tools[0].UnitPrice != "0" {
+		t.Fatalf("explicit zero price did not stay known free: %+v", resolved.Tools[0].UnitPrice)
+	}
+}
+
+func TestSnapshotRefusesMalformedToolPricesAndLimits(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	negative := "-1"
+	for name, mutate := range map[string]func(*Snapshot){
+		"negative server price": func(s *Snapshot) { s.MCPServers[0].UnitPrice = &negative },
+		"malformed tool price":  func(s *Snapshot) { s.MCPServers[0].ToolPrices = map[string]string{"lookup": "1e3"} },
+		"price for unknown tool": func(s *Snapshot) {
+			s.MCPServers[0].ToolPrices = map[string]string{"absent": "1"}
+		},
+		"rate above installation ceiling": func(s *Snapshot) { s.MCPServers[0].CallsPerMinute = MaxToolCallsPerMinute + 1 },
+		"negative concurrency":            func(s *Snapshot) { s.MCPServers[0].MaxConcurrency = -1 },
+		"per-key concurrency above ceiling": func(s *Snapshot) {
+			s.MCPServers[0].PerKeyMaxConcurrency = MaxToolConcurrency + 1
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			snapshot := mcpSnapshot(t, digest)
+			mutate(&snapshot)
+			if err := snapshot.Compile(); err == nil {
+				t.Fatalf("snapshot accepted %s", name)
+			}
+		})
+	}
+	snapshot := mcpSnapshot(t, digest)
+	snapshot.MCPServers[0].ToolPrices = map[string]string{"lookup": "0.5"}
+	clone := snapshot.Clone()
+	clone.MCPServers[0].ToolPrices["lookup"] = "9"
+	if snapshot.MCPServers[0].ToolPrices["lookup"] != "0.5" {
+		t.Fatal("snapshot clone shares mutable tool prices")
+	}
+}
+
 func TestSnapshotRefusesMoreThan128MCPServers(t *testing.T) {
 	digest := strings.Repeat("a", 64)
 	servers := func(count int) []MCPServer {
