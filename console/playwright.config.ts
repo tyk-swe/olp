@@ -110,6 +110,11 @@ export default defineConfig({
       reuseExistingServer: false
     },
     {
+      command: 'node tests/gateway/mock-realtime-webrtc.mjs',
+      url: 'http://127.0.0.1:4191/health',
+      reuseExistingServer: false
+    },
+    {
       command: 'pnpm dev --host localhost --port 4183 --strictPort',
       url: 'http://localhost:4183',
       reuseExistingServer: false,

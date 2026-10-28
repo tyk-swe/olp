@@ -2,6 +2,7 @@ package codeplans
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,6 +27,88 @@ func TestExchangeGrantPrincipalsFollowProfileAndKey(t *testing.T) {
 	}
 	if Principal(BigModelProfile, grant.AccessToken) == grant.Principal {
 		t.Fatal("principal ignores the profile account system")
+	}
+}
+
+func TestStartGrantSendsOperatorsToEachPlanKeyPage(t *testing.T) {
+	for _, test := range []struct {
+		adapter Adapter
+		profile string
+		page    string
+	}{
+		{MiniMax(), MiniMaxProfile, MiniMaxKeyPage},
+		{MiniMax(), MiniMaxCNProfile, MiniMaxCNKeyPage},
+		{Kimi(), KimiProfile, KimiKeyPage},
+		{Kimi(), KimiCNProfile, KimiCNKeyPage},
+		{QwenTokenPlan(), QwenTokenPlanProfile, QwenTokenPlanKeyPage},
+		{QwenTokenPlan(), QwenTokenPlanCNProfile, QwenTokenPlanCNKeyPage},
+	} {
+		if !slices.ContainsFunc(test.adapter.Manifest().Profiles, func(profile abi.Profile) bool { return profile.ID == test.profile }) {
+			t.Fatalf("plugin does not advertise enrollment profile %s", test.profile)
+		}
+		start, err := test.adapter.StartGrant(context.Background(), abi.GrantStart{Profile: test.profile})
+		if err != nil || start.URL != test.page {
+			t.Fatalf("%s opened %q: %v", test.profile, start.URL, err)
+		}
+	}
+}
+
+// MiniMax issues sk-cp- plan keys and Alibaba sk-sp- ones, beside pay-as-you-go
+// keys that share the host and bill outside the plan:
+// https://platform.minimax.io/docs/m-plan/other-tools and
+// https://www.alibabacloud.com/help/en/model-studio/token-plan-team-quickstart,
+// both checked 2026-10-26.
+func TestExchangeGrantRefusesPayAsYouGoKeys(t *testing.T) {
+	for _, test := range []struct {
+		adapter    Adapter
+		profile    string
+		payg, plan string
+	}{
+		{MiniMax(), MiniMaxProfile, "sk-api-0123456789abcdef", "sk-cp-0123456789abcdef"},
+		{MiniMax(), MiniMaxCNProfile, "sk-api-0123456789abcdef", "sk-cp-0123456789abcdef"},
+		{QwenTokenPlan(), QwenTokenPlanProfile, "sk-0123456789abcdef0", "sk-sp-0123456789abcdef"},
+		{QwenTokenPlan(), QwenTokenPlanCNProfile, "sk-0123456789abcdef0", "sk-sp-0123456789abcdef"},
+	} {
+		start, err := test.adapter.StartGrant(context.Background(), abi.GrantStart{Profile: test.profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := test.adapter.ExchangeGrant(context.Background(), abi.GrantExchange{Profile: test.profile, Session: start.Session, Input: test.payg}); err == nil {
+			t.Fatalf("%s accepted a pay-as-you-go key", test.profile)
+		}
+		grant, err := test.adapter.ExchangeGrant(context.Background(), abi.GrantExchange{Profile: test.profile, Session: start.Session, Input: test.plan})
+		if err != nil || grant.AccessToken != test.plan || grant.Principal != Principal(test.profile, test.plan) {
+			t.Fatalf("%s refused the plan key: %v %v", test.profile, grant, err)
+		}
+	}
+}
+
+// The global FAQ links the global console on kimi.ai and the mainland one on
+// kimi.com: https://www.kimi.ai/help/kimi-code/faq, checked 2026-10-27. Each
+// profile's key page must sit in the account system its upstream serves, or
+// subscribers of one are sent to enroll in the other.
+func TestKimiKeyPagesFollowEachAccountSystem(t *testing.T) {
+	for profile, upstream := range map[string]string{KimiProfile: KimiUpstream, KimiCNProfile: KimiCNUpstream} {
+		start, err := Kimi().StartGrant(context.Background(), abi.GrantStart{Profile: profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		domain := strings.SplitN(strings.TrimPrefix(upstream, "https://api."), "/", 2)[0]
+		if !strings.Contains(start.URL, "."+domain+"/") {
+			t.Fatalf("%s forwards to %s but enrolls at %s", profile, upstream, start.URL)
+		}
+	}
+}
+
+func TestExchangeGrantAcceptsKimiKey(t *testing.T) {
+	adapter := Kimi()
+	start, err := adapter.StartGrant(context.Background(), abi.GrantStart{Profile: KimiProfile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := adapter.ExchangeGrant(context.Background(), abi.GrantExchange{Profile: KimiProfile, Session: start.Session, Input: "kimi-key-0123456789abcdef"})
+	if err != nil || grant.AccessToken != "kimi-key-0123456789abcdef" {
+		t.Fatalf("Kimi Code key refused: %v", err)
 	}
 }
 

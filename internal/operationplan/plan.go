@@ -23,6 +23,7 @@ type Config struct {
 	ProviderID, RevisionID, Model, Operation string
 	Policy                                   *contentpolicy.Policy
 	MaxBodyBytes                             int
+	AllowProviderFetchedDocuments            bool
 }
 type Context struct {
 	Headers               http.Header
@@ -49,6 +50,8 @@ type Plan struct {
 	mapping           *operations.Mapping
 	route             string
 	estimate          int64
+	query             url.Values
+	wireBody          []byte
 }
 type Result struct {
 	Envelope  oif.Result
@@ -224,6 +227,38 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if t.codec.DocumentLocation != nil {
+		if location, external := t.codec.DocumentLocation(effective); external && !t.config.Provider.AllowsDocumentURI(location) {
+			return nil, fail("storage_scope", "/document", "document_location_prefix", "The document location is outside the connection's configured document URI prefixes.")
+		}
+	}
+	if t.codec.FetchedDocument != nil && t.codec.FetchedDocument(effective) && !t.config.AllowProviderFetchedDocuments {
+		return nil, fail("content_egress", "/document", "provider_fetched_documents", "This route does not allow the provider to fetch document URLs. Enable provider-fetched documents on the route or send the document inline.")
+	}
+	var query url.Values
+	var wireBody []byte
+	switch t.codec.Transport.Normalized() {
+	case operations.TransportGetQuery:
+		query, err = t.codec.Query(effective)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateQuery(query); err != nil {
+			return nil, err
+		}
+	case operations.TransportPoll202:
+		wire, wireErr := t.codec.Wire(view)
+		if wireErr != nil {
+			return nil, wireErr
+		}
+		if err := validateWireQuery(wire.Query); err != nil {
+			return nil, err
+		}
+		if len(wire.Body) == 0 {
+			return nil, fail("fidelity_protocol_violation", "/transport", "poll_submit_body", "A polling transport submits a body.")
+		}
+		query, wireBody = wire.Query, wire.Body
+	}
 	for _, pair := range []struct {
 		codec operations.Dialect
 		view  oif.View
@@ -258,7 +293,27 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if t.codec.Estimate != nil {
 		estimate = max(estimate, t.codec.Estimate(view))
 	}
-	return &Plan{template: t, config: config, source: source, effective: effective, view: view, prepared: prepared, receipt: receipt, mapping: mapping, route: ctx.Route, estimate: estimate}, nil
+	return &Plan{template: t, config: config, source: source, effective: effective, view: view, prepared: prepared, receipt: receipt, mapping: mapping, route: ctx.Route, estimate: estimate, query: query, wireBody: wireBody}, nil
+}
+
+func validateQuery(values url.Values) error {
+	if len(values) == 0 || len(values) > 32 {
+		return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+	}
+	for name, list := range values {
+		if !operations.Label.MatchString(name) || len(list) == 0 || len(list) > 8 {
+			return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+		}
+		for _, value := range list {
+			if len(value) > 2048 {
+				return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+			}
+		}
+	}
+	if len(values.Encode()) > 8192 {
+		return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+	}
+	return nil
 }
 func (p *Plan) Prepared() oif.Prepared       { return p.prepared }
 func (p *Plan) Body() []byte                 { return p.prepared.Document().Bytes() }
@@ -284,6 +339,34 @@ func (p *Plan) Receipt() oif.Receipt {
 func (p *Plan) EffectiveRequest() oif.Request { return p.effective }
 func (p *Plan) Endpoint() (string, error) {
 	return p.config.OperationURL(p.template.codec, p.template.config.Model)
+}
+func (p *Plan) Transport() operations.Transport {
+	return p.template.codec.Transport.Normalized()
+}
+func (p *Plan) Method() string {
+	if p.Transport() == operations.TransportGetQuery {
+		return http.MethodGet
+	}
+	return http.MethodPost
+}
+func (p *Plan) WireBody() []byte {
+	switch p.Transport() {
+	case operations.TransportGetQuery:
+		return nil
+	case operations.TransportPoll202:
+		return p.wireBody
+	}
+	return p.Body()
+}
+func (p *Plan) RequestURL() (string, error) {
+	endpoint, err := p.Endpoint()
+	if err != nil {
+		return "", err
+	}
+	if len(p.query) == 0 {
+		return endpoint, nil
+	}
+	return endpoint + "?" + p.query.Encode(), nil
 }
 func (p *Plan) Decode(body []byte) (Result, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: p.template.config.MaxBodyBytes})

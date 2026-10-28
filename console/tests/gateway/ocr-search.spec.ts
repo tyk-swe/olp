@@ -10,8 +10,10 @@ const upstream = {
   credential: 'ocr-search-fixture-secret'
 };
 const ocrRoute = 'e2e-mistral-ocr';
+const azureOcrRoute = 'e2e-azure-ocr';
 const nativeSearchRoute = 'e2e-perplexity-search';
 const mappedSearchRoute = 'e2e-search-tavily';
+const braveSearchRoute = 'e2e-search-brave';
 const keyName = 'OCR search route key';
 
 async function resetUpstream(request: APIRequestContext) {
@@ -32,6 +34,8 @@ async function upstreamRequests(request: APIRequestContext) {
   return (await observed.json()) as {
     calls: {
       path: string;
+      method: string;
+      query: Record<string, string>;
       raw: string;
       body: unknown;
       headers: Record<string, string>;
@@ -122,29 +126,35 @@ async function addProvider(
   return providerId;
 }
 
-// addMistralProvider provisions the OCR provider through the management API:
+// addOCRProvider provisions an OCR provider through the management API:
 // the provider wizard offers no profile choice for presets that carry no
 // default profile, such as mistral's generation preset.
-async function addMistralProvider(page: Page) {
+async function addOCRProvider(
+  page: Page,
+  name: string,
+  endpoint: string,
+  profile: string,
+  vendor: string
+) {
   const created = await manage<{ id: string }>(
     page,
     'POST',
     '/api/v1/providers',
     {
       body: {
-        name: 'Mistral upstream',
+        name,
         configuration: {
           kind: 'openai_compatible',
           auth_mode: 'api_key',
-          endpoint: `${upstream.origin}/mistral/v1`,
-          profile_id: 'mistral-ocr',
+          endpoint,
+          profile_id: profile,
           profile_revision: '1',
-          options: { vendor_id: 'mistral' }
+          options: { vendor_id: vendor }
         },
         credential: upstream.credential,
         model: upstream.model
       },
-      idempotency: `create-mistral-${Date.now()}`
+      idempotency: `create-${vendor}-${Date.now()}`
     }
   );
   expect(created.status, created.source).toBe(201);
@@ -244,8 +254,23 @@ test('a browser user publishes OCR and search routes and drives them through the
   await signIn(page);
   await resetUpstream(request);
 
-  await addMistralProvider(page);
+  await addOCRProvider(
+    page,
+    'Mistral upstream',
+    `${upstream.origin}/mistral/v1`,
+    'mistral-ocr',
+    'mistral'
+  );
   await addRoute(page, ocrRoute, 'strict', 'OCR', false);
+
+  await addOCRProvider(
+    page,
+    'Azure upstream',
+    `${upstream.origin}/azure`,
+    'azure-document-intelligence-ocr',
+    'azure-document-intelligence'
+  );
+  await addRoute(page, azureOcrRoute, 'transformed', 'OCR', false);
 
   await addProvider(
     page,
@@ -265,14 +290,22 @@ test('a browser user publishes OCR and search routes and drives them through the
   );
   await addRoute(page, mappedSearchRoute, 'transformed', 'Web search');
 
-  // One key allows all three routes.
+  await addProvider(page, 'Brave', `${upstream.origin}/brave`, 'search', true);
+  await addRoute(page, braveSearchRoute, 'transformed', 'Web search');
+
   await page.goto('/api-keys/new');
   await expect(
     page.getByRole('heading', { name: 'Create a proxy key.' })
   ).toBeVisible();
   await page.getByLabel('Key name').fill(keyName);
   await page.getByRole('checkbox', { name: 'Model listing' }).check();
-  for (const slug of [ocrRoute, nativeSearchRoute, mappedSearchRoute]) {
+  for (const slug of [
+    ocrRoute,
+    azureOcrRoute,
+    nativeSearchRoute,
+    mappedSearchRoute,
+    braveSearchRoute
+  ]) {
     await page
       .getByRole('group', { name: 'Allowed route slugs' })
       .getByRole('checkbox', { name: slug })
@@ -293,8 +326,6 @@ test('a browser user publishes OCR and search routes and drives them through the
 
   await resetUpstream(request);
 
-  // OCR on the strict route: the serving model is bound to the provider
-  // model and the result renders the page markdown.
   const result = page.locator('pre[data-testid="native-operation-result"]');
   await runNative(page, ocrRoute, 'ocr', 'mistral-ocr', secret);
   await expect(result).toContainText('Fixture OCR text');
@@ -303,7 +334,9 @@ test('a browser user publishes OCR and search routes and drives them through the
     fullPage: true
   });
 
-  // Native Perplexity search keeps the upstream identity.
+  await runNative(page, azureOcrRoute, 'ocr', 'mistral-ocr', secret);
+  await expect(result).toContainText('Azure fixture OCR text');
+
   await runNative(
     page,
     nativeSearchRoute,
@@ -314,8 +347,6 @@ test('a browser user publishes OCR and search routes and drives them through the
   await expect(result).toContainText('ppx_fx_1');
   await expect(result).toContainText('Fixture result');
 
-  // The transformed route projects the Tavily answer into the Perplexity
-  // shape with a gateway-minted search_ id.
   await runNative(
     page,
     mappedSearchRoute,
@@ -329,6 +360,16 @@ test('a browser user publishes OCR and search routes and drives them through the
     path: info.outputPath('playground-search.png'),
     fullPage: true
   });
+
+  await runNative(
+    page,
+    braveSearchRoute,
+    'search',
+    'perplexity-search',
+    secret
+  );
+  await expect(result).toContainText(/search_[0-9a-f]{32}/);
+  await expect(result).toContainText('Fixture description.');
 
   const observed = await upstreamRequests(request);
   expect(observed.unexpected).toEqual([]);
@@ -348,7 +389,32 @@ test('a browser user publishes OCR and search routes and drives them through the
     `Bearer ${upstream.credential}`
   );
   expect((perplexity?.body as { model?: unknown }).model).toBeUndefined();
-  // Only the provider credential ever reached the upstream.
+  const azureSubmit =
+    '/azure/documentintelligence/documentModels/fixture-model:analyze';
+  const azure = byPath.get(azureSubmit);
+  expect(azure?.headers['ocp-apim-subscription-key']).toBe(upstream.credential);
+  expect(azure?.headers.authorization).toBeUndefined();
+  expect(
+    (azure?.body as { base64Source?: unknown }).base64Source
+  ).toBeDefined();
+  const azurePoll = byPath.get(
+    '/azure/documentintelligence/documentModels/fixture-model/analyzeResults/fixture-result'
+  );
+  expect(azurePoll).toBeDefined();
+  expect(
+    observed.calls.filter((call) => call.path === azureSubmit)
+  ).toHaveLength(1);
+  const brave = byPath.get('/brave/res/v1/web/search');
+  expect(brave?.method).toBe('GET');
+  expect(brave?.raw).toBe('');
+  expect(brave?.headers['x-subscription-token']).toBe(upstream.credential);
+  expect(brave?.headers.authorization).toBeUndefined();
+  expect(brave?.query).toEqual({
+    q: 'What is an API gateway?',
+    count: '3',
+    result_filter: 'web',
+    text_decorations: 'false'
+  });
   expect(JSON.stringify(observed.calls)).not.toContain(secret);
 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

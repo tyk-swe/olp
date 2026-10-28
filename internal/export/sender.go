@@ -75,8 +75,9 @@ func NewSender(policy *egress.Policy) *Sender {
 }
 
 type SendError struct {
-	Code string
-	Err  error
+	Rejected bool
+	Code     string
+	Err      error
 }
 
 func (e *SendError) Error() string { return e.Code }
@@ -124,19 +125,34 @@ func (s *Sender) Send(ctx context.Context, destination Destination, credential [
 	}
 }
 
-func (s *Sender) do(req *http.Request) error {
+func DeliveryRejected(err error) bool {
+	var delivery *SendError
+	return errors.As(err, &delivery) && delivery.Rejected
+}
+
+func (s *Sender) response(req *http.Request) (*http.Response, error) {
 	response, err := s.client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return sendError("timeout", err)
+			return nil, sendError("timeout", err)
 		}
-		return sendError("network", err)
+		return nil, sendError("network", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		defer response.Body.Close()
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxDeliveryResponseBytes))
+		return nil, sendError("status", fmt.Errorf("destination answered %d", response.StatusCode))
+	}
+	return response, nil
+}
+
+func (s *Sender) do(req *http.Request) error {
+	response, err := s.response(req)
+	if err != nil {
+		return err
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxDeliveryResponseBytes))
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return sendError("status", fmt.Errorf("destination answered %d", response.StatusCode))
-	}
 	return nil
 }
 
@@ -262,7 +278,23 @@ func (s *Sender) sendOTLP(ctx context.Context, endpoint *url.URL, credential []b
 	if err := applyCredentialHeaders(request.Header, credentialDoc.Headers); err != nil {
 		return sendError("credential", err)
 	}
-	return s.do(request)
+	response, err := s.response(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxDeliveryResponseBytes+1))
+	if err != nil || len(body) > maxDeliveryResponseBytes {
+		return sendError("otlp_response", nil)
+	}
+	var result collogspb.ExportLogsServiceResponse
+	if proto.Unmarshal(body, &result) != nil {
+		return sendError("otlp_response", nil)
+	}
+	if result.GetPartialSuccess().GetRejectedLogRecords() > 0 {
+		return &SendError{Code: "otlp_rejected", Rejected: true}
+	}
+	return nil
 }
 
 func (s *Sender) sendObject(ctx context.Context, endpoint *url.URL, destination Destination, credential []byte, record Record) error {

@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "InvalidRequest",
+    "message": "Either urlSource or base64Source must be specified.",
+    "innererror": {
+      "code": "MissingParameter",
+      "message": "Either urlSource or base64Source must be specified."
+    }
+  }
+}

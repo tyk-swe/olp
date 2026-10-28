@@ -11,6 +11,7 @@ import (
 func (config Config) Clone() Config {
 	out := config
 	out.TuningDatasetURIPrefixes = slices.Clone(config.TuningDatasetURIPrefixes)
+	out.DocumentURIPrefixes = slices.Clone(config.DocumentURIPrefixes)
 	if config.BatchStorage != nil {
 		storage := *config.BatchStorage
 		out.BatchStorage = &storage

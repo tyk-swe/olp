@@ -206,33 +206,104 @@ meters as media units. OCR follows the
 non-exempt cost caps refuse `422 unbounded_work_budget` before dispatch,
 waived only for caller-paid cost-exempt routes.
 
+The `azure-document-intelligence-ocr` profile (vendor Azure Document
+Intelligence, an account-scoped endpoint the operator replaces with their
+resource host, credential as `Ocp-Apim-Subscription-Key`) serves the same
+frozen OCR contract through Azure Document Intelligence REST API
+`2024-11-30`. Its native document admits `model`, exactly one of
+`urlSource` (an `https:` URL the provider fetches) or `base64Source`
+(inline base64), and a one-based `pages` selector such as `1-2,4`. The
+analyze call answers `202` and the gateway polls the returned
+`Operation-Location` inside the same attempt and route deadline, so the
+caller still sends one request and reads one response. Polling retries are
+read-only and a document is never submitted twice; the polling URL must
+stay on the bound provider origin or the attempt fails before any
+credential is sent there. Cancelling the request stops the wait and makes
+a best-effort delete of the upstream result, which only marks the result
+for deletion because the provider offers no cancel operation; a cancelled
+or timed-out attempt stays billing-uncertain. Transformed serving maps the
+frozen OCR document onto this dialect, converting zero-based `pages` to
+the one-based selector, `https:` document and image URLs to `urlSource`
+and base64 `data:` documents to `base64Source`, and projects the provider
+markdown back into `pages[].index`/`pages[].markdown`. Provider-fetched
+documents are a route-level egress choice and apply to every OCR target,
+Mistral included. An `https:` document or image URL is forwarded for the
+provider to fetch only on a route whose revision sets
+`provider_fetched_documents`; without that choice the gateway refuses the
+request before dispatch, and inline `data:` documents are always admitted
+on their own contract terms. Routes that served `https:` documents before
+this gate existed must set the flag when they next publish, which is a
+deliberate breaking change recorded with the RM6 review fix so that the
+choice belongs to the operator and not to whichever caller sends a URL.
+The gateway never fetches document bytes itself.
+`table_format` is refused because [the upstream returns HTML tables](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/concept/markdown-elements#table) that do not map to the frozen table contract.
+The image-extraction and header/footer controls accept only explicit `false`, and `document_name`, the
+caller `id` and every other unmappable field are refused `400` before
+dispatch. Usage meters the observed result pages as media units; a result
+that carries no page evidence stays billing-uncertain instead of free.
+
+Transformed OCR serving also maps the frozen Mistral request to
+`vertex-document-processing-ocr`, the Google Cloud Document AI profile on
+the `vertex_ai` connector with vendor `google-vertex`. Document AI is a
+separate Google API from the Vertex AI publisher API. Its endpoint is
+`https://LOCATION-documentai.googleapis.com/v1/projects/PROJECT/locations/LOCATION`,
+where the connection's cloud region is the Document AI location, such as
+`us` or `eu`, and each provider model names a processor ID. Calls go to
+`processors/{processor}:process` with the bound connection's Google
+credential (`adc` or `service_account`) and no other. The mapping carries
+only inline `data:` documents with a base64 payload and a supported mime
+type, plus `pages`, which become a provider page selector. `https:`
+documents are refused before dispatch because Document AI cannot fetch
+them and the gateway never fetches document bytes. `document_name`, `id`,
+`include_image_base64`, `image_limit`, `image_min_size`, `table_format`,
+`extract_header` and `extract_footer` have no Document AI equivalent and
+are refused before dispatch. The native dialect additionally admits
+`gcsDocument` locations. A location is served only under one of the
+connection's operator configured `document_uri_prefixes`, and an empty
+list grants no locations. Results project into the frozen page shape from
+the document text and its page anchors. Observed pages meter as media
+units at the target's `unit_price`, and a result with no observed pages
+stays billing uncertain rather than free.
+
 The `perplexity-search` profile (vendor Perplexity) admits the frozen
 ApiSearchRequest: a string `query` (arrays refused), `max_results` 1–20,
 `search_type`, `max_tokens`, `max_tokens_per_page`, `country`,
 `search_language_filter`, an all-allow-or-all-deny `search_domain_filter` of
 at most 20 entries, and the date/recency filters. Transformed serving maps it
-to `tavily-search`, `exa-search` and `parallel-search` (vendors Tavily, Exa,
-Parallel; Parallel credentials arrive as `X-Api-Key`). The mappings always
+to `tavily-search`, `exa-search`, `parallel-search` and `brave-search`
+(vendors Tavily, Exa, Parallel, Brave; Parallel credentials arrive as
+`X-Api-Key`, Brave credentials as `X-Subscription-Token`). The mappings always
 send `query` and `max_results` (default 10); `search_type` is admitted only
-absent or `web`; token, locale and freshness controls are refused `400`
-rather than approximated. Domain filters reach Exa as root domains expanded
+absent or `web`; token and locale controls are refused `400` rather than
+approximated. Recency and last-updated filters are refused on every target.
+Brave alone also carries a paired `search_after_date_filter` and
+`search_before_date_filter` as a date range, and a single-sided date filter
+is refused there too. Domain filters reach Exa as root domains expanded
 with `*.d` subdomains and Parallel verbatim (`.tld` and domain/path entries
-allowed, `-` stripped on deny); Tavily carries none. Projections answer with
-the Perplexity shape, a gateway-minted `search_<hex>` id — upstream ids never
-cross — `""` for absent titles, joined highlight/excerpt snippets, and
-per-target dates. A result page beyond `max_results` is a protocol violation.
-Search results carry no usage and settle like moderation: a validated result
-completes its evidence, and the attempt is charged at the target's
-`per_request` price.
+allowed, `-` stripped on deny); Tavily and Brave carry none. Projections
+answer with the Perplexity shape, a gateway-minted `search_<hex>` id,
+upstream ids never cross, `""` for absent titles, joined
+highlight/excerpt snippets or Brave descriptions, and per-target dates. A
+result page beyond `max_results` is a protocol violation. Search results
+carry no usage and settle like moderation: a validated result completes its
+evidence, and the attempt is charged at the target's `per_request` price.
+
+The `brave-search` profile serves its upstream over a GET query transport.
+Its native document admits `q`, `count`, `offset`, `freshness` and
+`result_filter` (only `web`); the gateway lowers the document to bounded
+query parameters with decorations off and sends no body. Strict native
+ingress still takes the JSON document at `/native/{dialect}/models/{route}`.
+Only the wire to Brave is a query. Offset pagination is native-only because
+the frozen source contract has no offset field, so transformed Brave calls
+always read the first page.
 
 Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json),
 the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
 `tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
-required; this evidence does not qualify unimplemented API families. Brave (GET-query
-transport), Azure Document Intelligence (202/poll transport) and Vertex
-document processing (GCP-authenticated profile) stay pending; Google's Custom
-Search JSON API is excluded — the provider discontinued new enrollment and
-the API sunsets on 2027-01-01.
+required; this evidence does not qualify unimplemented API families. Google's
+Custom Search JSON API is excluded because the provider discontinued new
+enrollment and the API sunsets on 2027-01-01.
+
 
 ### Files, batches, realtime, and provider-retained state
 
@@ -273,7 +344,7 @@ State-bearing requests bypass response-cache replay. Known cached tokens count
 in context, token and monetary admission; unknown history, file and retrieval
 input quantities refuse applicable consumption caps.
 
-`GET /v1/realtime` is a WebSocket endpoint; WebRTC is not supported. The `model`
+`GET /v1/realtime` is a WebSocket endpoint. The `model`
 query parameter is an OLP route slug, the route must allow `realtime`, and the
 target must hold a certified `openai`/`realtime` capability. Target and slot are
 selected and reserved once before the upgrade, with no failover afterwards. The
@@ -282,6 +353,63 @@ propagates ping/close frames, and rechecks the presented API key every five
 seconds, closing with a policy violation on revocation or expiry. Terminal usage
 events feed accounting when the provider sends them; sessions that end without
 usage are recorded as billing-uncertain.
+
+`POST /v1/realtime/calls` opens a governed WebRTC session on OpenAI only. The
+caller posts the OpenAI calls form, an SDP offer plus an optional session
+document whose `model` names a strict route slug, or a raw SDP body with a
+`model` query parameter. A session whose consumption no token or cost budget
+can bound refuses applicable caps with `unbounded_work_budget`, like the other
+unbounded session paths. Request, concurrency and bounded session cost are
+reserved before the provider session exists, and a server control channel to
+the provider session is established before the SDP answer returns. The answer
+carries a gateway session identity in `Location`, never the provider call
+identity and never a raw provider client secret. The gateway rechecks the key every five
+seconds and closes the provider session on revocation, on provider credential
+loss and at the one-hour bound. Observed provider usage settles exactly once.
+Sessions that end without trustworthy usage stay billing-uncertain, and losing
+the control channel triggers a close attempt, holds the exposure and refuses
+new WebRTC work for that key while durable exposure remains unresolved. Without
+a durable ledger, the process-local hold lasts until the session bound. Bounded session
+cost is reserved through the durable debit ledger before the provider session
+exists and settled exactly once by the usage pipeline, and request and
+concurrency capacity ride the shared realtime lease path. A gateway crash
+after dispatch leaves the reserved exposure in the ledger and inside the key
+budgets until it is reconciled, so a lost session never reads as free.
+Installations without shared state settle on the lease path alone. SDP and media payloads are never logged
+or stored. The target must hold a certified `realtime`/`openai`/`webrtc`
+capability, which is distinct from the WebSocket `realtime` mode. Azure
+WebRTC is not supported yet and its ledger tuple is excluded until its own
+transport contract is certified.
+
+Native duplex profiles serve at `GET /native/{dialect}/sessions/{route}` on
+strict routes, with dialect `xai-realtime` for xAI, `vertex-realtime` for
+Vertex AI Live and `bedrock-realtime` for Bedrock Nova Sonic. The caller
+always speaks WebSocket to the gateway and sends that provider's native setup
+frame first. xAI and Vertex AI Live continue over WebSocket to the provider,
+while Nova Sonic continues over its SigV4-signed bidirectional event stream,
+with each WebSocket text frame carrying one native JSON event in either
+direction. The route must allow `realtime` and the target must hold a
+certified `native`/`realtime` capability for the profile. Frames stay opaque
+apart from the setup fields the profile gates and the usage evidence it
+extracts, so guardrail or content policies that cannot inspect them refuse
+the route, and no response caching ever applies. None of the three profiles
+declares transcription-only sessions, and a setup asking for one is refused
+before any provider dispatch. Vertex AI Live setup names the route as its
+model and is bound to the configured project, location and publisher model,
+and session resumption handles are refused because sessions are connection
+scoped. The gateway mints no session identifier and exposes no call that can
+address one later, so a session belongs only to the key and route that opened
+its connection. Admissions, the one-hour bound, five-second authority
+rechecks and exactly-once terminal settlement match `GET /v1/realtime`. xAI
+settles from per-response usage, including its cumulative billable audio
+seconds, Vertex AI Live from per-turn usage metadata, and Nova Sonic from
+the cumulative token totals its usage events carry. A session whose stream
+ends without that terminal evidence settles as billing-uncertain and never
+as zero cost.
+Rolling any RM6 family back is an ordinary publication change, for example
+retiring its routes or disabling its providers in a new release. New work
+then refuses at admission with nothing dispatched, and sessions that already
+settled stay in the usage history unchanged, debit records included.
 
 ### Anthropic surface
 
@@ -665,6 +793,14 @@ embeddings remain served. The media guide owns fal, Google Cloud TTS, Imagen
 and video declines. Reopening a decline needs a stable wire contract,
 representable pricing/usage and executable certification; generic endpoint
 registration does not reopen it.
+
+## Governed pass-through
+
+A pass-through route is a separate route kind for provider endpoints the gateway does not model. It is neither strict nor transformed, it advertises uncertified in route detail and capability views, and it binds exactly one connection through its single target. Callers reach it at `/native/{dialect}/routes/{route}/...` with an inference key that names the route, and the namespace cannot shadow a modeled endpoint because modeled native work lives under the `models` segment rather than `routes`.
+
+The route declares its methods and anchored path segment patterns, where `*` matches one nonempty segment. The gateway normalizes the path once before matching and refuses encoded separators, dot segments, absolute URLs, fragments and alternate authorities before any dispatch. Query names and forwarded headers come from explicit allowlists, and an unlisted query name is refused. Hop-by-hop headers and every caller credential are stripped, only the bound connection credential is injected, and provider redirects are refused instead of followed. The `Content-Type` of a request body is forwarded as body framing alongside the allowlisted headers. WebSocket upgrades are refused. Request bodies are buffered within the gateway body bound before dispatch so the bound credential can sign them where the connector requires signing. Responses stream within the response-byte limit and route deadline. An oversized or interrupted response terminates delivery without signaling successful completion.
+
+Fallback, mirroring, translation, response caching, guardrails and content policies cannot attach to this route kind, and a configuration that asks for them fails at configuration plan time and again at draft validation and publication. Publishing requires the operator acknowledgement for opaque provider state and unmetered work, recorded on the route itself. A successful attempt is charged the per-request price configured for the `passthrough` operation when one exists, and otherwise it is recorded as explicitly unpriced rather than as metered work. The gateway mints no resource handles or background jobs for an opaque response, and the escape hatch never qualifies the underlying endpoint as a modeled family. Live qualification against a real provider account remains a separate gate for each bound connection.
 
 ## Product boundaries
 

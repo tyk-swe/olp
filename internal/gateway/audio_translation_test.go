@@ -75,7 +75,10 @@ func TestStrictAudioTranslationPreservesNativeFormatsAndAccounting(t *testing.T)
 			if env.Operation != "translation" {
 				t.Fatalf("wrong operation: %s", env.Operation)
 			}
-			event := accountingEvent(env)
+			event, err := accountingEvent(env)
+			if err != nil {
+				t.Fatal(err)
+			}
 			encoded, err := usage.Encode(event)
 			if err != nil {
 				t.Fatal(err)

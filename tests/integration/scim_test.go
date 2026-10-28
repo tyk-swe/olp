@@ -5,15 +5,20 @@ package integration_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/scim"
+	"github.com/tyk-swe/olp/sdk/management"
 )
 
 func scimToken(h *accessHarness, owner *browser, scopes []string) string {
@@ -157,3 +162,108 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 // Directory replacement preserves an unfamiliar omitted extension.
 
 // Model an independently enrolled local sign-in; SCIM never accepts passwords.
+
+func TestSCIMNullFiltersMatchUnassignedDefinedAttributes(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	for _, kind := range []string{"Users", "Groups"} {
+		t.Run(kind, func(t *testing.T) {
+			schema := map[string]string{"Users": scim.UserSchema, "Groups": scim.GroupSchema}[kind]
+
+			create := func(name string, externalID json.RawMessage) string {
+				username := func() string {
+					if kind == "Groups" {
+						return ""
+					}
+					return name + "@example.com"
+				}()
+				body := struct {
+					Schemas     []string        `json:"schemas"`
+					UserName    string          `json:"userName,omitempty"`
+					DisplayName string          `json:"displayName"`
+					ExternalID  json.RawMessage `json:"externalId,omitempty"`
+				}{[]string{schema}, username, name, externalID}
+				return scimCall(t, h, token, "POST", "/scim/v2/"+kind, body, "", 201)["id"].(string)
+			}
+			ids := []string{create("Omitted", nil), create("Null", json.RawMessage(`null`)), create("Assigned", json.RawMessage(`"assigned"`))}
+
+			for _, method := range []string{"GET", "POST"} {
+				for _, tc := range []struct {
+					filter string
+					want   []string
+				}{
+					{"externalId eq null", ids[:2]},
+					{"not (externalId pr)", ids[:2]},
+					{"externalId ne null", ids[2:]},
+					{"externalId pr", ids[2:]},
+					{schema + ":externalId eq null", ids[:2]},
+					{"unsupported eq null", nil},
+					{map[string]string{"Users": "members", "Groups": "userName"}[kind] + " eq null", nil},
+					{map[string]string{"Users": scim.GroupSchema, "Groups": scim.UserSchema}[kind] + ":externalId eq null", nil},
+				} {
+					filter := fmt.Sprintf(`(id eq "%s" or id eq "%s" or id eq "%s") and (%s)`, ids[0], ids[1], ids[2], tc.filter)
+
+					request := map[string]struct {
+						path string
+						body any
+					}{
+						"GET":  {"/scim/v2/" + kind + "?filter=" + url.QueryEscape(filter), nil},
+						"POST": {"/scim/v2/" + kind + "/.search", map[string]any{"schemas": []string{scim.SearchSchema}, "filter": filter}},
+					}[method]
+					result := scimCall(t, h, token, method, request.path, request.body, "", 200)
+					resources := result["Resources"].([]any)
+					if len(resources) != len(tc.want) {
+						t.Fatalf("%s %s: %v", method, tc.filter, result)
+					}
+					for _, resource := range resources {
+						if !slices.Contains(tc.want, resource.(map[string]any)["id"].(string)) {
+							t.Fatalf("%s matched wrong resource: %v", tc.filter, resource)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSCIMSDKConditionalWriteRoundTrip(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	user := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("etag-roundtrip"), "", 201)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := management.NewClient(h.HTTP.URL, tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get, _ := management.Lookup("scim_users_get")
+	patch, _ := management.Lookup("scim_users_patch")
+	path := map[string]string{"scim_id": user["id"].(string)}
+	response, err := client.Call(t.Context(), get, management.Arguments{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(scimPatch(map[string]any{"op": "replace", "path": "displayName", "value": "Changed"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := management.Arguments{Path: path, IfMatch: response.ETag, Body: body}
+	updated, err := client.Call(t.Context(), patch, args)
+	if err != nil {
+		t.Fatalf("unchanged SCIM version refused: %v", err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(updated.Body, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["displayName"] != "Changed" {
+		t.Fatalf("patch did not update resource: %s", updated.Body)
+	}
+	_, stale := client.Call(t.Context(), patch, args)
+	var problem *management.APIError
+	if !errors.As(stale, &problem) || problem.Status != http.StatusPreconditionFailed {
+		t.Fatalf("stale version accepted: %v", stale)
+	}
+}

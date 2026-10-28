@@ -13,7 +13,7 @@ reaching its own subscription unchanged; see
 **Qualification status:** management, durable ledger and raw transports are wired
 into OLP. The official Codex CLI, Claude Code and OpenCode resolve npm latest in CI and have
 controlled-fixture qualification. This is not yet a release claim for a real
-ChatGPT, OpenCode Go or GLM Coding Plan subscription. See the
+ChatGPT, OpenCode Go or coding-plan subscription. See the
 [support matrix and release gates](../develop/qualification.md) before rollout.
 
 ## Adapters and clients
@@ -31,6 +31,9 @@ path refuses before upstream dispatch.
 | Codex | [`codex`](../../plugins/codex/README.md): `codex-subscription` | `responses`, `responses/compact`, WebSocket `responses` | `https://chatgpt.com/backend-api/codex` | Codex CLI |
 | OpenCode Go | [`opencode-go`](../../plugins/opencode-go/README.md): `opencode-go` | `v1/chat/completions`, `v1/messages`, `v1/responses` | `https://opencode.ai/zen/go/v1` | OpenCode, Claude Code |
 | GLM Coding Plan | [`zai-coding`](../../plugins/zai-coding/README.md): `zai-coding-plan`, `bigmodel-coding-plan` | `v1/messages`, `v1/chat/completions` | `https://api.z.ai/api/{anthropic,coding/paas/v4}` or the same paths on `https://open.bigmodel.cn/api` | Claude Code, OpenCode |
+| MiniMax M Plan | [`minimax-plan`](../../plugins/minimax-plan/README.md): `minimax-plan`, `minimax-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://api.minimax.io/{anthropic,v1}` or the same paths on `https://api.minimax.cn` | Claude Code, OpenCode |
+| Kimi Code | [`kimi-code`](../../plugins/kimi-code/README.md): `kimi-code`, `kimi-code-cn` | `v1/messages`, `v1/chat/completions` | `https://api.kimi.ai/coding/v1` or the same paths on `https://api.kimi.com/coding` | Claude Code, OpenCode |
+| Qwen Token Plan | [`qwen-token-plan`](../../plugins/qwen-token-plan/README.md): `qwen-token-plan`, `qwen-token-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/{apps/anthropic,compatible-mode}/v1` or the same paths on `https://token-plan.cn-beijing.maas.aliyuncs.com` | Claude Code, OpenCode |
 
 The Messages paths speak Anthropic Messages, the chat paths Chat Completions and
 the responses paths the Responses API. OpenCode Go serves each model on one
@@ -50,8 +53,8 @@ serves on the client's protocol stays out of that client's configuration.
 
 | Client | Paths it uses | Models a mixed route can give it |
 | --- | --- | --- |
-| Claude Code | `v1/messages` | GLM Coding Plan models, and OpenCode Go's Messages models such as MiniMax and Qwen |
-| OpenCode | `v1/chat/completions`, `v1/messages`, `v1/responses` | GLM Coding Plan models, and every OpenCode Go model including GPT and Grok |
+| Claude Code | `v1/messages` | GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan models, and OpenCode Go's Messages models such as MiniMax and Qwen |
+| OpenCode | `v1/chat/completions`, `v1/messages`, `v1/responses` | Every coding-plan model, and every OpenCode Go model including GPT and Grok |
 | Codex CLI | `responses`, `responses/compact` | ChatGPT subscription models only |
 
 To plan with a GPT model and implement with GLM in OpenCode, put an OpenCode Go
@@ -213,7 +216,7 @@ and retirement, and `If-Match` on updates and publication.
    Codex account authorization. Do not paste an access token into a developer's
    CLI or mark a fixture account as production-qualified.
    - Codex enrolls through the official device sign-in.
-   - OpenCode Go and GLM Coding Plan enroll a pasted API key: the operator opens
+   - OpenCode Go and the coding plans enroll a pasted API key: the operator opens
      the vendor's key page, creates a key and pastes it into a masked field. OLP
      makes no upstream call; it stores the key encrypted and takes a SHA-256
      fingerprint of it, scoped to the profile, as the principal. The key never
@@ -357,7 +360,9 @@ claude.ai login features are outside code mode. Optional
 
 The controlled suite resolves OpenCode from npm **latest** on each run. OLP generates an `opencode.json`
 that overrides the base URL of OpenCode's own provider for each subscription:
-`opencode-go`, or `zai-coding-plan` for either GLM profile. Each model is listed
+`opencode-go`, `zai-coding-plan` for either GLM profile, `minimax-coding-plan` for
+either MiniMax profile, `kimi-code-plan-global` for either Kimi profile or
+`alibaba-token-plan` for either Qwen profile. Each model is listed
 under the provider of the subscription that serves it, and every provider points
 at the route. The provider picks the endpoint OpenCode sends a model on, so for
 a model both subscriptions offer OLP picks the providers with which one
@@ -473,7 +478,7 @@ block subsequent budgeted admission. Historical unknown usage prevents falsely
 enabling a hard guarantee.
 
 Provider-reported allowance is separate metadata with observation/reset times.
-Only Codex reports allowance OLP reads; OpenCode Go and GLM Coding Plan accounts
+Only Codex reports allowance OLP reads; OpenCode Go and coding-plan accounts
 show none, and their health comes from response status alone. A 429, such as
 Z.ai's 5-hour limit or its concurrency limit, cools the account for a minute.
 Primary and secondary windows are retained independently for each metered limit;
@@ -501,8 +506,11 @@ Request authentication fields consumed locally are `Authorization`,
 Messages paths also accept the OLP key in `X-API-Key`, as Anthropic SDKs send
 it, and refuse in Anthropic's error envelope. Only the headers of the serving
 account's adapter replace them: Codex's `Authorization` and `ChatGPT-Account-ID`, a bearer
-`Authorization` for GLM Coding Plan, and for OpenCode Go a bearer
+`Authorization` for GLM Coding Plan, MiniMax M Plan and Qwen Token Plan, and for
+OpenCode Go a bearer
 `Authorization`, or `X-API-Key` on Messages as OpenCode's Anthropic SDK sends it.
+Kimi Code places the key in `X-API-Key` on Messages, as its Claude Code setup
+does, and a bearer `Authorization` on Chat Completions.
 All `X-OLP-*` fields are consumed. Hop-by-hop exclusions are `Connection`,
 its named fields, `Proxy-Connection`, `Keep-Alive`, `Proxy-Authenticate`,
 `Proxy-Authorization`, `TE`, `Trailer`, `Transfer-Encoding` and `Upgrade`.
@@ -526,7 +534,9 @@ places to store secrets.
 ## Vendor terms
 
 Z.ai restricts the GLM Coding Plan to its officially supported coding tools and
-scenarios, and OpenCode Go has its own terms. OLP forwards the client's own
+scenarios, OpenCode Go has its own terms, and MiniMax, Kimi and Alibaba each
+govern their coding plans by theirs. Kimi's terms forbid altering the client's
+identity. OLP forwards the client's own
 requests unmodified, including its user agent and session headers, but it
 cannot guarantee that a vendor accepts a plan used through a gateway or shared
 by several developers. Review each vendor's terms before pooling an account,
