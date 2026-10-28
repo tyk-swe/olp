@@ -78,15 +78,24 @@ func (s *Store) refreshLocked(ctx context.Context, conn *pgx.Conn, bound Binding
 	if current.AttemptID != nil {
 		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, *current.AttemptID))
 	}
-	if _, err := liveBinding(ctx, conn, bound); err != nil {
-		return nil, err
-	}
 	refresh, readErr := s.Keys.Read(ctx, conn, s.Installation, *current.RefreshID, secrets.MCPGrantRefresh)
 	if readErr != nil {
 		return nil, readErr
 	}
 	defer clear(refresh)
-	client, clientErr := s.oauthClient(bound, "")
+	return s.replaceGrant(ctx, conn, bound, current, func(client oauthClient) (*oauth2.Token, error) {
+		return client.config.TokenSource(client.context(ctx), &oauth2.Token{RefreshToken: string(refresh)}).Token()
+	})
+}
+
+func (s *Store) replaceGrant(ctx context.Context, conn *pgx.Conn, bound Binding, current storedGrant, exchange func(oauthClient) (*oauth2.Token, error)) ([]byte, error) {
+	if current.AttemptID != nil {
+		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, *current.AttemptID))
+	}
+	if _, err := liveBinding(ctx, conn, bound); err != nil {
+		return nil, err
+	}
+	client, clientErr := s.oauthClient(ctx, bound, "")
 	if clientErr != nil {
 		return nil, clientErr
 	}
@@ -99,11 +108,10 @@ func (s *Store) refreshLocked(ctx context.Context, conn *pgx.Conn, bound Binding
 	if tag.RowsAffected() != 1 {
 		return nil, ErrRequired
 	}
-	token, exchangeErr := client.config.TokenSource(client.context(ctx), &oauth2.Token{RefreshToken: string(refresh)}).Token()
+	token, exchangeErr := exchange(client)
 	if exchangeErr != nil {
 		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, attempt))
 	}
-
 	if err := validToken(token); err != nil {
 		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, attempt))
 	}
@@ -146,8 +154,15 @@ func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGr
 	if tag.RowsAffected() != 1 {
 		return ErrRequired
 	}
-	if _, err := tx.Exec(record, `DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])`, []string{current.AccessID, *current.RefreshID}); err != nil {
+	if _, err := tx.Exec(record, `DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])`, replacedSecretIDs(current)); err != nil {
 		return err
 	}
 	return tx.Commit(record)
+}
+
+func replacedSecretIDs(current storedGrant) []string {
+	if current.RefreshID == nil {
+		return []string{current.AccessID}
+	}
+	return []string{current.AccessID, *current.RefreshID}
 }

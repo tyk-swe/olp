@@ -47,7 +47,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 			return access.Fail(409, "mcp_server_limit", "This installation already has 128 active MCP servers.")
 		}
 		next.ID = access.NewID()
-		_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,credential_id,latest_revision_id,etag,created_by,calls_per_minute,max_concurrency,per_key_calls_per_minute,per_key_max_concurrency,delegation_key_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)", next.ID, next.ProjectID, next.Name, next.Transport, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, actor, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency, next.DelegationKeyID)
+		_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,credential_id,latest_revision_id,etag,created_by,calls_per_minute,max_concurrency,per_key_calls_per_minute,per_key_max_concurrency,delegation_key_id,entra_client_secret_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)", next.ID, next.ProjectID, next.Name, next.Transport, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, actor, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency, next.DelegationKeyID, next.EntraClientSecretID)
 	} else {
 		if current.Transport != next.Transport || !reflect.DeepEqual(current.Stdio, next.Stdio) {
 			return access.Invalid("transport", "The registered transport and executable binding are immutable.")
@@ -56,7 +56,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 			return access.Invalid("project_id", "The registered project is immutable.")
 		}
 		next.ID, next.Revision = current.ID, current.Revision+1
-		_, err = tx.Exec(ctx, "UPDATE olp.mcp_servers SET name=$2,endpoint=$3,enabled=$4,credential_id=$5,latest_revision_id=$6,etag=$7,calls_per_minute=$8,max_concurrency=$9,per_key_calls_per_minute=$10,per_key_max_concurrency=$11,delegation_key_id=$12 WHERE id=$1", next.ID, next.Name, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency, next.DelegationKeyID)
+		_, err = tx.Exec(ctx, "UPDATE olp.mcp_servers SET name=$2,endpoint=$3,enabled=$4,credential_id=$5,latest_revision_id=$6,etag=$7,calls_per_minute=$8,max_concurrency=$9,per_key_calls_per_minute=$10,per_key_max_concurrency=$11,delegation_key_id=$12,entra_client_secret_id=$13 WHERE id=$1", next.ID, next.Name, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency, next.DelegationKeyID, next.EntraClientSecretID)
 	}
 	if err != nil {
 		return err

@@ -28,6 +28,8 @@
     delegatedIssuer: string;
     delegatedAudience: string;
     signingKey: string;
+    entraIssuer: string;
+    entraClientSecret: string;
     clientID: string;
     audience: string;
     scopes: string;
@@ -57,6 +59,8 @@
       delegatedIssuer: '',
       delegatedAudience: '',
       signingKey: '',
+      entraIssuer: '',
+      entraClientSecret: '',
       clientID: '',
       audience: '',
       scopes: '',
@@ -151,6 +155,8 @@
           delegatedIssuer: loaded.delegation?.issuer ?? '',
           delegatedAudience: loaded.delegation?.audience ?? '',
           signingKey: '',
+          entraIssuer: loaded.oauth?.entra_obo?.issuer ?? '',
+          entraClientSecret: '',
           clientID: loaded.oauth?.client_id ?? '',
           audience: loaded.oauth?.audience ?? '',
           scopes: loaded.oauth?.scopes.join(' ') ?? '',
@@ -206,13 +212,20 @@
             ...(fields.signingKey
               ? { delegation_private_key: fields.signingKey }
               : {}),
+            ...(fields.entraClientSecret
+              ? { entra_client_secret: fields.entraClientSecret }
+              : {}),
             oauth: {
               client_id: fields.clientID.trim(),
               audience: fields.audience.trim(),
               scopes: fields.scopes.trim().split(/\s+/),
-              authorization_endpoint: fields.authorizationEndpoint.trim(),
+              ...(fields.entraIssuer.trim()
+                ? { entra_obo: { issuer: fields.entraIssuer.trim() } }
+                : {
+                    authorization_endpoint: fields.authorizationEndpoint.trim()
+                  }),
               token_endpoint: fields.tokenEndpoint.trim(),
-              ...(fields.deviceEndpoint.trim()
+              ...(!fields.entraIssuer.trim() && fields.deviceEndpoint.trim()
                 ? {
                     device_authorization_endpoint: fields.deviceEndpoint.trim()
                   }
@@ -228,6 +241,10 @@
         server: saved,
         fields: {
           ...$state.fields,
+          entraClientSecret:
+            $state.fields.entraClientSecret === fields.entraClientSecret
+              ? ''
+              : $state.fields.entraClientSecret,
           signingKey:
             $state.fields.signingKey === fields.signingKey
               ? ''
@@ -470,7 +487,8 @@
         <label
           >Authorization endpoint <input
             type="url"
-            required
+            disabled={Boolean($state.fields.entraIssuer.trim())}
+            required={!$state.fields.entraIssuer.trim()}
             value={$state.fields.authorizationEndpoint}
             oninput={(event) =>
               setField('authorizationEndpoint', event.currentTarget.value)}
@@ -488,11 +506,42 @@
         <label
           >Device authorization endpoint <input
             type="url"
+            disabled={Boolean($state.fields.entraIssuer.trim())}
             value={$state.fields.deviceEndpoint}
             oninput={(event) =>
               setField('deviceEndpoint', event.currentTarget.value)}
           /></label
         >
+        <fieldset>
+          <legend>Entra on-behalf-of authorization</legend>
+          <p>
+            Use a registered workload issuer and the middle-tier client ID.
+            Target scopes must start with the audience. This mode requires a
+            verified delegated user request and cannot combine with local
+            delegated signing.
+          </p>
+          <label
+            >Trusted Entra issuer <input
+              type="url"
+              value={$state.fields.entraIssuer}
+              oninput={(event) =>
+                setField('entraIssuer', event.currentTarget.value)}
+            /></label
+          >
+          <label
+            >Middle-tier client secret <input
+              type="password"
+              autocomplete="new-password"
+              value={$state.fields.entraClientSecret}
+              oninput={(event) =>
+                setField('entraClientSecret', event.currentTarget.value)}
+            /></label
+          >
+          <p>
+            Leave the secret empty to retain the installed value. Clear the
+            issuer to use browser authorization.
+          </p>
+        </fieldset>
         <fieldset>
           <legend>Delegated identity</legend>
           <p>
@@ -526,6 +575,10 @@
         </fieldset>
         <button disabled={$state.busy}>Save authorization settings</button>
       </form>
+      {#if $state.server.oauth?.entra_obo}<p>
+          Entra grants are created by verified delegated user requests. Browser
+          enrollment is unavailable for this server.
+        </p>{/if}
       <form
         onsubmit={(event) => {
           event.preventDefault();
@@ -539,8 +592,10 @@
             oninput={(event) => setField('keyID', event.currentTarget.value)}
           /></label
         >
-        <button disabled={$state.busy || !$state.server.oauth}
-          >Start key enrollment</button
+        <button
+          disabled={$state.busy ||
+            !$state.server.oauth ||
+            Boolean($state.server.oauth.entra_obo)}>Start key enrollment</button
         >
       </form>
       {#if $state.enrollmentURL}<p>

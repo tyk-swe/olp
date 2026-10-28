@@ -68,6 +68,9 @@ func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool ro
 }
 
 func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) (Handoff, error) {
+	if expected.OAuth.EntraOBO != nil {
+		return Handoff{}, access.Invalid("oauth", "Entra on-behalf-of grants require a verified user request, not browser enrollment.")
+	}
 	if _, err := liveBinding(ctx, s.Pool, expected); err != nil {
 		return Handoff{}, err
 	}

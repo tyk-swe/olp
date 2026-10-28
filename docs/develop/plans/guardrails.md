@@ -194,7 +194,7 @@ spans with OLP's local replacement. Neither claims every upstream anonymizer opt
 | `typesafe` | Excluded from RM2 text inspection: RM8.1: ordered tool-exchange relevance pruning | None in RM2 | Scope | Not applicable | Agent / accounting maintainers |
 | `straiker` | `straiker` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: straiker |
 | `alice` | `alice` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: alice |
-| `agent_365` | Excluded from RM2 text inspection: RM7.2: caller Entra OBO identity and MCP invocation | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `agent_365` | Shared consumer Entra OBO user, issuer and audience checks; fixture-qualified in RM7.2 | Refuse before exchange or dispatch | MCP grant owner | Content-free identity decision | MCP / access maintainers |
 | `conduct` | `conduct` native text contract; input phases only | block, annotate | N | Not run | Connector maintainers: conduct |
 | `decision_model` | `decision_model`: accounted model route with explicit JSON verdict rule | block, annotate | M | Not run | Guardrail / accounting maintainers |
 
@@ -210,10 +210,10 @@ execution owner; the remaining hooks still have the dependencies described below
   maintainers own these in RM7.1/RM7.2. `internal/mcp/identity.go` and the
   personal-grant owner enforce them; the delegated-identity gateway regression
   verifies JSON and MCP dispatch, revocation and audience isolation.
-- `agent_365` requires the caller's Entra JWT, on-behalf-of token exchange and
-  MCP invocation fields (`_build_evaluate_payload`, `_get_obo_token`). A shared
-  API-key text adapter cannot preserve that authority. MCP/access maintainers
-  own the RM7.2 integration.
+- `agent_365` runs in the shared consumer identity and grant owners. It requires
+  a verified delegated user assertion, explicit issuer and audience binding,
+  and a sealed middle-tier credential. Local fixtures qualify the exchange;
+  live tenant qualification remains separate.
 - `typesafe` constructs ordered tool exchanges and calls a paid relevance model
   before pruning complete exchanges (`_candidate_exchanges`, `_build_state`,
   `_call_systemone`). Agent/accounting maintainers own this in RM8.1; discarding

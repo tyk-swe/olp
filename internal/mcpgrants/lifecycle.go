@@ -68,13 +68,16 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 	if readErr != nil {
 		return Authorization{}, readErr
 	}
+	if item.Binding.OAuth.EntraOBO != nil {
+		return Authorization{}, ErrRequired
+	}
 	if item.Flow != "" || item.Outcome != "" {
 		return Authorization{}, access.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
 	}
 	if _, bindingErr := liveBinding(ctx, tx, item.Binding); bindingErr != nil {
 		return Authorization{}, bindingErr
 	}
-	client, clientErr := s.oauthClient(item.Binding, redirect)
+	client, clientErr := s.oauthClient(ctx, item.Binding, redirect)
 	if clientErr != nil {
 		return Authorization{}, clientErr
 	}
@@ -201,7 +204,7 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
 	}
-	client, clientErr := s.oauthClient(item.Binding, session.Redirect)
+	client, clientErr := s.oauthClient(ctx, item.Binding, session.Redirect)
 	if clientErr != nil {
 		return Authorization{}, clientErr
 	}

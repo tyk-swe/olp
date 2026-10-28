@@ -175,7 +175,7 @@ func (s *Server) revoke(r *http.Request, p access.Principal) (access.Reply, erro
 	}
 	defer tx.Rollback(r.Context())
 	var project, member string
-	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,member_id::text FROM olp.mcp_user_grants WHERE id=$1 FOR UPDATE`, id).Scan(&project, &member); err != nil {
+	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,COALESCE(member_id::text,'') FROM olp.mcp_user_grants WHERE id=$1 FOR UPDATE`, id).Scan(&project, &member); err != nil {
 		return access.Reply{}, err
 	}
 	if member != p.UserID() {

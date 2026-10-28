@@ -57,7 +57,7 @@ func Bind(authority access.Authority, tool routing.MCPToolsetTool) (Binding, err
 
 func binding(serverID, projectID, endpoint string, config routing.MCPOAuth, identity Identity) Binding {
 	return Binding{ServerID: serverID, ProjectID: projectID, Endpoint: endpoint, Identity: identity,
-		OAuth: routing.MCPOAuth{ClientID: config.ClientID, Audience: config.Audience,
+		OAuth: routing.MCPOAuth{EntraOBO: config.EntraOBO.Clone(), ClientID: config.ClientID, Audience: config.Audience,
 			Scopes:                slices.Compact(slices.Sorted(slices.Values(config.Scopes))),
 			AuthorizationEndpoint: config.AuthorizationEndpoint, TokenEndpoint: config.TokenEndpoint,
 			DeviceAuthorizationEndpoint: config.DeviceAuthorizationEndpoint}}

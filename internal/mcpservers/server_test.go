@@ -77,7 +77,7 @@ func TestValidateRefusesMalformedToolPricingAndLimits(t *testing.T) {
 
 func TestDefinitionCarriesEffectivePricingAndLimits(t *testing.T) {
 	in := pricingInput()
-	next := definitionFromInput(in, nil, nil)
+	next := definitionFromInput(in, nil, nil, nil)
 	if next.UnitPrice != nil {
 		t.Fatalf("unpriced input gained a price: %v", *next.UnitPrice)
 	}
@@ -92,7 +92,7 @@ func TestDefinitionCarriesEffectivePricingAndLimits(t *testing.T) {
 	in.UnitPrice = &price
 	in.ToolPrices = map[string]string{"lookup": "0.5"}
 	in.CallsPerMinute = &rate
-	next = definitionFromInput(in, nil, nil)
+	next = definitionFromInput(in, nil, nil, nil)
 	if next.UnitPrice == nil || *next.UnitPrice != price || next.ToolPrices["lookup"] != "0.5" || next.CallsPerMinute != rate {
 		t.Fatalf("configured pricing was not carried: %+v", next)
 	}

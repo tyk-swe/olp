@@ -10,9 +10,12 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	jose "github.com/go-jose/go-jose/v4"
+	"github.com/tyk-swe/olp/internal/workload"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1172,5 +1175,467 @@ func TestMCPGrantRevocationDuringCatalogCheckStopsDispatch(t *testing.T) {
 	assertPersonalCall(t, fixture.consumer(t), fixture, fixture.key, "revoked-during-discovery", http.StatusForbidden, "")
 	if calls.Load() != 0 {
 		t.Fatal("a revoked individual grant reached the tool")
+	}
+}
+
+type entraTestProfile struct {
+	Issuer string `json:"issuer"`
+}
+type entraTestOAuth struct {
+	ClientID      string           `json:"client_id"`
+	Audience      string           `json:"audience"`
+	Scopes        []string         `json:"scopes"`
+	TokenEndpoint string           `json:"token_endpoint"`
+	EntraOBO      entraTestProfile `json:"entra_obo"`
+}
+type entraTestRegistration struct {
+	Name              string         `json:"name"`
+	Endpoint          string         `json:"endpoint"`
+	Enabled           bool           `json:"enabled"`
+	OAuth             entraTestOAuth `json:"oauth"`
+	EntraClientSecret string         `json:"entra_client_secret,omitempty"`
+}
+type entraTestClaims struct {
+	Issuer       string `json:"iss"`
+	Audience     string `json:"aud"`
+	Subject      string `json:"sub"`
+	ObjectID     string `json:"oid"`
+	Scopes       string `json:"scp,omitempty"`
+	IdentityType string `json:"idtyp,omitempty"`
+	IssuedAt     int64  `json:"iat"`
+	Expires      int64  `json:"exp"`
+}
+
+func TestMCPEntraOBORequiresDelegatedUserIdentity(t *testing.T) {
+	var calls atomic.Int64
+	f := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{Call: func(r *http.Request) mcpsdk.CallToolResult {
+		calls.Add(1)
+		value := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer obo-access-")
+		return mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: value}}}
+	}})
+	current := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
+	project := mcpExecString(t, current, "project_id")
+	templates := f.h.want(f.owner, "GET", "/api/v1/projects/"+project+"/limit-templates", nil, nil, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/projects/"+project+"/limit-templates", struct {
+		Templates map[string]struct {
+			RequestsPerMinute int `json:"requests_per_minute"`
+		} `json:"templates"`
+	}{Templates: map[string]struct {
+		RequestsPerMinute int `json:"requests_per_minute"`
+	}{"worker": {RequestsPerMinute: 100}}}, etagHeader(templates), 200)
+	public, private, keyErr := ed25519.GenerateKey(rand.Reader)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: public, KeyID: "entra", Algorithm: "EdDSA", Use: "sig"}}})
+	}))
+	defer issuer.Close()
+	const clientID = "middle-tier-fixture"
+	userClaim := "/oid"
+	f.h.want(f.owner, "POST", "/api/v1/workload-issuers", workload.Config{Name: "Entra fixture", Issuer: issuer.URL, JWKSURL: issuer.URL, Enabled: true, Audiences: []string{clientID, "other-middle-tier"}, Algorithms: []string{"EdDSA"}, MaxLifetimeSeconds: 600, DisabledKeyIDs: []string{}, Mappings: []workload.Mapping{{Name: "users", Match: map[string]string{}, ProjectID: project, LimitTemplate: "worker", RouteGroups: []string{}, AllowedToolsets: []string{f.toolsetID}, AllowedAgents: []string{}, Scopes: []string{"tools"}, EndUserClaim: &userClaim}}}, idem("entra-issuer"), 201)
+	f.h.want(f.owner, "POST", "/api/v1/workload-issuers", workload.Config{Name: "Other trusted workload", Issuer: issuer.URL + "/other", JWKSURL: issuer.URL, Enabled: true, Audiences: []string{clientID}, Algorithms: []string{"EdDSA"}, MaxLifetimeSeconds: 600, DisabledKeyIDs: []string{}, Mappings: []workload.Mapping{{Name: "users", Match: map[string]string{}, ProjectID: project, LimitTemplate: "worker", RouteGroups: []string{}, AllowedToolsets: []string{f.toolsetID}, AllowedAgents: []string{}, Scopes: []string{"tools"}, EndUserClaim: &userClaim}}}, idem("other-workload-issuer"), 201)
+	var redirected atomic.Int64
+	var redirectToken atomic.Bool
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { redirected.Add(1); w.WriteHeader(http.StatusNoContent) }))
+	defer foreign.Close()
+	var exchanges atomic.Int64
+	var refreshes atomic.Int64
+	tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.Form.Get("client_id") != clientID || r.Form.Get("client_secret") != "operator-client-secret" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if redirectToken.Load() {
+			http.Redirect(w, r, foreign.URL, http.StatusTemporaryRedirect)
+			return
+		}
+		subject := func() string {
+			if r.Form.Get("grant_type") == "refresh_token" {
+				refreshes.Add(1)
+				return strings.TrimPrefix(r.Form.Get("refresh_token"), "obo-refresh-")
+			}
+			if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:jwt-bearer" || r.Form.Get("requested_token_use") != "on_behalf_of" || r.Form.Get("scope") != "downstream-fixture/tools.read" {
+				return ""
+			}
+			claims := &entraExchangeClaims{}
+			if _, err := jwt.ParseWithClaims(r.Form.Get("assertion"), claims, func(*jwt.Token) (any, error) { return public, nil }, jwt.WithValidMethods([]string{"EdDSA"}), jwt.WithIssuer(issuer.URL), jwt.WithAudience(clientID)); err != nil {
+				return ""
+			}
+			exchanges.Add(1)
+			return claims.Subject
+		}()
+		if subject == "" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Access  string `json:"access_token"`
+			Refresh string `json:"refresh_token"`
+			Kind    string `json:"token_type"`
+			Expires int    `json:"expires_in"`
+		}{"obo-access-" + subject, entraRefreshToken(subject), "Bearer", 3600})
+	}))
+	defer tokenEndpoint.Close()
+	conflict := struct {
+		entraTestRegistration
+		Delegation *routing.MCPDelegation `json:"delegation"`
+	}{entraTestRegistration: entraTestRegistration{Name: mcpExecString(t, current, "name"), Endpoint: mcpExecString(t, current, "endpoint"), Enabled: true, OAuth: entraTestOAuth{ClientID: clientID, Audience: "downstream-fixture", Scopes: []string{"downstream-fixture/tools.read"}, TokenEndpoint: tokenEndpoint.URL, EntraOBO: entraTestProfile{Issuer: issuer.URL}}, EntraClientSecret: "operator-client-secret"}, Delegation: &routing.MCPDelegation{Issuer: "https://delegation.invalid", Audience: "other-resource"}}
+	f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, conflict, withMatch(current, idem("entra-conflicting-authorization")), http.StatusUnprocessableEntity)
+	updated := f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, entraTestRegistration{Name: mcpExecString(t, current, "name"), Endpoint: mcpExecString(t, current, "endpoint"), Enabled: true, OAuth: entraTestOAuth{ClientID: clientID, Audience: "downstream-fixture", Scopes: []string{"downstream-fixture/tools.read"}, TokenEndpoint: tokenEndpoint.URL, EntraOBO: entraTestProfile{Issuer: issuer.URL}}, EntraClientSecret: "operator-client-secret"}, withMatch(current, idem("entra-registration")), 200)
+	publication := f.h.want(f.owner, "GET", "/api/v1/toolsets/"+f.toolsetID, nil, nil, 200)
+	tool := agentcontract.Tool{ServerID: f.serverID, RevisionID: mcpExecString(t, updated, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, updated, "catalog"), "digest"), Name: "identity", Alias: f.alias}
+	revised := f.h.want(f.owner, "PUT", "/api/v1/toolsets/"+f.toolsetID, personalOAuthToolsetInput{ProjectID: project, Name: "OAuth tools", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, withMatch(publication, idem("entra-toolset")), 200)
+	f.h.want(f.owner, "POST", "/api/v1/toolsets/"+f.toolsetID+"/publish", nil, withMatch(revised, idem("entra-publish")), 200)
+	handler := f.consumer(t)
+	signer, signerErr := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: private}, (&jose.SignerOptions{}).WithHeader("kid", "entra"))
+	if signerErr != nil {
+		t.Fatal(signerErr)
+	}
+	now := time.Now()
+	claims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: "service-principal", ObjectID: "not-a-user", IdentityType: "app", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+	signed, signErr := signer.Sign(mustJSON(claims))
+	if signErr != nil {
+		t.Fatal(signErr)
+	}
+	bearer, encodeErr := signed.CompactSerialize()
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	assertPersonalCall(t, handler, f, mcpPersonalKey{Secret: bearer}, "entra-app-only", http.StatusForbidden, "")
+	if exchanges.Load() != 0 {
+		t.Fatal("app-only assertion reached the token endpoint")
+	}
+	for _, rejected := range []struct{ name, issuer, audience, scope, kind string }{
+		{"generic-workload", issuer.URL, clientID, "", ""},
+		{"application-with-scope", issuer.URL, clientID, "delegated.read", "app"},
+		{"wrong-audience", issuer.URL, "other-middle-tier", "delegated.read", ""},
+		{"wrong-issuer", issuer.URL + "/other", clientID, "delegated.read", ""},
+	} {
+		t.Run(rejected.name, func(t *testing.T) {
+			claim := entraTestClaims{Issuer: rejected.issuer, Audience: rejected.audience, Subject: "rejected-user", ObjectID: "rejected-user", Scopes: rejected.scope, IdentityType: rejected.kind, IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+			assertPersonalCall(t, handler, f, mcpPersonalKey{Secret: signEntraAssertion(t, signer, claim)}, "entra-"+rejected.name, http.StatusForbidden, "")
+		})
+	}
+	assertPersonalCall(t, handler, f, f.key, "entra-api-key", http.StatusForbidden, "")
+	labelRequest := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", bytes.NewReader(mustJSON(struct {
+		ToolsetID string          `json:"toolset_id"`
+		Name      string          `json:"name"`
+		CallID    string          `json:"call_id"`
+		Arguments json.RawMessage `json:"arguments"`
+	}{f.toolsetID, f.alias, "entra-label", json.RawMessage(`{}`)})))
+	labelRequest.Header.Set("Authorization", "Bearer "+f.key.Secret)
+	labelRequest.Header.Set("Content-Type", "application/json")
+	labelRequest.Header.Set("X-OLP-End-User", "user-one")
+	labelResponse := httptest.NewRecorder()
+	handler.ServeHTTP(labelResponse, labelRequest)
+	if labelResponse.Code != http.StatusForbidden {
+		t.Fatal("caller label established Entra identity")
+	}
+	if exchanges.Load() != 0 || calls.Load() != 0 {
+		t.Fatal("untrusted or application identity reached exchange or dispatch")
+	}
+	userClaims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: "user-one", ObjectID: "user-one", Scopes: "delegated.read", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+	user := mcpPersonalKey{Secret: signEntraAssertion(t, signer, userClaims)}
+	assertPersonalCall(t, handler, f, user, "entra-user-json", http.StatusOK, "user-one")
+	if exchanges.Load() != 1 {
+		t.Fatalf("unexpected OBO exchanges: %d", exchanges.Load())
+	}
+	assertPersonalCall(t, handler, f, user, "entra-user-reuse", http.StatusOK, "user-one")
+	if exchanges.Load() != 1 {
+		t.Fatal("active OBO grant was exchanged again")
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), "UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE server_id=$1", f.serverID); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, handler, f, user, "entra-user-refresh", http.StatusOK, "user-one")
+	if refreshes.Load() != 1 || exchanges.Load() != 1 {
+		t.Fatal("OBO grant did not reuse the shared refresh lifecycle")
+	}
+	session := f.session(t, handler, user)
+	initializePersonalSession(t, handler, user, session)
+	params := func(id string) json.RawMessage {
+		return mustJSON(struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+			Meta      struct {
+				CallID string `json:"olp.call_id"`
+			} `json:"_meta"`
+		}{Name: f.alias, Arguments: json.RawMessage(`{}`), Meta: struct {
+			CallID string `json:"olp.call_id"`
+		}{id}})
+	}
+	reply := personalRPC(handler, user, "/mcp", session, "tools/call", params("entra-user-mcp"))
+	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), "user-one") {
+		t.Fatalf("MCP OBO call failed: %d %s", reply.Code, reply.Body.String())
+	}
+	secondClaims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: "user-two", ObjectID: "user-two", Scopes: "delegated.read", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+	second := mcpPersonalKey{Secret: signEntraAssertion(t, signer, secondClaims)}
+	beforeCalls := calls.Load()
+	crossed := personalRPC(handler, second, "/mcp", session, "tools/call", params("entra-wrong-user"))
+	if crossed.Code != http.StatusNotFound || exchanges.Load() != 1 || calls.Load() != beforeCalls {
+		t.Fatal("another user adopted a session or caused an exchange")
+	}
+	assertPersonalCall(t, handler, f, second, "entra-second-user", http.StatusOK, "user-two")
+	if exchanges.Load() != 2 {
+		t.Fatal("a second user did not receive a separate grant")
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), "UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE server_id=$1 AND refresh_secret_id IS NULL", f.serverID); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, handler, f, second, "entra-renew-assertion", http.StatusOK, "user-two")
+	if exchanges.Load() != 3 {
+		t.Fatal("a grant without refresh token did not renew using the verified assertion")
+	}
+	results := make(chan struct {
+		subject string
+		status  int
+		body    string
+	}, 2)
+	for _, subject := range []string{"user-three", "user-four"} {
+		claim := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: subject, ObjectID: subject, Scopes: "delegated.read", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+		key := mcpPersonalKey{Secret: signEntraAssertion(t, signer, claim)}
+		go func() {
+			status, body := personalCall(handler, f, key, "entra-concurrent-"+subject)
+			results <- struct {
+				subject string
+				status  int
+				body    string
+			}{subject, status, body}
+		}()
+	}
+	for range 2 {
+		result := <-results
+		var body struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal([]byte(result.body), &body) != nil || result.status != http.StatusOK || len(body.Content) != 1 || body.Content[0].Text != result.subject {
+			t.Fatal("concurrent OBO users received another user's result")
+		}
+	}
+	standing := f.h.want(f.owner, "GET", "/api/v1/mcp-user-grants", nil, nil, http.StatusOK)
+	attempts := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls", nil, nil, http.StatusOK)
+	exported := f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	for _, encoded := range []string{string(mustJSON(standing)), string(mustJSON(attempts)), string(mustJSON(exported)), string(mustJSON(updated))} {
+		for _, secret := range []string{user.Secret, second.Secret, "operator-client-secret", "obo-access-", "obo-refresh-", "user-one", "user-two"} {
+			if strings.Contains(encoded, secret) {
+				t.Fatal("identity or token material escaped into durable operator output")
+			}
+		}
+	}
+	var document configuration.Document
+	if err := json.Unmarshal(mustJSON(mcpExecObject(t, exported, "document")), &document); err != nil {
+		t.Fatal(err)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", struct {
+		Document configuration.Document `json:"document"`
+	}{document}, idem("entra-metadata-apply"), http.StatusOK)
+	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var records struct {
+		Items []mcp.ToolCall `json:"items"`
+	}
+	if err := json.Unmarshal(mustJSON(attempts), &records); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records.Items {
+		assertEntraDecision(t, record, record.Status == "succeeded")
+	}
+	var listed struct {
+		Items []mcpgrants.Standing `json:"items"`
+	}
+	if err := json.Unmarshal(mustJSON(standing), &listed); err != nil {
+		t.Fatal(err)
+	}
+	authority, authErr := f.h.Runtime.Authenticate(second.Secret)
+	if authErr != nil {
+		t.Fatal(authErr)
+	}
+	index := slices.IndexFunc(listed.Items, func(item mcpgrants.Standing) bool { return item.Binding.Identity.ID == authority.EndUserDigest })
+	if index < 0 || listed.Items[index].GrantID == nil {
+		t.Fatal("OBO grant is absent from standing")
+	}
+	f.h.want(f.owner, "DELETE", "/api/v1/mcp-user-grants/"+*listed.Items[index].GrantID, nil, nil, http.StatusNoContent)
+	beforeRevoke := calls.Load()
+	beforeExchange := exchanges.Load()
+	assertPersonalCall(t, handler, f, second, "entra-revoked", http.StatusForbidden, "")
+	if calls.Load() != beforeRevoke || exchanges.Load() != beforeExchange {
+		t.Fatal("revoked OBO grant was recreated or dispatched")
+	}
+	redirectToken.Store(true)
+	redirectClaims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: "redirect-user", ObjectID: "redirect-user", Scopes: "delegated.read", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+	assertPersonalCall(t, handler, f, mcpPersonalKey{Secret: signEntraAssertion(t, signer, redirectClaims)}, "entra-redirect", http.StatusForbidden, "")
+	if redirected.Load() != 0 || calls.Load() != beforeRevoke {
+		t.Fatal("redirected token exchange forwarded assertion or dispatched")
+	}
+	refused := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls", nil, nil, http.StatusOK)
+	var refusedRecords struct {
+		Items []mcp.ToolCall `json:"items"`
+	}
+	if err := json.Unmarshal(mustJSON(refused), &refusedRecords); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range refusedRecords.Items {
+		assertEntraDecision(t, record, record.Status == "succeeded")
+	}
+	redirectToken.Store(false)
+	exerciseEntraCredentialBoundary(t, f, handler, entraTestOAuth{ClientID: clientID, Audience: "downstream-fixture", Scopes: []string{"downstream-fixture/tools.read"}, TokenEndpoint: tokenEndpoint.URL, EntraOBO: entraTestProfile{Issuer: issuer.URL}}, user)
+}
+
+type entraExchangeClaims struct{ jwt.RegisteredClaims }
+
+func signEntraAssertion(t *testing.T, signer jose.Signer, claims entraTestClaims) string {
+	t.Helper()
+	signed, err := signer.Sign(mustJSON(claims))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, encodeErr := signed.CompactSerialize()
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	return token
+}
+
+func initializePersonalSession(t *testing.T, handler http.Handler, key mcpPersonalKey, session string) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	request.Header.Set("Authorization", "Bearer "+key.Secret)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Mcp-Protocol-Version", "2025-11-25")
+	request.Header.Set("Mcp-Session-Id", session)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("initialization failed: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func entraRefreshToken(subject string) string {
+	if subject == "user-two" {
+		return ""
+	}
+	return "obo-refresh-" + subject
+}
+
+func assertEntraDecision(t *testing.T, record mcp.ToolCall, succeeded bool) {
+	t.Helper()
+	index := slices.IndexFunc(record.IdentityDecisions, func(decision mcp.IdentityDecision) bool { return decision.Hook == mcp.EntraOBOHook })
+	if index < 0 {
+		t.Fatal("Entra hook standing was not recorded")
+	}
+	want := func() mcp.IdentityOutcome {
+		if succeeded {
+			return mcp.IdentityPassed
+		}
+		return mcp.IdentityDenied
+	}()
+	if record.IdentityDecisions[index].Outcome != want {
+		t.Fatalf("Entra decision = %s, want %s", record.IdentityDecisions[index].Outcome, want)
+	}
+}
+
+func exerciseEntraCredentialBoundary(t *testing.T, f personalOAuthFixture, handler http.Handler, profile entraTestOAuth, user mcpPersonalKey) {
+	t.Helper()
+	var oldSecretRequests atomic.Int64
+	var replacementRequests atomic.Int64
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("client_secret") == "operator-client-secret" {
+			oldSecretRequests.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if r.Form.Get("client_secret") != "replacement-client-secret" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		replacementRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Access  string `json:"access_token"`
+			Kind    string `json:"token_type"`
+			Expires int    `json:"expires_in"`
+		}{"obo-access-user-one", "Bearer", 3600})
+	}))
+	defer destination.Close()
+	for _, changed := range []struct {
+		name    string
+		profile entraTestOAuth
+	}{
+		{"token-endpoint", entraBoundaryProfile(profile, profile.ClientID, profile.EntraOBO.Issuer, destination.URL)},
+		{"client", entraBoundaryProfile(profile, "another-middle-tier", profile.EntraOBO.Issuer, profile.TokenEndpoint)},
+		{"issuer", entraBoundaryProfile(profile, profile.ClientID, profile.EntraOBO.Issuer+"/other", profile.TokenEndpoint)},
+	} {
+		current := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, http.StatusOK)
+		request := entraTestRegistration{Name: mcpExecString(t, current, "name"), Endpoint: mcpExecString(t, current, "endpoint"), Enabled: true, OAuth: changed.profile}
+		f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, request, withMatch(current, idem("entra-boundary-"+changed.name)), http.StatusUnprocessableEntity)
+		exported := f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+		var document configuration.Document
+		if err := json.Unmarshal(mustJSON(mcpExecObject(t, exported, "document")), &document); err != nil {
+			t.Fatal(err)
+		}
+		name := mcpExecString(t, current, "name")
+		entryIndex := slices.IndexFunc(document.MCPServers, func(entry configuration.MCPServerEntry) bool { return entry.Name == name })
+		if entryIndex < 0 {
+			t.Fatal("registered server missing from export")
+		}
+		entry := document.MCPServers[entryIndex]
+		promotion := configuration.Document{APIVersion: document.APIVersion, Projects: document.Projects, Providers: document.Providers, Routes: document.Routes, Pricing: document.Pricing, MCPServers: []configuration.MCPServerEntry{entraBoundaryEntry(entry, changed.profile)}}
+		input := struct {
+			Document configuration.Document `json:"document"`
+		}{promotion}
+		plan := f.h.want(f.owner, "POST", "/api/v1/configuration/plan", input, nil, http.StatusOK)
+		var result struct {
+			Conflicts []json.RawMessage `json:"conflicts"`
+		}
+		if err := json.Unmarshal(mustJSON(plan), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Conflicts) == 0 {
+			t.Fatal("promotion concealed the required Entra credential replacement")
+		}
+		f.h.want(f.owner, "POST", "/api/v1/configuration/apply", input, idem("entra-promotion-boundary-"+changed.name), http.StatusUnprocessableEntity)
+	}
+	current := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, http.StatusOK)
+	retained := f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, entraTestRegistration{Name: mcpExecString(t, current, "name") + " retained", Endpoint: mcpExecString(t, current, "endpoint"), Enabled: true, OAuth: profile}, withMatch(current, idem("entra-retained-secret")), http.StatusOK)
+	republishEntraBoundary(t, f, mcpExecString(t, retained, "project_id"), mcpExecString(t, retained, "revision_id"), mcpExecString(t, mcpExecObject(t, retained, "catalog"), "digest"))
+	if _, err := f.h.Pool.Exec(t.Context(), "UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 minute' WHERE server_id=$1 AND revoked_at IS NULL", f.serverID); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, handler, f, user, "entra-retained-secret", http.StatusOK, "user-one")
+	replacementCurrent := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, http.StatusOK)
+	replaced := f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, entraTestRegistration{Name: mcpExecString(t, replacementCurrent, "name"), Endpoint: mcpExecString(t, replacementCurrent, "endpoint"), Enabled: true, OAuth: entraBoundaryProfile(profile, profile.ClientID, profile.EntraOBO.Issuer, destination.URL), EntraClientSecret: "replacement-client-secret"}, withMatch(replacementCurrent, idem("entra-replaced-boundary")), http.StatusOK)
+	republishEntraBoundary(t, f, mcpExecString(t, replaced, "project_id"), mcpExecString(t, replaced, "revision_id"), mcpExecString(t, mcpExecObject(t, replaced, "catalog"), "digest"))
+	assertPersonalCall(t, handler, f, user, "entra-replaced-secret", http.StatusOK, "user-one")
+	if oldSecretRequests.Load() != 0 || replacementRequests.Load() != 1 {
+		t.Fatal("credential followed an unapproved boundary or replacement was unusable")
+	}
+}
+
+func entraBoundaryProfile(previous entraTestOAuth, client, issuer, endpoint string) entraTestOAuth {
+	return entraTestOAuth{ClientID: client, Audience: previous.Audience, Scopes: previous.Scopes, TokenEndpoint: endpoint, EntraOBO: entraTestProfile{Issuer: issuer}}
+}
+
+func entraBoundaryEntry(previous configuration.MCPServerEntry, profile entraTestOAuth) configuration.MCPServerEntry {
+	return configuration.MCPServerEntry{Name: previous.Name, Project: previous.Project, Transport: previous.Transport, Endpoint: previous.Endpoint, Enabled: previous.Enabled, CatalogDigest: previous.CatalogDigest, UnitPrice: previous.UnitPrice, ToolPrices: previous.ToolPrices, CallsPerMinute: previous.CallsPerMinute, MaxConcurrency: previous.MaxConcurrency, PerKeyCallsPerMinute: previous.PerKeyCallsPerMinute, PerKeyMaxConcurrency: previous.PerKeyMaxConcurrency, OAuth: &routing.MCPOAuth{ClientID: profile.ClientID, Audience: profile.Audience, Scopes: profile.Scopes, TokenEndpoint: profile.TokenEndpoint, EntraOBO: &routing.MCPEntraOBO{Issuer: profile.EntraOBO.Issuer}}}
+}
+
+func republishEntraBoundary(t *testing.T, f personalOAuthFixture, project, revision, digest string) {
+	t.Helper()
+	publication := f.h.want(f.owner, "GET", "/api/v1/toolsets/"+f.toolsetID, nil, nil, http.StatusOK)
+	tool := agentcontract.Tool{ServerID: f.serverID, RevisionID: revision, CatalogDigest: digest, Name: "identity", Alias: f.alias}
+	updated := f.h.want(f.owner, "PUT", "/api/v1/toolsets/"+f.toolsetID, personalOAuthToolsetInput{ProjectID: project, Name: "OAuth tools", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, withMatch(publication, idem("entra-boundary-repin-"+revision)), http.StatusOK)
+	f.h.want(f.owner, "POST", "/api/v1/toolsets/"+f.toolsetID+"/publish", nil, withMatch(updated, idem("entra-boundary-publish-"+revision)), http.StatusOK)
+	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
