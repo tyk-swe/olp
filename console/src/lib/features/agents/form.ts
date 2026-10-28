@@ -26,39 +26,50 @@ export function serverPricingForm(server: MCPServer): ServerPricingForm {
     perKeyMaxConcurrency: String(server.per_key_max_concurrency)
   };
 }
-function pricingLimit(raw: string, ceiling: number, label: string): number {
+export type ServerPricingResult =
+  { ok: true; input: MCPServerUpdate } | { ok: false; message: string };
+type LimitResult = { ok: true; value: number } | { ok: false; message: string };
+function pricingLimit(
+  raw: string,
+  ceiling: number,
+  label: string
+): LimitResult {
   const value = Number(raw);
   if (!/^[0-9]+$/.test(raw.trim()) || value < 1 || value > ceiling)
-    throw new Error(`${label} must be a whole number from 1 to ${ceiling}.`);
-  return value;
+    return {
+      ok: false,
+      message: `${label} must be a whole number from 1 to ${ceiling}.`
+    };
+  return { ok: true, value };
 }
 export function serverPricingInput(
   server: MCPServer,
   form: ServerPricingForm
-): MCPServerUpdate {
+): ServerPricingResult {
   const unitPrice = form.unitPrice.trim();
   if (unitPrice !== '' && !pricePattern.test(unitPrice))
-    throw new Error(
-      'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.'
-    );
+    return {
+      ok: false,
+      message:
+        'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.'
+    };
   const toolPrices: Record<string, string> = {};
   for (const [name, raw] of Object.entries(form.toolPrices)) {
     const price = raw.trim();
     if (price === '') continue;
     if (!server.catalog.tools.some((tool) => tool.name === name))
-      throw new Error(
-        `Price only certified tools. ${name} is not in the catalog.`
-      );
+      return {
+        ok: false,
+        message: `Price only certified tools. ${name} is not in the catalog.`
+      };
     if (!pricePattern.test(price))
-      throw new Error(`Use a non-negative decimal price for ${name}.`);
+      return {
+        ok: false,
+        message: `Use a non-negative decimal price for ${name}.`
+      };
     toolPrices[name] = price;
   }
-  return {
-    name: server.name,
-    endpoint: server.endpoint,
-    enabled: server.enabled,
-    unit_price: unitPrice === '' ? null : unitPrice,
-    tool_prices: toolPrices,
+  const limits = {
     calls_per_minute: pricingLimit(
       form.callsPerMinute,
       60000,
@@ -75,6 +86,27 @@ export function serverPricingInput(
       1024,
       'Per-key max concurrency'
     )
+  };
+  for (const limit of Object.values(limits)) {
+    if (!limit.ok) return limit;
+  }
+  return {
+    ok: true,
+    input: {
+      name: server.name,
+      endpoint: server.endpoint,
+      enabled: server.enabled,
+      unit_price: unitPrice === '' ? null : unitPrice,
+      tool_prices: toolPrices,
+      calls_per_minute: (limits.calls_per_minute as { value: number }).value,
+      max_concurrency: (limits.max_concurrency as { value: number }).value,
+      per_key_calls_per_minute: (
+        limits.per_key_calls_per_minute as { value: number }
+      ).value,
+      per_key_max_concurrency: (
+        limits.per_key_max_concurrency as { value: number }
+      ).value
+    }
   };
 }
 
@@ -133,16 +165,21 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
     };
   return d;
 }
+export type ToolPinResult =
+  { ok: true; pin: ToolPin } | { ok: false; message: string };
 export async function toolPin(
   server: MCPServer,
   name: string
-): Promise<ToolPin> {
+): Promise<ToolPinResult> {
   if (
     !server.enabled ||
     server.retired_at ||
     !server.catalog.tools.some((tool) => tool.name === name)
   )
-    throw new Error('Choose a tool from an enabled certified server.');
+    return {
+      ok: false,
+      message: 'Choose a tool from an enabled certified server.'
+    };
   const digest = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(name)
@@ -151,10 +188,13 @@ export async function toolPin(
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
   return {
-    server_id: server.id,
-    revision_id: server.revision_id,
-    catalog_digest: server.catalog.digest,
-    name,
-    alias: `t_${server.id.replaceAll('-', '')}_${suffix}`
+    ok: true,
+    pin: {
+      server_id: server.id,
+      revision_id: server.revision_id,
+      catalog_digest: server.catalog.digest,
+      name,
+      alias: `t_${server.id.replaceAll('-', '')}_${suffix}`
+    }
   };
 }

@@ -61,7 +61,9 @@ describe('publication configuration', () => {
   });
 
   it('pins the exact certified revision and domain-stable alias', async () => {
-    const pin = await toolPin(server, 'lookup');
+    const pinned = await toolPin(server, 'lookup');
+    if (!pinned.ok) throw new Error(pinned.message);
+    const pin = pinned.pin;
     expect(pin).toEqual({
       server_id: id,
       revision_id: id,
@@ -77,17 +79,23 @@ describe('publication configuration', () => {
   });
 
   it('refuses disabled, retired or undiscovered tools', async () => {
-    await expect(
-      toolPin({ ...server, enabled: false }, 'lookup')
-    ).rejects.toThrow();
-    await expect(
-      toolPin({ ...server, retired_at: '2026-10-22T00:00:00Z' }, 'lookup')
-    ).rejects.toThrow();
-    await expect(toolPin(server, 'unknown')).rejects.toThrow();
+    for (const refused of [
+      await toolPin({ ...server, enabled: false }, 'lookup'),
+      await toolPin(
+        { ...server, retired_at: '2026-10-22T00:00:00Z' },
+        'lookup'
+      ),
+      await toolPin(server, 'unknown')
+    ]) {
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) expect(refused.message.length).toBeGreaterThan(0);
+    }
   });
 
   it('copies reactive tool proxies into independent editor and request values', async () => {
-    const pin = await toolPin(server, 'lookup');
+    const pinned = await toolPin(server, 'lookup');
+    if (!pinned.ok) throw new Error(pinned.message);
+    const pin = pinned.pin;
     const tools = new Proxy([new Proxy(pin, {})], {});
     const current: Publication = {
       id,
@@ -120,7 +128,9 @@ describe('publication configuration', () => {
       perKeyCallsPerMinute: '45',
       perKeyMaxConcurrency: '2'
     });
-    const input = serverPricingInput(server, form);
+    const result = serverPricingInput(server, form);
+    if (!result.ok) throw new Error(result.message);
+    const input = result.input;
     expect(input).toEqual({
       name: server.name,
       endpoint: server.endpoint,
@@ -144,11 +154,14 @@ describe('publication configuration', () => {
       tool_prices: {}
     });
     expect(form.unitPrice).toBe('');
-    expect(serverPricingInput(server, form).unit_price).toBeNull();
+    const unpriced = serverPricingInput(server, form);
+    expect(unpriced.ok && unpriced.input.unit_price).toBeNull();
     form.unitPrice = '0';
-    expect(serverPricingInput(server, form).unit_price).toBe('0');
+    const free = serverPricingInput(server, form);
+    expect(free.ok && free.input.unit_price).toBe('0');
     form.toolPrices = { lookup: '  ' };
-    expect(serverPricingInput(server, form).tool_prices).toEqual({});
+    const blank = serverPricingInput(server, form);
+    expect(blank.ok && blank.input.tool_prices).toEqual({});
   });
 
   it('refuses malformed prices and limits outside installation bounds', () => {
@@ -165,7 +178,9 @@ describe('publication configuration', () => {
       { perKeyMaxConcurrency: '' }
     ];
     for (const patch of patches) {
-      expect(() => serverPricingInput(server, { ...base, ...patch })).toThrow();
+      const result = serverPricingInput(server, { ...base, ...patch });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message.length).toBeGreaterThan(0);
     }
   });
 });

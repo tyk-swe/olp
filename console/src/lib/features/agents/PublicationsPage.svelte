@@ -153,7 +153,12 @@
     error = '';
     notice = '';
     try {
-      const input = serverPricingInput(observed, draft);
+      const pricingResult = serverPricingInput(observed, draft);
+      if (!pricingResult.ok) {
+        error = pricingResult.message;
+        return;
+      }
+      const input = pricingResult.input;
       const result = await intent.submit(
         { action: 'server-pricing', observed, input },
         async (submission, requestId) =>
@@ -164,7 +169,7 @@
       pricing = serverPricingForm(result);
       serverID = result.id;
       notice =
-        'Server pricing saved in a new certified revision. Republish toolsets to pin it.';
+        'Server pricing and limits saved. Republish toolsets to pin new prices, and limits apply to the server now.';
       try {
         await client.invalidateQueries(
           { queryKey: ['agent-publications', 'servers'] },
@@ -185,7 +190,12 @@
     const version = epoch;
     const isCurrent = captureOwner();
     try {
-      const pin = await toolPin(server, name);
+      const pinned = await toolPin(server, name);
+      if (!pinned.ok) {
+        if (isCurrent() && version === epoch) error = pinned.message;
+        return;
+      }
+      const pin = pinned.pin;
       if (
         isCurrent() &&
         version === epoch &&
