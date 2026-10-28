@@ -36,22 +36,37 @@ func tighterToolLimit(server int64, key *int64) *int64 {
 	return &value
 }
 
+func toolRateLimit(value, fallback int64) *int64 {
+	if value <= 0 {
+		value = fallback
+	}
+	return &value
+}
+
 func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
 	limiter := s.rateLimiter()
 	if limiter == nil {
 		return nil, nil, 0
 	}
+	perKeyRate := in.tool.PerKeyCallsPerMinute
+	if perKeyRate <= 0 {
+		perKeyRate = routing.DefaultToolCallsPerMinute
+	}
+	perKeyConcurrency := in.tool.PerKeyMaxConcurrency
+	if perKeyConcurrency <= 0 {
+		perKeyConcurrency = routing.DefaultToolMaxConcurrency
+	}
 	requests := []limits.Request{
 		{
 			CostOwnerID: in.authority.ID, LookupID: toolPerKeyLookup(in.authority, in.tool.ServerID),
-			RequestsPerMinute: tighterToolLimit(in.tool.PerKeyCallsPerMinute, in.authority.Policy.RequestsPerMinute),
-			MaxConcurrency:    tighterToolLimit(in.tool.PerKeyMaxConcurrency, in.authority.Policy.MaxConcurrency),
+			RequestsPerMinute: tighterToolLimit(perKeyRate, in.authority.Policy.RequestsPerMinute),
+			MaxConcurrency:    tighterToolLimit(perKeyConcurrency, in.authority.Policy.MaxConcurrency),
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 		{
 			CostOwnerID: in.tool.ServerID, LookupID: toolPerServerLookup(in.tool.ServerID),
-			RequestsPerMinute: &in.tool.CallsPerMinute,
-			MaxConcurrency:    &in.tool.MaxConcurrency,
+			RequestsPerMinute: toolRateLimit(in.tool.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+			MaxConcurrency:    toolRateLimit(in.tool.MaxConcurrency, routing.DefaultToolMaxConcurrency),
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 	}
