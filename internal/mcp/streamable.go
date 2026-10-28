@@ -244,6 +244,9 @@ func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transp
 		writeRPCFailure(w, nil, rpcFailure{status: http.StatusBadRequest, code: rpcParseError, message: "The message could not be read.", data: rpcErrorData{Code: "parse_error"}})
 		return
 	}
+	if transport == sessionLegacy {
+		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
+	}
 	message, code, ok := parseRPCMessage(raw)
 	if !ok {
 		writeRPCFailure(w, nil, rpcFailure{status: http.StatusBadRequest, code: code, message: "Supply one JSON-RPC 2.0 message.", data: rpcErrorData{Code: "invalid_request"}})
@@ -276,7 +279,7 @@ func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transp
 		return
 	}
 	if !message.hasID {
-		if message.method == "notifications/initialized" {
+		if message.method == "notifications/initialized" && (transport != sessionLegacy || s.legacyNegotiated(record.id)) {
 			_ = s.Sessions.markSessionInitialized(r.Context(), record.id, binding)
 		}
 		w.WriteHeader(http.StatusAccepted)

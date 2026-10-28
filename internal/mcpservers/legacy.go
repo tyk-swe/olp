@@ -83,31 +83,27 @@ func transportProtocolAllowed(transport routing.MCPTransport, protocol string) b
 	return slices.Contains(protocols, protocol)
 }
 
-func (c *Transport) callLegacy(ctx context.Context, id int, method string, params any, out any) error {
+func (c *Transport) callLegacy(ctx context.Context, id int, method string, params json.RawMessage) (json.RawMessage, error) {
 	select {
 	case c.legacy.gate <- struct{}{}:
 		defer func() { <-c.legacy.gate }()
 	case <-ctx.Done():
-		return ErrTransport
-	}
-	encoded, err := json.Marshal(params)
-	if err != nil {
-		return ErrTransport
+		return nil, ErrTransport
 	}
 	requestID, err := legacyRequestID(id)
 	if err != nil {
-		return ErrTransport
+		return nil, ErrTransport
 	}
-	if err := c.legacy.connection.Write(ctx, &jsonrpc.Request{ID: requestID, Method: method, Params: encoded}); err != nil {
-		return ErrTransport
+	if err := c.legacy.connection.Write(ctx, &jsonrpc.Request{ID: requestID, Method: method, Params: params}); err != nil {
+		return nil, ErrTransport
 	}
 	if id == 0 {
-		return nil
+		return nil, nil
 	}
 	for {
 		message, readErr := c.legacy.connection.Read(ctx)
 		if readErr != nil {
-			return ErrTransport
+			return nil, ErrTransport
 		}
 		switch reply := message.(type) {
 		case *jsonrpc.Request:
@@ -115,18 +111,18 @@ func (c *Transport) callLegacy(ctx context.Context, id int, method string, param
 				c.listChanged.Store(true)
 				continue
 			}
-			return ErrTransport
+			return nil, ErrTransport
 		case *jsonrpc.Response:
 			if reply.ID != requestID {
-				return ErrTransport
+				return nil, ErrTransport
 			}
 			raw, encodeErr := jsonrpc.EncodeMessage(reply)
 			if encodeErr != nil {
-				return ErrTransport
+				return nil, ErrTransport
 			}
-			return decodeResult(raw, id, out)
+			return json.RawMessage(raw), nil
 		default:
-			return ErrTransport
+			return nil, ErrTransport
 		}
 	}
 }

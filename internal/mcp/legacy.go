@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -20,15 +21,19 @@ const (
 )
 
 type legacyStream struct {
-	frames   chan []byte
-	activity chan struct{}
-	done     chan struct{}
+	negotiated atomic.Bool
+	frames     chan []byte
+	activity   chan struct{}
+	done       chan struct{}
 }
 
 type legacyResponse struct {
+	writer http.ResponseWriter
 	ctx    context.Context
 	stream *legacyStream
 }
+
+func (w legacyResponse) Unwrap() http.ResponseWriter { return w.writer }
 
 func (w legacyResponse) Header() http.Header { return make(http.Header) }
 func (w legacyResponse) WriteHeader(int)     {}
@@ -132,8 +137,13 @@ func (s *Server) serveLegacyPOST(w http.ResponseWriter, r *http.Request) {
 	case stream.activity <- struct{}{}:
 	default:
 	}
+	deadline, _ := ctx.Deadline()
+	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
+		writeRPCFailure(w, nil, rpcFailure{status: http.StatusInternalServerError, code: rpcServerError, message: "The request body could not be bounded.", data: rpcErrorData{Code: "read_deadline_unavailable"}})
+		return
+	}
 	request.Header.Set("Accept", "application/json, text/event-stream")
-	s.serveSessionHTTP(legacyResponse{ctx: ctx, stream: stream}, request, sessionLegacy)
+	s.serveSessionHTTP(legacyResponse{writer: w, ctx: ctx, stream: stream}, request, sessionLegacy)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -148,5 +158,16 @@ func (s *Server) initializeLegacySession(w http.ResponseWriter, r *http.Request,
 		writeRPCFailure(w, message.id, *refused)
 		return
 	}
+	stream, exists := s.legacyStreams.Load(record.id)
+	if !exists {
+		writeRPCFailure(w, message.id, failureRPC(http.StatusNotFound, rpcInvalidRequest, errSessionNotFound))
+		return
+	}
+	stream.(*legacyStream).negotiated.Store(true)
 	writeInitializeResult(w, message.id, record)
+}
+
+func (s *Server) legacyNegotiated(sessionID string) bool {
+	stream, exists := s.legacyStreams.Load(sessionID)
+	return exists && stream.(*legacyStream).negotiated.Load()
 }

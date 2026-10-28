@@ -166,7 +166,15 @@ func (c *Transport) applyHeaders(h http.Header) {
 
 func (c *Transport) call(ctx context.Context, id int, method string, params any, out any) error {
 	if c.legacy != nil {
-		return c.callLegacy(ctx, id, method, params, out)
+		encoded, err := json.Marshal(params)
+		if err != nil {
+			return ErrTransport
+		}
+		raw, err := c.callLegacy(ctx, id, method, encoded)
+		if err != nil || id == 0 {
+			return err
+		}
+		return decodeResult(raw, id, out)
 	}
 	message := map[string]any{"jsonrpc": "2.0", "method": method}
 	if id != 0 {

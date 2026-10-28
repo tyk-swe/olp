@@ -51,10 +51,11 @@ func referenceClientTransport(kind routing.MCPTransport, endpoint, toolset strin
 	return &mcpsdk.StreamableClientTransport{Endpoint: endpoint + "/mcp?toolset_id=" + toolset, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true}
 }
 
-func revalidateReferenceServer(t *testing.T, h *accessHarness, owner *browser, transport routing.MCPTransport, created map[string]any) map[string]any {
+func revalidateReferenceServer(t *testing.T, h *accessHarness, owner *browser, transport routing.MCPTransport, serverID string) map[string]any {
 	t.Helper()
+	path := "/api/v1/mcp-servers/" + serverID
 	if transport != routing.MCPLegacySSE {
-		return created
+		return h.want(owner, "GET", path, nil, nil, 200)
 	}
 	exported := mcpExecObject(t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200), "document")
 	entry := mcpExecItem(t, mcpExecItems(t, exported, "mcp_servers"), 0, exported)
@@ -62,7 +63,6 @@ func revalidateReferenceServer(t *testing.T, h *accessHarness, owner *browser, t
 		t.Fatalf("portable configuration lost the registered transport: %v", entry)
 	}
 	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": exported}, idem("legacy-config-round-trip"), 200)
-	path := "/api/v1/mcp-servers/" + mcpExecString(t, created, "id")
 	current := h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "PUT", path, map[string]any{"name": current["name"], "endpoint": current["endpoint"], "enabled": true, "transport": "streamable_http"}, withMatch(current, idem("legacy-immutable-transport")), 422)
 	updated := h.want(owner, "PUT", path, map[string]any{"name": current["name"], "endpoint": current["endpoint"], "enabled": true}, withMatch(current, idem("legacy-recertify")), 200)
@@ -91,8 +91,8 @@ func mcpReferenceRoundTrip(t *testing.T, transport routing.MCPTransport, protoco
 		"name": "Reference MCP server", "project_id": project, "transport": transport,
 		"endpoint": upstream.URL, "enabled": true, "unit_price": "0", "per_key_calls_per_minute": 20, "per_key_max_concurrency": 4,
 	}, idem("mcp-reference-server"), 201)
-	registered := revalidateReferenceServer(t, h, owner, transport, created)
-	serverID := mcpExecString(t, registered, "id")
+	serverID := mcpExecString(t, created, "id")
+	registered := revalidateReferenceServer(t, h, owner, transport, serverID)
 	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "echo", Alias: agentcontract.ToolAlias(serverID, "echo")}
 	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
 		"project_id": project, "name": "Reference toolset", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}},

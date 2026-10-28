@@ -18,6 +18,25 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
+func legacyFixtureResult(request *jsonrpc.Request) (json.RawMessage, error) {
+	switch request.Method {
+	case "initialize":
+		var params struct {
+			Protocol string `json:"protocolVersion"`
+		}
+		if json.Unmarshal(request.Params, &params) != nil || params.Protocol != "2024-11-05" {
+			return nil, fmt.Errorf("legacy initialization did not pin the declared protocol")
+		}
+		return json.RawMessage(`{"protocolVersion":"2024-11-05","capabilities":{"tools":{}}}`), nil
+	case "tools/call":
+		return json.RawMessage(`{"content":[{"type":"text","text":"legacy answer"}]}`), nil
+	case "tools/list":
+		return json.RawMessage(`{"tools":[{"name":"lookup","inputSchema":{"type":"object"}}]}`), nil
+	default:
+		return nil, fmt.Errorf("unexpected legacy request method %q", request.Method)
+	}
+}
+
 func TestLegacyTransportRequiresExplicitSelectionAndPinsProtocol(t *testing.T) {
 	var sessions sync.Map
 	var sequence atomic.Int64
@@ -59,20 +78,13 @@ func TestLegacyTransportRequiresExplicitSelectionAndPinsProtocol(t *testing.T) {
 			if !ok || !request.ID.IsValid() {
 				continue
 			}
-			result := json.RawMessage(`{"tools":[{"name":"lookup","inputSchema":{"type":"object"}}]}`)
-			switch request.Method {
-			case "initialize":
-				var params struct {
-					Protocol string `json:"protocolVersion"`
-				}
-				if json.Unmarshal(request.Params, &params) != nil || params.Protocol != "2024-11-05" {
-					t.Error("legacy initialization did not pin the declared protocol")
-					return
-				}
-				result = json.RawMessage(`{"protocolVersion":"2024-11-05","capabilities":{"tools":{}}}`)
-			case "tools/call":
+			result, resultErr := legacyFixtureResult(request)
+			if resultErr != nil {
+				t.Error(resultErr)
+				return
+			}
+			if request.Method == "tools/call" {
 				calls.Add(1)
-				result = json.RawMessage(`{"content":[{"type":"text","text":"legacy answer"}]}`)
 			}
 			if connection.Write(r.Context(), &jsonrpc.Response{ID: request.ID, Result: result}) != nil {
 				return

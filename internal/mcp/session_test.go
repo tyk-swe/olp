@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,9 +21,13 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
 type legacyConsumer struct {
@@ -46,7 +52,12 @@ func openLegacyConsumer(t *testing.T, server *Server) legacyConsumer {
 	t.Helper()
 	mux := http.NewServeMux()
 	server.Register(mux)
-	httpServer := httptest.NewServer(mux)
+	return connectLegacyConsumer(t, mux)
+}
+
+func connectLegacyConsumer(t *testing.T, handler http.Handler) legacyConsumer {
+	t.Helper()
+	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -143,6 +154,89 @@ func TestLegacyHTTPUsesSharedExecutionAndRefusesModernSessionMixing(t *testing.T
 	legacy.post(t, sessionCallBody(6, "legacy-revoked-call", "hello"))
 	if response := legacy.receive(t); response.body["error"] == nil || fx.calls.Load() != 1 {
 		t.Fatalf("legacy call ignored current authority: %v calls=%d", response.body, fx.calls.Load())
+	}
+}
+
+func TestLegacyPOSTInterruptsUnfinishedRequestBody(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	mux := http.NewServeMux()
+	server.Register(mux)
+	admission := &observability.PublicAdmission{
+		Inference: observability.NewPool(4), Management: observability.NewPool(1), InferenceEnabled: true,
+		Tracing: &telemetry.RequestConfig{}, Tracer: noop.NewTracerProvider().Tracer("legacy-deadline-test"),
+		Reject: func(w http.ResponseWriter, r *http.Request, surface string) {
+			http.Error(w, "overloaded", http.StatusServiceUnavailable)
+		},
+	}
+	legacy := connectLegacyConsumer(t, admission.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Millisecond)
+		defer cancel()
+		mux.ServeHTTP(w, r.WithContext(ctx))
+	})))
+	legacy.post(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}`)
+	_ = rpcResult(t, legacy.receive(t))
+	legacy.post(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	endpoint, err := url.Parse(legacy.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := net.DialTimeout("tcp", endpoint.Host, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	body := sessionCallBody(2, "legacy-incomplete-body", "hello")
+	if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer test-key\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", endpoint.RequestURI(), endpoint.Host, len(body)+1, body); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(connection), &http.Request{Method: http.MethodPost})
+	if err != nil {
+		t.Fatalf("unfinished request body outlived its request deadline: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("legacy POST status=%d", response.StatusCode)
+	}
+	if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("unfinished request dispatched: calls=%d, reservations=%d", fx.calls.Load(), len(ledger.reserved))
+	}
+}
+
+func TestLegacyRequiresSuccessfulInitializeBeforeNotificationEnablesCalls(t *testing.T) {
+	for _, prior := range []string{"skipped", "rejected"} {
+		t.Run(prior, func(t *testing.T) {
+			server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			legacy := openLegacyConsumer(t, server)
+			if prior == "rejected" {
+				legacy.post(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
+				if rejected := legacy.receive(t); rejected.body["error"] == nil {
+					t.Fatal("modern initialization was accepted by legacy")
+				}
+			}
+			legacy.post(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+			legacy.post(t, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+			if rejected := legacy.receive(t); rejected.body["error"] == nil {
+				t.Fatal("tools were listed without a successful legacy initialization")
+			}
+			legacy.post(t, sessionCallBody(3, "legacy-handshake-call", "hello"))
+			if rejected := legacy.receive(t); rejected.body["error"] == nil || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+				t.Fatalf("call dispatched without legacy initialization: %v, calls=%d, reservations=%d", rejected.body, fx.calls.Load(), len(ledger.reserved))
+			}
+			legacy.post(t, `{"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}`)
+			_ = rpcResult(t, legacy.receive(t))
+			legacy.post(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+			legacy.post(t, sessionCallBody(5, "legacy-handshake-call", "hello"))
+			if result := rpcResult(t, legacy.receive(t)); result["isError"] == true || fx.calls.Load() != 1 {
+				t.Fatalf("successful legacy initialization did not permit the call: %v, calls=%d", result, fx.calls.Load())
+			}
+		})
 	}
 }
 
