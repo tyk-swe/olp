@@ -61,13 +61,13 @@ func TestMCPReferenceServerRoundTrip(t *testing.T) {
 	}, idem("mcp-reference-key"), 201)
 	secret := mcpExecString(t, key, "secret")
 	valkey, prefix, _ := acctKeyspace(t)
-	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
-	if err != nil {
-		t.Fatal(err)
+	limiter, limiterErr := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if limiterErr != nil {
+		t.Fatal(limiterErr)
 	}
-	sessions, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp-reference")
-	if err != nil {
-		t.Fatal(err)
+	sessions, sessionStoreErr := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp-reference")
+	if sessionStoreErr != nil {
+		t.Fatal(sessionStoreErr)
 	}
 	server := &mcp.Server{
 		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessions, Limiter: limiter,
@@ -81,9 +81,9 @@ func TestMCPReferenceServerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: &oauth2.Transport{Source: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: secret})}}
-	response, err := client.Get(consumer.URL + "/v1/mcp/tools")
-	if err != nil {
-		t.Fatal(err)
+	response, responseErr := client.Get(consumer.URL + "/v1/mcp/tools")
+	if responseErr != nil {
+		t.Fatal(responseErr)
 	}
 	defer response.Body.Close()
 	var capabilities struct {
@@ -108,27 +108,27 @@ func TestMCPReferenceServerRoundTrip(t *testing.T) {
 		t.Fatalf("discovery disagreed with the explicit price or tighter key policy: %+v", capability)
 	}
 	sdkClient := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "reference-caller", Version: "1"}, nil)
-	session, err := sdkClient.Connect(t.Context(), &mcpsdk.StreamableClientTransport{
+	session, connectErr := sdkClient.Connect(t.Context(), &mcpsdk.StreamableClientTransport{
 		Endpoint: consumer.URL + "/mcp?toolset_id=" + toolsetID, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true,
 	}, &mcpsdk.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
-	if err != nil {
-		t.Fatal(err)
+	if connectErr != nil {
+		t.Fatal(connectErr)
 	}
 	defer session.Close()
-	listed, err := session.ListTools(t.Context(), nil)
-	if err != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != tool.Alias {
-		t.Fatalf("reference client could not list the published tool: %+v %v", listed, err)
+	listed, listErr := session.ListTools(t.Context(), nil)
+	if listErr != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != tool.Alias {
+		t.Fatalf("reference client could not list the published tool: %+v %v", listed, listErr)
 	}
-	result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: tool.Alias, Arguments: arguments{Query: "reference round trip"}, Meta: mcpsdk.Meta{"olp.call_id": "reference-call"}})
-	if err != nil || result.IsError || len(result.Content) != 1 || dispatches.Load() != 1 {
-		t.Fatalf("reference round trip failed: %+v %v", result, err)
+	result, callErr := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: tool.Alias, Arguments: arguments{Query: "reference round trip"}, Meta: mcpsdk.Meta{"olp.call_id": "reference-call"}})
+	if callErr != nil || result.IsError || len(result.Content) != 1 || dispatches.Load() != 1 {
+		t.Fatalf("reference round trip failed: %+v %v", result, callErr)
 	}
-	text, ok := result.Content[0].(*mcpsdk.TextContent)
-	if !ok || text.Text != "reference round trip" {
+	text, isText := result.Content[0].(*mcpsdk.TextContent)
+	if !isText || text.Text != "reference round trip" {
 		t.Fatalf("reference result did not survive both protocol boundaries: %+v", result)
 	}
-	attemptID, ok := result.Meta["olp.attempt_id"].(string)
-	if !ok {
+	attemptID, hasAttemptID := result.Meta["olp.attempt_id"].(string)
+	if !hasAttemptID {
 		t.Fatalf("reference result omitted its attempt identity: %+v", result.Meta)
 	}
 	record := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+attemptID, nil, nil, 200)

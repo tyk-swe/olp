@@ -1,19 +1,29 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { writable } from 'svelte/store';
   import { errorMessage } from '$lib/api/http';
-  import { listProjects, listToolCalls } from './api';
+  import { listProjects } from '$lib/features/access/projects/api';
+  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { agentKeys } from './agentKeys';
+  import { listToolCalls } from './api';
 
-  let project = $state('');
-  let key = $state('');
-  let filter = $state({ project: '', key: '' });
-  let cursor = $state<string | undefined>();
+  const filters = writable<{
+    project: string;
+    key: string;
+    cursor?: string;
+  }>({ project: '', key: '' });
   const projects = createQuery(() => ({
-    queryKey: ['projects'],
-    queryFn: listProjects
+    queryKey: projectKeys.all,
+    queryFn: ({ signal }) => listProjects(signal)
   }));
   const calls = createQuery(() => ({
-    queryKey: ['mcp-tool-calls', filter, cursor],
-    queryFn: () => listToolCalls(filter.project, filter.key, cursor)
+    queryKey: agentKeys.toolCalls(
+      $filters.project,
+      $filters.key,
+      $filters.cursor
+    ),
+    queryFn: () =>
+      listToolCalls($filters.project, $filters.key, $filters.cursor)
   }));
 </script>
 
@@ -30,13 +40,18 @@
 <form
   onsubmit={(event) => {
     event.preventDefault();
-    filter = { project, key: key.trim() };
-    cursor = undefined;
+    const form = new FormData(event.currentTarget);
+    const project = form.get('project');
+    const key = form.get('key');
+    filters.set({
+      project: typeof project === 'string' ? project : '',
+      key: typeof key === 'string' ? key.trim() : ''
+    });
   }}
 >
   <label>
     Project
-    <select bind:value={project}>
+    <select name="project">
       <option value="">All authorized projects</option>
       {#each projects.data ?? [] as value (value.id)}
         <option value={value.id}>{value.name}</option>
@@ -45,10 +60,7 @@
   </label>
   <label>
     API key UUID (optional)
-    <input
-      bind:value={key}
-      pattern="[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}"
-    />
+    <input name="key" pattern="[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}" />
   </label>
   <button type="submit">Filter</button>
 </form>
@@ -133,13 +145,19 @@
 <nav aria-label="Tool call pages">
   <button
     type="button"
-    disabled={!cursor || calls.isFetching}
-    onclick={() => (cursor = undefined)}>Newest</button
+    disabled={!$filters.cursor || calls.isFetching}
+    onclick={() =>
+      filters.update((current) => ({ ...current, cursor: undefined }))}
+    >Newest</button
   >
   <button
     type="button"
     disabled={!calls.data?.nextCursor || calls.isFetching}
-    onclick={() => (cursor = calls.data?.nextCursor ?? undefined)}>Older</button
+    onclick={() =>
+      filters.update((current) => ({
+        ...current,
+        cursor: calls.data?.nextCursor ?? undefined
+      }))}>Older</button
   >
   <button
     type="button"

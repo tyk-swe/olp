@@ -2,13 +2,14 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import * as api from './api';
+import * as projectsApi from '$lib/features/access/projects/api';
 import ToolCallsProbe from './test/ToolCallsProbe.svelte';
 
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
-  listToolCalls: vi.fn(),
-  listProjects: vi.fn()
+  listToolCalls: vi.fn()
 }));
+vi.mock('$lib/features/access/projects/api', () => ({ listProjects: vi.fn() }));
 
 it('keeps unresolved exposure separate from observed spend and refreshes settlement', async () => {
   const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50701';
@@ -42,7 +43,7 @@ it('keeps unresolved exposure separate from observed spend and refreshes settlem
     currency: 'USD',
     guardrail_decisions: []
   };
-  vi.mocked(api.listProjects).mockResolvedValue([]);
+  vi.mocked(projectsApi.listProjects).mockResolvedValue([]);
   vi.mocked(api.listToolCalls).mockResolvedValue({
     items: [call],
     nextCursor: null
@@ -98,5 +99,17 @@ it('keeps unresolved exposure separate from observed spend and refreshes settlem
     ).toBe('0.25 / 0.25');
     expect(host.textContent).toContain('succeeded');
     expect(host.textContent).toContain('settled');
+  });
+  vi.mocked(api.listToolCalls).mockImplementation(async (_project, key) => ({
+    items: key === id ? [] : [call],
+    nextCursor: null
+  }));
+  host.querySelector('input[name="key"]')?.setAttribute('value', id);
+  host
+    .querySelector('form')
+    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('No tool calls in this view.');
   });
 });
