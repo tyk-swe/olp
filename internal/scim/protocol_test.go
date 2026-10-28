@@ -19,7 +19,7 @@ func TestFilterBindsEveryCallerValueAndBoundsComplexity(t *testing.T) {
 			t.Fatal("caller text reached SQL", sql)
 		}
 	}
-	for _, raw := range []string{strings.Repeat("(", 17) + `active pr` + strings.Repeat(")", 17), strings.Repeat("x", 4097), `active gt true`, `userName =~ "x"`} {
+	for _, raw := range []string{strings.Repeat("(", 17) + `active pr` + strings.Repeat(")", 17), strings.Repeat("x", 4097), `emails[` + strings.Repeat(`type eq "work" or `, 32) + `value pr]`, `active gt true`, `userName =~ "x"`} {
 		if _, err := (&SQLFilter{}).Compile(raw, "document"); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
