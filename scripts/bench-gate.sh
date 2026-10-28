@@ -164,7 +164,6 @@ if (( ${#packages[@]} == 0 )); then
 fi
 echo "bench-gate: shard $shard, ${#packages[@]} benchmark packages: ${packages[*]#github.com/*/*/}" >&2
 
-# Build each side's test binaries once, so that no sample pays to link them.
 declare -A test_dir=()
 build() { # base|head, tree
   local side=$1 tree=$2 listing package dir
