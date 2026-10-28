@@ -1,4 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
+import type { ProviderModel } from '../../src/lib/features/providers/api/models';
 import { manage } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
@@ -466,4 +467,79 @@ test('cloud connections support bulk model review, credential pools and policy r
     page.getByRole('heading', { name: 'Now build a stable route slug.' })
   ).toBeVisible();
   await verifyProviderRouting(page, info);
+});
+
+test('manual model identifiers remain disabled until capability review', async ({
+  page
+}, info) => {
+  await signIn(page);
+  const created = await manage<{ id: string }>(
+    page,
+    'POST',
+    '/api/v1/providers',
+    {
+      idempotency: crypto.randomUUID(),
+      body: {
+        name: `Manual model fixture ${crypto.randomUUID()}`,
+        configuration: {
+          kind: 'openai_compatible',
+          endpoint: upstream.endpoint,
+          auth_mode: 'api_key'
+        },
+        credential: upstream.credential
+      }
+    }
+  );
+  expect(created.status, created.source).toBe(201);
+  const path = `/api/v1/providers/${created.body.id}`;
+  await page.goto(`/providers/${created.body.id}`);
+  const discovery = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `${path}/discovery`
+  );
+  await page.getByRole('button', { name: 'Run upstream discovery' }).click();
+  expect((await discovery).status()).toBe(200);
+  await expect(
+    page.getByText(upstream.model, { exact: true }).first()
+  ).toBeVisible();
+  for (const names of [['manual-one'], ['manual-two', 'manual-three']]) {
+    await page.getByText('Manual model identifiers', { exact: true }).click();
+    await page.getByLabel('Upstream model identifiers').fill(names.join('\n'));
+    const declared = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === `${path}/discovery`
+    );
+    const submit = page.getByRole('button', {
+      name: 'Add identifiers for review'
+    });
+    await submit.click();
+    const response = await declared;
+    await expect(
+      page.getByRole('button', { name: 'Run upstream discovery' })
+    ).toBeEnabled();
+    await page.screenshot({
+      path: info.outputPath(`manual-models-${names.length}.png`),
+      fullPage: true
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    const inventory = await manage<{ items: ProviderModel[] }>(
+      page,
+      'GET',
+      `${path}/models`
+    );
+    expect(inventory.status).toBe(200);
+    for (const name of names) {
+      expect(
+        inventory.body.items.find((model) => model.upstream_model === name)
+      ).toMatchObject({
+        display_name: name,
+        enabled: false,
+        capabilities: []
+      });
+      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+    }
+    await expect(page.getByLabel('Upstream model identifiers')).toHaveValue('');
+  }
 });
