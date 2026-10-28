@@ -100,6 +100,9 @@
     patch({
       enrollmentID: id,
       handoffToken: token,
+      callbackCode: '',
+      callbackState: '',
+      authorization: undefined,
       enrollmentURL: '',
       error: '',
       message: '',
@@ -219,7 +222,10 @@
     const observed = $state;
     if (!observed.server || observed.busy) return;
     const owner = captureOwner();
-    const active = () => owner() && $state.selection === observed.selection;
+    const active = () =>
+      owner() &&
+      $state.selection === observed.selection &&
+      $state.enrollmentID === observed.enrollmentID;
     patch({ busy: true, error: '', enrollmentURL: '' });
     try {
       const result = await startMCPGrant(
@@ -239,7 +245,10 @@
     if (!observed.enrollmentID || !observed.handoffToken || observed.busy)
       return;
     const owner = captureOwner();
-    const active = () => owner() && $state.selection === observed.selection;
+    const active = () =>
+      owner() &&
+      $state.selection === observed.selection &&
+      $state.enrollmentID === observed.enrollmentID;
     patch({ busy: true, error: '' });
     try {
       const claimed = await claimMCPGrant(
