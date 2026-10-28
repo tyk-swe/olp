@@ -121,6 +121,7 @@ func fail(status int, code, kind, msg string) *apiError {
 var (
 	errToolsetNotFound          = fail(http.StatusNotFound, "toolset_not_found", "invalid_request_error", "The toolset does not exist or this key may not use it.")
 	errToolNotFound             = fail(http.StatusNotFound, "tool_not_found", "invalid_request_error", "The tool does not exist in the pinned toolset.")
+	errToolDefinitionChanged    = fail(http.StatusConflict, "tool_definition_changed", "api_error", "The upstream tool definitions differ from the pinned published definitions, so the call was not dispatched. Publish a reviewed revision to use the changed definitions.")
 	errLedger                   = fail(http.StatusServiceUnavailable, "debit_ledger_unavailable", "api_error", "The durable debit ledger is unavailable, so the call was not dispatched.")
 	errSessionRequired          = fail(http.StatusBadRequest, "session_required", "invalid_request_error", "Supply the session in the Mcp-Session-Id header.")
 	errSessionNotFound          = fail(http.StatusNotFound, "session_not_found", "invalid_request_error", "The session does not exist.")
@@ -212,6 +213,11 @@ func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Sn
 	if err := s.Runtime.AuthorizeAgentResource(authority, "tools", toolsetID, revisionID, *authority.ProjectID); err != nil {
 		if errors.Is(err, runtime.ErrStaleAuthority) {
 			return resolvedToolset{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
+		}
+		if authority.AllowsResource("tools", toolsetID, *authority.ProjectID, s.now()) {
+			if resolution, ok := snapshot.MCPToolset(revisionID); ok && len(resolution.Drifted) > 0 {
+				return resolvedToolset{}, errToolDefinitionChanged
+			}
 		}
 		return resolvedToolset{}, errToolsetNotFound
 	}
@@ -319,6 +325,10 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 	}
 	index := slices.IndexFunc(resolved.tools, func(tool routing.MCPToolsetTool) bool { return tool.Alias == request.Name })
 	if index < 0 {
+		if slices.ContainsFunc(resolved.drifted, func(pin routing.MCPDriftedTool) bool { return pin.Alias == request.Name }) {
+			writeError(w, errToolDefinitionChanged)
+			return
+		}
 		writeError(w, errToolNotFound)
 		return
 	}
@@ -336,7 +346,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	releaseID := releaseIDFor(release, snapshot)
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID})
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID, certify: true})
 	switch {
 	case outcome.failure != nil:
 		if outcome.retryAfter > 0 {

@@ -20,6 +20,7 @@ type executeInput struct {
 	tool      routing.MCPToolsetTool
 	arguments json.RawMessage
 	releaseID string
+	certify   bool
 }
 
 type execution struct {
@@ -29,6 +30,7 @@ type execution struct {
 	retryAfter     time.Duration
 	outcomeUnknown bool
 	unknownMessage string
+	listChanged    bool
 }
 
 func (s *Server) loadCredential(ctx context.Context, tool routing.MCPToolsetTool) ([]byte, *apiError) {
@@ -67,24 +69,35 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 	return reservation, execution{}
 }
 
-func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTool, credential []byte, reservation *Reservation, arguments json.RawMessage) (mcpservers.ToolResult, time.Time, time.Time, error, *apiError) {
+func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTool, credential []byte, reservation *Reservation, arguments json.RawMessage, certify bool) (mcpservers.ToolResult, time.Time, time.Time, bool, error, *apiError) {
 	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-tools", Timeout: defaultCallTimeout})
 	if err != nil {
 		s.release(reservation)
-		return mcpservers.ToolResult{}, time.Time{}, time.Time{}, nil, fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server could not be reached, so the tool was not called.")
+		return mcpservers.ToolResult{}, time.Time{}, time.Time{}, false, nil, fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server could not be reached, so the tool was not called.")
 	}
 	defer transport.Close(context.WithoutCancel(ctx))
+	if certify {
+		catalog, certErr := transport.CertifyCatalog(ctx)
+		if certErr != nil {
+			s.release(reservation)
+			return mcpservers.ToolResult{}, time.Time{}, time.Time{}, false, nil, fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server catalog could not be verified, so the tool was not called.")
+		}
+		if catalog.Digest != tool.CatalogDigest {
+			s.release(reservation)
+			return mcpservers.ToolResult{}, time.Time{}, time.Time{}, false, nil, errToolDefinitionChanged
+		}
+	}
 	if err = s.Ledger.MarkDispatched(ctx, reservation); err != nil {
 		s.release(reservation)
-		return mcpservers.ToolResult{}, time.Time{}, time.Time{}, nil, errLedger
+		return mcpservers.ToolResult{}, time.Time{}, time.Time{}, false, nil, errLedger
 	}
 	started := time.Now()
 	result, callErr := transport.CallTool(ctx, tool.Name, arguments)
 	completed := time.Now()
-	return result, started, completed, callErr, nil
+	return result, started, completed, transport.ListChanged(), callErr, nil
 }
 
-func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool, reservation *Reservation, result mcpservers.ToolResult, started, completed time.Time) execution {
+func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool, reservation *Reservation, result mcpservers.ToolResult, started, completed time.Time, listChanged bool) execution {
 	encoded, _ := json.Marshal(result)
 	status := StatusSucceeded
 	if result.IsError {
@@ -102,9 +115,9 @@ func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool
 			StartedAt: started, CompletedAt: completed,
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
-		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled."}
+		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: listChanged}
 	}
-	return execution{reservation: reservation, result: result}
+	return execution{reservation: reservation, result: result, listChanged: listChanged}
 }
 
 func (s *Server) execute(parent context.Context, in executeInput) execution {
@@ -121,7 +134,7 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if reserved.failure != nil {
 		return reserved
 	}
-	result, started, completed, callErr, failure := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)
+	result, started, completed, listChanged, callErr, failure := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments, in.certify)
 	if failure != nil {
 		return execution{failure: failure}
 	}
@@ -133,7 +146,7 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 			StartedAt:    started, CompletedAt: completed,
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
-		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed."}
+		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed.", listChanged: listChanged}
 	}
-	return s.settleToolCall(ctx, in.tool, reservation, result, started, completed)
+	return s.settleToolCall(ctx, in.tool, reservation, result, started, completed, listChanged)
 }
