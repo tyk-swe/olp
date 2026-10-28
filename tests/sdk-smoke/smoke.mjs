@@ -59,7 +59,10 @@ function anthropicClient(clientApiKey = apiKey) {
   return new Anthropic({
     apiKey: clientApiKey,
     baseURL: `${origin}/anthropic`,
-    defaultHeaders: { 'X-OLP-Routing': JSON.stringify({ strategy: 'weighted' }) },
+    defaultHeaders: {
+      'X-OLP-Routing': JSON.stringify({ strategy: 'weighted' }),
+      'anthropic-version': '2023-06-01'
+    },
     fetch: localOnlyFetch,
     maxRetries: 0,
     timeout: 5_000
@@ -378,7 +381,14 @@ async function consoleSnippets() {
     for (const surface of ['anthropic', 'gemini'].filter((name) => surfaces.has(name))) {
       for (const [label, key] of [['success', apiKey], ['refusal', invalidApiKey]]) {
         let requests = 0;
-        globalThis.fetch = (input, init) => { requests++; return localOnlyFetch(input, init); };
+        globalThis.fetch = (input, init) => {
+          requests++;
+          if (surface === 'anthropic') {
+            const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+            assert.equal(headers.get('anthropic-version'), '2023-06-01');
+          }
+          return localOnlyFetch(input, init);
+        };
         const source = sdkSnippet(surface, key, `${origin}/`, routeSlug);
         const resultName = surface === 'anthropic' ? 'message' : 'response';
         const path = `${directory}/${surface}-${label}.mjs`;

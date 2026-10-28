@@ -3,9 +3,9 @@ name = "openllmproxy-sdk-smoke-python"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
-    "anthropic==1.15.0",
-    "google-genai==2.31.0",
-    "openai==3.31.0",
+    "anthropic==2.1.0",
+    "google-genai==2.32.0",
+    "openai==3.36.1",
 ]
 
 [tool.uv]
