@@ -25,12 +25,18 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if operation == "batch" && surface == "native" && mode == "unary" {
 		return kind == "vertex_ai" && vendor == "google-vertex" || kind == "bedrock" && vendor == "amazon-bedrock"
 	}
+	if operation == "realtime" && surface == "native" {
+		reviewed := kind == "openai_compatible" && vendor == "xai" ||
+			kind == "vertex_ai" && vendor == "google-vertex" ||
+			kind == "bedrock" && vendor == "amazon-bedrock"
+		return mode == "realtime" && reviewed && vendors.Serves(vendor, operation)
+	}
 	if surface == "native" && operation == "generation" {
 		return kind == KindPlugin && (mode == "unary" || mode == "streaming") ||
 			kind == "openai_compatible" && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2")) &&
 				(mode == "unary" || mode == "streaming")
 	}
-	if mode != "unary" && mode != "streaming" && mode != "async" && mode != "realtime" {
+	if mode != "unary" && mode != "streaming" && mode != "async" && mode != "realtime" && mode != "webrtc" {
 		return false
 	}
 	if kind == KindPlugin {
@@ -63,6 +69,9 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		return false
 	}
 	if mode == "realtime" && (surface != "openai" || operation != "realtime") {
+		return false
+	}
+	if mode == "webrtc" && (surface != "openai" || operation != "realtime") {
 		return false
 	}
 	if !vendors.Serves(vendor, operation) {
@@ -99,6 +108,9 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		return surface == "openai" && mode == "unary" && (kind == "openai" || kind == "azure_openai" ||
 			kind == "openai_compatible" && (vendor == "groq" || vendor == "together" || vendor == "mistral"))
 	case "realtime":
+		if mode == "webrtc" {
+			return surface == "openai" && kind == "openai"
+		}
 		return surface == "openai" && mode == "realtime" && (kind == "openai" || kind == "azure_openai")
 	case "bedrock_invoke":
 		return surface == "bedrock" && (mode == "unary" || mode == "streaming") && kind == "bedrock"

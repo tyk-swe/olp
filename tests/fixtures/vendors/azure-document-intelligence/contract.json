@@ -1,0 +1,29 @@
+{
+  "vendor": "azure-document-intelligence",
+  "documentation_url": "https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document",
+  "reviewed_at": "2026-10-27",
+  "notes": "Built from the published Document Intelligence REST API 2024-11-30 (analyze document, get analyze result, delete analyze result). Submission answers 202 with an Operation-Location polling URL on the bound resource origin. No cancel operation exists; delete analyze result only marks the result for deletion, so cancellation is best effort. These are offline contract fixtures, not live-provider qualification.",
+  "endpoints": {
+    "ocr": "https://your-resource.cognitiveservices.azure.com/documentintelligence/documentModels/{modelId}:analyze?api-version=2024-11-30&outputContentFormat=markdown&stringIndexType=utf16CodeUnit"
+  },
+  "unsupported_parameters": [
+    "locale",
+    "features",
+    "queryFields",
+    "output"
+  ],
+  "responses": {
+    "ocr": {
+      "request": "ocr.request.json",
+      "file": "ocr.response.json",
+      "basis": "schema"
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 400,
+    "envelope": "error",
+    "class": "upstream_client"
+  }
+}

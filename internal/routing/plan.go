@@ -370,7 +370,7 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			reason = "provider_not_active"
 		case provider.Plugin != nil && provider.Plugin.Unconfined() && !options.UnconfinedPlugins:
 			reason = "plugin_unconfined_disabled"
-		case !provider.Supports(target.ProviderModel, operation, surface, mode):
+		case !(route.IsPassthrough() && operation == PassthroughOperation) && !provider.Supports(target.ProviderModel, operation, surface, mode):
 			reason = "capability_not_certified"
 		case row.shadow && (options.Mirror == nil || !Sampled(target.ID, options.Mirror, target.Shadow.SampleRate)):
 			reason = "shadow_not_sampled"

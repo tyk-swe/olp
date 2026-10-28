@@ -22,6 +22,10 @@ unqualified.
 | `make test-console` | Console unit and component suites |
 | `make test-scripts` | Automation script tests |
 | `make test-race` | Uncached Go tests with race detection, also required in CI |
+| `make test-ratchet` | Mechanical test rules on the test files a change touches |
+| `make test-coverage-gate` | Coverage comparison for changed Go unit packages against the merge base |
+| `make test-mutation-go` | Mutation gate on changed Go code against the merge base |
+| `make test-mutation-console` | Mutation gate on changed console modules |
 | `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
 | `make bench` | Gateway benchmark scenarios against a mock upstream, in [docs/develop/performance.md](docs/develop/performance.md) |
 | `make bench-compare` | The same scenarios against OLP and the pinned LiteLLM release |
@@ -77,7 +81,12 @@ Svelte route components thin and use the [console design system](console/README.
 Place Go unit tests beside their feature as `*_test.go`. Service tests use the
 `integration` build tag and fail when explicitly selected without prerequisites.
 Use Vitest `*.test.ts`/`*.svelte.test.ts` and Playwright `*.spec.ts` for the console.
-Cover changed behavior and preserve protocol fixtures; no coverage threshold is set.
+Cover changed behavior and preserve protocol fixtures. Tests follow the strict
+rules in [testing](tests/README.md#test-rules), meaning behavior assertions
+only, no pinned outside facts without a cited source and date, and one focused
+regression test per bug fix in the existing mapped test file. Coverage on
+changed packages must not drop against the merge base, the comparison in the
+[test baseline](tests/baseline.md) lanes, so the floor ratchets with every merge.
 Run `make integration` for service or browser behavior changes.
 
 Use short imperative commit subjects and name agent-created branches `tyk/{name}`.

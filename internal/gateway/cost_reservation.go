@@ -151,7 +151,7 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority acce
 		x.routingInputs = s.Runtime.RoutingInputs()
 	}
 	hold := x.attemptCostReservation(authority, attempt)
-	if x.lease == nil || hold.amount == "" {
+	if x.lease == nil || hold.amount == "" || x.sessionDebit != nil {
 		return nil
 	}
 	return s.growCost(ctx, x.lease, hold.amount, hold.charge, hold.requestID, ttl)
@@ -225,7 +225,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil || x.retainedTokenless || x.operationName() == "search" || retainedapi.Operation(x.operationName()) {
+	if x.media != nil || x.retainedTokenless || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
 		u := usage.AttemptUsage{Complete: true}
 		if x.media != nil {
 			var ok bool
@@ -286,7 +286,7 @@ func (x *call) targetCostBound(provider routing.Provider, target routing.Target,
 		}
 		return price.Cost(u, x.request.startedAt, true, discount)
 	}
-	if x.retainedTokenless || x.operationName() == "search" || retainedapi.Operation(x.operationName()) {
+	if x.retainedTokenless || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
 		return price.Cost(usage.AttemptUsage{Complete: true}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {

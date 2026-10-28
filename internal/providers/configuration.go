@@ -35,6 +35,7 @@ type Limits struct {
 // Options carries connector options and per-model metadata.
 type Options struct {
 	TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
+	DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
 	Network                  *egress.ConnectionOptions        `json:"network,omitempty"`
 	SemanticHeaders          map[string]string                `json:"semantic_headers,omitempty"`
 	QuerySettings            map[string]string                `json:"query_settings,omitempty"`
@@ -219,6 +220,11 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.tuning_dataset_uri_prefixes", err.Error())
 	}
 	c.Options.TuningDatasetURIPrefixes = tuningPrefixes
+	documentPrefixes, err := connectors.NormalizeDocumentURIPrefixes(c.Kind, c.Options.DocumentURIPrefixes)
+	if err != nil {
+		return access.Invalid("configuration.options.document_uri_prefixes", err.Error())
+	}
+	c.Options.DocumentURIPrefixes = documentPrefixes
 	if _, err := policy.ValidateEndpoint(*c.Endpoint); err != nil {
 		return access.Invalid("configuration.endpoint", err.Error())
 	}
@@ -364,6 +370,9 @@ func (c *Configuration) transportFingerprint() string {
 	if len(c.Options.TuningDatasetURIPrefixes) > 0 {
 		parts = append(parts, c.Options.TuningDatasetURIPrefixes)
 	}
+	if len(c.Options.DocumentURIPrefixes) > 0 {
+		parts = append(parts, c.Options.DocumentURIPrefixes)
+	}
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
@@ -391,5 +400,5 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }
