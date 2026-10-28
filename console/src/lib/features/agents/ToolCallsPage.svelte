@@ -111,6 +111,12 @@
                   <dt>Completed</dt>
                   <dd>{value.completed_at ?? 'Pending'}</dd>
                 </dl>
+                {#if value.identity_decisions.length}
+                  <h2>Identity decisions</h2>
+                  {#each value.identity_decisions as decision (decision.hook)}
+                    <p>{decision.hook}: {decision.outcome}</p>
+                  {/each}
+                {/if}
                 {#if value.guardrail_decisions.length}
                   <h2>Guardrail decisions</h2>
                   <pre>{JSON.stringify(

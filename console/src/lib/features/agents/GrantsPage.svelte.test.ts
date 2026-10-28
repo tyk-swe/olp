@@ -43,6 +43,7 @@ const server = (id: string): api.MCPServer => ({
     digest: 'a'.repeat(64),
     tools: []
   },
+  delegation: null,
   oauth: {
     client_id: `${id}-client`,
     audience: `${id}-audience`,
@@ -148,6 +149,14 @@ it('retains ambiguous save identity and treats refresh failure as a saved write'
   const { host, client } = page();
   await choose(host, a);
   fill(host, 'Client ID', 'changed-client');
+  fill(host, 'Delegated issuer', 'https://fixture.invalid/issuer');
+  fill(host, 'Delegated audience', 'fixture-tools');
+  const signingKey = host.querySelector('textarea');
+  expect(signingKey).not.toBeNull();
+  if (!signingKey) return;
+  signingKey.value = 'fixture-private-key';
+  signingKey.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
   button(host, 'Save authorization settings').click();
   await vi.waitFor(() =>
     expect(host.textContent).toContain('Connection closed')
@@ -166,10 +175,13 @@ it('retains ambiguous save identity and treats refresh failure as a saved write'
   });
   const retry = vi.mocked(api.saveServer).mock.calls[1];
   expect(retry).toEqual(original);
+  expect(original?.[1].delegation_private_key).toBe('fixture-private-key');
+  expect(signingKey.value).toBe('');
   button(host, 'Save authorization settings').click();
   await vi.waitFor(() => {
     const next = vi.mocked(api.saveServer).mock.calls.at(-1);
     expect(next?.[0].etag).toBe(saved.etag);
+    expect(next?.[1].delegation_private_key).toBeUndefined();
     expect(next?.[2]).not.toBe(original?.[2]);
   });
 });

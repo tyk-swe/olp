@@ -59,6 +59,7 @@ func (o *MCPOAuth) Clone() *MCPOAuth {
 }
 
 type MCPServer struct {
+	Delegation           *MCPDelegation    `json:"delegation,omitempty"`
 	OAuth                *MCPOAuth         `json:"oauth,omitempty"`
 	ID                   string            `json:"id"`
 	ProjectID            string            `json:"project_id"`
@@ -78,6 +79,7 @@ type MCPServer struct {
 }
 
 type MCPToolsetTool struct {
+	Delegation           *MCPDelegation
 	Transport            MCPTransport
 	OAuth                *MCPOAuth
 	Alias                string
@@ -206,6 +208,9 @@ func (s *Snapshot) validateMCPServers() error {
 	}
 	seen := map[string]bool{}
 	for _, server := range s.MCPServers {
+		if !server.Delegation.Valid() || server.Delegation != nil && server.OAuth == nil {
+			return fmt.Errorf("MCP delegation requires personal OAuth and valid metadata")
+		}
 		if server.OAuth != nil && !server.OAuth.Valid() {
 			return fmt.Errorf("MCP server has invalid OAuth configuration")
 		}
@@ -298,7 +303,7 @@ func (s *Snapshot) compileMCP() {
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint, Transport: server.Transport.OrDefault(),
-				CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(),
+				Delegation: server.Delegation.Clone(), CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(),
 				CallsPerMinute:       effective.CallsPerMinute,
 				MaxConcurrency:       effective.MaxConcurrency,
 				PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute,
@@ -323,6 +328,7 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 		tools[i].UnitPrice = copyPointer(tools[i].UnitPrice)
 		tools[i].CredentialID = copyPointer(tools[i].CredentialID)
 		tools[i].OAuth = tools[i].OAuth.Clone()
+		tools[i].Delegation = tools[i].Delegation.Clone()
 	}
 	return MCPToolsetResolution{
 		Tools:   tools,

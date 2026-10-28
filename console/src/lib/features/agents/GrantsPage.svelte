@@ -25,6 +25,9 @@
   } from './api';
 
   type Fields = {
+    delegatedIssuer: string;
+    delegatedAudience: string;
+    signingKey: string;
     clientID: string;
     audience: string;
     scopes: string;
@@ -51,6 +54,9 @@
     selection: { id: '' },
     server: null,
     fields: {
+      delegatedIssuer: '',
+      delegatedAudience: '',
+      signingKey: '',
       clientID: '',
       audience: '',
       scopes: '',
@@ -142,6 +148,9 @@
       patch({
         server: loaded,
         fields: {
+          delegatedIssuer: loaded.delegation?.issuer ?? '',
+          delegatedAudience: loaded.delegation?.audience ?? '',
+          signingKey: '',
           clientID: loaded.oauth?.client_id ?? '',
           audience: loaded.oauth?.audience ?? '',
           scopes: loaded.oauth?.scopes.join(' ') ?? '',
@@ -188,6 +197,15 @@
             name: observed.server.name,
             endpoint: observed.server.endpoint,
             enabled: observed.server.enabled,
+            delegation: fields.delegatedIssuer.trim()
+              ? {
+                  issuer: fields.delegatedIssuer.trim(),
+                  audience: fields.delegatedAudience.trim()
+                }
+              : null,
+            ...(fields.signingKey
+              ? { delegation_private_key: fields.signingKey }
+              : {}),
             oauth: {
               client_id: fields.clientID.trim(),
               audience: fields.audience.trim(),
@@ -208,6 +226,7 @@
       if (!active()) return;
       patch({
         server: saved,
+        fields: { ...$state.fields, signingKey: '' },
         message: 'Personal authorization configuration saved'
       });
       await refresh(agentKeys.servers(), active);
@@ -468,6 +487,37 @@
               setField('deviceEndpoint', event.currentTarget.value)}
           /></label
         >
+        <fieldset>
+          <legend>Delegated identity</legend>
+          <p>
+            Leave the issuer empty to disable signing. The private key stays in
+            this installation.
+          </p>
+          <label
+            >Delegated issuer <input
+              type="url"
+              value={$state.fields.delegatedIssuer}
+              oninput={(event) =>
+                setField('delegatedIssuer', event.currentTarget.value)}
+            /></label
+          >
+          <label
+            >Delegated audience <input
+              value={$state.fields.delegatedAudience}
+              oninput={(event) =>
+                setField('delegatedAudience', event.currentTarget.value)}
+            /></label
+          >
+          <label
+            >PKCS8 Ed25519 signing key <textarea
+              autocomplete="off"
+              spellcheck="false"
+              value={$state.fields.signingKey}
+              oninput={(event) =>
+                setField('signingKey', event.currentTarget.value)}
+            ></textarea></label
+          >
+        </fieldset>
         <button disabled={$state.busy}>Save authorization settings</button>
       </form>
       <form

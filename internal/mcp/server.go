@@ -118,6 +118,7 @@ func (r *Reservation) amount() string {
 }
 
 type AttemptEvidence struct {
+	IdentityDecisions  []IdentityDecision
 	ServerID           string
 	ServerRevisionID   string
 	Status             Status

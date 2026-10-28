@@ -58,7 +58,7 @@ func (s *Server) evaluateToolPhase(ctx context.Context, in executeInput, reserva
 
 func (s *Server) refuseGuardedCall(ctx context.Context, in executeInput, reservation *Reservation, state *toolGuardrailState) {
 	now := s.now()
-	evidence := AttemptEvidence{
+	evidence := AttemptEvidence{IdentityDecisions: toolIdentityDecisions(in.tool, nil),
 		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
 		Status: StatusGuardrailBlocked, StartedAt: now, CompletedAt: now,
 		GuardrailDecisions: stateDecisions(state),

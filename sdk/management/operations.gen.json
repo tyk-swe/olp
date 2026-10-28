@@ -4112,6 +4112,9 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
             }
           }
         },
@@ -4166,6 +4169,29 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -7190,6 +7216,18 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
+            },
+            "delegation_private_key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
             }
           },
           "required": [
@@ -7251,6 +7289,29 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -26576,6 +26637,9 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
             }
           }
         },
@@ -26630,6 +26694,29 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -39368,6 +39455,18 @@
             },
             "oauth": {
               "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
+            },
+            "delegation_private_key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
             }
           },
           "required": [
@@ -39427,6 +39526,29 @@
             "token_endpoint"
           ],
           "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         }
       }
     }

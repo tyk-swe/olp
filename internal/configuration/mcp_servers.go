@@ -18,20 +18,21 @@ import (
 )
 
 type MCPServerEntry struct {
-	OAuth                *routing.MCPOAuth `json:"oauth,omitempty"`
-	Name                 string            `json:"name"`
-	Project              string            `json:"project"`
-	Transport            string            `json:"transport"`
-	Endpoint             string            `json:"endpoint"`
-	Enabled              bool              `json:"enabled"`
-	CatalogDigest        string            `json:"catalog_digest"`
-	CredentialRef        *string           `json:"credential_ref,omitempty"`
-	UnitPrice            *string           `json:"unit_price"`
-	ToolPrices           map[string]string `json:"tool_prices,omitempty"`
-	CallsPerMinute       *int64            `json:"calls_per_minute"`
-	MaxConcurrency       *int64            `json:"max_concurrency"`
-	PerKeyCallsPerMinute *int64            `json:"per_key_calls_per_minute"`
-	PerKeyMaxConcurrency *int64            `json:"per_key_max_concurrency"`
+	Delegation           *routing.MCPDelegation `json:"delegation,omitempty"`
+	OAuth                *routing.MCPOAuth      `json:"oauth,omitempty"`
+	Name                 string                 `json:"name"`
+	Project              string                 `json:"project"`
+	Transport            string                 `json:"transport"`
+	Endpoint             string                 `json:"endpoint"`
+	Enabled              bool                   `json:"enabled"`
+	CatalogDigest        string                 `json:"catalog_digest"`
+	CredentialRef        *string                `json:"credential_ref,omitempty"`
+	UnitPrice            *string                `json:"unit_price"`
+	ToolPrices           map[string]string      `json:"tool_prices,omitempty"`
+	CallsPerMinute       *int64                 `json:"calls_per_minute"`
+	MaxConcurrency       *int64                 `json:"max_concurrency"`
+	PerKeyCallsPerMinute *int64                 `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency *int64                 `json:"per_key_max_concurrency"`
 }
 
 func mcpEntryPrice(value *string) *string {
@@ -62,7 +63,7 @@ func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcps
 		prices[name] = price
 	}
 	return &mcpservers.Definition{
-		OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
+		Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
 		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -94,7 +95,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 		}
 		seen[key] = true
 		in := mcpservers.Input{
-			OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
+			Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
 			UnitPrice: e.UnitPrice, ToolPrices: e.ToolPrices,
 			CallsPerMinute: e.CallsPerMinute, MaxConcurrency: e.MaxConcurrency,
 			PerKeyCallsPerMinute: e.PerKeyCallsPerMinute, PerKeyMaxConcurrency: e.PerKeyMaxConcurrency,
@@ -111,7 +112,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 	return nil
 }
 func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, error) {
-	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
+	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.delegation FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +122,7 @@ func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, 
 		var e MCPServerEntry
 		var credential bool
 		var callsPerMinute, maxConcurrency, perKeyCallsPerMinute, perKeyMaxConcurrency int64
-		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency, &e.OAuth); err != nil {
+		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency, &e.OAuth, &e.Delegation); err != nil {
 			return nil, err
 		}
 		e.CallsPerMinute = &callsPerMinute
@@ -161,7 +162,7 @@ func mcpEntry(d *mcpservers.Definition, project string) MCPServerEntry {
 	}
 	e := MCPServerEntry{
 		Name: d.Name, Project: project, Transport: d.Transport, Endpoint: d.Endpoint, Enabled: d.Enabled, CatalogDigest: d.Catalog.Digest,
-		OAuth: d.OAuth.Clone(), UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
+		Delegation: d.Delegation.Clone(), OAuth: d.OAuth.Clone(), UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
 		CallsPerMinute: mcpEntryLimit(d.CallsPerMinute), MaxConcurrency: mcpEntryLimit(d.MaxConcurrency),
 		PerKeyCallsPerMinute: mcpEntryLimit(d.PerKeyCallsPerMinute), PerKeyMaxConcurrency: mcpEntryLimit(d.PerKeyMaxConcurrency),
 	}
@@ -208,6 +209,10 @@ func (s *Server) planMCPServers(ctx context.Context, q access.Queryer, doc *Docu
 		current, err := findMCPServer(ctx, q, e)
 		if err != nil {
 			return err
+		}
+		if e.Delegation != nil && (current == nil || current.DelegationKeyID == nil) {
+			result.conflict("mcp_server", e.Name, "Install this server's delegation signing key locally before applying its metadata.")
+			continue
 		}
 		if e.CredentialRef != nil {
 			if _, ok := bindings[*e.CredentialRef]; !ok && (current == nil || !current.HasCredential) {
@@ -354,6 +359,9 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 		}
 		next := mcpDefinitionFromEntry(e, cert.catalog)
 		next.ProjectID = project
+		if current != nil && next.Delegation != nil {
+			next.DelegationKeyID = current.DelegationKeyID
+		}
 		if e.CredentialRef != nil {
 			if b, ok := bindings[*e.CredentialRef]; ok {
 				id := access.NewID()
@@ -369,6 +377,11 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 			return err
 		}
 		changed = true
+		if current != nil && current.DelegationKeyID != nil && next.DelegationKeyID == nil {
+			if _, keyErr := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.DelegationKeyID, secrets.MCPDelegationSigning); keyErr != nil {
+				return keyErr
+			}
+		}
 		if current != nil && current.CredentialID != nil && (next.CredentialID == nil || *current.CredentialID != *next.CredentialID) {
 			if _, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.CredentialID, secrets.MCPCredential); err != nil {
 				return err
