@@ -75,7 +75,7 @@ export const getServer = async (id: string) =>
       params: { path: { server_id: id } }
     })
   );
-export async function saveServerPricing(
+export async function saveServer(
   current: MCPServer,
   input: MCPServerUpdate,
   requestId: string
@@ -179,3 +179,35 @@ export async function setLabel(
     })
   );
 }
+
+export type MCPGrantStanding = components['schemas']['MCPUserGrantStanding'];
+export const listMCPGrants = () =>
+  collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/mcp-user-grants', {
+        params: { query: { cursor, limit: 200 } }
+      })
+    )
+  );
+export const startMCPGrant = async (serverID: string, keyID: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-servers/{server_id}/grant-enrollments', {
+      params: { path: { server_id: serverID } },
+      body: { api_key_id: keyID }
+    })
+  );
+export const claimMCPGrant = async (
+  enrollmentID: string,
+  handoffToken: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-grant-enrollments/claim', {
+      body: { enrollment_id: enrollmentID, handoff_token: handoffToken }
+    })
+  );
+export const revokeMCPGrant = async (grantID: string) =>
+  unwrap(
+    await apiClient.DELETE('/api/v1/mcp-user-grants/{grant_id}', {
+      params: { path: { grant_id: grantID } }
+    })
+  );

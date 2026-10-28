@@ -112,7 +112,17 @@ type dispatchResult struct {
 	certification certificationState
 }
 
-func (s *Server) loadCredential(ctx context.Context, tool routing.MCPToolsetTool) ([]byte, *apiError) {
+func (s *Server) loadCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *apiError) {
+	if tool.OAuth != nil {
+		if s.Grants == nil {
+			return nil, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool.")
+		}
+		credential, err := s.Grants.Resolve(ctx, authority, tool)
+		if err != nil {
+			return nil, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool.")
+		}
+		return credential, nil
+	}
 	if tool.CredentialID == nil {
 		return nil, nil
 	}
@@ -229,7 +239,7 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if failure := executeCallIDFailure(in.callID); failure != nil {
 		return execution{failure: failure}
 	}
-	credential, failure := s.loadCredential(parent, in.tool)
+	credential, failure := s.loadCredential(parent, in.authority, in.tool)
 	if failure != nil {
 		return execution{failure: failure}
 	}

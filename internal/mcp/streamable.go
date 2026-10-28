@@ -351,7 +351,7 @@ func (s *Server) initializeSession(w http.ResponseWriter, r *http.Request, autho
 		writeRPCFailure(w, message.id, failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable))
 		return
 	}
-	certifications := s.certifyToolsetServers(r.Context(), resolved)
+	certifications := s.certifyToolsetServers(r.Context(), authority, resolved)
 	for _, state := range certifications {
 		if state == certificationInvalid {
 			writeRPCFailure(w, message.id, failureRPC(errCatalogUnavailable.status, rpcServerError, errCatalogUnavailable))

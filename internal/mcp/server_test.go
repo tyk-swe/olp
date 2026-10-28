@@ -1134,3 +1134,47 @@ func TestRetainedResultCapEvictsOldestResult(t *testing.T) {
 		t.Fatal("retention cap evicted more than the oldest result")
 	}
 }
+
+func TestToolCallRequiresUserGrantWithoutStaticFallback(t *testing.T) {
+	configured, upstream, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	registered := rt.release.Snapshot.MCPServers[0]
+	snapshot := &routing.Snapshot{
+		Generation:        rt.release.Snapshot.Generation,
+		Providers:         rt.release.Snapshot.Providers,
+		Routes:            rt.release.Snapshot.Routes,
+		AgentPublications: rt.release.Snapshot.AgentPublications,
+		MCPServers: []routing.MCPServer{{
+			ID: registered.ID, ProjectID: registered.ProjectID, RevisionID: registered.RevisionID,
+			Endpoint: registered.Endpoint, Protocol: registered.Protocol, Digest: registered.Digest,
+			CredentialID: registered.CredentialID, Tools: registered.Tools,
+			OAuth: &routing.MCPOAuth{ClientID: "tool-client", Audience: "tool-audience", Scopes: []string{"tools.read"}, AuthorizationEndpoint: upstream.server.URL + "/authorize", TokenEndpoint: upstream.server.URL + "/token"},
+		}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		Runtime: &fakeRuntime{authority: rt.authority, release: &runtime.Release{ID: testGenID, Snapshot: snapshot}},
+		Ledger:  ledger, Auth: configured.Auth, Limiter: configured.Limiter, Egress: configured.Egress,
+		Credentials: configured.Credentials, Sessions: configured.Sessions,
+	}
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call", `{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"grant-required","arguments":{"query":"hello"}}`)
+	problem, ok := body["error"].(map[string]any)
+	if status != http.StatusForbidden || !ok || problem["code"] != "user_grant_required" {
+		t.Fatalf("missing individual grant did not refuse execution: %d %v", status, body)
+	}
+	if upstream.calls.Load() != 0 {
+		t.Fatal("missing individual grant fell back to the registered static credential")
+	}
+}
+
+func TestGrantEnrollmentRefusesAccountingIdentityWithoutVerifiedWorkload(t *testing.T) {
+	accountingAuthority := testAuthority([]string{"tools"}, []string{testToolset})
+	server, _, _, _, rt := newTestServer(t, accountingAuthority, "")
+	labeled := &Server{Runtime: &fakeRuntime{authority: &access.Authority{ID: accountingAuthority.ID, ProjectID: accountingAuthority.ProjectID, Policy: accountingAuthority.Policy, EndUserDigest: strings.Repeat("a", 64)}, release: rt.release}, Auth: server.Auth}
+	status, body := request(t, labeled, http.MethodPost, "/v1/mcp/servers/"+testServerID+"/grant-enrollments", `{"toolset_id":"`+testToolset+`"}`)
+	problem, ok := body["error"].(map[string]any)
+	if status != http.StatusForbidden || !ok || problem["code"] != "verified_individual_required" {
+		t.Fatalf("accounting identity authorized personal enrollment: %d %v", status, body)
+	}
+}

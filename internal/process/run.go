@@ -30,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -389,7 +390,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 					return err
 				}
 			}
-			toolServer := &mcp.Server{Log: log, Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			toolServer := &mcp.Server{Grants: &mcpgrants.Store{Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Log: log, Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
 			}}
 			if limiter != nil {

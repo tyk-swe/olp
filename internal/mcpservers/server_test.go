@@ -193,3 +193,13 @@ func TestLimitsOnlyUpdateRejectsCatalogAndPriceChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRefusesUnapprovedOAuthDestinations(t *testing.T) {
+	enabled := true
+	for _, endpoint := range []string{"http://metadata.invalid/token", "http://127.0.0.1:8080/token#fragment", "http://user:password@127.0.0.1:8080/token"} {
+		in := Input{Name: "Personal tools", Transport: "streamable_http", Endpoint: "http://127.0.0.1:8080/mcp", Enabled: &enabled, OAuth: &routing.MCPOAuth{ClientID: "tool-client", Audience: "tool-api", Scopes: []string{"tools.read"}, AuthorizationEndpoint: "http://127.0.0.1:8080/authorize", TokenEndpoint: endpoint}}
+		if err := Validate(&in, fixturePolicy()); err == nil || invalidField(t, err) != "oauth" {
+			t.Fatalf("unapproved OAuth destination accepted: %s %v", endpoint, err)
+		}
+	}
+}

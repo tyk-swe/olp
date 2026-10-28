@@ -3271,6 +3271,39 @@ func (e KeyExpiringEventReason) Valid() bool {
 	}
 }
 
+// Defines values for MCPGrantClaimResponseState.
+const (
+	MCPGrantClaimResponseStatePending MCPGrantClaimResponseState = "pending"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantClaimResponseState enum.
+func (e MCPGrantClaimResponseState) Valid() bool {
+	switch e {
+	case MCPGrantClaimResponseStatePending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPGrantIdentityKind.
+const (
+	MCPGrantIdentityKindApiKey  MCPGrantIdentityKind = "api_key"
+	MCPGrantIdentityKindEndUser MCPGrantIdentityKind = "end_user"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantIdentityKind enum.
+func (e MCPGrantIdentityKind) Valid() bool {
+	switch e {
+	case MCPGrantIdentityKindApiKey:
+		return true
+	case MCPGrantIdentityKindEndUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
 	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
@@ -3421,6 +3454,30 @@ func (e MCPToolCallResponseStatus) Valid() bool {
 	case MCPToolCallResponseStatusSucceeded:
 		return true
 	case MCPToolCallResponseStatusUpstreamError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPUserGrantStandingState.
+const (
+	MCPUserGrantStandingStateActive  MCPUserGrantStandingState = "active"
+	MCPUserGrantStandingStateExpired MCPUserGrantStandingState = "expired"
+	MCPUserGrantStandingStatePending MCPUserGrantStandingState = "pending"
+	MCPUserGrantStandingStateRevoked MCPUserGrantStandingState = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the MCPUserGrantStandingState enum.
+func (e MCPUserGrantStandingState) Valid() bool {
+	switch e {
+	case MCPUserGrantStandingStateActive:
+		return true
+	case MCPUserGrantStandingStateExpired:
+		return true
+	case MCPUserGrantStandingStatePending:
+		return true
+	case MCPUserGrantStandingStateRevoked:
 		return true
 	default:
 		return false
@@ -4923,16 +4980,16 @@ func (e RouteBehaviorCertification) Valid() bool {
 
 // Defines values for RouteDetailResponseState.
 const (
-	Active  RouteDetailResponseState = "active"
-	Retired RouteDetailResponseState = "retired"
+	RouteDetailResponseStateActive  RouteDetailResponseState = "active"
+	RouteDetailResponseStateRetired RouteDetailResponseState = "retired"
 )
 
 // Valid indicates whether the value is a known member of the RouteDetailResponseState enum.
 func (e RouteDetailResponseState) Valid() bool {
 	switch e {
-	case Active:
+	case RouteDetailResponseStateActive:
 		return true
-	case Retired:
+	case RouteDetailResponseStateRetired:
 		return true
 	default:
 		return false
@@ -7012,6 +7069,12 @@ type ChangePasswordRequest struct {
 	NewPassword     *string `json:"new_password,omitempty"`
 }
 
+// ClaimMCPGrantEnrollmentRequest defines model for ClaimMCPGrantEnrollmentRequest.
+type ClaimMCPGrantEnrollmentRequest struct {
+	EnrollmentId openapi_types.UUID `json:"enrollment_id"`
+	HandoffToken *string            `json:"handoff_token,omitempty"`
+}
+
 // ClassifierPredicate Sends the request text to another OLP route and tests the label it returns: a classification route's top label, or a generation route's reply. The call is an accounted request with its own deadline; a failure falls through to the next selector.
 type ClassifierPredicate struct {
 	Labels    []string                   `json:"labels"`
@@ -7628,6 +7691,9 @@ type ConfigurationMCPServer struct {
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
 	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth,omitempty"`
 
 	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
 	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
@@ -8356,6 +8422,9 @@ type CreateMCPServerRequest struct {
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
 	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth,omitempty"`
 
 	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
 	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
@@ -9419,6 +9488,63 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// MCPGrantBinding defines model for MCPGrantBinding.
+type MCPGrantBinding struct {
+	Endpoint string           `json:"endpoint"`
+	Identity MCPGrantIdentity `json:"identity"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth     nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+	ProjectId openapi_types.UUID                       `json:"project_id"`
+	ServerId  openapi_types.UUID                       `json:"server_id"`
+}
+
+// MCPGrantClaimResponse defines model for MCPGrantClaimResponse.
+type MCPGrantClaimResponse struct {
+	Enrollment MCPGrantEnrollment         `json:"enrollment"`
+	State      MCPGrantClaimResponseState `json:"state"`
+}
+
+// MCPGrantClaimResponseState defines model for MCPGrantClaimResponse.State.
+type MCPGrantClaimResponseState string
+
+// MCPGrantEnrollment defines model for MCPGrantEnrollment.
+type MCPGrantEnrollment struct {
+	Binding   MCPGrantBinding              `json:"binding"`
+	ClaimedAt nullable.Nullable[time.Time] `json:"claimed_at"`
+	ExpiresAt time.Time                    `json:"expires_at"`
+	Id        openapi_types.UUID           `json:"id"`
+}
+
+// MCPGrantHandoff defines model for MCPGrantHandoff.
+type MCPGrantHandoff struct {
+	EnrollmentId openapi_types.UUID `json:"enrollment_id"`
+
+	// EnrollmentUrl One-use browser link. Its secret remains in the URL fragment and must not be logged or retained.
+	EnrollmentUrl string    `json:"enrollment_url"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
+// MCPGrantIdentity defines model for MCPGrantIdentity.
+type MCPGrantIdentity struct {
+	Id               string               `json:"id"`
+	Kind             MCPGrantIdentityKind `json:"kind"`
+	WorkloadIssuerId *openapi_types.UUID  `json:"workload_issuer_id,omitempty"`
+}
+
+// MCPGrantIdentityKind defines model for MCPGrantIdentity.Kind.
+type MCPGrantIdentityKind string
+
+// MCPOAuthConfiguration Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+type MCPOAuthConfiguration struct {
+	Audience                    string   `json:"audience"`
+	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
+	ClientId                    string   `json:"client_id"`
+	DeviceAuthorizationEndpoint *string  `json:"device_authorization_endpoint,omitempty"`
+	Scopes                      []string `json:"scopes"`
+	TokenEndpoint               string   `json:"token_endpoint"`
+}
+
 // MCPRegisteredCatalog defines model for MCPRegisteredCatalog.
 type MCPRegisteredCatalog struct {
 	Digest          string                              `json:"digest"`
@@ -9458,6 +9584,9 @@ type MCPServerResponse struct {
 	MaxConcurrency int    `json:"max_concurrency"`
 	Name           string `json:"name"`
 
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+
 	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
 
@@ -9491,6 +9620,9 @@ type MCPServerRevisionResponse struct {
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency int `json:"max_concurrency"`
 
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+
 	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
 
@@ -9520,6 +9652,9 @@ type MCPServerSummary struct {
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency int    `json:"max_concurrency"`
 	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
 
 	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
@@ -9608,6 +9743,25 @@ type MCPToolCallResponsePricingState string
 
 // MCPToolCallResponseStatus defines model for MCPToolCallResponse.Status.
 type MCPToolCallResponseStatus string
+
+// MCPUserGrantList defines model for MCPUserGrantList.
+type MCPUserGrantList struct {
+	Items      []MCPUserGrantStanding    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// MCPUserGrantStanding defines model for MCPUserGrantStanding.
+type MCPUserGrantStanding struct {
+	Binding   MCPGrantBinding                       `json:"binding"`
+	CreatedAt time.Time                             `json:"created_at"`
+	ExpiresAt time.Time                             `json:"expires_at"`
+	GrantId   nullable.Nullable[openapi_types.UUID] `json:"grant_id"`
+	Id        openapi_types.UUID                    `json:"id"`
+	State     MCPUserGrantStandingState             `json:"state"`
+}
+
+// MCPUserGrantStandingState defines model for MCPUserGrantStanding.State.
+type MCPUserGrantStandingState string
 
 // MFABootstrapSession defines model for MFABootstrapSession.
 type MFABootstrapSession struct {
@@ -13772,6 +13926,11 @@ type StartGrantEnrollmentRequest struct {
 	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
 }
 
+// StartMCPGrantEnrollmentRequest defines model for StartMCPGrantEnrollmentRequest.
+type StartMCPGrantEnrollmentRequest struct {
+	ApiKeyId openapi_types.UUID `json:"api_key_id"`
+}
+
 // Surface defines model for Surface.
 type Surface string
 
@@ -14024,6 +14183,9 @@ type UpdateMCPServerRequest struct {
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
 	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth,omitempty"`
 
 	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
 	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
@@ -15015,6 +15177,15 @@ type ListMcpToolCallsParams struct {
 // ResolveMcpToolCallParams defines parameters for ResolveMcpToolCall.
 type ResolveMcpToolCallParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListMcpUserGrantsParams defines parameters for ListMcpUserGrants.
+type ListMcpUserGrantsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListMediaJobsParams defines parameters for ListMediaJobs.
@@ -16610,11 +16781,17 @@ type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
 // ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
 type ManagementMcpJSONRequestBody ManagementMcpJSONBody
 
+// ClaimMcpGrantEnrollmentJSONRequestBody defines body for ClaimMcpGrantEnrollment for application/json ContentType.
+type ClaimMcpGrantEnrollmentJSONRequestBody = ClaimMCPGrantEnrollmentRequest
+
 // CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
 type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
 
 // UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
 type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
+
+// StartMcpGrantEnrollmentJSONRequestBody defines body for StartMcpGrantEnrollment for application/json ContentType.
+type StartMcpGrantEnrollmentJSONRequestBody = StartMCPGrantEnrollmentRequest
 
 // ResolveMcpToolCallJSONRequestBody defines body for ResolveMcpToolCall for application/json ContentType.
 type ResolveMcpToolCallJSONRequestBody = MCPToolCallResolveRequest

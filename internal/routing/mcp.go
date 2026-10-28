@@ -25,7 +25,24 @@ const (
 	MaxToolConcurrency        = int64(1024)
 )
 
+type MCPOAuth struct {
+	ClientID                    string   `json:"client_id"`
+	Audience                    string   `json:"audience"`
+	Scopes                      []string `json:"scopes"`
+	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
+	TokenEndpoint               string   `json:"token_endpoint"`
+	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint,omitempty"`
+}
+
+func (o *MCPOAuth) Clone() *MCPOAuth {
+	if o == nil {
+		return nil
+	}
+	return &MCPOAuth{ClientID: o.ClientID, Audience: o.Audience, Scopes: slices.Clone(o.Scopes), AuthorizationEndpoint: o.AuthorizationEndpoint, TokenEndpoint: o.TokenEndpoint, DeviceAuthorizationEndpoint: o.DeviceAuthorizationEndpoint}
+}
+
 type MCPServer struct {
+	OAuth                *MCPOAuth         `json:"oauth,omitempty"`
 	ID                   string            `json:"id"`
 	ProjectID            string            `json:"project_id"`
 	RevisionID           string            `json:"revision_id"`
@@ -43,6 +60,7 @@ type MCPServer struct {
 }
 
 type MCPToolsetTool struct {
+	OAuth                *MCPOAuth
 	Alias                string
 	Name                 string
 	Description          string
@@ -169,6 +187,9 @@ func (s *Snapshot) validateMCPServers() error {
 	}
 	seen := map[string]bool{}
 	for _, server := range s.MCPServers {
+		if server.OAuth != nil && !server.OAuth.Valid() {
+			return fmt.Errorf("MCP server has invalid OAuth configuration")
+		}
 		if !validUUID(server.ID) || !validUUID(server.ProjectID) || !validUUID(server.RevisionID) || server.Endpoint == "" || len(server.Endpoint) > 2048 || server.Protocol == "" || !mcpDigest.MatchString(server.Digest) || seen[server.ID] || len(server.Tools) > 128 {
 			return fmt.Errorf("MCP server %q is malformed", server.ID)
 		}
@@ -258,7 +279,7 @@ func (s *Snapshot) compileMCP() {
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint,
-				CredentialID: copyPointer(server.CredentialID), UnitPrice: price,
+				CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(),
 				CallsPerMinute:       effective.CallsPerMinute,
 				MaxConcurrency:       effective.MaxConcurrency,
 				PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute,
@@ -282,6 +303,7 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	for i := range tools {
 		tools[i].UnitPrice = copyPointer(tools[i].UnitPrice)
 		tools[i].CredentialID = copyPointer(tools[i].CredentialID)
+		tools[i].OAuth = tools[i].OAuth.Clone()
 	}
 	return MCPToolsetResolution{
 		Tools:   tools,
@@ -289,4 +311,21 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 		Invalid: slices.Clone(resolution.Invalid),
 		Missing: slices.Clone(resolution.Missing),
 	}, true
+}
+
+func (o *MCPOAuth) Valid() bool {
+	if o == nil || o.ClientID == "" || len(o.ClientID) > 256 || o.Audience == "" || len(o.Audience) > 2048 || o.AuthorizationEndpoint == "" || o.TokenEndpoint == "" || len(o.Scopes) == 0 || len(o.Scopes) > 32 {
+		return false
+	}
+	for _, scope := range o.Scopes {
+		if scope == "" || len(scope) > 256 {
+			return false
+		}
+		for _, character := range scope {
+			if character < 0x21 || character > 0x7e || character == '"' || character == '\\' {
+				return false
+			}
+		}
+	}
+	return true
 }

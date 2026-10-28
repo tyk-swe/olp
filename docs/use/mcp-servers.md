@@ -209,3 +209,15 @@ eligibility once the gateway authority view refreshes, which is the same
 freshness boundary the rest of the gateway enforces. A session that loses its
 authority this way is refused and closed on next use, while a temporary
 authority outage only refuses requests until authority is readable again.
+
+## Personal grants
+
+An operator can configure personal OAuth on a registered server from **Personal tool grants** in the console. The configuration declares the client ID, audience, scope set, authorization endpoint, token endpoint and optional device authorization endpoint. Each destination must pass the installation's egress policy. The configuration belongs to the certified server revision and round trips through portable configuration. Personal grant records and their secrets never enter that export.
+
+A server with personal OAuth requires an unexpired, unrevoked grant for the exact server, endpoint, client, audience, scopes, project and individual. A missing or mismatched grant refuses execution with `user_grant_required`. The registered static credential is never used as a fallback. Scope order and duplicate scopes do not change the individual grant binding.
+
+A project manager can start key-bound enrollment with `POST /api/v1/mcp-servers/{server_id}/grant-enrollments` and an `api_key_id`. Only that signed-in member can claim the returned link. For a project end user, an authenticated workload caller with a verified end-user claim can request a link with `POST /v1/mcp/servers/{server_id}/grant-enrollments` and a `toolset_id`. The server must belong to that caller's authorized toolset. A header label cannot create this link or select another individual's grant.
+
+Enrollment links expire after ten minutes and can be claimed once. The console removes the secret from the address bar when it opens the link, keeps it only in transient page state until submission to the authenticated claim endpoint, and clears it after a successful claim. The console shows pending, active, expired and revoked standing without access or refresh tokens. A grant holder or project manager can revoke an active grant.
+
+Provider authorization exchange, device approval and automatic refresh remain planned. Newly claimed enrollments therefore stay pending and cannot authorize tool execution yet.

@@ -253,7 +253,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -328,7 +328,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3159,7 +3159,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -3234,7 +3234,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3623,7 +3623,7 @@
             ]
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -3650,7 +3650,7 @@
             "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
           },
           "url": {
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
             "type": "string"
           }
         },
@@ -5558,7 +5558,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "required": [
@@ -13411,7 +13411,7 @@
         "type": "object"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
@@ -13522,7 +13522,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -13597,7 +13597,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -13760,7 +13760,7 @@
             "type": "string"
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -13788,7 +13788,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "type": "object",
@@ -21224,7 +21224,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           },
           "etag": {
             "type": "string"
@@ -21247,7 +21247,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           }
         }
       },
@@ -22911,6 +22911,9 @@
             "minimum": 1,
             "maximum": 1024,
             "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
           }
         },
         "required": [
@@ -22987,6 +22990,9 @@
             "minimum": 1,
             "maximum": 1024,
             "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
           }
         },
         "required": [
@@ -23092,6 +23098,9 @@
             "minimum": 1,
             "maximum": 1024,
             "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
           }
         },
         "required": [
@@ -23113,7 +23122,8 @@
           "calls_per_minute",
           "max_concurrency",
           "per_key_calls_per_minute",
-          "per_key_max_concurrency"
+          "per_key_max_concurrency",
+          "oauth"
         ]
       },
       "MCPServerSummary": {
@@ -23210,6 +23220,9 @@
             "minimum": 1,
             "maximum": 1024,
             "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
           }
         },
         "required": [
@@ -23230,7 +23243,8 @@
           "calls_per_minute",
           "max_concurrency",
           "per_key_calls_per_minute",
-          "per_key_max_concurrency"
+          "per_key_max_concurrency",
+          "oauth"
         ]
       },
       "MCPServerListResponse": {
@@ -23550,6 +23564,9 @@
             "minimum": 1,
             "maximum": 1024,
             "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
           }
         },
         "required": [
@@ -23564,7 +23581,8 @@
           "calls_per_minute",
           "max_concurrency",
           "per_key_calls_per_minute",
-          "per_key_max_concurrency"
+          "per_key_max_concurrency",
+          "oauth"
         ]
       },
       "ConfigurationMCPServer": {
@@ -23651,6 +23669,9 @@
             "minimum": 1,
             "maximum": 1024,
             "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
           }
         }
       },
@@ -27682,6 +27703,285 @@
           "acknowledge_opaque_unmetered"
         ],
         "type": "object"
+      },
+      "MCPOAuthConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "device_authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "client_id",
+          "audience",
+          "scopes",
+          "authorization_endpoint",
+          "token_endpoint"
+        ],
+        "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+      },
+      "MCPGrantIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "end_user"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "workload_issuer_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "MCPGrantBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/MCPGrantIdentity"
+          }
+        },
+        "required": [
+          "server_id",
+          "project_id",
+          "endpoint",
+          "oauth",
+          "identity"
+        ]
+      },
+      "MCPGrantHandoff": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "enrollment_url": {
+            "type": "string",
+            "description": "One-use browser link. Its secret remains in the URL fragment and must not be logged or retained."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "enrollment_url",
+          "expires_at"
+        ]
+      },
+      "MCPGrantEnrollment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/MCPGrantBinding"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "claimed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "binding",
+          "expires_at",
+          "claimed_at"
+        ]
+      },
+      "MCPGrantClaimResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment": {
+            "$ref": "#/components/schemas/MCPGrantEnrollment"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          }
+        },
+        "required": [
+          "enrollment",
+          "state"
+        ]
+      },
+      "MCPUserGrantStanding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "grant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/MCPGrantBinding"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "expired",
+              "revoked"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "grant_id",
+          "binding",
+          "state",
+          "expires_at",
+          "created_at"
+        ]
+      },
+      "MCPUserGrantList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPUserGrantStanding"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "StartMCPGrantEnrollmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "api_key_id"
+        ]
+      },
+      "ClaimMCPGrantEnrollmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "handoff_token": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 128,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "handoff_token"
+        ]
       }
     },
     "securitySchemes": {
@@ -27698,7 +27998,7 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_…). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
+        "description": "Management automation token (olpm_\u2026). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -35978,7 +36278,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -36146,7 +36446,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -64546,6 +64846,251 @@
         ],
         "tags": [
           "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/mcp-user-grants": {
+      "get": {
+        "operationId": "list_mcp_user_grants",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp user grants",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal grant standing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPUserGrantList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/grant-enrollments": {
+      "post": {
+        "operationId": "start_mcp_grant_enrollment",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "start mcp grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantHandoff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/claim": {
+      "post": {
+        "operationId": "claim_mcp_grant_enrollment",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "claim mcp grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantClaimResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-user-grants/{grant_id}": {
+      "delete": {
+        "operationId": "revoke_mcp_user_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "revoke mcp user grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Enrollment or grant updated"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ]
       }
     }

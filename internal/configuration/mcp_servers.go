@@ -18,6 +18,7 @@ import (
 )
 
 type MCPServerEntry struct {
+	OAuth                *routing.MCPOAuth `json:"oauth,omitempty"`
 	Name                 string            `json:"name"`
 	Project              string            `json:"project"`
 	Transport            string            `json:"transport"`
@@ -61,7 +62,7 @@ func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcps
 		prices[name] = price
 	}
 	return &mcpservers.Definition{
-		Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
+		OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
 		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -93,7 +94,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 		}
 		seen[key] = true
 		in := mcpservers.Input{
-			Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
+			OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
 			UnitPrice: e.UnitPrice, ToolPrices: e.ToolPrices,
 			CallsPerMinute: e.CallsPerMinute, MaxConcurrency: e.MaxConcurrency,
 			PerKeyCallsPerMinute: e.PerKeyCallsPerMinute, PerKeyMaxConcurrency: e.PerKeyMaxConcurrency,
@@ -110,7 +111,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 	return nil
 }
 func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, error) {
-	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
+	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +121,7 @@ func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, 
 		var e MCPServerEntry
 		var credential bool
 		var callsPerMinute, maxConcurrency, perKeyCallsPerMinute, perKeyMaxConcurrency int64
-		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency); err != nil {
+		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency, &e.OAuth); err != nil {
 			return nil, err
 		}
 		e.CallsPerMinute = &callsPerMinute
@@ -160,7 +161,7 @@ func mcpEntry(d *mcpservers.Definition, project string) MCPServerEntry {
 	}
 	e := MCPServerEntry{
 		Name: d.Name, Project: project, Transport: d.Transport, Endpoint: d.Endpoint, Enabled: d.Enabled, CatalogDigest: d.Catalog.Digest,
-		UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
+		OAuth: d.OAuth.Clone(), UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
 		CallsPerMinute: mcpEntryLimit(d.CallsPerMinute), MaxConcurrency: mcpEntryLimit(d.MaxConcurrency),
 		PerKeyCallsPerMinute: mcpEntryLimit(d.PerKeyCallsPerMinute), PerKeyMaxConcurrency: mcpEntryLimit(d.PerKeyMaxConcurrency),
 	}
