@@ -15263,6 +15263,12 @@ type CreateGuardrailCredentialParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ListGuardrailPoliciesParams defines parameters for ListGuardrailPolicies.
+type ListGuardrailPoliciesParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateGuardrailPolicyParams defines parameters for CreateGuardrailPolicy.
 type CreateGuardrailPolicyParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`

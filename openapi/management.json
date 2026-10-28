@@ -61451,7 +61451,10 @@
                       "maxItems": 1001
                     }
                   },
-                  "required": []
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -61468,7 +61471,28 @@
           "422": {
             "description": "Invalid or incompatible guardrail"
           }
-        }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ]
       },
       "post": {
         "operationId": "create_guardrail_policy",
