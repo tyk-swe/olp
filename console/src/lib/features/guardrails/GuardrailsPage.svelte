@@ -255,7 +255,10 @@
 </nav>
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 {#if notice}<p role="status">{notice}</p>{/if}
-{#if definitions.isError || policies.isError || attachments.isError}<p
+{#if definitions.isPending || policies.isPending || projects.isPending}
+  <p role="status">Loading guardrail inventory…</p>
+{/if}
+{#if definitions.isError || policies.isError || attachments.isError || projects.isError}<p
     role="alert"
   >
     Guardrails could not be loaded. Reload to try again.

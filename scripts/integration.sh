@@ -126,6 +126,7 @@ for lane in "${lanes[@]}"; do
       export OLP_CONSOLE_E2E_BIN="$PWD/.local/bin/olp-identity-test"
       export OLP_CONSOLE_E2E_FLEET_SECRET_DIR="$scratch/fleet-secrets"
       pnpm --dir console exec playwright test --config playwright.config.ts
+      pnpm --dir console exec playwright test --config playwright.guardrails.config.ts
 
       export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
       export OLP_LOCAL_DIR="$scratch"
