@@ -335,8 +335,9 @@ func loadCardRevisionSummariesByCards(ctx context.Context, q access.Queryer, car
 	rows, err := q.Query(ctx, cardRevisionColumns+
 		` WHERE r.rate_card_id = ANY($1::uuid[])
 		  AND (r.revision=(SELECT MAX(revision) FROM olp.rate_card_revisions WHERE rate_card_id=r.rate_card_id)
-		   OR r.revision=(SELECT MAX(revision) FROM olp.rate_card_revisions
-		                  WHERE rate_card_id=r.rate_card_id AND effective_at <= now()))
+		   OR r.id=(SELECT id FROM olp.rate_card_revisions
+		            WHERE rate_card_id=r.rate_card_id AND effective_at <= now()
+		            ORDER BY effective_at DESC, revision DESC LIMIT 1))
 		  ORDER BY r.rate_card_id, r.revision DESC`, cardIDs)
 	if err != nil {
 		return nil, err
