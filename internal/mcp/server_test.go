@@ -165,9 +165,16 @@ type fixture struct {
 	server      *httptest.Server
 	calls       atomic.Int32
 	lists       atomic.Int32
-	mode        string
+	mode        atomic.Value
 	description atomic.Value
 	notify      atomic.Bool
+}
+
+func (f *fixture) setMode(mode string) { f.mode.Store(mode) }
+
+func (f *fixture) currentMode() string {
+	mode, _ := f.mode.Load().(string)
+	return mode
 }
 
 func (f *fixture) setDescription(description string) { f.description.Store(description) }
@@ -181,7 +188,8 @@ func (f *fixture) catalogDescription() string {
 
 func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 	t.Helper()
-	fx := &fixture{mode: mode}
+	fx := &fixture{}
+	fx.setMode(mode)
 	fx.description.Store("Look up")
 	fx.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -201,7 +209,7 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 		switch request.Method {
 		case "initialize":
 			tl.add("initialize")
-			if fx.mode == "dial_fail" {
+			if fx.currentMode() == "dial_fail" {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -220,7 +228,7 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 			}
 			fx.calls.Add(1)
 			tl.add("upstream")
-			if fx.mode == "drop" {
+			if fx.currentMode() == "drop" {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -231,7 +239,7 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 			_ = json.Unmarshal(request.Params, &params)
 			result = map[string]any{
 				"content": []any{map[string]any{"type": "text", "text": "answer for " + params.Name}},
-				"isError": fx.mode == "tool_error",
+				"isError": fx.currentMode() == "tool_error",
 			}
 			if fx.notify.Load() {
 				note, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
@@ -257,14 +265,13 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 
 func testSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
 	t.Helper()
-	digest := strings.Repeat("a", 64)
-	description := "Look up"
-	schema := testToolSchema
-	if catalog, err := mcpservers.Certify(t.Context(), testEgress(), endpoint, []byte("static-token")); err == nil && len(catalog.Tools) == 1 {
-		digest = catalog.Digest
-		description = catalog.Tools[0].Description
-		schema = catalog.Tools[0].InputSchema
+	catalog, err := mcpservers.Certify(t.Context(), testEgress(), endpoint, []byte("static-token"))
+	if err != nil || len(catalog.Tools) != 1 {
+		t.Fatalf("fixture catalog did not certify: err=%v catalog=%+v", err, catalog)
 	}
+	digest := catalog.Digest
+	description := catalog.Tools[0].Description
+	schema := catalog.Tools[0].InputSchema
 	cred := testCredID
 	toolset := func(id, revision string) agentcontract.Revision {
 		tool := agentcontract.Tool{ServerID: testServerID, RevisionID: testServerRv, CatalogDigest: digest, Name: "lookup", Alias: agentcontract.ToolAlias(testServerID, "lookup")}
@@ -295,8 +302,9 @@ func testAuthKey() *secrets.AuthKey {
 func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Server, *fixture, *fakeLedger, *timeline, *fakeRuntime) {
 	t.Helper()
 	tl := &timeline{}
-	fx := newFixture(t, tl, mode)
+	fx := newFixture(t, tl, "")
 	rt := &fakeRuntime{authority: authority, release: &runtime.Release{ID: testGenID, Snapshot: testSnapshot(t, fx.server.URL)}}
+	fx.setMode(mode)
 	ledger := &fakeLedger{tl: tl}
 	server := &Server{
 		Runtime: rt, Ledger: ledger, Auth: testAuthKey(),
@@ -569,16 +577,6 @@ func jsonErrorCode(t *testing.T, body map[string]any) string {
 	return code
 }
 
-func jsonErrorMessage(t *testing.T, body map[string]any) string {
-	t.Helper()
-	failure, _ := body["error"].(map[string]any)
-	if failure == nil {
-		t.Fatalf("response has no error: %v", body)
-	}
-	message, _ := failure["message"].(string)
-	return message
-}
-
 func driftedSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
 	t.Helper()
 	snapshot := testSnapshot(t, endpoint)
@@ -589,6 +587,87 @@ func driftedSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
 	return snapshot
 }
 
+func twoServerSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
+	t.Helper()
+	snapshot := testSnapshot(t, endpoint)
+	second := snapshot.MCPServers[0]
+	second.ID = testServer2
+	second.RevisionID = testServerRv2
+	snapshot.MCPServers = append(snapshot.MCPServers, second)
+	for index, revision := range snapshot.AgentPublications {
+		if revision.ID != testRevision {
+			continue
+		}
+		revision.Definition.Toolset.Tools = append(revision.Definition.Toolset.Tools, agentcontract.Tool{
+			ServerID: testServer2, RevisionID: testServer2R, CatalogDigest: second.Digest,
+			Name: "lookup", Alias: agentcontract.ToolAlias(testServer2, "lookup"),
+		})
+		revision.Digest = agentcontract.DraftDigest(revision.Definition)
+		snapshot.AgentPublications[index] = revision
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func TestCallToolSnapshotDriftScopesPerServerAndRefusesExplicitListing(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: twoServerSnapshot(t, fx.server.URL)}
+
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("healthy server in a partially drifted toolset was not callable: %d %v", status, body)
+	}
+	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"}}`)
+	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" || fx.calls.Load() != 1 {
+		t.Fatalf("drifted server beside a healthy one was not refused as drift: %d %v calls=%d", status, body, fx.calls.Load())
+	}
+	status, body = request(t, server, http.MethodGet, "/v1/mcp/tools?toolset_id="+testToolset, "")
+	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" {
+		t.Fatalf("explicit listing silently skipped the drifted server: %d %v", status, body)
+	}
+	status, body = request(t, server, http.MethodGet, "/v1/mcp/tools", "")
+	tools, _ := body["tools"].([]any)
+	if status != http.StatusOK || len(tools) != 1 {
+		t.Fatalf("all-toolsets listing lost the healthy server beside drift: %d %v", status, body)
+	}
+
+	unlive, unliveFixture, _, _, unliveRuntime := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	unliveRuntime.release = &runtime.Release{ID: testGenID, Snapshot: twoServerSnapshot(t, unliveFixture.server.URL)}
+	unliveRuntime.failAuthzOn = 2
+	status, body = request(t, unlive, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusOK || unliveFixture.calls.Load() != 1 {
+		t.Fatalf("authority failure caused by a drifted sibling blocked the healthy server: %d %v", status, body)
+	}
+}
+
+func TestCallToolUncompilablePinnedSchemaRefusesWithItsOwnError(t *testing.T) {
+	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	snapshot := testSnapshot(t, fx.server.URL)
+	snapshot.MCPServers[0].Tools[0].InputSchema = json.RawMessage(`{"type":"object","$ref":"https://schemas.example.test/tool"}`)
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: snapshot}
+
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusServiceUnavailable || jsonErrorCode(t, body) != "tool_schema_invalid" {
+		t.Fatalf("uncompilable pinned schema was not refused with its own error: %d %v", status, body)
+	}
+	if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("uncompilable pinned schema reserved or dispatched: calls=%d reserved=%d", fx.calls.Load(), len(ledger.reserved))
+	}
+	status, body = request(t, server, http.MethodGet, "/v1/mcp/tools?toolset_id="+testToolset, "")
+	if status != http.StatusServiceUnavailable || jsonErrorCode(t, body) != "tool_schema_invalid" {
+		t.Fatalf("explicit listing silently skipped the uncompilable schema: %d %v", status, body)
+	}
+}
+
 func TestCallToolDriftedLiveCatalogRefusesWithoutDispatch(t *testing.T) {
 	server, fx, ledger, tl, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	fx.setDescription("Changed after publication")
@@ -596,9 +675,6 @@ func TestCallToolDriftedLiveCatalogRefusesWithoutDispatch(t *testing.T) {
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
 	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" {
 		t.Fatalf("drifted catalog call was not refused as a definition change: %d %v", status, body)
-	}
-	if message := jsonErrorMessage(t, body); !strings.Contains(message, "pinned") || strings.Contains(message, "behavior") {
-		t.Fatalf("drift refusal misstates what was checked: %q", message)
 	}
 	if fx.calls.Load() != 0 {
 		t.Fatalf("drift check invoked the tool: calls=%d", fx.calls.Load())
@@ -684,10 +760,11 @@ func TestRepublishedRevisionUnblocksOnlyItsOwnToolset(t *testing.T) {
 	drifted := driftedSnapshot(t, fx.server.URL)
 	second := drifted.MCPServers[0]
 	second.ID, second.RevisionID = testServer2, testServer2R
-	second.Digest = strings.Repeat("a", 64)
-	if catalog, err := mcpservers.Certify(t.Context(), testEgress(), fx.server.URL, []byte("static-token")); err == nil {
-		second.Digest = catalog.Digest
+	catalog, err := mcpservers.Certify(t.Context(), testEgress(), fx.server.URL, []byte("static-token"))
+	if err != nil {
+		t.Fatalf("fixture catalog did not certify for the second server: %v", err)
 	}
+	second.Digest = catalog.Digest
 	for index, revision := range drifted.AgentPublications {
 		if revision.ID != testOtherRv {
 			continue

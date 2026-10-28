@@ -2,10 +2,28 @@ package mcp
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+const (
+	initializeCertifyTimeout = 10 * time.Second
+	maxConcurrentCertifies   = 4
+)
+
+func certifyTransport(ctx context.Context, transport *mcpservers.Transport, pinnedDigest string) certificationState {
+	catalog, err := transport.CertifyCatalog(ctx)
+	if err != nil || catalog == nil {
+		return certificationInvalid
+	}
+	if catalog.Digest != pinnedDigest {
+		return certificationDrifted
+	}
+	return certificationCertified
+}
 
 func (s *Server) certifyToolsetServers(ctx context.Context, resolved resolvedToolset) map[string]certificationState {
 	representatives := map[string]routing.MCPToolsetTool{}
@@ -14,11 +32,35 @@ func (s *Server) certifyToolsetServers(ctx context.Context, resolved resolvedToo
 			representatives[tool.ServerID] = tool
 		}
 	}
-	states := make(map[string]certificationState, len(representatives))
-	for serverID, tool := range representatives {
-		states[serverID] = s.certifyServer(ctx, tool)
+	tools := make([]routing.MCPToolsetTool, 0, len(representatives))
+	for _, tool := range representatives {
+		tools = append(tools, tool)
 	}
-	return states
+	states := make([]certificationState, len(tools))
+	ctx, cancel := context.WithTimeout(ctx, initializeCertifyTimeout)
+	defer cancel()
+	slots := make(chan struct{}, maxConcurrentCertifies)
+	var pending sync.WaitGroup
+	for index, tool := range tools {
+		pending.Add(1)
+		go func() {
+			defer pending.Done()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				states[index] = certificationInvalid
+				return
+			}
+			states[index] = s.certifyServer(ctx, tool)
+		}()
+	}
+	pending.Wait()
+	certified := make(map[string]certificationState, len(tools))
+	for index, tool := range tools {
+		certified[tool.ServerID] = states[index]
+	}
+	return certified
 }
 
 func (s *Server) certifyServer(ctx context.Context, tool routing.MCPToolsetTool) certificationState {
@@ -32,12 +74,10 @@ func (s *Server) certifyServer(ctx context.Context, tool routing.MCPToolsetTool)
 	if credential != nil {
 		defer clear(credential)
 	}
-	catalog, err := mcpservers.Certify(ctx, s.Egress, tool.Endpoint, credential)
+	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-certifier", Timeout: initializeCertifyTimeout})
 	if err != nil {
 		return certificationInvalid
 	}
-	if catalog.Digest != tool.CatalogDigest {
-		return certificationDrifted
-	}
-	return certificationCertified
+	defer transport.Close(context.WithoutCancel(ctx))
+	return certifyTransport(ctx, transport, tool.CatalogDigest)
 }

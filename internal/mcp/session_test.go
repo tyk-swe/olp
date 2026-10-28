@@ -334,7 +334,7 @@ func TestStreamableHTTPSessionLifecycleAtCertifiedVersions(t *testing.T) {
 			if len(content) != 1 || fx.calls.Load() != 1 {
 				t.Fatalf("session call did not reach the upstream exactly once: calls=%d result=%v", fx.calls.Load(), result)
 			}
-			if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,dispatched,upstream,settled" {
+			if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,list,dispatched,upstream,settled" {
 				t.Fatalf("session call bypassed the shared call path: %s", got)
 			}
 			if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusSucceeded {
@@ -522,9 +522,11 @@ func TestStreamableHTTPSessionBindsPinnedToolsetRevision(t *testing.T) {
 	}
 	rt.release = &runtime.Release{ID: testGenID, Snapshot: changed}
 	listed := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", listCall)
-	tools, _ := rpcResult(t, listed)["tools"].([]any)
-	if len(tools) != 0 {
-		t.Fatalf("session served definitions changed after pinning: %v", tools)
+	if failure := rpcError(t, listed); failure["code"] != float64(rpcServerError) {
+		t.Fatalf("session listing did not refuse as a server error: %v", listed.body)
+	}
+	if code := rpcDataCode(t, listed); code != "tool_definition_changed" {
+		t.Fatalf("session listing silently omitted definitions changed after pinning: %v", listed.body)
 	}
 	called := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":{"query":"x"}}}`)
@@ -593,7 +595,7 @@ func TestStreamableHTTPSessionAmbiguousCallStaysUnknown(t *testing.T) {
 	if data["code"] != "outcome_unknown" || data["attempt_id"] == nil || fx.calls.Load() != 1 {
 		t.Fatalf("ambiguous session call was not reported unknown: %v", response.body)
 	}
-	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,dispatched,upstream,unknown" {
+	if got := strings.Join(tl.snapshot(), ","); got != "reserve,initialize,list,dispatched,upstream,unknown" {
 		t.Fatalf("ambiguous session dispatch settled or released: %s", got)
 	}
 	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusOutcomeUnknown {
@@ -712,7 +714,7 @@ func TestStreamableHTTPInitializeCertifiesLiveCatalogAndBlocksDriftedCalls(t *te
 	}
 }
 
-func TestStreamableHTTPSessionCallsSkipDiscoveryWhileCertified(t *testing.T) {
+func TestStreamableHTTPSessionCallsCertifyEveryDispatch(t *testing.T) {
 	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	lists := fx.lists.Load()
@@ -722,8 +724,16 @@ func TestStreamableHTTPSessionCallsSkipDiscoveryWhileCertified(t *testing.T) {
 	if fx.calls.Load() != 2 {
 		t.Fatalf("certified session calls did not dispatch: calls=%d", fx.calls.Load())
 	}
-	if fx.lists.Load() != lists {
-		t.Fatalf("certified session rediscovered the catalog on the call path: lists %d -> %d", lists, fx.lists.Load())
+	if fx.lists.Load() != lists+2 {
+		t.Fatalf("session dispatch skipped live catalog certification: lists %d -> %d", lists, fx.lists.Load())
+	}
+	fx.setDescription("Changed mid-session without a notification")
+	called := sessionCall(t, server, sessionID)
+	if code := rpcDataCode(t, called); code != "tool_definition_changed" {
+		t.Fatalf("mid-session drift without a notification was served: %v", called.body)
+	}
+	if fx.calls.Load() != 2 {
+		t.Fatalf("mid-session drift dispatched: calls=%d", fx.calls.Load())
 	}
 }
 
@@ -768,8 +778,8 @@ func TestStreamableHTTPListChangedWithoutDriftRecertifiesAndServes(t *testing.T)
 	}
 	lists := fx.lists.Load()
 	rpcResult(t, sessionCall(t, server, sessionID))
-	if fx.calls.Load() != 3 || fx.lists.Load() != lists {
-		t.Fatalf("recertified session kept rediscovering: calls=%d lists %d -> %d", fx.calls.Load(), lists, fx.lists.Load())
+	if fx.calls.Load() != 3 || fx.lists.Load() != lists+1 {
+		t.Fatalf("recertified session stopped certifying per dispatch: calls=%d lists %d -> %d", fx.calls.Load(), lists, fx.lists.Load())
 	}
 }
 
@@ -790,7 +800,7 @@ func TestStreamableHTTPSessionEndsWhenAuthorityIsRevoked(t *testing.T) {
 	sessionID = openSession(t, server, "test-key", latestProtocol())
 	rt.revoked.Store(true)
 	called := sessionCall(t, server, sessionID)
-	if code := rpcDataCode(t, called); code != "permission_denied" {
+	if code := rpcDataCode(t, called); code != "toolset_not_found" {
 		t.Fatalf("revoked session call was not refused: %v", called.body)
 	}
 	if fx.calls.Load() != 0 {
@@ -858,5 +868,88 @@ func TestStreamableHTTPRepublishedRevisionServesNewSessions(t *testing.T) {
 	rpcError(t, refused)
 	if fx.calls.Load() != 1 {
 		t.Fatalf("session pinned before re-publish dispatched against new definitions: calls=%d", fx.calls.Load())
+	}
+}
+
+func TestStreamableHTTPSessionEndsWhenPinnedServerLeavesSnapshot(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+	gone := testSnapshot(t, fx.server.URL)
+	gone.MCPServers = nil
+	if err := gone.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: gone}
+	called := sessionCall(t, server, sessionID)
+	if code := rpcDataCode(t, called); code != "toolset_not_found" {
+		t.Fatalf("call whose server left the snapshot was not refused as ended eligibility: %v", called.body)
+	}
+	if fx.calls.Load() != 0 {
+		t.Fatalf("server that left the snapshot dispatched: calls=%d", fx.calls.Load())
+	}
+	ended := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", listCall)
+	if ended.status != http.StatusNotFound || rpcDataCode(t, ended) != "session_not_found" {
+		t.Fatalf("session stayed eligible after its server left the snapshot: %d %v", ended.status, ended.body)
+	}
+}
+
+func TestStreamableHTTPInitializeRefusesWhenCatalogCannotBeVerified(t *testing.T) {
+	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	fx.setMode("dial_fail")
+	response := rpcInitialize(t, server, "test-key", latestProtocol(), testToolset)
+	if response.headers.Get("Mcp-Session-Id") != "" {
+		t.Fatalf("initialize opened a session it could not certify: %v", response.body)
+	}
+	if failure := rpcError(t, response); failure["code"] != float64(rpcServerError) {
+		t.Fatalf("uncertifiable initialize did not refuse as a server error: %v", response.body)
+	}
+	if code := rpcDataCode(t, response); code != "upstream_unavailable" {
+		t.Fatalf("uncertifiable initialize was not refused as unavailable: %v", response.body)
+	}
+	if fx.calls.Load() != 0 {
+		t.Fatalf("uncertifiable initialize invoked a tool: calls=%d", fx.calls.Load())
+	}
+}
+
+func TestStreamableHTTPInitializeDriftEncodesAsServerError(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: driftedSnapshot(t, fx.server.URL)}
+	rt.failAuthzOn = 1
+	response := rpcInitialize(t, server, "test-key", latestProtocol(), testToolset)
+	if response.headers.Get("Mcp-Session-Id") != "" {
+		t.Fatalf("drifted initialize opened a session: %v", response.body)
+	}
+	if failure := rpcError(t, response); failure["code"] != float64(rpcServerError) {
+		t.Fatalf("drifted initialize did not encode as -32000: %v", response.body)
+	}
+	if code := rpcDataCode(t, response); code != "tool_definition_changed" {
+		t.Fatalf("drifted initialize was not refused as a definition change: %v", response.body)
+	}
+}
+
+func TestStreamableHTTPSessionSnapshotDriftScopesPerServer(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: twoServerSnapshot(t, fx.server.URL)}
+	sessionID := openSession(t, server, "test-key", latestProtocol())
+
+	rpcResult(t, sessionCall(t, server, sessionID))
+	if fx.calls.Load() != 1 {
+		t.Fatalf("healthy server in a partially drifted toolset did not serve in session: calls=%d", fx.calls.Load())
+	}
+	driftedCall := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"}}}`)
+	if code := rpcDataCode(t, driftedCall); code != "tool_definition_changed" {
+		t.Fatalf("drifted server beside a healthy one was not refused as drift in session: %v", driftedCall.body)
+	}
+	if fx.calls.Load() != 1 {
+		t.Fatalf("drifted server dispatched in session: calls=%d", fx.calls.Load())
+	}
+	listed := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", listCall)
+	if code := rpcDataCode(t, listed); code != "tool_definition_changed" {
+		t.Fatalf("session listing silently omitted the drifted server: %v", listed.body)
+	}
+	rpcResult(t, sessionCall(t, server, sessionID))
+	if fx.calls.Load() != 2 {
+		t.Fatalf("drift refusal ended the session for its healthy server: calls=%d", fx.calls.Load())
 	}
 }

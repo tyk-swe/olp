@@ -340,12 +340,23 @@ func (s *Server) initializeSession(w http.ResponseWriter, r *http.Request, autho
 	}
 	resolved, failure := s.sessionToolset(authority, snapshot, r.URL.Query().Get("toolset_id"))
 	if failure != nil {
+		if failure == errToolDefinitionChanged {
+			writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
+			return
+		}
 		writeRPCFailure(w, message.id, failureRPC(failure.status, rpcInvalidParams, failure))
 		return
 	}
 	if s.Sessions == nil {
 		writeRPCFailure(w, message.id, failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable))
 		return
+	}
+	certifications := s.certifyToolsetServers(r.Context(), resolved)
+	for _, state := range certifications {
+		if state == certificationInvalid {
+			writeRPCFailure(w, message.id, failureRPC(errCatalogUnavailable.status, rpcServerError, errCatalogUnavailable))
+			return
+		}
 	}
 	sessionID, err := newSessionID()
 	if err != nil {
@@ -357,7 +368,7 @@ func (s *Server) initializeSession(w http.ResponseWriter, r *http.Request, autho
 		protocol:  negotiateProtocol(params.ProtocolVersion),
 		toolsetID: resolved.id, toolsetRevisionID: resolved.revisionID,
 		releaseID:      releaseIDFor(release, snapshot),
-		certifications: s.certifyToolsetServers(r.Context(), resolved),
+		certifications: certifications,
 	}
 	created, err := s.Sessions.createSession(r.Context(), candidate)
 	if err != nil {
@@ -408,11 +419,13 @@ func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, aut
 	}
 	switch message.method {
 	case "ping":
-		if failure := s.reauthorizeSession(authority, current); failure != nil {
-			if failure == errToolsetNotFound {
-				s.endSession(r.Context(), current)
-			}
-			writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
+		resolved, failure := s.pinnedToolset(current)
+		if failure != nil {
+			s.writeSessionFailure(w, r, current, message.id, failure)
+			return
+		}
+		if failure = s.reauthorizeSession(authority, current, resolved); failure != nil {
+			s.writeSessionFailure(w, r, current, message.id, failure)
 			return
 		}
 		writeRPCResult(w, http.StatusOK, message.id, pingResult{})
@@ -429,14 +442,27 @@ func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, aut
 	}
 }
 
-func (s *Server) reauthorizeSession(authority access.Authority, current sessionRecord) *apiError {
+func (s *Server) reauthorizeSession(authority access.Authority, current sessionRecord, resolved resolvedToolset) *apiError {
 	if err := s.Runtime.AuthorizeAgentResource(authority, "tools", current.toolsetID, current.toolsetRevisionID, *authority.ProjectID); err != nil {
 		if errors.Is(err, runtime.ErrStaleAuthority) {
 			return fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
 		}
+		if s.driftScoped(authority, resolved) {
+			if len(resolved.tools) == 0 {
+				return errToolDefinitionChanged
+			}
+			return nil
+		}
 		return errToolsetNotFound
 	}
 	return nil
+}
+
+func (s *Server) writeSessionFailure(w http.ResponseWriter, r *http.Request, current sessionRecord, id json.RawMessage, failure *apiError) {
+	if failure == errToolsetNotFound {
+		s.endSession(r.Context(), current)
+	}
+	writeRPCFailure(w, id, failureRPC(http.StatusOK, rpcServerError, failure))
 }
 
 func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *apiError) {
@@ -455,7 +481,7 @@ func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *apiErro
 	if !ok {
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	return resolvedToolset{id: current.toolsetID, revisionID: current.toolsetRevisionID, tools: resolution.Tools, drifted: resolution.Drifted}, nil
+	return toolsetFromResolution(current.toolsetID, current.toolsetRevisionID, resolution), nil
 }
 
 type wireTool struct {
@@ -487,15 +513,16 @@ func (s *Server) sessionListTools(w http.ResponseWriter, r *http.Request, author
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "The cursor was not issued by this endpoint.", data: rpcErrorData{Code: "invalid_cursor"}})
 		return
 	}
-	if failure := s.reauthorizeSession(authority, current); failure != nil {
-		if failure == errToolsetNotFound {
-			s.endSession(r.Context(), current)
-		}
-		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
-		return
-	}
 	resolved, failure := s.pinnedToolset(current)
 	if failure != nil {
+		s.writeSessionFailure(w, r, current, message.id, failure)
+		return
+	}
+	if failure = s.reauthorizeSession(authority, current, resolved); failure != nil {
+		s.writeSessionFailure(w, r, current, message.id, failure)
+		return
+	}
+	if failure = resolved.listingFailure(); failure != nil {
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
 		return
 	}
@@ -533,22 +560,29 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 	}
 	resolved, failure := s.pinnedToolset(current)
 	if failure != nil {
-		if failure == errToolsetNotFound {
-			s.endSession(r.Context(), current)
-		}
-		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
+		s.writeSessionFailure(w, r, current, message.id, failure)
 		return
 	}
-	index := slices.IndexFunc(resolved.tools, func(tool routing.MCPToolsetTool) bool { return tool.Alias == params.Name })
-	if index < 0 {
-		if slices.ContainsFunc(resolved.drifted, func(pin routing.MCPDriftedTool) bool { return pin.Alias == params.Name }) {
-			writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
-			return
-		}
+	if failure = s.reauthorizeSession(authority, current, resolved); failure != nil {
+		s.writeSessionFailure(w, r, current, message.id, failure)
+		return
+	}
+	tool, found := resolved.lookup(params.Name)
+	switch found {
+	case toolFound:
+	case toolDrifted:
+		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
+		return
+	case toolInvalidSchema:
+		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolSchemaInvalid))
+		return
+	case toolServerMissing:
+		s.writeSessionFailure(w, r, current, message.id, errToolsetNotFound)
+		return
+	default:
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcInvalidParams, errToolNotFound))
 		return
 	}
-	tool := resolved.tools[index]
 	certification := current.certification(tool.ServerID)
 	if certification == certificationDrifted {
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
@@ -566,7 +600,11 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errLedger))
 		return
 	}
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: current.releaseID, certify: certification == certificationInvalid})
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: current.releaseID})
+	if outcome.failure == errPermissionDenied && s.driftScoped(authority, resolved) {
+		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
+		return
+	}
 	s.recordCallCertification(r.Context(), current, tool, certification, outcome)
 	switch {
 	case outcome.failure != nil:
@@ -600,10 +638,10 @@ func (s *Server) recordCallCertification(ctx context.Context, current sessionRec
 		return
 	}
 	if outcome.failure != nil {
-		switch outcome.failure.code {
-		case "tool_definition_changed":
+		switch {
+		case outcome.certification == certificationDrifted:
 			_, _ = s.Sessions.setSessionCertification(ctx, current.id, current.binding, tool.ServerID, certificationDrifted)
-		case "permission_denied":
+		case outcome.failure == errPermissionDenied:
 			s.endSession(ctx, current)
 		}
 		return
