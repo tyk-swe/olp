@@ -65,6 +65,43 @@ unavailability cannot make that completed request fail or overwrite a later
 registration. New applies release mutation locks for discovery and repeat
 reauthorization, replay lookup and destination preconditions before commit.
 
+## Discovering capabilities and simulating a call
+
+`GET /v1/mcp/tools` uses the calling key's toolset allowlist and current
+publication authority. Each tool includes its pinned unit price, `priced`,
+`free` or `unpriced` state, whether its accounting owners enforce a budget, and
+effective server and key rate/concurrency limits. Key limits are the tighter
+of the registered server policy and key policy. The response also states the
+request/result byte bounds and call timeout used by execution.
+
+`POST /v1/mcp/tools/simulate` accepts `toolset_id`, `name` and `arguments` in the
+same form as the JSON call endpoint, without requiring a `call_id`. It checks
+current authority, the published tool definition, argument schema and whether
+an enforced budget requires a missing price. It returns `configuration_valid`,
+the same tool capability record and the checks that remain for execution.
+Simulation does not contact an upstream, run an evaluator, reserve accounting,
+consume a rate allowance or dispatch a tool. Live catalog, credentials,
+guardrails, available budget and concurrent admission are checked by an actual
+call, so a valid simulation is not a reservation or a guarantee of admission.
+
+## Inspecting execution and stopping new calls
+
+The console's **Tool calls** page at `/tool-calls` shows project-filtered
+attempts, outcomes, prices and settlement. Observed cost and charge stay
+separate from unresolved reserved amounts. Expand an attempt to inspect its
+dispatch identity, pinned revisions, content digests and bounded guardrail
+decisions. Arguments, result content and credentials are not stored in these
+records or returned to this page. Its management API is
+`GET /api/v1/mcp-tool-calls`, with optional `project_id`, `api_key_id` and
+`toolset_id` filters; access remains constrained to authorized projects.
+
+Disable or retire the registered server, retire the published toolset, revoke
+the calling key or remove its toolset allowlist entry to stop new calls at the
+shared authority freshness boundary. Existing attempt records and settlement
+history remain readable to authorized project operators. A pending unknown
+outcome keeps its reservation until the existing resolution operation records
+evidence, even after execution is disabled.
+
 ## Calling published tools over Streamable HTTP
 
 Callers with the `tools` scope and a toolset allowlist can also reach the same

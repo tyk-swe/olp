@@ -419,7 +419,7 @@ func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, aut
 	}
 	switch message.method {
 	case "ping":
-		resolved, failure := s.pinnedToolset(current)
+		resolved, _, _, failure := s.pinnedToolset(current)
 		if failure != nil {
 			s.writeSessionFailure(w, r, current, message.id, failure)
 			return
@@ -465,23 +465,23 @@ func (s *Server) writeSessionFailure(w http.ResponseWriter, r *http.Request, cur
 	writeRPCFailure(w, id, failureRPC(http.StatusOK, rpcServerError, failure))
 }
 
-func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *apiError) {
-	_, snapshot, failure := s.snapshot()
+func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *runtime.Release, *routing.Snapshot, *apiError) {
+	release, snapshot, failure := s.snapshot()
 	if failure != nil {
-		return resolvedToolset{}, failure
+		return resolvedToolset{}, nil, nil, failure
 	}
 	pinned := slices.ContainsFunc(snapshot.AgentPublications, func(revision agentcontract.Revision) bool {
 		return revision.ID == current.toolsetRevisionID && revision.PublicationID == current.toolsetID &&
 			revision.ProjectID == current.binding.projectID && revision.Kind == "toolset"
 	})
 	if !pinned {
-		return resolvedToolset{}, errToolsetNotFound
+		return resolvedToolset{}, nil, nil, errToolsetNotFound
 	}
 	resolution, ok := snapshot.MCPToolset(current.toolsetRevisionID)
 	if !ok {
-		return resolvedToolset{}, errToolsetNotFound
+		return resolvedToolset{}, nil, nil, errToolsetNotFound
 	}
-	return toolsetFromResolution(current.toolsetID, current.toolsetRevisionID, resolution), nil
+	return toolsetFromResolution(current.toolsetID, current.toolsetRevisionID, resolution), release, snapshot, nil
 }
 
 type wireTool struct {
@@ -513,7 +513,7 @@ func (s *Server) sessionListTools(w http.ResponseWriter, r *http.Request, author
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "The cursor was not issued by this endpoint.", data: rpcErrorData{Code: "invalid_cursor"}})
 		return
 	}
-	resolved, failure := s.pinnedToolset(current)
+	resolved, _, _, failure := s.pinnedToolset(current)
 	if failure != nil {
 		s.writeSessionFailure(w, r, current, message.id, failure)
 		return
@@ -574,7 +574,7 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: failure.msg, data: rpcErrorData{Code: failure.code}})
 		return
 	}
-	resolved, failure := s.pinnedToolset(current)
+	resolved, release, snapshot, failure := s.pinnedToolset(current)
 	if failure != nil {
 		s.writeSessionFailure(w, r, current, message.id, failure)
 		return
@@ -616,7 +616,7 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errLedger))
 		return
 	}
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: current.releaseID, callID: *params.callID()})
+	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: current.releaseID, callID: *params.callID(), release: release, snapshot: snapshot})
 	if outcome.failure == errPermissionDenied && s.driftScoped(authority, resolved) {
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
 		return
@@ -627,6 +627,12 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 	}
 	s.recordCallCertification(r.Context(), current, tool, certification, outcome)
 	switch {
+	case outcome.blocked != nil:
+		refused := failureRPC(http.StatusOK, rpcServerError, outcome.blocked)
+		refused.data.Status = string(StatusGuardrailBlocked)
+		refused.data.AttemptID = outcome.reservation.AttemptID
+		refused.data.DispatchID = outcome.reservation.DispatchID
+		writeRPCFailure(w, message.id, refused)
 	case outcome.failure != nil:
 		refused := failureRPC(http.StatusOK, rpcServerError, outcome.failure)
 		if outcome.retryAfter > 0 {
@@ -656,6 +662,14 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 func (s *Server) writeSessionRepeat(w http.ResponseWriter, id json.RawMessage, resolved resolvedToolset, outcome execution) {
 	repeat := outcome.repeat
 	kind := repeatOutcome(repeat, outcome.repeatRetained)
+	if kind == repeatGuardrailBlocked {
+		refused := failureRPC(http.StatusOK, rpcServerError, errGuardrailBlocked)
+		refused.data.Status = string(StatusGuardrailBlocked)
+		refused.data.AttemptID = repeat.AttemptID
+		refused.data.DispatchID = repeat.DispatchID
+		writeRPCFailure(w, id, refused)
+		return
+	}
 	if kind == repeatRetainedResult {
 		content := outcome.repeatResult.Content
 		if content == nil {

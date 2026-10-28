@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -422,6 +423,24 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	s.settleAdmission(context.WithoutCancel(r.Context()), x)
 	s.finish(x, out, status)
 }
+func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority access.Authority, release *runtime.Release, engine *guardrails.Engine, requestID, phase string, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
+	if s == nil || release == nil || release.Snapshot == nil {
+		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
+	}
+	parent := &call{
+		request:       request{id: requestID, minted: true, startedAt: s.now(), release: release},
+		actor:         "api_key",
+		keyID:         authority.ID,
+		budgetGroupID: authority.BudgetGroupID,
+		authority:     authority,
+		attribution:   authority.Attribution,
+		endUserDigest: authority.EndUserDigest,
+		family:        wire.Chat,
+	}
+	evaluation := guardrails.Evaluation{RequestID: parent.request.accountingID(), Phase: phase, Segments: segments}
+	return engine.WithEvaluator(s.GuardrailEvaluator).Evaluate(context.WithValue(ctx, guardrailCallerKey{}, parent), evaluation, masks)
+}
+
 func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 	if s == nil || s.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")

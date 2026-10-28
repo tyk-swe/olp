@@ -28,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
@@ -392,6 +393,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}
 			toolServer := &mcp.Server{Grants: &mcpgrants.Store{Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Log: log, Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
+			}, Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
+				return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
 			}}
 			if limiter != nil {
 				toolServer.Limiter = limiter
