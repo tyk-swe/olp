@@ -210,11 +210,13 @@ guardrail argument/result execution.
   dispatch state. Repeated call IDs must not repeat effects.
   Local fixture coverage includes the official MCP Go SDK v1.8.0 reference
   round trip and project-scoped, content-free execution history.
-- [ ] **RM7.2 — OAuth and per-user grants:** implement server/client/audience/
+- [x] **RM7.2. OAuth and per-user grants:** implemented server/client/audience/
   scope/project/user binding, single-flight refresh, expiry, revocation and
-  isolated credentials. Missing grants must refuse execution. Include the
-  inventory's `mcp_security`, `mcp_end_user_permission`, `mcp_jwt_signer` and
-  `agent_365` hooks only after server authority and caller identity are available.
+  isolated credentials. Missing grants refuse execution. The inventory's
+  `mcp_security`, `mcp_end_user_permission`, `mcp_jwt_signer` and `agent_365`
+  hooks run only after live server authority and verified caller identity are
+  available. Entra OBO is fixture-qualified; live tenant qualification is
+  separate.
 - [x] **RM7.3. Legacy HTTP+SSE:** explicitly register and consume the
   `2024-11-05` transport while preserving modern sessions' selected transport.
   The pinned reference SDK fixture verifies registration, configuration,

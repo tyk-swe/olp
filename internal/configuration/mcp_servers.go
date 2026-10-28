@@ -70,7 +70,8 @@ func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog, curre
 		prices[name] = price
 	}
 	return &mcpservers.Definition{
-		DelegationKeyID: signingKeyID, Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
+		EntraClientSecretID: entraConfigurationSecret(e, current),
+		DelegationKeyID:     signingKeyID, Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
 		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -216,6 +217,9 @@ func (s *Server) planMCPServers(ctx context.Context, q access.Queryer, doc *Docu
 		current, err := findMCPServer(ctx, q, e)
 		if err != nil {
 			return err
+		}
+		if e.OAuth != nil && e.OAuth.EntraOBO != nil && (current == nil || current.EntraClientSecretID == nil) {
+			result.conflict("mcp_server", e.Name, "Install this server's Entra client secret locally before applying its metadata.")
 		}
 		if e.Delegation != nil && (current == nil || current.DelegationKeyID == nil) {
 			result.conflict("mcp_server", e.Name, "Install this server's delegation signing key locally before applying its metadata.")
@@ -381,6 +385,11 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 			return err
 		}
 		changed = true
+		if current != nil && current.EntraClientSecretID != nil && next.EntraClientSecretID == nil {
+			if _, keyErr := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.EntraClientSecretID, secrets.MCPEntraClient); keyErr != nil {
+				return keyErr
+			}
+		}
 		if current != nil && current.DelegationKeyID != nil && next.DelegationKeyID == nil {
 			if _, keyErr := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.DelegationKeyID, secrets.MCPDelegationSigning); keyErr != nil {
 				return keyErr
@@ -397,4 +406,11 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 		return err
 	}
 	return nil
+}
+
+func entraConfigurationSecret(e MCPServerEntry, current *mcpservers.Definition) *string {
+	if current == nil || e.OAuth == nil || e.OAuth.EntraOBO == nil {
+		return nil
+	}
+	return current.EntraClientSecretID
 }

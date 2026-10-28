@@ -849,3 +849,12 @@ define new dialects. Custom guardrails run as confined WASM or signed webhooks,
 not arbitrary in-process code. Durable request history excludes prompts and
 responses; explicit external capture and sealed response caching have their own
 storage contracts. Operator-authored prompt templates remain planned.
+
+Entra on-behalf-of authorization is qualified against a local Entra-shaped
+fixture. Both JSON and MCP calls require a live, verified delegated user and
+matching middle-tier audience; application tokens, generic workload identity,
+wrong issuers and cross-user sessions refuse before exchange or dispatch.
+Sealed grants reuse the existing refresh and revocation owner. Redirect refusal
+and exclusion of assertions and credentials from operator records are covered.
+This does not claim live Entra tenant qualification. See
+[the configuration contract](mcp-servers.md#entra-on-behalf-of-grants).

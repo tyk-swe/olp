@@ -11,6 +11,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const oauthTimeout = 20 * time.Second
@@ -22,7 +24,7 @@ type oauthClient struct {
 	client *http.Client
 }
 
-func (s *Store) oauthClient(bound Binding, redirect string) (oauthClient, error) {
+func (s *Store) oauthClient(ctx context.Context, bound Binding, redirect string) (oauthClient, error) {
 	if s.Egress == nil {
 		return oauthClient{}, errOAuth
 	}
@@ -34,7 +36,11 @@ func (s *Store) oauthClient(bound Binding, redirect string) (oauthClient, error)
 			return oauthClient{}, errOAuth
 		}
 	}
-	return oauthClient{config: oauth2.Config{ClientID: bound.OAuth.ClientID, RedirectURL: redirect, Scopes: bound.OAuth.Scopes, Endpoint: oauth2.Endpoint{AuthURL: bound.OAuth.AuthorizationEndpoint, TokenURL: bound.OAuth.TokenEndpoint, DeviceAuthURL: bound.OAuth.DeviceAuthorizationEndpoint, AuthStyle: oauth2.AuthStyleInParams}}, client: s.Egress.Client(oauthTimeout)}, nil
+	secret, secretErr := s.entraClientSecret(ctx, bound)
+	if secretErr != nil {
+		return oauthClient{}, secretErr
+	}
+	return oauthClient{config: oauth2.Config{ClientSecret: secret, ClientID: bound.OAuth.ClientID, RedirectURL: redirect, Scopes: bound.OAuth.Scopes, Endpoint: oauth2.Endpoint{AuthURL: bound.OAuth.AuthorizationEndpoint, TokenURL: bound.OAuth.TokenEndpoint, DeviceAuthURL: bound.OAuth.DeviceAuthorizationEndpoint, AuthStyle: oauth2.AuthStyleInParams}}, client: s.Egress.Client(oauthTimeout)}, nil
 }
 
 func (o oauthClient) context(ctx context.Context) context.Context {
@@ -74,4 +80,24 @@ func oauthProblem(err error) error {
 		return access.Fail(422, "grant_authorization_failed", "Personal authorization failed. Start a new enrollment.")
 	}
 	return grantProblem(err)
+}
+
+func (s *Store) entraClientSecret(ctx context.Context, bound Binding) (string, error) {
+	if bound.OAuth.EntraOBO == nil {
+		return "", nil
+	}
+	var id string
+	var config routing.MCPOAuth
+	if err := s.Pool.QueryRow(ctx, "SELECT s.entra_client_secret_id::text,v.oauth FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.id=$1 AND s.project_id=$2 AND s.enabled AND s.retired_at IS NULL", bound.ServerID, bound.ProjectID).Scan(&id, &config); err != nil {
+		return "", ErrRequired
+	}
+	if binding(bound.ServerID, bound.ProjectID, bound.Endpoint, config, bound.Identity).Digest() != bound.Digest() {
+		return "", ErrRequired
+	}
+	material, err := s.Keys.Read(ctx, s.Pool, s.Installation, id, secrets.MCPEntraClient)
+	if err != nil {
+		return "", ErrRequired
+	}
+	defer clear(material)
+	return string(material), nil
 }

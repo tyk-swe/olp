@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 var ErrUnpricedToolCall = errors.New("tool call has no price for an enforced budget ceiling")
@@ -195,16 +196,16 @@ func (s *Server) finishLeases(ctx context.Context, leases []*limits.Lease, dispa
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/mcp/servers/{server_id}/grant-enrollments", s.startGrantEnrollment)
-	mux.HandleFunc("GET /v1/mcp/tools", s.listTools)
-	mux.HandleFunc("POST /v1/mcp/tools/simulate", s.simulateTool)
-	mux.HandleFunc("POST /v1/mcp/tools/call", s.callTool)
-	mux.HandleFunc("GET /mcp/sse", s.serveLegacyGET)
-	mux.HandleFunc("POST /mcp/messages", s.serveLegacyPOST)
+	mux.HandleFunc("POST /v1/mcp/servers/{server_id}/grant-enrollments", s.withAssertion(s.startGrantEnrollment))
+	mux.HandleFunc("GET /v1/mcp/tools", s.withAssertion(s.listTools))
+	mux.HandleFunc("POST /v1/mcp/tools/simulate", s.withAssertion(s.simulateTool))
+	mux.HandleFunc("POST /v1/mcp/tools/call", s.withAssertion(s.callTool))
+	mux.HandleFunc("GET /mcp/sse", s.withAssertion(s.serveLegacyGET))
+	mux.HandleFunc("POST /mcp/messages", s.withAssertion(s.serveLegacyPOST))
 	for _, path := range []string{"/mcp", "/mcp/"} {
-		mux.HandleFunc("POST "+path, s.serveStreamableHTTP)
-		mux.HandleFunc("GET "+path, s.serveStreamableGET)
-		mux.HandleFunc("DELETE "+path, s.serveStreamableDELETE)
+		mux.HandleFunc("POST "+path, s.withAssertion(s.serveStreamableHTTP))
+		mux.HandleFunc("GET "+path, s.withAssertion(s.serveStreamableGET))
+		mux.HandleFunc("DELETE "+path, s.withAssertion(s.serveStreamableDELETE))
 	}
 }
 
@@ -641,5 +642,12 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 			"content": outcome.result.Content, "structured_content": outcome.result.StructuredContent, "is_error": outcome.result.IsError,
 			"attempt_id": outcome.reservation.AttemptID, "dispatch_id": outcome.reservation.DispatchID,
 		})
+	}
+}
+
+func (s *Server) withAssertion(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
+		handler(w, r.WithContext(workload.WithAssertion(r.Context(), raw)))
 	}
 }

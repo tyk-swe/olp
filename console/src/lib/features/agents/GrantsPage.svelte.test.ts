@@ -437,3 +437,41 @@ it('ignores a late device result after another enrollment is adopted', async () 
   expect(host.textContent).not.toContain('first-code');
   expect(button(host, 'Use device authorization').disabled).toBe(false);
 });
+
+it('saves Entra trust and clears a client secret without replaying it on later saves', async () => {
+  const saved: api.MCPServer = {
+    ...a,
+    oauth: {
+      client_id: 'middle-tier',
+      audience: 'api://tools',
+      scopes: ['api://tools/read'],
+      token_endpoint: 'https://identity.example.test/token',
+      entra_obo: { issuer: 'https://identity.example.test' }
+    }
+  };
+  vi.mocked(api.saveServer).mockResolvedValue(saved);
+  const { host } = page();
+  await choose(host, a);
+  fill(host, 'Trusted Entra issuer', 'https://identity.example.test');
+  fill(host, 'Middle-tier client secret', 'fixture-client-secret');
+  fill(host, 'Client ID', 'middle-tier');
+  fill(host, 'Audience', 'api://tools');
+  fill(host, 'Scopes', 'api://tools/read');
+  fill(host, 'Token endpoint', 'https://identity.example.test/token');
+  button(host, 'Save authorization settings').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(textInput(host, 'Middle-tier client secret').value).toBe('');
+    expect(button(host, 'Save authorization settings').disabled).toBe(false);
+  });
+  expect(vi.mocked(api.saveServer).mock.calls[0]?.[1]).toMatchObject({
+    entra_client_secret: 'fixture-client-secret',
+    oauth: { entra_obo: { issuer: 'https://identity.example.test' } }
+  });
+  expect(button(host, 'Start key enrollment').disabled).toBe(true);
+  button(host, 'Save authorization settings').click();
+  await vi.waitFor(() => expect(api.saveServer).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(api.saveServer).mock.calls[1]?.[1]).not.toHaveProperty(
+    'entra_client_secret'
+  );
+});

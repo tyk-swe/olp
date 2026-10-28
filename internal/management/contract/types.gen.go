@@ -3369,6 +3369,7 @@ func (e MCPGrantIdentityKind) Valid() bool {
 
 // Defines values for MCPIdentityDecisionHook.
 const (
+	Agent365             MCPIdentityDecisionHook = "agent_365"
 	McpEndUserPermission MCPIdentityDecisionHook = "mcp_end_user_permission"
 	McpJwtSigner         MCPIdentityDecisionHook = "mcp_jwt_signer"
 	McpSecurity          MCPIdentityDecisionHook = "mcp_security"
@@ -3377,6 +3378,8 @@ const (
 // Valid indicates whether the value is a known member of the MCPIdentityDecisionHook enum.
 func (e MCPIdentityDecisionHook) Valid() bool {
 	switch e {
+	case Agent365:
+		return true
 	case McpEndUserPermission:
 		return true
 	case McpJwtSigner:
@@ -8557,6 +8560,9 @@ type CreateMCPServerRequest struct {
 	Enabled              bool                      `json:"enabled"`
 	Endpoint             *string                   `json:"endpoint,omitempty"`
 
+	// EntraClientSecret Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports.
+	EntraClientSecret *string `json:"entra_client_secret,omitempty"`
+
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
 	Name           string `json:"name"`
@@ -9633,6 +9639,12 @@ type MCPDelegationConfiguration struct {
 	Issuer   string `json:"issuer"`
 }
 
+// MCPEntraOBO defines model for MCPEntraOBO.
+type MCPEntraOBO struct {
+	// Issuer Exact registered workload issuer trusted for delegated user assertions.
+	Issuer string `json:"issuer"`
+}
+
 // MCPExecutableFile defines model for MCPExecutableFile.
 type MCPExecutableFile struct {
 	Digest    string `json:"digest"`
@@ -9746,12 +9758,13 @@ type MCPIdentityDecisionOutcome string
 
 // MCPOAuthConfiguration Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
 type MCPOAuthConfiguration struct {
-	Audience                    string   `json:"audience"`
-	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
-	ClientId                    string   `json:"client_id"`
-	DeviceAuthorizationEndpoint *string  `json:"device_authorization_endpoint,omitempty"`
-	Scopes                      []string `json:"scopes"`
-	TokenEndpoint               string   `json:"token_endpoint"`
+	Audience                    string       `json:"audience"`
+	AuthorizationEndpoint       *string      `json:"authorization_endpoint,omitempty"`
+	ClientId                    string       `json:"client_id"`
+	DeviceAuthorizationEndpoint *string      `json:"device_authorization_endpoint,omitempty"`
+	EntraObo                    *MCPEntraOBO `json:"entra_obo,omitempty"`
+	Scopes                      []string     `json:"scopes"`
+	TokenEndpoint               string       `json:"token_endpoint"`
 }
 
 // MCPRegisteredCatalog defines model for MCPRegisteredCatalog.
@@ -14406,6 +14419,9 @@ type UpdateMCPServerRequest struct {
 	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
 	Enabled              bool                      `json:"enabled"`
 	Endpoint             *string                   `json:"endpoint,omitempty"`
+
+	// EntraClientSecret Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports.
+	EntraClientSecret *string `json:"entra_client_secret,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`

@@ -22939,6 +22939,13 @@
             "maxLength": 8192,
             "writeOnly": true,
             "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
           }
         },
         "required": [
@@ -23029,6 +23036,13 @@
             "maxLength": 8192,
             "writeOnly": true,
             "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
           }
         },
         "required": [
@@ -23490,7 +23504,7 @@
           },
           "identity_decisions": {
             "type": "array",
-            "maxItems": 3,
+            "maxItems": 4,
             "items": {
               "$ref": "#/components/schemas/MCPIdentityDecision"
             }
@@ -27849,7 +27863,8 @@
           "authorization_endpoint": {
             "type": "string",
             "format": "uri",
-            "maxLength": 2048
+            "maxLength": 2048,
+            "minLength": 0
           },
           "token_endpoint": {
             "type": "string",
@@ -27860,13 +27875,15 @@
             "type": "string",
             "format": "uri",
             "maxLength": 2048
+          },
+          "entra_obo": {
+            "$ref": "#/components/schemas/MCPEntraOBO"
           }
         },
         "required": [
           "client_id",
           "audience",
           "scopes",
-          "authorization_endpoint",
           "token_endpoint"
         ],
         "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
@@ -28302,7 +28319,8 @@
             "enum": [
               "mcp_security",
               "mcp_end_user_permission",
-              "mcp_jwt_signer"
+              "mcp_jwt_signer",
+              "agent_365"
             ]
           },
           "outcome": {
@@ -28319,6 +28337,20 @@
           "outcome"
         ],
         "additionalProperties": false
+      },
+      "MCPEntraOBO": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issuer"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Exact registered workload issuer trusted for delegated user assertions."
+          }
+        }
       }
     },
     "securitySchemes": {

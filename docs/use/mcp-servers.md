@@ -306,6 +306,49 @@ The shared consumer path first checks live publication authority and the caller'
 
 Tool calls show bounded decisions for registered-server security, personal-grant permission and delegated signing. They do not store signed tokens or their claims. Portable configuration includes issuer and audience but excludes signing material. Install the signing key locally before importing delegation metadata to another installation. Revoking the personal grant, revoking caller authority or disabling the registered server prevents new execution. An empty delegated issuer in the console disables signing, while existing execution history remains readable.
 
+## Entra on-behalf-of grants
+
+The Entra mode uses a verified user request to obtain the registered server's
+access token. Configure the tenant issuer as a workload issuer, including its
+JWKS, accepted middle-tier audience, project mapping and end-user claim. Then
+set `oauth.entra_obo.issuer` to that exact issuer, `oauth.client_id` to the
+middle-tier client, and `oauth.audience` to the downstream resource. Every
+configured scope must start with that resource audience and a slash, such as
+`api://<resource>/.default`. Set the declared token endpoint and supply the
+write-only `entra_client_secret` once through the management API or Personal
+tool grants console. The installation seals this dedicated credential
+separately from grant tokens. Later updates can omit it to retain the local
+credential. Configuration export includes the trust profile but excludes the
+client secret; import requires it to be installed locally.
+
+The incoming assertion must pass the current workload issuer's signature,
+expiry, mapping and authority checks. It must have the middle-tier audience and
+nonempty delegated `scp` claims. Tokens marked `idtyp: app`, generic workload
+tokens without delegated scopes, API keys and end-user header labels cannot
+start the exchange. Entra mode and local delegated JWT signing are mutually
+exclusive because both supply the downstream Authorization header.
+
+The first eligible request exchanges its original, transient assertion at the
+declared token endpoint using the standard JWT bearer on-behalf-of parameters.
+Redirects are refused. The token and optional refresh token are sealed in the
+existing per-user grant store and bind the server, project, endpoint, client,
+resource, scopes and verified individual. Concurrent refresh uses the existing
+grant lock and attempt fence. Without a refresh token, renewal requires a new
+verified user request under the same lock. Revoked grants stay revoked and
+never fall back to a service credential. Browser and device enrollment do not
+apply to Entra mode.
+
+The assertion is carried only in the current request and is never stored with
+sessions, grants, attempts or configuration. Operator views show only bounded
+`agent_365` decisions and grant standing. JSON and MCP consumers share these
+checks. The local Entra-shaped fixture covers delegated versus application
+identity, audience and issuer refusal, user isolation, refresh, revocation,
+redirect refusal and secret exclusion. It is not live tenant qualification.
+
+Protocol references, checked 2026-10-28, are the Microsoft
+[on-behalf-of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow)
+and [access token claims](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference).
+
 ## Experimental stdio executables
 
 Stdio registration is experimental and uses the existing unconfined executable
