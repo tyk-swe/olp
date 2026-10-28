@@ -7,9 +7,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
+
+	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/operations/ocr"
 )
 
 func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
@@ -41,6 +49,78 @@ func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
 				t.Fatalf("probe: %+v %v calls=%d", models, err, calls)
 			}
 		})
+	}
+}
+
+func TestNativeDuplexProfileCertifiesOverItsWebSocket(t *testing.T) {
+	dials := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dials++
+		if r.URL.Path != "/v1/realtime" || r.URL.Query().Get("model") != "grok-voice" {
+			t.Errorf("unexpected duplex dial %s", r.URL)
+		}
+		if !strings.Contains(r.Header.Get("Authorization"), "secret") {
+			t.Errorf("duplex dial credential: %v", r.Header)
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "xai-realtime", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1"), Options: Options{VendorID: new("xai")}}
+	cfg.Normalize()
+	tuple := CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}
+	if err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("secret"), "grok-voice", tuple, 4096); err != nil {
+		t.Fatalf("native duplex certification: %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("duplex dials = %d, want one native transport probe", dials)
+	}
+}
+
+func TestDefaultProbeTupleSelectsNativeRealtimeForDuplexProfiles(t *testing.T) {
+	want := CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}
+	for name, cfg := range map[string]Configuration{
+		"xai":     {Kind: KindOpenAICompatible, ProfileID: "xai-realtime", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new("https://api.x.ai/v1"), Options: Options{VendorID: new("xai")}},
+		"vertex":  {Kind: KindVertex, ProfileID: "vertex-realtime", ProfileRevision: "1", AuthMode: "service_account", CloudProject: new("example-project"), CloudRegion: new("us-central1"), Options: Options{VendorID: new("google-vertex")}},
+		"bedrock": {Kind: KindBedrock, ProfileID: "bedrock-realtime", ProfileRevision: "1", AuthMode: "aws_sigv4", Endpoint: new("https://bedrock-runtime.us-east-1.amazonaws.com"), CloudRegion: new("us-east-1"), Options: Options{VendorID: new("aws-bedrock")}},
+	} {
+		cfg.Normalize()
+		if got := defaultProbeTuple(&cfg); got != want {
+			t.Fatalf("%s default probe tuple = %+v, want %+v", name, got, want)
+		}
+	}
+}
+
+func TestBraveProfileProbesOverGetQuery(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.Path != "/res/v1/web/search" {
+			t.Errorf("unexpected probe %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("count") != "1" || r.URL.Query().Get("q") == "" {
+			t.Errorf("probe query: %v", r.URL.Query())
+		}
+		if r.Header.Get("X-Subscription-Token") != "secret" {
+			t.Errorf("probe credential: %v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"type":"search","query":{"original":"probe"},"web":{"type":"search","results":[{"title":"t","url":"https://a","description":"d"}],"family_friendly":true}}`)
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "brave-search", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL), Options: Options{VendorID: new("brave")}, ProbeModels: []string{"brave-model"}}
+	cfg.Normalize()
+	if tuple := defaultProbeTuple(&cfg); tuple != (CapabilityInput{Operation: "search", Surface: "openai", Mode: ModeUnary}) {
+		t.Fatalf("probe tuple = %+v", tuple)
+	}
+	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
+	if err != nil || len(models) != 1 || models[0].Name != "brave-model" || calls != 1 {
+		t.Fatalf("probe: %+v %v calls=%d", models, err, calls)
 	}
 }
 
@@ -84,5 +164,133 @@ func TestDiscoveredFactsNeverInvalidateConfiguration(t *testing.T) {
 	}
 	if err := full.Validate(&egress.Policy{}); err != nil {
 		t.Fatalf("configuration invalid after discovery: %v", err)
+	}
+}
+
+func TestAzureOperationProbePolls(t *testing.T) {
+	submits, polls := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Ocp-Apim-Subscription-Key") != "secret" {
+			t.Errorf("credential header on %s %s: %v", r.Method, r.URL.Path, r.Header)
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/documentintelligence/documentModels/prebuilt-layout:analyze":
+			submits++
+			if r.URL.Query().Get("api-version") != ocr.AzureAPIVersion || r.URL.Query().Get("outputContentFormat") != "markdown" {
+				t.Errorf("submit query: %s", r.URL.RawQuery)
+			}
+			w.Header().Set("Operation-Location", "http://"+r.Host+"/documentintelligence/documentModels/prebuilt-layout/analyzeResults/result-1?api-version=2024-11-30")
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && r.URL.Path == "/documentintelligence/documentModels/prebuilt-layout/analyzeResults/result-1":
+			polls++
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"probe","pages":[{"pageNumber":1}]}}`)
+		default:
+			t.Errorf("unexpected probe %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "azure-document-intelligence-ocr", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL), Options: Options{VendorID: new("azure-document-intelligence")}, ProbeModels: []string{"prebuilt-layout"}}
+	cfg.Normalize()
+	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
+	if err != nil || len(models) != 1 || models[0].Name != "prebuilt-layout" || submits != 1 || polls != 1 {
+		t.Fatalf("probe: %+v %v submits=%d polls=%d", models, err, submits, polls)
+	}
+}
+
+func TestVertexDuplexProbeRequiresBoundModelAcknowledgement(t *testing.T) {
+	transport := connectors.Config{Kind: "vertex_ai", VendorID: "google-vertex", AuthMode: "service_account", ProfileID: "vertex-realtime", ProfileRevision: connectors.ProfileRevision, CloudProject: "fixture-project", CloudRegion: "us-central1"}
+	transport.Endpoint = connectors.DefaultProfileEndpoint(transport.Kind, transport.ProfileID, transport.CloudRegion, transport.CloudProject)
+	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: "fixture-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := transport.DuplexBoundModel("fixture-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, reply string
+		accepted    bool
+	}{
+		{"accepted", `{"setupComplete":{}}`, true},
+		{"rejected", `{"error":{"code":404,"message":"unknown model"}}`, false},
+		{"missing acknowledgement", `{"serverContent":{"turnComplete":true}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer conn.CloseNow()
+				_, raw, err := conn.Read(r.Context())
+				if err != nil {
+					return
+				}
+				var setup struct {
+					Setup struct {
+						Model string `json:"model"`
+					} `json:"setup"`
+				}
+				if err := json.Unmarshal(raw, &setup); err != nil {
+					t.Error(err)
+				}
+				models <- setup.Setup.Model
+				_ = conn.Write(r.Context(), websocket.MessageText, []byte(tc.reply))
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			probeErr := probeNativeDuplexSetup(ctx, conn, template, transport, "fixture-model")
+			if (probeErr == nil) != tc.accepted {
+				t.Fatalf("certification accepted=%v err=%v", tc.accepted, probeErr)
+			}
+			select {
+			case model := <-models:
+				if model != bound {
+					t.Fatalf("setup model=%q want bound model=%q", model, bound)
+				}
+			default:
+				t.Fatal("certification never submitted model setup")
+			}
+		})
+	}
+}
+
+func TestWebRTCProbeHangsUpWhenControlDialFails(t *testing.T) {
+	var hangups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/realtime/calls":
+			w.Header().Set("Location", "/v1/realtime/calls/rtc_probe")
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, webrtcProbeSDP)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/realtime":
+			http.Error(w, "control refused", http.StatusForbidden)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/realtime/calls/rtc_probe/hangup":
+			hangups.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected probe %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1"), ProfileID: "openai-responses", ProfileRevision: connectors.ProfileRevision, Options: Options{VendorID: new("openai")}}
+	cfg.Normalize()
+	err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("secret"), "fixture-model", CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "webrtc"}, 4096)
+	if err == nil || hangups.Load() != 1 {
+		t.Fatalf("control failure left the probe call open: hangups=%d err=%v", hangups.Load(), err)
 	}
 }

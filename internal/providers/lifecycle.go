@@ -213,12 +213,13 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		}
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.
-		if input.Configuration.ProfileID != "" && !probeable(&input.Configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: ModeUnary}) {
+		mode := ModeUnary
+		if input.Configuration.ProfileID != "" && !probeable(&input.Configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
 			if tuple := defaultProbeTuple(&input.Configuration); probeable(&input.Configuration, tuple) {
-				operation, surface = tuple.Operation, tuple.Surface
+				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
 			}
 		}
-		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: ModeUnary, Source: "declared"}}
+		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: mode, Source: "declared"}}
 		if operation == "generation" {
 			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})
 		}

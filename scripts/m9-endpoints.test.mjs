@@ -21,7 +21,7 @@ test('M9 endpoint ledger pins the installed SDK contract and uniquely identifies
     assert.ok(row.path.startsWith('/'));
     assert.ok(row.reference_revision);
     assert.ok(row.operation && row.profile_revision && row.dialect_revision);
-    assert.ok(['http', 'sse'].includes(row.transport));
+    assert.ok(['http', 'sse', 'websocket', 'bedrock-bidi'].includes(row.transport));
     if (row.status === 'implemented') {
       assert.ok(row.evidence.length > 0);
       assert.ok(row.supported_fields.length > 0);

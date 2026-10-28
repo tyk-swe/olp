@@ -2,44 +2,69 @@ package contract_test
 
 import (
 	"encoding/json"
-	"reflect"
+	"os"
+	"slices"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func roundTrip[T any](t *testing.T, raw string) T {
+func openAPIEnum(t *testing.T, schema string) []string {
 	t.Helper()
-	var value T
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := json.Marshal(value)
+	raw, err := os.ReadFile("../../../openapi/management.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var before, after any
-	json.Unmarshal([]byte(raw), &before)
-	json.Unmarshal(encoded, &after)
-	if !reflect.DeepEqual(before, after) {
-		t.Fatalf("transport round trip changed JSON:\n%s\n%s", raw, encoded)
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"schemas"`
+		} `json:"components"`
 	}
-	return value
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	values := document.Components.Schemas[schema].Enum
+	if len(values) == 0 {
+		t.Fatalf("OpenAPI schema %s declares no enum", schema)
+	}
+	return values
 }
-
-// A oneOf transport carries raw JSON until the owning domain validates it.
 
 // Generated structs express fields, but encoding/json permits unknown fields
 // by default. Management handlers must explicitly enforce additionalProperties:false.
-
-func TestRequestOriginsMatchUsageEvents(t *testing.T) {
-	for _, origin := range []string{usage.OriginCaller, usage.OriginShadow, usage.OriginClassifier, usage.OriginCacheEmbedding, usage.OriginProbe, usage.OriginPlayground, usage.OriginBatchSettlement} {
-		t.Run(origin, func(t *testing.T) {
-			value := roundTrip[contract.RequestOrigin](t, `"`+origin+`"`)
-			if !value.Valid() {
-				t.Fatalf("usage origin %q is missing from the management contract", origin)
-			}
-		})
+func TestRequestOriginsAgreeAcrossUsageContractAndOpenAPI(t *testing.T) {
+	usageOrigins := []string{
+		usage.OriginCaller,
+		usage.OriginShadow,
+		usage.OriginClassifier,
+		usage.OriginCacheEmbedding,
+		usage.OriginProbe,
+		usage.OriginPlayground,
+		usage.OriginBatchSettlement,
+		usage.OriginRetainedSettlement,
+	}
+	declared := openAPIEnum(t, "RequestOrigin")
+	if !slices.Equal(slices.Sorted(slices.Values(usageOrigins)), slices.Sorted(slices.Values(declared))) {
+		t.Fatalf("usage origins %v disagree with the OpenAPI RequestOrigin enum %v", usageOrigins, declared)
+	}
+	for _, origin := range declared {
+		value := contract.RequestOrigin(origin)
+		if !value.Valid() {
+			t.Fatalf("OpenAPI origin %q is missing from the generated contract", origin)
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded contract.RequestOrigin
+		if err := json.Unmarshal(encoded, &decoded); err != nil || decoded != value {
+			t.Fatalf("origin %q does not round trip through JSON: %q, %v", origin, decoded, err)
+		}
+	}
+	if contract.RequestOrigin("not_an_origin").Valid() {
+		t.Fatal("an unknown origin reports valid")
 	}
 }

@@ -235,6 +235,9 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 // PersistEventTx records accounting in the caller's transaction, allowing a
 // resource's reconciliation marker and its usage to commit atomically.
 func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (Persisted, error) {
+	if _, present := debitDispatchID(ev); present {
+		return PersistDebitEventTx(ctx, tx, ev, payload)
+	}
 	return persistEventTx(ctx, tx, ev, payload, nil)
 }
 

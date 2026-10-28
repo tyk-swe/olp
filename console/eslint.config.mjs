@@ -17,6 +17,8 @@ export default [
   {
     ignores: [
       '.svelte-kit/**',
+      '.stryker-tmp/**',
+      'reports/**',
       'build/**',
       'node_modules/**',
       'playwright-report/**',

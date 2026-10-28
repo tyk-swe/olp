@@ -1,0 +1,26 @@
+{
+  "document": {
+    "mimeType": "application/pdf",
+    "text": "Hello page one.\nSecond page text.",
+    "pages": [
+      {
+        "pageNumber": 1,
+        "dimension": { "width": 612, "height": 792, "unit": "point" },
+        "layout": {
+          "textAnchor": {
+            "textSegments": [{ "startIndex": "0", "endIndex": "15" }]
+          },
+          "orientation": "PAGE_UP"
+        }
+      },
+      {
+        "pageNumber": 2,
+        "layout": {
+          "textAnchor": {
+            "textSegments": [{ "startIndex": "16", "endIndex": "33" }]
+          }
+        }
+      }
+    ]
+  }
+}

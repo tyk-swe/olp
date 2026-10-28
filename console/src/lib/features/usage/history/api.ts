@@ -40,7 +40,8 @@ export const operationKinds = [
   'context_cache',
   'retrieval',
   'realtime',
-  'bedrock_invoke'
+  'bedrock_invoke',
+  'passthrough'
 ] as const;
 
 export type RequestFilters = {

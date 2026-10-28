@@ -1,13 +1,9 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
-	"mime"
 	"net/http"
-	"net/http/httptrace"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -17,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -66,11 +61,11 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	endpoint, err := plan.Endpoint()
+	submit, err := plan.RequestURL()
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	if _, err = s.egress.ValidateEndpoint(endpoint); err != nil {
+	if err := s.validateUnaryEndpoint(submit); err != nil {
 		return fail(classConnect, nil)
 	}
 	deadline, _ := ctx.Deadline()
@@ -82,23 +77,6 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	defer cancel()
 	timer := time.AfterFunc(min(a.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
 	defer timer.Stop()
-	body := plan.Body()
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, state.trace()), http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fail(classConnect, nil)
-	}
-	if trace != nil {
-		trace.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "olp/gateway")
-	if err := s.applySlotCredential(actx, x, req, plan.Config(), slot, body, provider, a.UpstreamModel); err != nil {
-		if actx.Err() != nil {
-			return fail(state.classify(err, false), nil)
-		}
-		return fail(classCredential, nil)
-	}
 	client, err := s.providerClient(actx, x.request.release, provider, slot)
 	if err != nil {
 		return fail(classCredential, nil)
@@ -107,38 +85,18 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if parallel != nil {
 		defer parallel.cancel()
 	}
-	response, err := client.Do(req)
-	if err != nil {
-		return fail(state.classify(err, false), nil)
-	}
-	defer response.Body.Close()
-	received := s.now().Sub(fact.StartedAt)
-	fact.FirstByte = &received
-	fact.Status = response.StatusCode
-	if response.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
-		failure := &attemptFailure{status: response.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
-		class := state.rejected(response.StatusCode, failure.upstream)
-		if class == classRateLimit {
-			failure.retryAfter = upstream.RetryAfter(response.Header.Get("Retry-After"), s.now())
-		}
-		return fail(class, failure)
-	}
-	state.accepted = true
-	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
-	}
 	cap := plan.Receipt().Obligations.MaxBodyBytes
 	if s.cfg.MaxResponseBytes > 0 {
 		cap = min(cap, int(s.cfg.MaxResponseBytes))
 	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(cap)+1))
-	if err != nil {
-		return fail(state.classify(err, false), nil)
-	}
-	if len(raw) > cap {
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+	exchange := &unaryExchange{server: s, ctx: actx, x: x, state: state, plan: plan, client: client, slot: slot, provider: provider, model: a.UpstreamModel, fact: &fact, bodyCap: cap, inject: func(header http.Header) {
+		if trace != nil {
+			trace.InjectUpstream(header, x.request.trace.PropagateUpstream())
+		}
+	}}
+	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
+	if failure != nil {
+		return fail(failure.class, failure.failure)
 	}
 	state.settled = true
 	result, err := plan.Decode(raw)
