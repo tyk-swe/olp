@@ -3,10 +3,12 @@ package connectors
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
 func TestRetrievalDedicatedProfilesAndAddressing(t *testing.T) {
@@ -35,6 +37,25 @@ func TestRetrievalDedicatedProfilesAndAddressing(t *testing.T) {
 		t.Fatal("generation profile gained cloud retrieval")
 	}
 }
+func TestRetrievalKindsAgreeWithRetainedSupports(t *testing.T) {
+	declared := map[string]bool{}
+	kinds := map[string]bool{}
+	for _, profile := range Profiles() {
+		kinds[profile.Kind] = true
+		if slices.Contains(profile.Operations, "retrieval") {
+			declared[profile.Kind] = true
+		}
+	}
+	if len(declared) == 0 {
+		t.Fatal("no connector profile declares retrieval")
+	}
+	for kind := range kinds {
+		if got := retainedapi.Supports(kind, "retrieval", "openai", "unary"); got != declared[kind] {
+			t.Errorf("kind %s profiles declare retrieval %v, retained supports says %v", kind, declared[kind], got)
+		}
+	}
+}
+
 func TestRetrievalAzureCredentialPlacementAndScope(t *testing.T) {
 	c := Config{Kind: KindAzureAISearch, ProfileID: "azure-ai-search", ProfileRevision: ProfileRevision, AuthMode: "api_key", Endpoint: "https://test.search.windows.net", APIVersion: "2025-09-01"}
 	req, _ := http.NewRequest(http.MethodPost, c.Endpoint+"/indexes/docs/docs/search?api-version=2025-09-01", strings.NewReader(`{}`))

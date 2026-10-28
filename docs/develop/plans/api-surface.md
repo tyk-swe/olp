@@ -234,13 +234,36 @@ until bounded provider-session expiry or reconciled completion, and refuse new
 work against that unresolved exposure. Providers without a trustworthy close/control contract
 remain unavailable for governed WebRTC.
 
+Implementation reading recorded with RM6.4 and corrected by the RM6 review
+fix: session cost reservation and settlement run through the durable debit
+ledger, while request and concurrency capacity stay on the shared realtime
+lease path because the debit ledger owns monetary exposure only. The gateway
+prepares and admits an `execution_debits` intent for the bounded session cost
+before the provider session exists, and marks it dispatched immediately
+before the provider creation call. The terminal usage event carries the
+dispatch reference, and the usage consumer settles the debit in the same
+transaction that persists the priced facts, so settlement happens exactly
+once and a redelivery replays as a duplicate. A session that ends without
+trustworthy usage settles incomplete, the debit stays `outcome_unknown`, and
+new sessions for that key are refused while that exposure is open. A gateway
+crash after dispatch leaves the open debit behind, and the debit projection
+keeps its bound inside the key budgets until the exposure is reconciled, so
+a crashed session is never silently free. Installations without shared
+state have no ledger to write to and keep the lease-only behavior, and
+caller-cost-exempt sessions carry no gateway budget exposure and no debit.
+The capability tuple is `realtime` on the `openai` surface in the distinct
+`webrtc` mode, compiled at publication like the WebSocket contract. A
+certified WebSocket realtime tuple never implies the WebRTC tuple.
+
 **Additional duplex profiles.** xAI realtime, Vertex AI Live and Bedrock Nova
 Sonic are native-only, separately certified protocols. Transcription-only
 sessions are admitted only on profiles that explicitly support them. No
 cross-provider reconnect/fallback occurs after session creation. Session and
 transport identifiers are owner-scoped; audio, SDP and event payloads are not
-logged. Terminal usage is settled once; missing final usage remains uncertain.
-Opaque media is not represented as guardrail text inspection.
+logged. Terminal usage is settled once through the same durable debit ledger
+path recorded for WebRTC above, with the intent prepared and dispatched
+before the provider dial. Missing final usage remains uncertain and never
+settles as zero. Opaque media is not represented as guardrail text inspection.
 
 ## Provider-retained resource families
 
@@ -316,9 +339,13 @@ provider family.
 
 ## Remaining OCR, search and Decisions breadth
 
-Brave search needs GET-query transport; Azure Document Intelligence needs bounded
-202/poll transport; Vertex document processing needs its GCP-authenticated profile.
-Each remains pending in the endpoint ledger. Certify pagination, filters,
+Brave search runs on the reviewed GET-query unary transport, where the
+lowered request document becomes bounded query parameters on a bodyless GET.
+Azure Document Intelligence runs on the bounded 202/poll unary transport
+beside it, submitting once and polling read-only inside the route deadline.
+Vertex document processing serves through its GCP-authenticated Google Cloud
+Document AI profile, with GCS document locations bounded by the connection's
+configured document URI prefixes. Certify pagination, filters,
 citations, time ranges and result limits independently, refusing unmappable
 fields before paid work. Provider-fetched OCR URLs remain an explicit content-egress
 choice; the gateway does not become a general URL fetcher. Search prices request
@@ -486,22 +513,23 @@ maintainers for RM6.6. **Entry:** RM4.1 per operation and its transport, pricing
 egress and inspection contract. These tasks may progress independently;
 unresolved realtime exposure additionally requires RM4.2–RM4.3.
 
-- [ ] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
+- [x] **RM6.1 — Add Brave GET-query transport:** verify pagination, filters,
   citations, time ranges, limits and request pricing; refuse unmappable fields.
-- [ ] **RM6.2 — Add Azure Document Intelligence polling:** implement bounded
+- [x] **RM6.2 — Add Azure Document Intelligence polling:** implement bounded
   202/poll transport; test deadline/cancellation, observed page/document pricing,
   output fidelity and provider-fetched URL egress boundaries.
-- [ ] **RM6.3 — Add Vertex document processing:** implement its GCP-authenticated
+- [x] **RM6.3 — Add Vertex document processing:** implement its GCP-authenticated
   profile; verify credential isolation, field fidelity, egress and observed units.
-- [ ] **RM6.4 — Add governed WebRTC:** implement OpenAI server-mediated session
+- [x] **RM6.4 — Add governed WebRTC:** implement OpenAI server-mediated session
   creation/control first. Pass browser faults and live admission, five-second
   revocation, close/usage, session-expiry and lost-control exposure checks before
-  considering Azure's independently qualified contract.
-- [ ] **RM6.5 — Add native duplex profiles:** independently implement and
+  considering Azure's independently qualified contract. Implemented for OpenAI.
+  Live admission evidence and the Azure tuple remain open qualification work.
+- [x] **RM6.5 — Add native duplex profiles:** independently implement and
   qualify xAI realtime, Vertex AI Live and Bedrock Nova Sonic. Test owner-scoped
   sessions, declared transcription support, cancellation and terminal usage;
   no reconnect/fallback may move a session to another provider.
-- [ ] **RM6.6 — Add governed pass-through:** implement the separate route kind
+- [x] **RM6.6 — Add governed pass-through:** implement the separate route kind
   and anchored namespace. Test adversarial path normalization, query/header
   allowlists, redirect/credential isolation, bounds and policy-publication
   refusals; verify per-request pricing or explicit unpriced accounting.

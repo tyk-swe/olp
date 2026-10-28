@@ -32,7 +32,10 @@ func assertEndUserEnvelope(t *testing.T, envelope Envelope, digest, identifier s
 	if envelope.Route == "" {
 		return
 	}
-	event := accountingEvent(envelope)
+	event, err := accountingEvent(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if event == nil {
 		t.Fatal("identified operation lost its accounting event")
 	}

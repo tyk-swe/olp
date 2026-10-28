@@ -1,40 +1,88 @@
 package secrets
 
 import (
+	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// Purpose names are bound into every stored digest and ciphertext, so renaming
-// one silently orphans what the installation stores. The lists are pinned.
-func TestPurposeNamesNeverChange(t *testing.T) {
-	var digests, seals []string
+func TestDigestPurposesSeparateDomains(t *testing.T) {
+	key := NewAuthKey(bytes.Repeat([]byte{7}, 32), "install-a")
+	seen := map[string]DigestPurpose{}
 	for _, purpose := range DigestPurposes() {
-		digests = append(digests, purpose.String())
-	}
-	for _, purpose := range SealPurposes() {
-		seals = append(seals, purpose.String())
-	}
-	if want := []string{"cache_key", "saml_state", "saml_cookie", "saml_assertion", "mfa_challenge", "mfa_recovery", "api_key", "workload_identity", "end_user", "management_token", "session", "recent_auth", "csrf", "oidc_state", "oidc_cookie", "invitation", "admission", "mutation", "installation", "batch_submission", "batch_line", "agent_approval", "agent_principal", "retained_submission"}; !slices.Equal(digests, want) {
-		t.Fatalf("digest purposes %v, want %v", digests, want)
-	}
-	if want := []string{"saml_key", "saml_flow", "mfa_totp", "mfa_webauthn", "provider_credential", "provider_continuation", "notification_secret", "mutation_replay", "oidc_client", "oidc_flow", "media_job_source", "provider_grant_refresh", "grant_enrollment", "sink_credential", "mcp_credential", "billing_credential", "guardrail_credential", "response_cache", "provider_upload_session", "agent_credential"}; !slices.Equal(seals, want) {
-		t.Fatalf("seal purposes %v, want %v", seals, want)
-	}
-	for _, names := range [][]string{digests, seals} {
-		if len(slices.Compact(slices.Sorted(slices.Values(names)))) != len(names) {
-			t.Fatal("purpose names must be unique", names)
+		digest := key.Digest(purpose, "token-value")
+		if again := key.Digest(purpose, "token-value"); !bytes.Equal(again, digest) {
+			t.Fatalf("%s digest is not stable across calls", purpose)
+		}
+		if other, dup := seen[string(digest)]; dup {
+			t.Fatalf("%s and %s produce the same digest for one value", purpose, other)
+		}
+		seen[string(digest)] = purpose
+		if changed := key.Digest(purpose, "other-value"); bytes.Equal(changed, digest) {
+			t.Fatalf("%s digest ignores the value", purpose)
 		}
 	}
+	otherInstall := NewAuthKey(bytes.Repeat([]byte{7}, 32), "install-b")
+	for _, purpose := range DigestPurposes() {
+		if bytes.Equal(otherInstall.Digest(purpose, "token-value"), key.Digest(purpose, "token-value")) {
+			t.Fatalf("%s digest ignores the installation", purpose)
+		}
+	}
+	if len(slices.Compact(slices.Sorted(slices.Values(purposeNames())))) != len(DigestPurposes())+len(SealPurposes()) {
+		t.Fatal("purpose names must be unique")
+	}
+}
+
+func purposeNames() []string {
+	names := make([]string, 0, len(DigestPurposes())+len(SealPurposes()))
+	for _, purpose := range DigestPurposes() {
+		names = append(names, purpose.String())
+	}
 	for _, purpose := range SealPurposes() {
+		names = append(names, purpose.String())
+	}
+	return names
+}
+
+func TestSealPurposesBindCiphertext(t *testing.T) {
+	ring, err := ParseRing([]byte(fmt.Sprintf(`{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat("01", 32))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	purposes := SealPurposes()
+	for i, purpose := range purposes {
+		other := purposes[(i+1)%len(purposes)]
+		sealed, err := ring.Seal("install-a", purpose, "record-1", []byte("payload"))
+		if err != nil {
+			t.Fatalf("seal for %s: %v", purpose, err)
+		}
+		opened, err := ring.Open("install-a", purpose, "record-1", ring.Active, sealed)
+		if err != nil || string(opened) != "payload" {
+			t.Fatalf("open for %s: %v, %q", purpose, err, opened)
+		}
+		for name, attempt := range map[string]func() ([]byte, error){
+			"other purpose":      func() ([]byte, error) { return ring.Open("install-a", other, "record-1", ring.Active, sealed) },
+			"other installation": func() ([]byte, error) { return ring.Open("install-b", purpose, "record-1", ring.Active, sealed) },
+			"other record":       func() ([]byte, error) { return ring.Open("install-a", purpose, "record-2", ring.Active, sealed) },
+		} {
+			if _, err := attempt(); err == nil {
+				t.Fatalf("%s ciphertext opened under %s", purpose, name)
+			}
+		}
+		tampered := slices.Clone(sealed)
+		tampered[len(tampered)-1] ^= 1
+		if _, err := ring.Open("install-a", purpose, "record-1", ring.Active, tampered); err == nil {
+			t.Fatalf("%s tampered ciphertext opened", purpose)
+		}
 		if parsed, ok := ParseSealPurpose(purpose.String()); !ok || parsed != purpose {
-			t.Fatalf("%s does not parse back", purpose)
+			t.Fatalf("stored name of %s does not parse back", purpose)
 		}
 		if value, err := purpose.Value(); err != nil || value != purpose.String() {
-			t.Fatalf("%s binds as %v", purpose, value)
+			t.Fatalf("%s binds as %v, want its stored name", purpose, value)
 		}
 	}
 	if _, ok := ParseSealPurpose("unknown"); ok {

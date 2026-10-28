@@ -8,6 +8,7 @@ GO_TEST_PACKAGES ?= ./...
 GO_TEST_ARGS ?=
 GO_TEST_TIMEOUT ?= 5m
 CONSOLE_TEST_ARGS ?=
+RATCHET_BASE ?=
 GO_BUILD_OUTPUT ?= .local/bin/olp
 GO_BUILD_TAGS ?=
 SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
@@ -19,7 +20,8 @@ GOFMT_PATHS = \
 
 .PHONY: \
 	help setup dev check lint \
-	test test-go test-bench test-console test-scripts test-race integration \
+	test test-go test-bench test-console test-scripts test-race test-ratchet \
+	test-mutation-go test-mutation-console test-coverage-gate integration \
 	bench bench-compare bench-gate \
 	api build build-go catalog catalog-sign fmt
 
@@ -59,6 +61,18 @@ test-console: ## Run console unit and component tests
 
 test-scripts: ## Run automation script tests
 	node --test scripts/*.test.mjs
+
+test-ratchet: ## Check touched test files against the mechanical test rules
+	node scripts/check-test-ratchet.mjs $(RATCHET_BASE)
+
+test-mutation-go: ## Mutation-test changed Go code against the merge base
+	MUTATION_BASE="$(if $(strip $(RATCHET_BASE)),$(RATCHET_BASE),$(MUTATION_BASE))" ./scripts/mutation-go.sh
+
+test-mutation-console: ## Mutation-test changed console modules
+	MUTATION_BASE="$(if $(strip $(RATCHET_BASE)),$(RATCHET_BASE),$(MUTATION_BASE))" ./scripts/mutation-console.sh
+
+test-coverage-gate: ## Fail when a changed Go package loses coverage against the merge base
+	./scripts/coverage-gate.sh $(RATCHET_BASE)
 
 test-race: ## Run uncached Go tests with race detection
 	$(MAKE) test-go GO_TEST_ARGS="$(GO_TEST_ARGS) -race -count=1"
