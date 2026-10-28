@@ -975,13 +975,14 @@ func TestStreamableHTTPCallRequiresMetaCallID(t *testing.T) {
 }
 
 func TestStreamableHTTPExactRepeatReturnsRetainedResult(t *testing.T) {
-	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "order-session", "x"))
 	firstResult := rpcResult(t, first)
 	if fx.calls.Load() != 1 {
 		t.Fatalf("first session call did not execute once: %v", first.body)
 	}
+	ledger.repeat = retainedFromMeta(t, firstResult, StatusSucceeded)
 	second := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(3, "order-session", "x"))
 	secondResult := rpcResult(t, second)
 	if fx.calls.Load() != 1 {
@@ -1000,10 +1001,11 @@ func TestStreamableHTTPExactRepeatReturnsRetainedResult(t *testing.T) {
 }
 
 func TestStreamableHTTPChangedBodyUnderSameMetaCallIDConflicts(t *testing.T) {
-	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "order-clash", "one"))
-	_ = rpcResult(t, first)
+	ledger.repeat = retainedFromMeta(t, rpcResult(t, first), StatusSucceeded)
+	ledger.repeat.Conflict = true
 	second := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(3, "order-clash", "two"))
 	if rpcDataCode(t, second) != "call_id_conflict" || fx.calls.Load() != 1 {
 		t.Fatalf("changed session body under one call id executed: %v calls=%d", second.body, fx.calls.Load())
@@ -1012,6 +1014,17 @@ func TestStreamableHTTPChangedBodyUnderSameMetaCallIDConflicts(t *testing.T) {
 	if data["attempt_id"] == nil || data["dispatch_id"] == nil {
 		t.Fatalf("session conflict did not name the original attempt: %v", second.body)
 	}
+}
+
+func retainedFromMeta(t *testing.T, result map[string]any, status Status) *RetainedCall {
+	t.Helper()
+	meta, _ := result["_meta"].(map[string]any)
+	attempt, _ := meta["olp.attempt_id"].(string)
+	dispatch, _ := meta["olp.dispatch_id"].(string)
+	if attempt == "" || dispatch == "" {
+		t.Fatalf("session result carries no attempt identity to retain: %v", result)
+	}
+	return &RetainedCall{AttemptID: attempt, DispatchID: dispatch, Status: status}
 }
 
 func TestStreamableHTTPSameCallIDUnderAnotherPrincipalExecutesIndependently(t *testing.T) {

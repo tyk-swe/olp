@@ -13,26 +13,63 @@ import (
 const (
 	StatusInProgress Status = "in_progress"
 
-	callIdentityBinding  = 24 * time.Hour
-	retainedResultTTL    = 15 * time.Minute
-	maxRetainedResults   = 512
-	maxCallIDBytes       = 256
-	callerCallIDMetaName = "olp.call_id"
+	OrphanDispatchAge = 2 * time.Minute
+
+	callIdentityBinding = 24 * time.Hour
+	retainedResultTTL   = 15 * time.Minute
+	maxRetainedResults  = 512
+	maxCallIDBytes      = 256
 )
 
 type RetainedCall struct {
 	AttemptID  string
 	DispatchID string
 	Status     Status
-	IsError    bool
 	Conflict   bool
 }
 
-type CallRepeatError struct {
-	Retained RetainedCall
+type ReserveResult struct {
+	Reservation *Reservation
+	Repeat      *RetainedCall
 }
 
-func (e *CallRepeatError) Error() string { return "mcp: caller call id already bound" }
+type repeatKind int
+
+const (
+	repeatConflict repeatKind = iota
+	repeatInProgress
+	repeatOutcomeUnknown
+	repeatRetainedResult
+	repeatResultNotRetained
+)
+
+func repeatOutcome(repeat *RetainedCall, hasResult bool) repeatKind {
+	switch {
+	case repeat.Conflict:
+		return repeatConflict
+	case repeat.Status == StatusInProgress:
+		return repeatInProgress
+	case repeat.Status == StatusOutcomeUnknown:
+		return repeatOutcomeUnknown
+	case hasResult:
+		return repeatRetainedResult
+	default:
+		return repeatResultNotRetained
+	}
+}
+
+func repeatFailure(kind repeatKind) (code string, message string) {
+	switch kind {
+	case repeatConflict:
+		return "call_id_conflict", "This call identifier already belongs to a different tool call."
+	case repeatInProgress:
+		return "call_in_progress", "This call identifier belongs to a call that is still in progress."
+	case repeatOutcomeUnknown:
+		return "outcome_unknown", "The tool call may have run upstream, but its outcome could not be confirmed."
+	default:
+		return "result_not_retained", "This call already ran, but its result is no longer retained."
+	}
+}
 
 func validCallID(callID string) bool {
 	if len(callID) < 1 || len(callID) > maxCallIDBytes || strings.TrimSpace(callID) == "" {
@@ -46,20 +83,18 @@ func validCallID(callID string) bool {
 	return true
 }
 
-func validCallDigest(digest string) bool {
-	if len(digest) != 64 {
-		return false
+func parseEvidenceDigest(digest string) ([]byte, bool) {
+	decoded, err := hex.DecodeString(digest)
+	if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != digest {
+		return nil, false
 	}
-	for index := 0; index < len(digest); index++ {
-		c := digest[index]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
+	return decoded, true
 }
 
 func (s *Server) callDigest(authority access.Authority, callID string) string {
+	if !validCallID(callID) {
+		return ""
+	}
 	return hex.EncodeToString(s.Auth.Digest(secrets.ToolCallDigest, authority.ID+"\x00"+callID))
 }
 
@@ -80,8 +115,14 @@ func (s *Server) retainResult(attemptID string, result mcpservers.ToolResult) {
 			delete(s.results, id)
 		}
 	}
-	if len(s.results) >= maxRetainedResults {
-		return
+	if _, kept := s.results[attemptID]; !kept && len(s.results) >= maxRetainedResults {
+		oldestID, oldestExpiry := "", time.Time{}
+		for id, entry := range s.results {
+			if oldestID == "" || entry.expires.Before(oldestExpiry) {
+				oldestID, oldestExpiry = id, entry.expires
+			}
+		}
+		delete(s.results, oldestID)
 	}
 	s.results[attemptID] = retainedResult{result: result, expires: now.Add(retainedResultTTL)}
 }

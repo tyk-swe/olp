@@ -120,98 +120,64 @@ func (f *fakeRuntime) AuthorizeAgentResource(a access.Authority, scope, id, revi
 	return nil
 }
 
-type fakeClaim struct {
-	input       ReserveInput
-	reservation *Reservation
-	status      Status
-	isError     bool
-}
-
 type fakeLedger struct {
 	tl         *timeline
 	reserveErr error
 	settleErr  error
+	repeat     *RetainedCall
 	evidence   []AttemptEvidence
 	reserved   []ReserveInput
-	claims     map[string]*fakeClaim
 	sequence   int
 }
 
-func (f *fakeLedger) Reserve(_ context.Context, in ReserveInput) (*Reservation, error) {
+func (f *fakeLedger) Reserve(_ context.Context, in ReserveInput) (ReserveResult, error) {
 	if f.reserveErr != nil {
-		return nil, f.reserveErr
+		return ReserveResult{}, f.reserveErr
 	}
-	if f.claims == nil {
-		f.claims = map[string]*fakeClaim{}
-	}
-	if existing, ok := f.claims[in.CallDigest]; ok {
-		retained := RetainedCall{
-			AttemptID: existing.reservation.AttemptID, DispatchID: existing.reservation.DispatchID,
-			Status: existing.status, IsError: existing.isError,
-		}
-		if retained.Status == "" {
-			retained.Status = StatusInProgress
-		}
-		if existing.input.ToolsetRevisionID != in.ToolsetRevisionID || existing.input.ToolAlias != in.ToolAlias || existing.input.InputDigest != in.InputDigest {
-			retained.Conflict = true
-		}
-		return nil, &CallRepeatError{Retained: retained}
+	if f.repeat != nil {
+		return ReserveResult{Repeat: f.repeat}, nil
 	}
 	f.tl.add("reserve")
 	f.reserved = append(f.reserved, in)
 	f.sequence++
 	suffix := strconv.Itoa(7000 + f.sequence)
 	id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f5" + suffix
-	reservation := &Reservation{DispatchID: id, ClaimID: testGenID, RunID: testGenID, StepID: testGenID, AttemptID: id}
-	f.claims[in.CallDigest] = &fakeClaim{input: in, reservation: reservation}
-	return reservation, nil
+	return ReserveResult{Reservation: &Reservation{DispatchID: id, ClaimID: testGenID, RunID: testGenID, StepID: testGenID, AttemptID: id}}, nil
 }
 
-func (f *fakeLedger) claimFor(reservation *Reservation) *fakeClaim {
-	for _, claim := range f.claims {
-		if claim.reservation == reservation {
-			return claim
-		}
-	}
-	return nil
-}
-
-func (f *fakeLedger) MarkDispatched(context.Context, *Reservation) error {
+func (f *fakeLedger) MarkDispatched(context.Context, *Reservation, AttemptEvidence) error {
 	f.tl.add("dispatched")
 	return nil
 }
 
-func (f *fakeLedger) ReleaseUndispatched(_ context.Context, reservation *Reservation) error {
+func (f *fakeLedger) ReleaseUndispatched(context.Context, *Reservation) error {
 	f.tl.add("released")
-	for digest, claim := range f.claims {
-		if claim.reservation == reservation {
-			delete(f.claims, digest)
-		}
-	}
 	return nil
 }
 
-func (f *fakeLedger) MarkUnknown(_ context.Context, reservation *Reservation, evidence AttemptEvidence) error {
+func (f *fakeLedger) MarkUnknown(_ context.Context, _ *Reservation, evidence AttemptEvidence) error {
 	f.tl.add("unknown")
 	f.evidence = append(f.evidence, evidence)
-	if claim := f.claimFor(reservation); claim != nil {
-		claim.status = evidence.Status
-		claim.isError = evidence.IsError
-	}
 	return nil
 }
 
-func (f *fakeLedger) Settle(_ context.Context, reservation *Reservation, evidence AttemptEvidence) error {
+func (f *fakeLedger) Settle(_ context.Context, _ *Reservation, evidence AttemptEvidence) error {
 	if f.settleErr != nil {
 		return f.settleErr
 	}
 	f.tl.add("settled")
 	f.evidence = append(f.evidence, evidence)
-	if claim := f.claimFor(reservation); claim != nil {
-		claim.status = evidence.Status
-		claim.isError = evidence.IsError
-	}
 	return nil
+}
+
+func retainedFrom(t *testing.T, body map[string]any, status Status) *RetainedCall {
+	t.Helper()
+	attempt, _ := body["attempt_id"].(string)
+	dispatch, _ := body["dispatch_id"].(string)
+	if attempt == "" || dispatch == "" {
+		t.Fatalf("response carries no attempt identity to retain: %v", body)
+	}
+	return &RetainedCall{AttemptID: attempt, DispatchID: dispatch, Status: status}
 }
 
 type fixture struct {
@@ -868,11 +834,13 @@ func TestCallToolRequiresCallerCallID(t *testing.T) {
 }
 
 func TestCallToolExactRepeatReturnsRetainedResultWithoutReexecuting(t *testing.T) {
-	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	server, fx, ledger, _, _ := newTestServer(t, authority, "")
 	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-42", "secret-argument"))
 	if status != http.StatusOK || fx.calls.Load() != 1 {
 		t.Fatalf("first call did not execute once: status=%d body=%v calls=%d", status, first, fx.calls.Load())
 	}
+	ledger.repeat = retainedFrom(t, first, StatusSucceeded)
 	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-42", "secret-argument"))
 	if status != http.StatusOK || fx.calls.Load() != 1 {
 		t.Fatalf("exact repeat re-executed upstream: status=%d body=%v calls=%d", status, second, fx.calls.Load())
@@ -894,13 +862,18 @@ func TestCallToolExactRepeatReturnsRetainedResultWithoutReexecuting(t *testing.T
 		t.Fatalf("exact repeat reserved or settled a second debit: reserved=%d evidence=%d", len(ledger.reserved), len(ledger.evidence))
 	}
 	reserved := ledger.reserved[0]
-	if reserved.CallDigest == "" || reserved.CallDigest == "order-42" || len(reserved.CallDigest) != 64 {
-		t.Fatalf("caller call id was not reduced to a keyed digest before storage: %q", reserved.CallDigest)
+	if reserved.CallDigest == "order-42" || reserved.CallDigest != server.callDigest(*authority, "order-42") {
+		t.Fatalf("caller call id was not reduced to its stable keyed digest before storage: %q", reserved.CallDigest)
+	}
+	other := *authority
+	other.ID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50711"
+	if server.callDigest(other, "order-42") == reserved.CallDigest {
+		t.Fatal("call digest did not separate principals")
 	}
 }
 
 func TestCallToolRepeatAfterTransientResultGoneReportsNotRetained(t *testing.T) {
-	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	current := time.Now()
 	server.Now = func() time.Time { return current }
 	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-gone", "x"))
@@ -908,6 +881,7 @@ func TestCallToolRepeatAfterTransientResultGoneReportsNotRetained(t *testing.T) 
 		t.Fatalf("first call did not execute once: status=%d body=%v", status, first)
 	}
 	current = current.Add(2 * time.Hour)
+	ledger.repeat = retainedFrom(t, first, StatusSucceeded)
 	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-gone", "x"))
 	if status != http.StatusConflict || jsonErrorCode(t, second) != "result_not_retained" || fx.calls.Load() != 1 {
 		t.Fatalf("repeat with no retained result replayed upstream: status=%d body=%v calls=%d", status, second, fx.calls.Load())
@@ -918,11 +892,13 @@ func TestCallToolRepeatAfterTransientResultGoneReportsNotRetained(t *testing.T) 
 }
 
 func TestCallToolChangedBodyUnderSameCallIDConflicts(t *testing.T) {
-	server, fx, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-7", "one"))
 	if status != http.StatusOK {
 		t.Fatalf("first call failed: status=%d body=%v", status, first)
 	}
+	ledger.repeat = retainedFrom(t, first, StatusSucceeded)
+	ledger.repeat.Conflict = true
 	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-7", "two"))
 	if status != http.StatusConflict || jsonErrorCode(t, second) != "call_id_conflict" || fx.calls.Load() != 1 {
 		t.Fatalf("changed body under one call id executed: status=%d body=%v calls=%d", status, second, fx.calls.Load())
@@ -939,6 +915,7 @@ func TestCallToolAmbiguousOutcomeStaysUnknownOnRepeat(t *testing.T) {
 		t.Fatalf("ambiguous dispatch was not held unknown: status=%d body=%v calls=%d", status, first, fx.calls.Load())
 	}
 	fx.setMode("")
+	ledger.repeat = retainedFrom(t, first, StatusOutcomeUnknown)
 	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-unknown", "x"))
 	if status != http.StatusBadGateway || second["status"] != string(StatusOutcomeUnknown) || jsonErrorCode(t, second) != "outcome_unknown" || fx.calls.Load() != 1 {
 		t.Fatalf("repeat of an unknown outcome redispatched: status=%d body=%v calls=%d", status, second, fx.calls.Load())
@@ -961,5 +938,76 @@ func TestCallToolUndispatchedFailureFreesCallIDForRetry(t *testing.T) {
 	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-retry", "x"))
 	if status != http.StatusOK || fx.calls.Load() != 1 {
 		t.Fatalf("retry of a never-dispatched call stayed bound: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+}
+
+func TestCallToolRepeatOfInFlightCallReportsInProgress(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-flight", "x"))
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("first call did not execute once: status=%d body=%v", status, first)
+	}
+	ledger.repeat = retainedFrom(t, first, StatusInProgress)
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-flight", "x"))
+	if status != http.StatusConflict || jsonErrorCode(t, second) != "call_in_progress" || fx.calls.Load() != 1 {
+		t.Fatalf("in-flight repeat was not held as in progress: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+	if second["attempt_id"] != first["attempt_id"] || second["dispatch_id"] != first["dispatch_id"] || second["status"] != string(StatusInProgress) {
+		t.Fatalf("in-progress repeat lost the retained identity: first=%v second=%v", first, second)
+	}
+}
+
+func TestExecuteRefusesEmptyCallerCallIDBeforeReserve(t *testing.T) {
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	server, fx, ledger, _, rt := newTestServer(t, authority, "")
+	resolved, failure := server.resolveToolset(*authority, rt.release.Snapshot, testToolset)
+	if failure != nil {
+		t.Fatalf("toolset did not resolve: %v", failure)
+	}
+	tool, found := resolved.lookup(alias())
+	if found != toolFound {
+		t.Fatalf("tool did not resolve: %v", found)
+	}
+	outcome := server.execute(t.Context(), executeInput{
+		authority: *authority, resolved: resolved, tool: tool,
+		arguments: json.RawMessage(`{"query":"x"}`), releaseID: testGenID, callID: "",
+	})
+	if outcome.failure == nil || outcome.failure.code != "call_id_required" || len(ledger.reserved) != 0 || fx.calls.Load() != 0 {
+		t.Fatalf("shared execute path accepted an empty caller call id: %+v reserved=%d calls=%d", outcome.failure, len(ledger.reserved), fx.calls.Load())
+	}
+}
+
+func TestCallToolExactRepeatAfterDriftHitsDriftRefusalBeforeRetainedIdentity(t *testing.T) {
+	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-drift", "x"))
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("first call did not execute once: status=%d body=%v", status, first)
+	}
+	ledger.repeat = retainedFrom(t, first, StatusSucceeded)
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: driftedSnapshot(t, fx.server.URL)}
+	status, second := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-drift", "x"))
+	if status != http.StatusConflict || jsonErrorCode(t, second) != "tool_definition_changed" || fx.calls.Load() != 1 {
+		t.Fatalf("exact repeat after drift bypassed the drift refusal: status=%d body=%v calls=%d", status, second, fx.calls.Load())
+	}
+}
+
+func TestRetainedResultCapEvictsOldestResult(t *testing.T) {
+	server, _, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	current := time.Now()
+	server.Now = func() time.Time { return current }
+	result := mcpservers.ToolResult{Content: []mcpservers.ToolContent{{Type: "text", Text: "kept"}}}
+	for i := 0; i < maxRetainedResults; i++ {
+		server.retainResult("attempt-"+strconv.Itoa(i), result)
+		current = current.Add(time.Second)
+	}
+	server.retainResult("attempt-newest", result)
+	if _, ok := server.retainedResultFor("attempt-0"); ok {
+		t.Fatal("retention cap kept the oldest result")
+	}
+	if _, ok := server.retainedResultFor("attempt-newest"); !ok {
+		t.Fatal("retention cap dropped the newest result")
+	}
+	if _, ok := server.retainedResultFor("attempt-1"); !ok {
+		t.Fatal("retention cap evicted more than the oldest result")
 	}
 }

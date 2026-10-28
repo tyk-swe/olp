@@ -25,9 +25,12 @@ import (
 type Status string
 
 const (
+	StatusDispatched     Status = "dispatched"
 	StatusSucceeded      Status = "succeeded"
 	StatusUpstreamError  Status = "upstream_error"
 	StatusOutcomeUnknown Status = "outcome_unknown"
+	StatusSettled        Status = "settled"
+	StatusNotAccepted    Status = "not_accepted"
 
 	defaultCallTimeout = 30 * time.Second
 	maxCallBodyBytes   = 1 << 20
@@ -61,6 +64,7 @@ type Reservation struct {
 	ToolsetRevisionID string
 	ToolAlias         string
 	InputDigest       string
+	CallDigest        string
 }
 
 type AttemptEvidence struct {
@@ -74,8 +78,8 @@ type AttemptEvidence struct {
 }
 
 type Ledger interface {
-	Reserve(ctx context.Context, in ReserveInput) (*Reservation, error)
-	MarkDispatched(ctx context.Context, reservation *Reservation) error
+	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
+	MarkDispatched(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
 	ReleaseUndispatched(ctx context.Context, reservation *Reservation) error
 	MarkUnknown(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
 	Settle(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
@@ -163,31 +167,24 @@ func writeOutcomeUnknown(w http.ResponseWriter, attemptID, dispatchID, message s
 
 func writeRepeat(w http.ResponseWriter, resolved resolvedToolset, tool routing.MCPToolsetTool, outcome execution) {
 	repeat := outcome.repeat
-	switch {
-	case repeat.Conflict:
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
-			"error": map[string]any{"message": "This call identifier already belongs to a different tool call.", "type": "invalid_request_error", "code": "call_id_conflict"},
-		})
-	case repeat.Status == StatusInProgress:
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
-			"error": map[string]any{"message": "This call identifier belongs to a call that is still in progress.", "type": "invalid_request_error", "code": "call_in_progress"},
-		})
-	case repeat.Status == StatusOutcomeUnknown:
-		writeOutcomeUnknown(w, repeat.AttemptID, repeat.DispatchID, "The tool call may have run upstream, but its outcome could not be confirmed.")
-	case outcome.repeatRetained:
+	kind := repeatOutcome(repeat, outcome.repeatRetained)
+	if kind == repeatRetainedResult {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
 			"content": outcome.repeatResult.Content, "structured_content": outcome.repeatResult.StructuredContent, "is_error": outcome.repeatResult.IsError,
 			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID,
 		})
-	default:
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
-			"error": map[string]any{"message": "This call already ran, but its result is no longer retained.", "type": "invalid_request_error", "code": "result_not_retained"},
-		})
+		return
 	}
+	code, message := repeatFailure(kind)
+	if kind == repeatOutcomeUnknown {
+		writeOutcomeUnknown(w, repeat.AttemptID, repeat.DispatchID, message)
+		return
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
+		"error": map[string]any{"message": message, "type": "invalid_request_error", "code": code},
+	})
 }
 
 func callIDFailure(callID *string) *apiError {
@@ -195,6 +192,16 @@ func callIDFailure(callID *string) *apiError {
 		return errCallIDRequired
 	}
 	if !validCallID(*callID) {
+		return errCallIDInvalid
+	}
+	return nil
+}
+
+func executeCallIDFailure(callID string) *apiError {
+	if callID == "" {
+		return errCallIDRequired
+	}
+	if !validCallID(callID) {
 		return errCallIDInvalid
 	}
 	return nil

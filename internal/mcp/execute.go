@@ -62,25 +62,27 @@ func (s *Server) loadCredential(ctx context.Context, tool routing.MCPToolsetTool
 }
 
 func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reservation, execution) {
-	reservation, err := s.Ledger.Reserve(ctx, ReserveInput{
+	reservedResult, err := s.Ledger.Reserve(ctx, ReserveInput{
 		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
 		CallDigest: s.callDigest(in.authority, in.callID),
 	})
-	if err != nil {
-		var repeatErr *CallRepeatError
-		if errors.As(err, &repeatErr) {
-			repeat := repeatErr.Retained
-			outcome := execution{repeat: &repeat}
-			if repeat.Status == StatusSucceeded || repeat.Status == StatusUpstreamError {
-				outcome.repeatResult, outcome.repeatRetained = s.retainedResultFor(repeat.AttemptID)
-			}
-			return nil, outcome
+	if err == nil && reservedResult.Repeat != nil {
+		outcome := execution{repeat: reservedResult.Repeat}
+		if reservedResult.Repeat.Status == StatusSucceeded || reservedResult.Repeat.Status == StatusUpstreamError {
+			outcome.repeatResult, outcome.repeatRetained = s.retainedResultFor(reservedResult.Repeat.AttemptID)
 		}
+		return nil, outcome
+	}
+	if err != nil {
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
 			return nil, execution{failure: fail(http.StatusTooManyRequests, "budget_exceeded", "rate_limit_error", "The call exceeds an enforced budget, so it was not dispatched."), retryAfter: exceeded.RetryAfter}
 		}
+		return nil, execution{failure: errLedger}
+	}
+	reservation := reservedResult.Reservation
+	if reservation == nil {
 		return nil, execution{failure: errLedger}
 	}
 	if err = s.Runtime.AuthorizeAgentResource(in.authority, "tools", in.resolved.id, in.resolved.revisionID, *in.authority.ProjectID); err != nil {
@@ -111,11 +113,15 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTo
 		s.release(reservation)
 		return dispatchResult{certification: state, failure: errToolDefinitionChanged}
 	}
-	if err = s.Ledger.MarkDispatched(ctx, reservation); err != nil {
+	started := time.Now()
+	dispatchedEvidence := AttemptEvidence{
+		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
+		Status: StatusDispatched, StartedAt: started,
+	}
+	if err = s.Ledger.MarkDispatched(ctx, reservation, dispatchedEvidence); err != nil {
 		s.release(reservation)
 		return dispatchResult{certification: certificationCertified, failure: errLedger}
 	}
-	started := time.Now()
 	result, callErr := transport.CallTool(ctx, tool.Name, arguments)
 	return dispatchResult{
 		result: result, started: started, completed: time.Now(),
@@ -150,6 +156,9 @@ func (s *Server) settleToolCall(ctx context.Context, tool routing.MCPToolsetTool
 }
 
 func (s *Server) execute(parent context.Context, in executeInput) execution {
+	if failure := executeCallIDFailure(in.callID); failure != nil {
+		return execution{failure: failure}
+	}
 	credential, failure := s.loadCredential(parent, in.tool)
 	if failure != nil {
 		return execution{failure: failure}

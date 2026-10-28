@@ -655,18 +655,8 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 
 func (s *Server) writeSessionRepeat(w http.ResponseWriter, id json.RawMessage, resolved resolvedToolset, outcome execution) {
 	repeat := outcome.repeat
-	data := rpcErrorData{Status: string(repeat.Status), AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}
-	switch {
-	case repeat.Conflict:
-		data.Code = "call_id_conflict"
-		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "This call identifier already belongs to a different tool call.", data: data})
-	case repeat.Status == StatusInProgress:
-		data.Code = "call_in_progress"
-		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcServerError, message: "This call identifier belongs to a call that is still in progress.", data: data})
-	case repeat.Status == StatusOutcomeUnknown:
-		data.Code = "outcome_unknown"
-		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcServerError, message: "The tool call may have run upstream, but its outcome could not be confirmed.", data: data})
-	case outcome.repeatRetained:
+	kind := repeatOutcome(repeat, outcome.repeatRetained)
+	if kind == repeatRetainedResult {
 		content := outcome.repeatResult.Content
 		if content == nil {
 			content = []mcpservers.ToolContent{}
@@ -678,10 +668,15 @@ func (s *Server) writeSessionRepeat(w http.ResponseWriter, id json.RawMessage, r
 				ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
 			},
 		})
-	default:
-		data.Code = "result_not_retained"
-		writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcServerError, message: "This call already ran, but its result is no longer retained.", data: data})
+		return
 	}
+	code, message := repeatFailure(kind)
+	rpcCode := rpcServerError
+	if kind == repeatConflict {
+		rpcCode = rpcInvalidParams
+	}
+	data := rpcErrorData{Code: code, Status: string(repeat.Status), AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}
+	writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcCode, message: message, data: data})
 }
 
 func (s *Server) recordCallCertification(ctx context.Context, current sessionRecord, tool routing.MCPToolsetTool, before certificationState, outcome execution) {
