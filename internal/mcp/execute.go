@@ -2,9 +2,12 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -13,6 +16,67 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
+
+const toolRateLeaseTTL = 150 * time.Second
+
+func toolPerKeyLookup(authority access.Authority, serverID string) string {
+	sum := sha256.Sum256([]byte(authority.LimitsLookup() + "\x00" + serverID))
+	return "tk_" + hex.EncodeToString(sum[:16])
+}
+
+func toolPerServerLookup(serverID string) string {
+	return "ts_" + strings.ReplaceAll(serverID, "-", "")
+}
+
+func tighterToolLimit(server int64, key *int64) *int64 {
+	value := server
+	if key != nil && *key < value {
+		value = *key
+	}
+	return &value
+}
+
+func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
+	limiter := s.Limiter
+	if concrete, ok := limiter.(*limits.Limiter); ok && concrete == nil {
+		limiter = nil
+	}
+	if limiter == nil {
+		return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
+	}
+	effective := routing.EffectiveToolLimits(in.tool.CallsPerMinute, in.tool.MaxConcurrency, in.tool.PerKeyCallsPerMinute, in.tool.PerKeyMaxConcurrency)
+	requests := []limits.Request{
+		{
+			CostOwnerID: in.authority.ID, LookupID: toolPerKeyLookup(in.authority, in.tool.ServerID),
+			RequestsPerMinute: tighterToolLimit(effective.PerKeyCallsPerMinute, in.authority.Policy.RequestsPerMinute),
+			MaxConcurrency:    tighterToolLimit(effective.PerKeyMaxConcurrency, in.authority.Policy.MaxConcurrency),
+			LeaseTTL:          toolRateLeaseTTL,
+		},
+		{
+			CostOwnerID:       in.tool.ServerID,
+			LookupID:          toolPerServerLookup(in.tool.ServerID),
+			RequestsPerMinute: &effective.CallsPerMinute,
+			MaxConcurrency:    &effective.MaxConcurrency,
+			LeaseTTL:          toolRateLeaseTTL,
+		},
+	}
+	leases := make([]*limits.Lease, 0, len(requests))
+	for _, request := range requests {
+		lease, err := limiter.Reserve(ctx, request)
+		if err != nil {
+			s.finishLeases(ctx, leases, false)
+			var exceeded *limits.ExceededError
+			if errors.As(err, &exceeded) {
+				return nil, fail(http.StatusTooManyRequests, "tool_rate_limited", "rate_limit_error", "The call exceeds a tool rate or concurrency limit, so it was not dispatched."), exceeded.RetryAfter
+			}
+			return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
+		}
+		if lease != nil {
+			leases = append(leases, lease)
+		}
+	}
+	return leases, nil, 0
+}
 
 type executeInput struct {
 	authority access.Authority
@@ -38,6 +102,7 @@ type execution struct {
 }
 
 type dispatchResult struct {
+	dispatched    bool
 	result        mcpservers.ToolResult
 	started       time.Time
 	completed     time.Time
@@ -65,7 +130,8 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 	reservedResult, err := s.Ledger.Reserve(ctx, ReserveInput{
 		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
-		CallDigest: s.callDigest(in.authority, in.callID),
+		CallDigest: s.callDigest(in.authority, in.callID), UnitPrice: cloneUnitPrice(in.tool.UnitPrice),
+		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
 	})
 	if err == nil && reservedResult.Repeat != nil {
 		outcome := execution{repeat: reservedResult.Repeat}
@@ -75,6 +141,9 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 		return nil, outcome
 	}
 	if err != nil {
+		if errors.Is(err, ErrUnpricedToolCall) {
+			return nil, execution{failure: fail(http.StatusUnprocessableEntity, "tool_unpriced", "invalid_request_error", "The tool has no price and an enforced budget needs a finite bound, so the call was not dispatched.")}
+		}
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
 			return nil, execution{failure: fail(http.StatusTooManyRequests, "budget_exceeded", "rate_limit_error", "The call exceeds an enforced budget, so it was not dispatched."), retryAfter: exceeded.RetryAfter}
@@ -124,7 +193,8 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTo
 	}
 	result, callErr := transport.CallTool(ctx, tool.Name, arguments)
 	return dispatchResult{
-		result: result, started: started, completed: time.Now(),
+		dispatched: true,
+		result:     result, started: started, completed: time.Now(),
 		listChanged: transport.ListChanged(), callErr: callErr,
 		certification: certificationCertified,
 	}
@@ -168,23 +238,30 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	}
 	ctx, cancel := context.WithTimeout(parent, defaultCallTimeout)
 	defer cancel()
+	leases, rateFailure, retryAfter := s.reserveToolRate(ctx, in)
+	if rateFailure != nil {
+		return execution{failure: rateFailure, retryAfter: retryAfter}
+	}
+	dispatched := false
+	defer func() { s.finishLeases(ctx, leases, dispatched) }()
 	reservation, reserved := s.reserveToolCall(ctx, in)
 	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved
 	}
-	dispatched := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)
-	if dispatched.failure != nil {
-		return execution{failure: dispatched.failure, certification: dispatched.certification}
+	dispatchedResult := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)
+	dispatched = dispatchedResult.dispatched
+	if dispatchedResult.failure != nil {
+		return execution{failure: dispatchedResult.failure, certification: dispatchedResult.certification}
 	}
-	if dispatched.callErr != nil {
+	if dispatchedResult.callErr != nil {
 		evidence := AttemptEvidence{
 			ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
 			Status: StatusOutcomeUnknown, IsError: false,
 			ResultDigest: digestBytes([]byte(string(StatusOutcomeUnknown) + ":" + reservation.DispatchID)),
-			StartedAt:    dispatched.started, CompletedAt: dispatched.completed,
+			StartedAt:    dispatchedResult.started, CompletedAt: dispatchedResult.completed,
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
-		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed.", listChanged: dispatched.listChanged, certification: dispatched.certification}
+		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed.", listChanged: dispatchedResult.listChanged, certification: dispatchedResult.certification}
 	}
-	return s.settleToolCall(ctx, in.tool, reservation, dispatched)
+	return s.settleToolCall(ctx, in.tool, reservation, dispatchedResult)
 }

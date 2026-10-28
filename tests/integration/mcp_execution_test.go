@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,7 +156,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		t.Fatal(err)
 	}
 	toolServer := &mcp.Server{
-		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore,
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
 		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
 		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 			return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
@@ -531,7 +532,7 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	toolServer := &mcp.Server{
-		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore,
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
 		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
 		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 			return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
@@ -725,7 +726,7 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	}
 	newConsumer := func() *httptest.Server {
 		toolServer := &mcp.Server{
-			Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore,
+			Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
 			Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
 			Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
@@ -887,7 +888,7 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	unknownTwoDispatch := mcpExecString(t, unknownTwo, "dispatch_id")
 	h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
 		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"), "observed_cost": "1.5",
-	}, idem("mcp-identity-settle-nonzero"), 409)
+	}, idem("mcp-identity-settle-nonzero"), 422)
 	settled := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
 		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"), "observed_cost": "0", "observed_charge": "0",
 	}, idem("mcp-identity-settle-unknown"), 200)
@@ -1017,5 +1018,685 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	status, swept := callOn(restarted, callerID, argument)
 	if status != http.StatusOK || calls.Load() != 7 {
 		t.Fatalf("swept call identity could not be reused: status=%d calls=%d body=%v", status, calls.Load(), swept)
+	}
+}
+
+func TestMCPToolCallPricingLimitsAndOwnersEndToEnd(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "MCP pricing")
+	const credential = "integration-pricing-credential"
+	const serverPrice = "0.10"
+	const toolPrice = "0.25"
+	var calls atomic.Int64
+	var mode atomic.Value
+	mode.Store("ok")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+credential {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "pricing-session")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{
+				"name": "lookup", "description": "Look up",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
+			}}}
+		case "tools/call":
+			calls.Add(1)
+			switch mode.Load() {
+			case "drop":
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			case "error":
+				result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "upstream failed"}}, "isError": true}
+			default:
+				result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "priced answer"}}, "isError": false}
+			}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+
+	openProject := createProject(h, owner, "MCP pricing open")
+	register := func(projectID, name string, pricing map[string]any) (map[string]any, agentcontract.Tool) {
+		t.Helper()
+		body := map[string]any{
+			"name": name, "project_id": projectID, "transport": "streamable_http",
+			"endpoint": upstream.URL, "enabled": true, "credential": credential,
+		}
+		for key, value := range pricing {
+			body[key] = value
+		}
+		created := h.want(owner, "POST", "/api/v1/mcp-servers", body, idem("mcp-pricing-"+name), 201)
+		serverID := mcpExecString(t, created, "id")
+		tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+		return created, tool
+	}
+	pricedServer, pricedTool := register(project, "Priced server", map[string]any{
+		"unit_price": serverPrice, "tool_prices": map[string]any{"lookup": toolPrice},
+		"calls_per_minute": 120, "max_concurrency": 4, "per_key_calls_per_minute": 30, "per_key_max_concurrency": 2,
+	})
+	if pricedServer["unit_price"] != serverPrice || pricedServer["calls_per_minute"] != float64(120) || pricedServer["per_key_max_concurrency"] != float64(2) {
+		t.Fatalf("management create did not round trip pricing: %v", pricedServer)
+	}
+	if prices, _ := pricedServer["tool_prices"].(map[string]any); prices["lookup"] != toolPrice {
+		t.Fatalf("management create lost the tool price: %v", pricedServer)
+	}
+	_, unpricedTool := register(project, "Unpriced server", nil)
+	_, openUnpricedTool := register(openProject, "Open unpriced server", nil)
+	_, limitedTool := register(openProject, "Limited server", map[string]any{"unit_price": "0", "per_key_calls_per_minute": 1})
+	publish := func(projectID, name string, tool agentcontract.Tool) string {
+		t.Helper()
+		toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+			"project_id": projectID, "name": name,
+			"toolset": map[string]any{"tools": []agentcontract.Tool{tool}},
+		}, idem("mcp-pricing-toolset-"+name), 201)
+		id := mcpExecString(t, toolset, "id")
+		h.want(owner, "POST", "/api/v1/toolsets/"+id+"/publish", nil, withMatch(toolset, idem("mcp-pricing-publish-"+name)), 200)
+		return id
+	}
+	pricedToolset := publish(project, "Priced toolset", pricedTool)
+	unpricedToolset := publish(project, "Unpriced toolset", unpricedTool)
+	openUnpricedToolset := publish(openProject, "Open unpriced toolset", openUnpricedTool)
+	limitedToolset := publish(openProject, "Limited toolset", limitedTool)
+
+	budgetDetail := h.want(owner, "GET", "/api/v1/projects/"+project+"/budget", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/projects/"+project+"/budget", map[string]any{"policy": map[string]any{"daily_cost_limit": "100"}}, etagHeader(budgetDetail), 200)
+	group := h.want(owner, "POST", "/api/v1/budget-groups", map[string]any{
+		"name": "tool pricing group", "project_id": project, "monthly_cost_limit": "100",
+	}, idem("mcp-pricing-group"), 201)
+	cappedKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Capped tool caller", "project_id": project, "scopes": []string{"tools"},
+		"allowed_toolsets": []string{pricedToolset, unpricedToolset}, "daily_cost_limit": "100", "budget_group_id": mcpExecString(t, group, "id"),
+	}, idem("mcp-pricing-capped-key"), 201)
+	cappedSecret := mcpExecString(t, cappedKey, "secret")
+	openKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Open tool caller", "project_id": openProject, "scopes": []string{"tools"},
+		"allowed_toolsets": []string{openUnpricedToolset, limitedToolset},
+	}, idem("mcp-pricing-open-key"), 201)
+	openSecret := mcpExecString(t, openKey, "secret")
+
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(h.Ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := database.Installation(t.Context(), h.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp-pricing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolServer := &mcp.Server{
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
+		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
+		},
+	}
+	mux := http.NewServeMux()
+	toolServer.Register(mux)
+	consumer := httptest.NewServer(mux)
+	defer consumer.Close()
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	windows := limits.BudgetWindows(time.Now())
+	for kind, id := range map[string]int64{"day": windows.DailyID, "week": windows.WeeklyID, "month": windows.MonthlyID} {
+		for _, seed := range []struct {
+			query string
+			owner string
+		}{
+			{`INSERT INTO olp.api_key_cost_windows(api_key_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete) VALUES($1,$2,$3,0,0,true) ON CONFLICT DO NOTHING`, mcpExecString(t, cappedKey, "id")},
+			{`INSERT INTO olp.budget_group_cost_windows(budget_group_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete) VALUES($1,$2,$3,0,0,true) ON CONFLICT DO NOTHING`, mcpExecString(t, group, "id")},
+			{`INSERT INTO olp.aggregate_cost_windows(account_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete) VALUES($1,$2,$3,0,0,true) ON CONFLICT DO NOTHING`, limits.AggregateBudgetID("project", project)},
+		} {
+			if _, err := h.Pool.Exec(t.Context(), seed.query, seed.owner, kind, id); err != nil {
+				t.Fatalf("seed %s cost window for %s: %v", kind, seed.owner, err)
+			}
+		}
+	}
+	call := func(secret, toolsetID string, tool agentcontract.Tool, callID string) (int, map[string]any) {
+		t.Helper()
+		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": callID, "arguments": map[string]any{"query": "pricing probe"}})
+		req, err := http.NewRequest(http.MethodPost, consumer.URL+"/v1/mcp/tools/call", bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if len(raw) > 0 {
+			if err = json.Unmarshal(raw, &out); err != nil {
+				t.Fatalf("consumer response is not JSON: %s", raw)
+			}
+		}
+		return resp.StatusCode, out
+	}
+	var pricingCurrency string
+	if err = h.Pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&pricingCurrency); err != nil {
+		t.Fatal(err)
+	}
+
+	status, called := call(cappedSecret, pricedToolset, pricedTool, "pricing-priced-1")
+	if status != http.StatusOK || calls.Load() != 1 {
+		t.Fatalf("priced call did not execute: status=%d calls=%d body=%v", status, calls.Load(), called)
+	}
+	attemptID := mcpExecString(t, called, "attempt_id")
+	dispatchID := mcpExecString(t, called, "dispatch_id")
+	record := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+attemptID, nil, nil, 200)
+	price, _ := new(big.Rat).SetString(toolPrice)
+	if record["pricing_state"] != "priced" || record["currency"] != pricingCurrency || record["debit_state"] != "settled" ||
+		mcpAmount(t, record, "unit_price").Cmp(price) != 0 ||
+		!mcpAmountsEqual(t, record, "cost_bound", "unit_price") || !mcpAmountsEqual(t, record, "charge_bound", "unit_price") ||
+		!mcpAmountsEqual(t, record, "observed_cost", "cost_bound") || !mcpAmountsEqual(t, record, "observed_charge", "charge_bound") ||
+		!mcpAmountIsZero(t, record, "remaining_cost") || !mcpAmountIsZero(t, record, "remaining_charge") {
+		t.Fatalf("priced call did not settle at the pinned tool price: %v", record)
+	}
+	rows, err := h.Pool.Query(t.Context(), `SELECT owner_kind,bound::text FROM olp.execution_debit_owners WHERE dispatch_id=$1`, dispatchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerKinds := map[string]bool{}
+	for rows.Next() {
+		var kind, bound string
+		if err = rows.Scan(&kind, &bound); err != nil {
+			t.Fatal(err)
+		}
+		ownerKinds[kind] = true
+		parsed, _ := new(big.Rat).SetString(bound)
+		if parsed.Cmp(price) != 0 {
+			t.Fatalf("%s owner reserved bound %q instead of the pinned price", kind, bound)
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"key", "group", "aggregate"} {
+		if !ownerKinds[kind] {
+			t.Fatalf("priced debit recorded no %s owner: %v", kind, ownerKinds)
+		}
+	}
+
+	mode.Store("error")
+	status, failed := call(cappedSecret, pricedToolset, pricedTool, "pricing-priced-2")
+	if status != http.StatusOK || failed["is_error"] != true || calls.Load() != 2 {
+		t.Fatalf("upstream failure did not return as a tool error: status=%d calls=%d body=%v", status, calls.Load(), failed)
+	}
+	failureRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, failed, "attempt_id"), nil, nil, 200)
+	if failureRecord["status"] != "upstream_error" || failureRecord["debit_state"] != "settled" ||
+		!mcpAmountsEqual(t, failureRecord, "observed_cost", "cost_bound") || mcpAmount(t, failureRecord, "observed_cost").Cmp(price) != 0 {
+		t.Fatalf("upstream failure did not settle at the pinned price: %v", failureRecord)
+	}
+	mode.Store("ok")
+
+	status, refused := call(cappedSecret, unpricedToolset, unpricedTool, "pricing-unpriced-capped")
+	if status != http.StatusUnprocessableEntity || calls.Load() != 2 {
+		t.Fatalf("unpriced call under a ceiling dispatched: status=%d calls=%d body=%v", status, calls.Load(), refused)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, refused, "error"), "code"); code != "tool_unpriced" {
+		t.Fatalf("unpriced refusal is not typed: %v", refused)
+	}
+	var refusedRecords int
+	var refusedContentFree bool
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*),COALESCE(bool_and(result_digest IS NULL AND pricing_state='unpriced' AND unit_price IS NULL),false) FROM olp.mcp_tool_calls WHERE api_key_id=$1 AND status='refused_unpriced'`, mcpExecString(t, cappedKey, "id")).Scan(&refusedRecords, &refusedContentFree); err != nil {
+		t.Fatal(err)
+	}
+	if refusedRecords != 1 || !refusedContentFree {
+		t.Fatalf("capped missing-price refusal wrote no content-free refused record: count=%d free=%v", refusedRecords, refusedContentFree)
+	}
+	status, openUnpriced := call(openSecret, openUnpricedToolset, openUnpricedTool, "pricing-unpriced-open")
+	if status != http.StatusOK || calls.Load() != 3 {
+		t.Fatalf("unpriced call without a key ceiling did not execute: status=%d calls=%d body=%v", status, calls.Load(), openUnpriced)
+	}
+	unpricedRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, openUnpriced, "attempt_id"), nil, nil, 200)
+	if unpricedRecord["pricing_state"] != "unpriced" || unpricedRecord["unit_price"] != nil || unpricedRecord["debit_state"] != "settled" ||
+		!mcpAmountIsZero(t, unpricedRecord, "cost_bound") || !mcpAmountIsZero(t, unpricedRecord, "observed_cost") {
+		t.Fatalf("missing price was not recorded as an unpriced fact: %v", unpricedRecord)
+	}
+	var unpricedAttempts int64
+	if err = h.Pool.QueryRow(t.Context(), `SELECT COALESCE(unpriced_attempts,0) FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='month'`, mcpExecString(t, openKey, "id")).Scan(&unpricedAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if unpricedAttempts != 1 {
+		t.Fatalf("unpriced dispatched call read as free in the spend view: unpriced_attempts=%d", unpricedAttempts)
+	}
+
+	status, free := call(openSecret, limitedToolset, limitedTool, "pricing-free-1")
+	if status != http.StatusOK || calls.Load() != 4 {
+		t.Fatalf("free call did not execute: status=%d calls=%d body=%v", status, calls.Load(), free)
+	}
+	freeRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, free, "attempt_id"), nil, nil, 200)
+	if freeRecord["pricing_state"] != "free" || freeRecord["unit_price"] == nil || !mcpAmountIsZero(t, freeRecord, "unit_price") || freeRecord["debit_state"] != "settled" {
+		t.Fatalf("explicit zero was not recorded as known free: %v", freeRecord)
+	}
+	status, limited := call(openSecret, limitedToolset, limitedTool, "pricing-free-2")
+	if status != http.StatusTooManyRequests || calls.Load() != 4 {
+		t.Fatalf("per-key rate limit dispatched: status=%d calls=%d body=%v", status, calls.Load(), limited)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, limited, "error"), "code"); code != "tool_rate_limited" {
+		t.Fatalf("rate refusal is not typed: %v", limited)
+	}
+
+	mode.Store("drop")
+	status, unknown := call(cappedSecret, pricedToolset, pricedTool, "pricing-unknown-1")
+	if status != http.StatusBadGateway || unknown["status"] != "outcome_unknown" || calls.Load() != 5 {
+		t.Fatalf("ambiguous priced dispatch was not held unknown: status=%d calls=%d body=%v", status, calls.Load(), unknown)
+	}
+	mode.Store("ok")
+	unknownAttempt := mcpExecString(t, unknown, "attempt_id")
+	held := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+unknownAttempt, nil, nil, 200)
+	if held["pricing_state"] != "priced" || mcpAmount(t, held, "cost_bound").Cmp(price) != 0 ||
+		!mcpAmountIsZero(t, held, "observed_cost") || !mcpAmountsEqual(t, held, "remaining_cost", "cost_bound") ||
+		mcpAmount(t, held, "remaining_cost").Sign() == 0 {
+		t.Fatalf("held report folded bound, observed and remaining together: %v", held)
+	}
+	evidence := func(seed string) string {
+		sum := sha256.Sum256([]byte(seed))
+		return hex.EncodeToString(sum[:])
+	}
+	over := new(big.Rat).Add(price, big.NewRat(1, 100)).FloatString(2)
+	h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidence("priced-upstream-completion"), "observed_cost": over, "observed_charge": toolPrice,
+	}, idem("mcp-pricing-resolve-over"), 422)
+	resolved := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidence("priced-upstream-completion"), "observed_cost": toolPrice, "observed_charge": toolPrice,
+	}, idem("mcp-pricing-resolve"), 200)
+	if resolved["status"] != "settled" || resolved["debit_state"] != "settled" ||
+		!mcpAmountsEqual(t, resolved, "observed_cost", "cost_bound") || !mcpAmountIsZero(t, resolved, "remaining_cost") {
+		t.Fatalf("observed evidence did not settle against the real bound: %v", resolved)
+	}
+	repeat := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidence("priced-upstream-completion"), "observed_cost": toolPrice, "observed_charge": toolPrice,
+	}, idem("mcp-pricing-resolve-retry"), 200)
+	if repeat["id"] != resolved["id"] {
+		t.Fatalf("repeated resolve did not return the existing record: %v", repeat)
+	}
+	h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidence("priced-upstream-completion"), "observed_cost": "0", "observed_charge": "0",
+	}, idem("mcp-pricing-resolve-changed-amounts"), 409)
+
+	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	foundPricing := false
+	for _, item := range exported["mcp_servers"].([]any) {
+		entry := item.(map[string]any)
+		if entry["name"] == "Priced server" {
+			prices, _ := entry["tool_prices"].(map[string]any)
+			foundPricing = entry["unit_price"] == serverPrice && prices["lookup"] == toolPrice &&
+				entry["calls_per_minute"] == float64(120) && entry["per_key_max_concurrency"] == float64(2) &&
+				entry["credential_ref"] != nil && entry["credential_ref"] != credential
+		}
+	}
+	if !foundPricing {
+		t.Fatalf("configuration export lost tool pricing or exposed the credential: %v", exported["mcp_servers"])
+	}
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": exported}, nil, 200)
+
+	updated := h.want(owner, "PUT", "/api/v1/mcp-servers/"+mcpExecString(t, pricedServer, "id"), map[string]any{
+		"name": "Priced server", "endpoint": upstream.URL, "enabled": true, "credential": credential,
+		"unit_price": "0.40", "tool_prices": map[string]any{"lookup": "0.40"},
+	}, withMatch(pricedServer, idem("mcp-pricing-update")), 200)
+	if updated["unit_price"] != "0.40" || updated["revision_id"] == pricedServer["revision_id"] ||
+		updated["calls_per_minute"] != float64(120) || updated["max_concurrency"] != float64(4) ||
+		updated["per_key_calls_per_minute"] != float64(30) || updated["per_key_max_concurrency"] != float64(2) {
+		t.Fatalf("management update did not pin new pricing while preserving absent limits: %v", updated)
+	}
+	limitsOnly := h.want(owner, "PUT", "/api/v1/mcp-servers/"+mcpExecString(t, updated, "id"), map[string]any{
+		"name": "Priced server", "endpoint": upstream.URL, "enabled": true,
+		"calls_per_minute": 240, "max_concurrency": 6,
+	}, withMatch(updated, idem("mcp-pricing-limits-only")), 200)
+	if limitsOnly["revision_id"] != updated["revision_id"] || limitsOnly["unit_price"] != "0.40" ||
+		limitsOnly["calls_per_minute"] != float64(240) || limitsOnly["max_concurrency"] != float64(6) ||
+		limitsOnly["per_key_calls_per_minute"] != float64(30) {
+		t.Fatalf("limits-only update drifted the certified revision or lost preserved fields: %v", limitsOnly)
+	}
+}
+
+func TestMCPToolCallSettledSpendExhaustsFreshBudgetAndEndUserEndToEnd(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "MCP budget exhaustion")
+	const unitPrice = "0.30"
+	price, ok := new(big.Rat).SetString(unitPrice)
+	if !ok {
+		t.Fatal("unit price does not parse")
+	}
+	capLimit := new(big.Rat).Mul(price, big.NewRat(3, 2)).FloatString(2)
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "exhaustion-session")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{
+				"name": "lookup", "description": "Look up",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
+			}}}
+		case "tools/call":
+			calls.Add(1)
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "priced answer"}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+
+	created := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
+		"name": "Exhaustion server", "project_id": project, "transport": "streamable_http",
+		"endpoint": upstream.URL, "enabled": true, "unit_price": unitPrice,
+	}, idem("mcp-exhaustion-server"), 201)
+	serverID := mcpExecString(t, created, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+		"project_id": project, "name": "Exhaustion toolset",
+		"toolset": map[string]any{"tools": []agentcontract.Tool{tool}},
+	}, idem("mcp-exhaustion-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("mcp-exhaustion-publish")), 200)
+	cappedKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Exhaustion caller", "project_id": project, "scopes": []string{"tools"},
+		"allowed_toolsets": []string{toolsetID}, "daily_cost_limit": capLimit,
+	}, idem("mcp-exhaustion-key"), 201)
+	cappedSecret := mcpExecString(t, cappedKey, "secret")
+	endUserKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "End-user caller", "project_id": project, "scopes": []string{"tools"},
+		"allowed_toolsets": []string{toolsetID}, "end_user_source": "header",
+		"end_user_policy": map[string]any{"defaults": map[string]any{"daily_cost_limit": capLimit}},
+	}, idem("mcp-exhaustion-end-user-key"), 201)
+	endUserSecret := mcpExecString(t, endUserKey, "secret")
+
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+"mcp-exhaustion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolServer := &mcp.Server{
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
+		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+	}
+	mux := http.NewServeMux()
+	toolServer.Register(mux)
+	consumer := httptest.NewServer(mux)
+	defer consumer.Close()
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	call := func(secret, endUser, callID string) (int, map[string]any) {
+		t.Helper()
+		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": callID, "arguments": map[string]any{"query": "exhaustion probe"}})
+		req, err := http.NewRequest(http.MethodPost, consumer.URL+"/v1/mcp/tools/call", bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		if endUser != "" {
+			req.Header.Set("X-OLP-End-User", endUser)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if len(raw) > 0 {
+			if err = json.Unmarshal(raw, &out); err != nil {
+				t.Fatalf("consumer response is not JSON: %s", raw)
+			}
+		}
+		return resp.StatusCode, out
+	}
+
+	status, first := call(cappedSecret, "", "exhaustion-1")
+	if status != http.StatusOK || calls.Load() != 1 {
+		t.Fatalf("first capped call from a fresh owner did not execute: status=%d calls=%d body=%v", status, calls.Load(), first)
+	}
+	record := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, first, "attempt_id"), nil, nil, 200)
+	var accrued string
+	if err = h.Pool.QueryRow(t.Context(), `SELECT accrued::text FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'`, mcpExecString(t, cappedKey, "id")).Scan(&accrued); err != nil {
+		t.Fatal(err)
+	}
+	accruedAmount, ok := new(big.Rat).SetString(accrued)
+	if !ok || accruedAmount.Cmp(mcpAmount(t, record, "observed_cost")) != 0 || accruedAmount.Sign() == 0 {
+		t.Fatalf("settled spend did not persist into the owner window: accrued=%q record=%v", accrued, record)
+	}
+	status, refused := call(cappedSecret, "", "exhaustion-2")
+	if status != http.StatusTooManyRequests || calls.Load() != 1 {
+		t.Fatalf("call past settled spend dispatched: status=%d calls=%d body=%v", status, calls.Load(), refused)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, refused, "error"), "code"); code != "budget_exceeded" {
+		t.Fatalf("budget refusal is not typed: %v", refused)
+	}
+
+	status, endUserFirst := call(endUserSecret, "end-user-alpha", "exhaustion-eu-1")
+	if status != http.StatusOK || calls.Load() != 2 {
+		t.Fatalf("first end-user call did not execute: status=%d calls=%d body=%v", status, calls.Load(), endUserFirst)
+	}
+	var endUserOwners int
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_owners WHERE dispatch_id=$1 AND owner_kind='end_user'`, mcpExecString(t, endUserFirst, "dispatch_id")).Scan(&endUserOwners); err != nil {
+		t.Fatal(err)
+	}
+	if endUserOwners == 0 {
+		t.Fatal("end-user call recorded no end-user debit owner")
+	}
+	status, endUserRefused := call(endUserSecret, "end-user-alpha", "exhaustion-eu-2")
+	if status != http.StatusTooManyRequests || calls.Load() != 2 {
+		t.Fatalf("second call for the exhausted end user dispatched: status=%d calls=%d body=%v", status, calls.Load(), endUserRefused)
+	}
+	status, otherEndUser := call(endUserSecret, "end-user-beta", "exhaustion-eu-3")
+	if status != http.StatusOK || calls.Load() != 3 {
+		t.Fatalf("a different end user inherited the exhausted budget: status=%d calls=%d body=%v", status, calls.Load(), otherEndUser)
+	}
+}
+
+func TestMCPToolCallRateLeasesHoldAndRefundEndToEnd(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "MCP rate leases")
+	entered := make(chan struct{}, 1)
+	releaseUpstream := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseUpstream) }) }
+	defer release()
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "lease-session")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{
+				"name": "lookup", "description": "Look up",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
+			}}}
+		case "tools/call":
+			if calls.Add(1) == 1 {
+				entered <- struct{}{}
+				select {
+				case <-releaseUpstream:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "leased answer"}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+
+	created := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
+		"name": "Lease server", "project_id": project, "transport": "streamable_http",
+		"endpoint": upstream.URL, "enabled": true, "unit_price": "0",
+		"max_concurrency": 1, "per_key_calls_per_minute": 1,
+	}, idem("mcp-lease-server"), 201)
+	serverID := mcpExecString(t, created, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+		"project_id": project, "name": "Lease toolset",
+		"toolset": map[string]any{"tools": []agentcontract.Tool{tool}},
+	}, idem("mcp-lease-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("mcp-lease-publish")), 200)
+	makeKey := func(name string) string {
+		t.Helper()
+		key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+			"name": name, "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
+		}, idem("mcp-lease-key-"+name), 201)
+		return mcpExecString(t, key, "secret")
+	}
+	secretA, secretB := makeKey("Lease caller A"), makeKey("Lease caller B")
+
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+"mcp-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolServer := &mcp.Server{
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore, Limiter: limiter,
+		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+	}
+	mux := http.NewServeMux()
+	toolServer.Register(mux)
+	consumer := httptest.NewServer(mux)
+	defer consumer.Close()
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	call := func(secret, callID string) (int, map[string]any) {
+		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": callID, "arguments": map[string]any{"query": "lease probe"}})
+		req, err := http.NewRequest(http.MethodPost, consumer.URL+"/v1/mcp/tools/call", bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if len(raw) > 0 && json.Unmarshal(raw, &out) != nil {
+			t.Fatalf("consumer response is not JSON: %s", raw)
+		}
+		return resp.StatusCode, out
+	}
+
+	type outcome struct {
+		status int
+		body   map[string]any
+	}
+	firstDone := make(chan outcome, 1)
+	go func() {
+		status, body := call(secretA, "lease-a-1")
+		firstDone <- outcome{status, body}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("first call never reached the upstream tool")
+	}
+	status, refused := call(secretB, "lease-b-1")
+	if status != http.StatusTooManyRequests || calls.Load() != 1 {
+		t.Fatalf("second call was not held by the server concurrency lease: status=%d calls=%d body=%v", status, calls.Load(), refused)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, refused, "error"), "code"); code != "tool_rate_limited" {
+		t.Fatalf("concurrency refusal is not typed: %v", refused)
+	}
+	release()
+	first := <-firstDone
+	if first.status != http.StatusOK {
+		t.Fatalf("held call did not complete after release: status=%d body=%v", first.status, first.body)
+	}
+	status, retried := call(secretB, "lease-b-2")
+	if status != http.StatusOK || calls.Load() != 2 {
+		t.Fatalf("refused call consumed the per-key rate allowance instead of refunding it: status=%d calls=%d body=%v", status, calls.Load(), retried)
 	}
 }

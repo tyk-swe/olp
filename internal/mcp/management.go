@@ -43,9 +43,12 @@ type ToolCall struct {
 	ObservedCharge    string            `json:"observed_charge"`
 	RemainingCost     string            `json:"remaining_cost"`
 	RemainingCharge   string            `json:"remaining_charge"`
+	UnitPrice         *string           `json:"unit_price"`
+	PricingState      PricingState      `json:"pricing_state"`
+	Currency          *string           `json:"currency"`
 }
 
-const toolCallColumns = "c.id::text,c.dispatch_id::text,c.api_key_id::text,c.project_id::text,c.toolset_id::text,c.toolset_revision_id::text,c.server_id::text,c.server_revision_id::text,c.tool_alias,c.input_digest,c.result_digest,c.status,c.is_error,c.started_at,c.completed_at,c.created_at,c.call_digest,d.state,d.cost_bound::text,d.charge_bound::text,d.observed_cost::text,d.observed_charge::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text"
+const toolCallColumns = "c.id::text,c.dispatch_id::text,c.api_key_id::text,c.project_id::text,c.toolset_id::text,c.toolset_revision_id::text,c.server_id::text,c.server_revision_id::text,c.tool_alias,c.input_digest,c.result_digest,c.status,c.is_error,c.started_at,c.completed_at,c.created_at,c.call_digest,d.state,d.cost_bound::text,d.charge_bound::text,d.observed_cost::text,d.observed_charge::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text,c.unit_price::text,c.pricing_state,c.currency"
 
 const toolCallFrom = " FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id"
 
@@ -55,7 +58,7 @@ type toolCallRow interface {
 
 func scanToolCall(row toolCallRow) (ToolCall, error) {
 	var call ToolCall
-	err := row.Scan(&call.ID, &call.DispatchID, &call.APIKeyID, &call.ProjectID, &call.ToolsetID, &call.ToolsetRevisionID, &call.ServerID, &call.ServerRevisionID, &call.ToolAlias, &call.InputDigest, &call.ResultDigest, &call.Status, &call.IsError, &call.StartedAt, &call.CompletedAt, &call.CreatedAt, &call.CallDigest, &call.DebitState, &call.CostBound, &call.ChargeBound, &call.ObservedCost, &call.ObservedCharge, &call.RemainingCost, &call.RemainingCharge)
+	err := row.Scan(&call.ID, &call.DispatchID, &call.APIKeyID, &call.ProjectID, &call.ToolsetID, &call.ToolsetRevisionID, &call.ServerID, &call.ServerRevisionID, &call.ToolAlias, &call.InputDigest, &call.ResultDigest, &call.Status, &call.IsError, &call.StartedAt, &call.CompletedAt, &call.CreatedAt, &call.CallDigest, &call.DebitState, &call.CostBound, &call.ChargeBound, &call.ObservedCost, &call.ObservedCharge, &call.RemainingCost, &call.RemainingCharge, &call.UnitPrice, &call.PricingState, &call.Currency)
 	return call, err
 }
 
@@ -109,6 +112,16 @@ func resolveAmount(raw *string, field string) (string, error) {
 
 func resolveAmountIsZero(amount string) bool {
 	return strings.Trim(amount, "0.") == ""
+}
+
+func checkResolveBounds(call ToolCall, observedCost, observedCharge string) error {
+	if !limits.WithinBound(call.CostBound, call.ObservedCost, observedCost) {
+		return access.Invalid("observed_cost", "The observed cost exceeds the held debit bound.")
+	}
+	if !limits.WithinBound(call.ChargeBound, call.ObservedCharge, observedCharge) {
+		return access.Invalid("observed_charge", "The observed charge exceeds the held debit bound.")
+	}
+	return nil
 }
 
 func validateResolveInput(outcome ResolveOutcome, evidenceDigest string) error {
@@ -174,13 +187,18 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply,
 		if storedErr != nil {
 			return access.Reply{}, storedErr
 		}
-		if found && bytes.Equal(stored, evidence) {
+		if found && bytes.Equal(stored, evidence) && limits.AmountEqual(call.ObservedCost, observedCost) && limits.AmountEqual(call.ObservedCharge, observedCharge) {
 			return access.Detail(call, call.ID), nil
 		}
 		return access.Reply{}, access.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
 	}
 	if call.Status != StatusOutcomeUnknown {
 		return access.Reply{}, access.Fail(409, "tool_call_not_unknown", "Only a tool call with an unknown outcome can be resolved.")
+	}
+	if request.Outcome == ResolveSettled {
+		if err = checkResolveBounds(call, observedCost, observedCharge); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	tx, err := m.Access.Begin(r)
 	if err != nil {

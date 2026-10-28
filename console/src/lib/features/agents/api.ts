@@ -8,6 +8,7 @@ export type Publication = components['schemas']['AgentPublication'];
 export type Draft = components['schemas']['AgentPublicationWrite'];
 export type ToolPin = components['schemas']['AgentToolPin'];
 export type MCPServer = components['schemas']['MCPServerResponse'];
+export type MCPServerUpdate = components['schemas']['UpdateMCPServerRequest'];
 export type Revision = components['schemas']['AgentPublicationRevision'];
 export type Exposure = components['schemas']['ExecutionDebit'];
 
@@ -74,6 +75,24 @@ export const getServer = async (id: string) =>
       params: { path: { server_id: id } }
     })
   );
+export async function saveServerPricing(
+  current: MCPServer,
+  input: MCPServerUpdate,
+  requestId: string
+) {
+  return unwrap(
+    await apiClient.PUT('/api/v1/mcp-servers/{server_id}', {
+      params: {
+        path: { server_id: current.id },
+        header: {
+          'If-Match': `"${current.etag}"`,
+          'Idempotency-Key': requestId
+        }
+      },
+      body: input
+    })
+  );
+}
 export const listExposures = async (key?: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/execution-debits', {

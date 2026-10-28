@@ -13,17 +13,61 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type MCPServerEntry struct {
-	Name          string  `json:"name"`
-	Project       string  `json:"project"`
-	Transport     string  `json:"transport"`
-	Endpoint      string  `json:"endpoint"`
-	Enabled       bool    `json:"enabled"`
-	CatalogDigest string  `json:"catalog_digest"`
-	CredentialRef *string `json:"credential_ref,omitempty"`
+	Name                 string            `json:"name"`
+	Project              string            `json:"project"`
+	Transport            string            `json:"transport"`
+	Endpoint             string            `json:"endpoint"`
+	Enabled              bool              `json:"enabled"`
+	CatalogDigest        string            `json:"catalog_digest"`
+	CredentialRef        *string           `json:"credential_ref,omitempty"`
+	UnitPrice            *string           `json:"unit_price"`
+	ToolPrices           map[string]string `json:"tool_prices,omitempty"`
+	CallsPerMinute       *int64            `json:"calls_per_minute"`
+	MaxConcurrency       *int64            `json:"max_concurrency"`
+	PerKeyCallsPerMinute *int64            `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency *int64            `json:"per_key_max_concurrency"`
+}
+
+func mcpEntryPrice(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
+func mcpEntryLimit(value int64) *int64 {
+	return &value
+}
+
+func normalizeMCPEntry(e *MCPServerEntry) {
+	if e.ToolPrices == nil {
+		e.ToolPrices = map[string]string{}
+	}
+	e.CallsPerMinute = mcpEntryLimit(routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute))
+	e.MaxConcurrency = mcpEntryLimit(routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency))
+	e.PerKeyCallsPerMinute = mcpEntryLimit(routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute))
+	e.PerKeyMaxConcurrency = mcpEntryLimit(routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+}
+
+func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcpservers.Definition {
+	prices := make(map[string]string, len(e.ToolPrices))
+	for name, price := range e.ToolPrices {
+		prices[name] = price
+	}
+	return &mcpservers.Definition{
+		Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
+		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
+		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		PerKeyCallsPerMinute: routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		PerKeyMaxConcurrency: routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
+	}
 }
 
 func mcpKey(e MCPServerEntry) [2]string {
@@ -48,11 +92,17 @@ func (s *Server) validateMCPServers(doc *Document) error {
 			return access.Invalid("mcp_servers", "Use unique project/name pairs, streamable_http and a certified catalog digest.")
 		}
 		seen[key] = true
-		in := mcpservers.Input{Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled}
+		in := mcpservers.Input{
+			Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
+			UnitPrice: e.UnitPrice, ToolPrices: e.ToolPrices,
+			CallsPerMinute: e.CallsPerMinute, MaxConcurrency: e.MaxConcurrency,
+			PerKeyCallsPerMinute: e.PerKeyCallsPerMinute, PerKeyMaxConcurrency: e.PerKeyMaxConcurrency,
+		}
 		if err = mcpservers.Validate(&in, s.Egress); err != nil {
 			return err
 		}
 		e.Name, e.Endpoint = in.Name, in.Endpoint
+		normalizeMCPEntry(e)
 		if e.CredentialRef != nil && *e.CredentialRef != mcpReference(*e) {
 			return access.Invalid("mcp_servers.credential_ref", "Use the deterministic exported MCP credential reference.")
 		}
@@ -60,7 +110,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 	return nil
 }
 func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, error) {
-	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
+	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +119,16 @@ func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, 
 	for rows.Next() {
 		var e MCPServerEntry
 		var credential bool
-		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential); err != nil {
+		var callsPerMinute, maxConcurrency, perKeyCallsPerMinute, perKeyMaxConcurrency int64
+		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency); err != nil {
 			return nil, err
+		}
+		e.CallsPerMinute = &callsPerMinute
+		e.MaxConcurrency = &maxConcurrency
+		e.PerKeyCallsPerMinute = &perKeyCallsPerMinute
+		e.PerKeyMaxConcurrency = &perKeyMaxConcurrency
+		if e.ToolPrices == nil {
+			e.ToolPrices = map[string]string{}
 		}
 		if credential {
 			ref := mcpReference(e)
@@ -96,7 +154,16 @@ func findMCPServer(ctx context.Context, q access.Queryer, e MCPServerEntry) (*mc
 	return d, err
 }
 func mcpEntry(d *mcpservers.Definition, project string) MCPServerEntry {
-	e := MCPServerEntry{Name: d.Name, Project: project, Transport: d.Transport, Endpoint: d.Endpoint, Enabled: d.Enabled, CatalogDigest: d.Catalog.Digest}
+	prices := make(map[string]string, len(d.ToolPrices))
+	for name, price := range d.ToolPrices {
+		prices[name] = price
+	}
+	e := MCPServerEntry{
+		Name: d.Name, Project: project, Transport: d.Transport, Endpoint: d.Endpoint, Enabled: d.Enabled, CatalogDigest: d.Catalog.Digest,
+		UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
+		CallsPerMinute: mcpEntryLimit(d.CallsPerMinute), MaxConcurrency: mcpEntryLimit(d.MaxConcurrency),
+		PerKeyCallsPerMinute: mcpEntryLimit(d.PerKeyCallsPerMinute), PerKeyMaxConcurrency: mcpEntryLimit(d.PerKeyMaxConcurrency),
+	}
 	if d.HasCredential {
 		ref := mcpReference(e)
 		e.CredentialRef = &ref
@@ -168,9 +235,10 @@ func (s *Server) planMCPServers(ctx context.Context, q access.Queryer, doc *Docu
 }
 
 type preparedMCP struct {
-	catalog  *mcpservers.Catalog
-	observed string
-	reuse    bool
+	catalog    *mcpservers.Catalog
+	observed   string
+	reuse      bool
+	limitsOnly bool
 }
 
 func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc *Document, bindings bindingSet) (map[[2]string]preparedMCP, error) {
@@ -205,6 +273,21 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 		if equal {
 			out[mcpKey(e)] = prepared
 			continue
+		}
+		if d != nil {
+			probe := e
+			current := mcpEntry(d, e.Project)
+			probe.CallsPerMinute, probe.MaxConcurrency = current.CallsPerMinute, current.MaxConcurrency
+			probe.PerKeyCallsPerMinute, probe.PerKeyMaxConcurrency = current.PerKeyCallsPerMinute, current.PerKeyMaxConcurrency
+			sameExceptLimits, probeErr := s.mcpMatches(ctx, s.Access.Pool, probe, d, bindings)
+			if probeErr != nil {
+				return nil, probeErr
+			}
+			if sameExceptLimits {
+				prepared.limitsOnly = true
+				out[mcpKey(e)] = prepared
+				continue
+			}
 		}
 		var material []byte
 		if e.CredentialRef != nil {
@@ -256,7 +339,20 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 		if cert.reuse {
 			continue
 		}
-		next := &mcpservers.Definition{Name: e.Name, ProjectID: project, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: cert.catalog}
+		if cert.limitsOnly && current != nil {
+			effective := routing.EffectiveToolLimits(
+				routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+				routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+				routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+				routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+			if err = mcpservers.UpdateLimits(ctx, tx, current.ID, effective, access.NewID()); err != nil {
+				return err
+			}
+			changed = true
+			continue
+		}
+		next := mcpDefinitionFromEntry(e, cert.catalog)
+		next.ProjectID = project
 		if e.CredentialRef != nil {
 			if b, ok := bindings[*e.CredentialRef]; ok {
 				id := access.NewID()

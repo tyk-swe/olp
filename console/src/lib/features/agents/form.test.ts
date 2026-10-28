@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { publicationForm, publicationInput, toolPin } from './form';
+import {
+  publicationForm,
+  publicationInput,
+  serverPricingForm,
+  serverPricingInput,
+  toolPin,
+  type ServerPricingForm
+} from './form';
 import type { MCPServer, Publication } from './api';
 
 const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
@@ -17,6 +24,12 @@ const server: MCPServer = {
   revision: 1,
   certified_at: '2026-10-22T00:00:00Z',
   retired_at: null,
+  unit_price: '0.25',
+  tool_prices: { lookup: '0.5' },
+  calls_per_minute: 90,
+  max_concurrency: 3,
+  per_key_calls_per_minute: 45,
+  per_key_max_concurrency: 2,
   catalog: {
     protocol_version: '2025-11-25',
     digest: 'a'.repeat(64),
@@ -48,7 +61,9 @@ describe('publication configuration', () => {
   });
 
   it('pins the exact certified revision and domain-stable alias', async () => {
-    const pin = await toolPin(server, 'lookup');
+    const pinned = await toolPin(server, 'lookup');
+    if (!pinned.ok) throw new Error(pinned.message);
+    const pin = pinned.pin;
     expect(pin).toEqual({
       server_id: id,
       revision_id: id,
@@ -64,17 +79,23 @@ describe('publication configuration', () => {
   });
 
   it('refuses disabled, retired or undiscovered tools', async () => {
-    await expect(
-      toolPin({ ...server, enabled: false }, 'lookup')
-    ).rejects.toThrow();
-    await expect(
-      toolPin({ ...server, retired_at: '2026-10-22T00:00:00Z' }, 'lookup')
-    ).rejects.toThrow();
-    await expect(toolPin(server, 'unknown')).rejects.toThrow();
+    for (const refused of [
+      await toolPin({ ...server, enabled: false }, 'lookup'),
+      await toolPin(
+        { ...server, retired_at: '2026-10-22T00:00:00Z' },
+        'lookup'
+      ),
+      await toolPin(server, 'unknown')
+    ]) {
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) expect(refused.message.length).toBeGreaterThan(0);
+    }
   });
 
   it('copies reactive tool proxies into independent editor and request values', async () => {
-    const pin = await toolPin(server, 'lookup');
+    const pinned = await toolPin(server, 'lookup');
+    if (!pinned.ok) throw new Error(pinned.message);
+    const pin = pinned.pin;
     const tools = new Proxy([new Proxy(pin, {})], {});
     const current: Publication = {
       id,
@@ -95,5 +116,71 @@ describe('publication configuration', () => {
     input.toolset!.tools[0].name = 'request';
     expect(form.tools[0].name).toBe('edited');
     expect(structuredClone(input)).toEqual(input);
+  });
+
+  it('round trips server pricing and limits without credentials', () => {
+    const form = serverPricingForm(server);
+    expect(form).toEqual({
+      unitPrice: '0.25',
+      toolPrices: { lookup: '0.5' },
+      callsPerMinute: '90',
+      maxConcurrency: '3',
+      perKeyCallsPerMinute: '45',
+      perKeyMaxConcurrency: '2'
+    });
+    const result = serverPricingInput(server, form);
+    if (!result.ok) throw new Error(result.message);
+    const input = result.input;
+    expect(input).toEqual({
+      name: server.name,
+      endpoint: server.endpoint,
+      enabled: true,
+      unit_price: '0.25',
+      tool_prices: { lookup: '0.5' },
+      calls_per_minute: 90,
+      max_concurrency: 3,
+      per_key_calls_per_minute: 45,
+      per_key_max_concurrency: 2
+    });
+    expect(input).not.toHaveProperty('credential');
+    form.toolPrices.lookup = '9';
+    expect(server.tool_prices.lookup).toBe('0.5');
+  });
+
+  it('keeps unpriced, free and blank tool prices distinct', () => {
+    const form = serverPricingForm({
+      ...server,
+      unit_price: null,
+      tool_prices: {}
+    });
+    expect(form.unitPrice).toBe('');
+    const unpriced = serverPricingInput(server, form);
+    expect(unpriced.ok && unpriced.input.unit_price).toBeNull();
+    form.unitPrice = '0';
+    const free = serverPricingInput(server, form);
+    expect(free.ok && free.input.unit_price).toBe('0');
+    form.toolPrices = { lookup: '  ' };
+    const blank = serverPricingInput(server, form);
+    expect(blank.ok && blank.input.tool_prices).toEqual({});
+  });
+
+  it('refuses malformed prices and limits outside installation bounds', () => {
+    const base = serverPricingForm(server);
+    const patches: Partial<ServerPricingForm>[] = [
+      { unitPrice: '-1' },
+      { unitPrice: '1e3' },
+      { toolPrices: { lookup: '-0.5' } },
+      { toolPrices: { absent: '1' } },
+      { callsPerMinute: '0' },
+      { callsPerMinute: '60001' },
+      { maxConcurrency: '1025' },
+      { perKeyCallsPerMinute: '1.5' },
+      { perKeyMaxConcurrency: '' }
+    ];
+    for (const patch of patches) {
+      const result = serverPricingInput(server, { ...base, ...patch });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message.length).toBeGreaterThan(0);
+    }
   });
 });

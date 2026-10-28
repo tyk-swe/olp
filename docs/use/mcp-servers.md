@@ -9,6 +9,9 @@ promotion retains those checks. Up to 128 active registrations are permitted.
 Create requires a project UUID, name, `transport: streamable_http`, endpoint and
 explicit enabled flag. PUT replaces editable metadata with an observed If-Match;
 project and transport are immutable. Every mutation requires Idempotency-Key.
+On PUT, omitting `unit_price`, `tool_prices` or a rate and concurrency limit
+keeps the current value, `unit_price: null` removes the price, and a null limit
+resets that limit to its default.
 A successful create or update negotiates an upstream MCP session, sends initialized
 notification and discovers tools before committing. Certification never invokes
 tools. It runs outside database transactions; authority and preconditions are
@@ -45,7 +48,8 @@ material; identity, certified revisions and audit history remain. Those retained
 project references prevent deleting their project boundary.
 
 Configuration export includes logical project/name, transport, endpoint, enabled
-state, reviewed catalog digest and an optional deterministic destination binding.
+state, reviewed catalog digest, the unit and tool prices, the rate and
+concurrency limits, and an optional deterministic destination binding.
 It excludes local IDs, credential bytes and revision history. Plan identifies
 reuse/create/replace and required bindings. Apply certifies changed registrations
 outside its transaction and requires the reviewed digest before any document
@@ -154,6 +158,50 @@ records keep naming the call they came from after an identifier is reused.
 Tool call records report the debit state with its bounds, observed amounts
 and remaining unresolved amounts as separate fields, so an unresolved bound
 never reads as observed provider cost.
+
+Registrations also carry tool call pricing and pace. Prices are pinned in the
+same immutable certified revision as the catalog, while the rate and
+concurrency limits below are mutable server settings. `unit_price` prices every
+dispatched call to the server and `tool_prices` overrides it per tool name,
+both in the installation pricing currency with no conversion. An explicit
+`0` means the call is known free. A missing price makes the call unpriced.
+An unpriced call refuses with `tool_unpriced` before dispatch while any key,
+budget group, aggregate or end-user ceiling applies, because no finite bound
+can be reserved for it, and the refused call still writes a content-free
+`refused_unpriced` tool call record. Otherwise it dispatches and records an
+unpriced fact that reporting keeps distinct from a free call, including an
+unpriced attempt count against every recorded owner. The provisional debit
+reserves the pinned price as both its cost and charge bound before dispatch
+and settles at that price for every dispatched call, including calls the
+upstream answers with an error. Tool calls have one operator unit price and
+no separate rate card, so the settled cost and the settled consumer charge are
+that same unit price under either budget basis. That equality is the tool
+pricing contract, not a missing conversion. Discovery and certification never
+bill. The debit records the key owner plus every applicable budget group,
+aggregate and end-user owner, so each capped boundary enforces the same bound,
+and settlement adds the priced amount into every recorded owner's spend
+windows in the same step. A `settled` resolve now checks its observed amounts
+against those held bounds and refuses amounts past them. Tool call records
+carry the pinned `unit_price`, a `pricing_state` of `priced`, `free` or
+`unpriced`, and the `currency` their bounds use.
+
+`calls_per_minute` and `max_concurrency` bound the server across all keys,
+and `per_key_calls_per_minute` and `per_key_max_concurrency` bound each key
+against the server. Both pairs default to 60 calls per minute and 8
+concurrent calls and stay inside installation limits of 60000 calls per
+minute and 1024 concurrent calls. The effective per-key limit is the tighter
+of the server per-key value and the key's own request or concurrency limit,
+so a key limit can only tighten the per-key pair and never loosen it. Calls
+past either limit refuse with `tool_rate_limited` before anything is reserved
+or dispatched, a call that never dispatches gives its rate allowance back,
+and only a dispatched call consumes it. Pricing and limits round trip through
+the management API, the console pricing form on the agent publications
+page, and configuration export, plan and apply, without ever exposing the
+sealed credential. Saving new pricing certifies a new server revision, so
+toolsets keep calling at the price pinned in the revision they already
+reviewed until a fresh toolset revision pins the new one. Saving only new
+limits updates the server in place, certifies no new revision, and never
+drifts a pinned toolset, because serving reads the current server limits.
 
 Revoking a key, removing a toolset from its allowlist, retiring a publication
 and disabling or retiring a server all refuse new calls and end live session

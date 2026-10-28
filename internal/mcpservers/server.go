@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -21,38 +22,103 @@ type Server struct {
 	Egress *egress.Policy
 }
 type Definition struct {
-	ID            string     `json:"id"`
-	ProjectID     string     `json:"project_id"`
-	Name          string     `json:"name"`
-	Transport     string     `json:"transport"`
-	Endpoint      string     `json:"endpoint"`
-	Enabled       bool       `json:"enabled"`
-	HasCredential bool       `json:"has_credential"`
-	ETag          string     `json:"etag"`
-	RevisionID    string     `json:"revision_id"`
-	Revision      int64      `json:"revision"`
-	Catalog       *Catalog   `json:"catalog"`
-	CertifiedAt   time.Time  `json:"certified_at"`
-	RetiredAt     *time.Time `json:"retired_at"`
-	CredentialID  *string    `json:"-"`
+	ID                   string            `json:"id"`
+	ProjectID            string            `json:"project_id"`
+	Name                 string            `json:"name"`
+	Transport            string            `json:"transport"`
+	Endpoint             string            `json:"endpoint"`
+	Enabled              bool              `json:"enabled"`
+	HasCredential        bool              `json:"has_credential"`
+	ETag                 string            `json:"etag"`
+	RevisionID           string            `json:"revision_id"`
+	Revision             int64             `json:"revision"`
+	Catalog              *Catalog          `json:"catalog"`
+	CertifiedAt          time.Time         `json:"certified_at"`
+	RetiredAt            *time.Time        `json:"retired_at"`
+	UnitPrice            *string           `json:"unit_price"`
+	ToolPrices           map[string]string `json:"tool_prices"`
+	CallsPerMinute       int64             `json:"calls_per_minute"`
+	MaxConcurrency       int64             `json:"max_concurrency"`
+	PerKeyCallsPerMinute int64             `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency int64             `json:"per_key_max_concurrency"`
+	CredentialID         *string           `json:"-"`
 }
 type Input struct {
-	ProjectID  *string         `json:"project_id,omitempty"`
-	Name       string          `json:"name"`
-	Transport  string          `json:"transport,omitempty"`
-	Endpoint   string          `json:"endpoint"`
-	Enabled    *bool           `json:"enabled"`
-	Credential json.RawMessage `json:"credential,omitempty"`
+	present              map[string]bool   `json:"-"`
+	ProjectID            *string           `json:"project_id,omitempty"`
+	Name                 string            `json:"name"`
+	Transport            string            `json:"transport,omitempty"`
+	Endpoint             string            `json:"endpoint"`
+	Enabled              *bool             `json:"enabled"`
+	Credential           json.RawMessage   `json:"credential,omitempty"`
+	UnitPrice            *string           `json:"unit_price"`
+	ToolPrices           map[string]string `json:"tool_prices,omitempty"`
+	CallsPerMinute       *int64            `json:"calls_per_minute"`
+	MaxConcurrency       *int64            `json:"max_concurrency"`
+	PerKeyCallsPerMinute *int64            `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency *int64            `json:"per_key_max_concurrency"`
 }
 
-const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at"
+const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency"
 const joined = " FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id"
 
 func scan(row pgx.Row) (*Definition, error) {
 	d := &Definition{Catalog: &Catalog{}}
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt)
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency)
 	d.HasCredential = d.CredentialID != nil
+	if d.ToolPrices == nil {
+		d.ToolPrices = map[string]string{}
+	}
 	return d, err
+}
+
+func (in *Input) UnmarshalJSON(data []byte) error {
+	type inputJSON Input
+	var decoded inputJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*in = Input(decoded)
+	in.present = make(map[string]bool, len(raw))
+	for key := range raw {
+		in.present[key] = true
+	}
+	return nil
+}
+
+func (in Input) Present(field string) bool {
+	return in.present[field]
+}
+
+func clonePrice(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
+func cloneToolPrices(values map[string]string) map[string]string {
+	out := make(map[string]string, len(values))
+	for name, price := range values {
+		out[name] = price
+	}
+	return out
+}
+
+func definitionFromInput(in Input, catalog *Catalog) *Definition {
+	return &Definition{
+		Name: in.Name, Transport: "streamable_http", Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
+		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
+		CallsPerMinute:       routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		MaxConcurrency:       routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		PerKeyCallsPerMinute: routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		PerKeyMaxConcurrency: routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
+	}
 }
 func Load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definition, error) {
 	query := "SELECT " + columns + joined + " WHERE s.id=$1"
@@ -133,11 +199,16 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	catalog := Catalog{}
 	var endpoint string
 	var certified time.Time
-	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified)
+	var unitPrice *string
+	toolPrices := map[string]string{}
+	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Detail(map[string]any{"id": revision, "server_id": id, "revision": version, "endpoint": endpoint, "catalog": catalog, "certified_at": certified}, revision), nil
+	if toolPrices == nil {
+		toolPrices = map[string]string{}
+	}
+	return access.Detail(map[string]any{"id": revision, "server_id": id, "revision": version, "endpoint": endpoint, "catalog": catalog, "certified_at": certified, "unit_price": unitPrice, "tool_prices": toolPrices, "calls_per_minute": d.CallsPerMinute, "max_concurrency": d.MaxConcurrency, "per_key_calls_per_minute": d.PerKeyCallsPerMinute, "per_key_max_concurrency": d.PerKeyMaxConcurrency}, revision), nil
 }
 func Validate(in *Input, policy *egress.Policy) error {
 	in.Name = strings.TrimSpace(in.Name)
@@ -157,6 +228,31 @@ func Validate(in *Input, policy *egress.Policy) error {
 	in.Endpoint = u.String()
 	if in.Transport != "" && in.Transport != "streamable_http" {
 		return access.Invalid("transport", "Use streamable_http.")
+	}
+	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
+		return access.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
+	}
+	if len(in.ToolPrices) > 128 {
+		return access.Invalid("tool_prices", "Price at most 128 tools.")
+	}
+	for name, price := range in.ToolPrices {
+		if name == "" || len(name) > 128 || !routing.ValidToolPrice(price) {
+			return access.Invalid("tool_prices", "Use certified tool names with non-negative decimal prices.")
+		}
+	}
+	for _, limit := range [...]struct {
+		field   string
+		value   *int64
+		ceiling int64
+	}{
+		{"calls_per_minute", in.CallsPerMinute, routing.MaxToolCallsPerMinute},
+		{"per_key_calls_per_minute", in.PerKeyCallsPerMinute, routing.MaxToolCallsPerMinute},
+		{"max_concurrency", in.MaxConcurrency, routing.MaxToolConcurrency},
+		{"per_key_max_concurrency", in.PerKeyMaxConcurrency, routing.MaxToolConcurrency},
+	} {
+		if limit.value != nil && (*limit.value < 1 || *limit.value > limit.ceiling) {
+			return access.Invalid(limit.field, "Stay inside the installation tool call limits.")
+		}
 	}
 	return nil
 }
@@ -239,14 +335,75 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 	}
 	return d, nil, nil
 }
+func mergeAbsentPricingAndLimits(in *Input, previous *Definition) {
+	if !in.Present("unit_price") {
+		in.UnitPrice = clonePrice(previous.UnitPrice)
+	}
+	if !in.Present("tool_prices") {
+		in.ToolPrices = cloneToolPrices(previous.ToolPrices)
+	}
+	merge := func(field string, value **int64, current, fallback int64) {
+		switch {
+		case !in.Present(field):
+			preserved := current
+			*value = &preserved
+		case *value == nil:
+			reset := fallback
+			*value = &reset
+		}
+	}
+	merge("calls_per_minute", &in.CallsPerMinute, previous.CallsPerMinute, routing.DefaultToolCallsPerMinute)
+	merge("max_concurrency", &in.MaxConcurrency, previous.MaxConcurrency, routing.DefaultToolMaxConcurrency)
+	merge("per_key_calls_per_minute", &in.PerKeyCallsPerMinute, previous.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute)
+	merge("per_key_max_concurrency", &in.PerKeyMaxConcurrency, previous.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency)
+}
+
+func samePrice(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func limitsOnlyUpdate(in Input, previous *Definition) bool {
+	if previous == nil || in.Enabled == nil {
+		return false
+	}
+	if in.Name != previous.Name || in.Endpoint != previous.Endpoint || *in.Enabled != previous.Enabled {
+		return false
+	}
+	if len(in.Credential) != 0 || !samePrice(in.UnitPrice, previous.UnitPrice) {
+		return false
+	}
+	if len(in.ToolPrices) != len(previous.ToolPrices) {
+		return false
+	}
+	for name, price := range in.ToolPrices {
+		if previous.ToolPrices[name] != price {
+			return false
+		}
+	}
+	effective := routing.EffectiveToolLimits(
+		routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+	return effective != routing.EffectiveToolLimits(previous.CallsPerMinute, previous.MaxConcurrency, previous.PerKeyCallsPerMinute, previous.PerKeyMaxConcurrency)
+}
+
 func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bool) (access.Reply, error) {
 	var in Input
 	if !retire {
-		if err := access.DecodeUnique(r, &in, 16<<10); err != nil {
+		if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
 			return access.Reply{}, err
 		}
 		if err := Validate(&in, s.Egress); err != nil {
 			return access.Reply{}, err
+		}
+		if id != "" {
+			if current, loadErr := Load(r.Context(), s.Access.Pool, id, false); loadErr == nil {
+				mergeAbsentPricingAndLimits(&in, current)
+			}
 		}
 	}
 	previous, replayed, err := s.preflight(r, in, id)
@@ -258,7 +415,11 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	}
 	var material []byte
 	var catalog *Catalog
-	if !retire {
+	limitsOnly := !retire && limitsOnlyUpdate(in, previous)
+	if limitsOnly {
+		catalog = previous.Catalog
+	}
+	if !retire && !limitsOnly {
 		material, err = Credential(in.Credential)
 		if err != nil {
 			return access.Reply{}, err
@@ -318,11 +479,21 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	}
 	action := "mcp_server.update"
 	etag := access.NewID()
-	if retire {
+	if limitsOnly && current != nil {
+		effective := routing.EffectiveToolLimits(
+			routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+			routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+			routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+			routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+		if err = UpdateLimits(r.Context(), tx, id, effective, etag); err != nil {
+			return access.Reply{}, err
+		}
+	} else if retire {
 		action = "mcp_server.retire"
 		_, err = tx.Exec(r.Context(), "UPDATE olp.mcp_servers SET enabled=false,retired_at=now(),credential_id=NULL,etag=$2 WHERE id=$1", id, etag)
 	} else {
-		next := &Definition{ID: id, Name: in.Name, Transport: "streamable_http", Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog}
+		next := definitionFromInput(in, catalog)
+		next.ID = id
 		if current == nil {
 			next.ProjectID = *in.ProjectID
 			action = "mcp_server.create"

@@ -186,7 +186,22 @@ func (s *DebitStore) Admit(ctx context.Context, id, claim string, requests []Req
 		seen[key] = true
 		if r.HasCostBudget() {
 			if err = s.syncOwnerTx(ctx, tx, r.CostOwnerID); err != nil {
-				return err
+				if !errors.Is(err, ErrUninitializedCost) {
+					return err
+				}
+				kind := ""
+				for _, owner := range owners {
+					if owner.ID == r.CostOwnerID {
+						kind = owner.Kind
+						break
+					}
+				}
+				if err = s.initializeFreshOwnerTx(ctx, tx, DebitOwner{ID: r.CostOwnerID, Kind: kind}); err != nil {
+					return err
+				}
+				if err = s.syncOwnerTx(ctx, tx, r.CostOwnerID); err != nil {
+					return err
+				}
 			}
 			if err = s.Limiter.verifyDurableCost(ctx, r); err != nil {
 				return err
@@ -289,6 +304,8 @@ type DebitResult struct {
 	EventID                      string
 	Cost, Charge                 string
 	Final, Complete              bool
+	Unpriced                     bool
+	ObservedAt                   time.Time
 	// ResolvesResultDigests links later verified evidence to incomplete receipts.
 	// Its event contains only newly observed accounting deltas; prior charges
 	// are never replayed. Lifecycle owners verify native evidence before calling.
@@ -326,14 +343,17 @@ func debitResultMatches(r DebitResult, resolutionDigest, evidence, resolutions [
 }
 
 type debitSettleHead struct {
-	state     DebitState
-	kind      string
-	zeroBound bool
+	state          DebitState
+	kind           string
+	costBound      string
+	chargeBound    string
+	observedCost   string
+	observedCharge string
 }
 
 func beginDebitSettleTx(ctx context.Context, tx pgx.Tx, r DebitResult) (debitSettleHead, bool, error) {
 	var head debitSettleHead
-	if err := tx.QueryRow(ctx, `SELECT state,kind,cost_bound=0 AND charge_bound=0 FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&head.state, &head.kind, &head.zeroBound); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT state,kind,cost_bound::text,charge_bound::text,observed_cost::text,observed_charge::text FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&head.state, &head.kind, &head.costBound, &head.chargeBound, &head.observedCost, &head.observedCharge); err != nil {
 		return head, false, err
 	}
 	duplicate, err := DebitResultReplayTx(ctx, tx, r)

@@ -4067,6 +4067,47 @@
             "credential_ref": {
               "type": "string",
               "description": "Logical destination sealed bearer binding; never source credential bytes."
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
             }
           }
         },
@@ -7046,6 +7087,47 @@
               "enum": [
                 "streamable_http"
               ]
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
             }
           },
           "required": [
@@ -26325,6 +26407,47 @@
             "credential_ref": {
               "type": "string",
               "description": "Logical destination sealed bearer binding; never source credential bytes."
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
             }
           }
         },
@@ -39020,6 +39143,47 @@
               "minLength": 1,
               "maxLength": 4096,
               "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
             }
           },
           "required": [

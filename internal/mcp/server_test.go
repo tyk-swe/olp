@@ -326,7 +326,7 @@ func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Ser
 	fx.setMode(mode)
 	ledger := &fakeLedger{tl: tl}
 	server := &Server{
-		Runtime: rt, Ledger: ledger, Auth: testAuthKey(),
+		Runtime: rt, Ledger: ledger, Auth: testAuthKey(), Limiter: &fakeRateLimiter{},
 		Egress: testEgress(),
 		Credentials: func(_ context.Context, id string) ([]byte, error) {
 			if id != testCredID {
@@ -452,6 +452,129 @@ func TestCallToolReservesDispatchesAndSettlesExactlyOnce(t *testing.T) {
 	}
 	if ledger.reserved[0].ToolAlias != alias() || body["attempt_id"] == nil || body["dispatch_id"] == nil {
 		t.Fatalf("call lost its attempt identity: reserved=%+v body=%v", ledger.reserved, body)
+	}
+}
+
+type fakeRateLimiter struct {
+	requests []limits.Request
+	err      error
+	failOn   int
+}
+
+func (f *fakeRateLimiter) Reserve(_ context.Context, request limits.Request) (*limits.Lease, error) {
+	f.requests = append(f.requests, request)
+	if f.err != nil && (f.failOn == 0 || f.failOn == len(f.requests)) {
+		return nil, f.err
+	}
+	return nil, nil
+}
+
+func priceTestSnapshot(t *testing.T, rt *fakeRuntime, serverPrice *string, toolPrices map[string]string) {
+	t.Helper()
+	snapshot := rt.release.Snapshot
+	snapshot.MCPServers[0].UnitPrice = serverPrice
+	snapshot.MCPServers[0].ToolPrices = toolPrices
+	snapshot.MCPServers[0].CallsPerMinute = 120
+	snapshot.MCPServers[0].MaxConcurrency = 4
+	snapshot.MCPServers[0].PerKeyCallsPerMinute = 30
+	snapshot.MCPServers[0].PerKeyMaxConcurrency = 2
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCallToolReservesPinnedPriceAndRateLimits(t *testing.T) {
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	keyRate, keyConcurrency := int64(10), int64(3)
+	authority.Policy.RequestsPerMinute = &keyRate
+	authority.Policy.MaxConcurrency = &keyConcurrency
+	server, fx, ledger, _, rt := newTestServer(t, authority, "")
+	serverPrice := "0.10"
+	priceTestSnapshot(t, rt, &serverPrice, map[string]string{"lookup": "0.25"})
+	limiter := &fakeRateLimiter{}
+	server.Limiter = limiter
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"priced-json-1","arguments":{"query":"x"}}`)
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("priced call status %d calls=%d: %v", status, fx.calls.Load(), body)
+	}
+	if len(ledger.reserved) != 1 || ledger.reserved[0].UnitPrice == nil || *ledger.reserved[0].UnitPrice != "0.25" {
+		t.Fatalf("reservation did not carry the pinned per-tool price: %+v", ledger.reserved)
+	}
+	if len(limiter.requests) != 2 {
+		t.Fatalf("call did not reserve per-key and per-server rate limits: %+v", limiter.requests)
+	}
+	perKey, perServer := limiter.requests[0], limiter.requests[1]
+	if perKey.CostOwnerID != testKeyID || perKey.RequestsPerMinute == nil || *perKey.RequestsPerMinute != keyRate ||
+		perKey.MaxConcurrency == nil || *perKey.MaxConcurrency != 2 {
+		t.Fatalf("per-key reservation did not take the tighter of key and server limits: %+v", perKey)
+	}
+	if perServer.CostOwnerID != testServerID || perServer.RequestsPerMinute == nil || *perServer.RequestsPerMinute != 120 ||
+		perServer.MaxConcurrency == nil || *perServer.MaxConcurrency != 4 {
+		t.Fatalf("per-server reservation lost the server limits: %+v", perServer)
+	}
+	if perKey.LookupID == perServer.LookupID || perKey.LookupID == "" || perServer.LookupID == "" {
+		t.Fatalf("rate counters are not separated per scope: %q %q", perKey.LookupID, perServer.LookupID)
+	}
+}
+
+func TestCallToolRateLimitRefusalReservesAndDispatchesNothing(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server.Limiter = &fakeRateLimiter{err: &limits.ExceededError{Dimension: limits.DimensionRequests, RetryAfter: time.Minute}}
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"limited-json-1","arguments":{"query":"x"}}`)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("rate limited call status %d: %v", status, body)
+	}
+	if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("rate limited call reserved or dispatched: calls=%d reserved=%d", fx.calls.Load(), len(ledger.reserved))
+	}
+	limiter := &fakeRateLimiter{err: &limits.ExceededError{Dimension: limits.DimensionConcurrency, RetryAfter: time.Second}, failOn: 2}
+	server.Limiter = limiter
+	status, _ = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"limited-json-2","arguments":{"query":"x"}}`)
+	if status != http.StatusTooManyRequests || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("concurrency limited call dispatched: status=%d calls=%d reserved=%d", status, fx.calls.Load(), len(ledger.reserved))
+	}
+}
+
+func TestCallToolMissingLimiterFailsClosed(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server.Limiter = nil
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"missing-limiter-1","arguments":{"query":"x"}}`)
+	if status != http.StatusServiceUnavailable || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("missing limiter dispatched: status=%d calls=%d reserved=%d body=%v", status, fx.calls.Load(), len(ledger.reserved), body)
+	}
+	if body["error"].(map[string]any)["code"] != "limits_unavailable" {
+		t.Fatalf("missing limiter refusal is not limits_unavailable: %v", body)
+	}
+}
+
+func TestCallToolUnpricedAgainstCeilingRefusesWithoutDispatch(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	ledger.reserveErr = ErrUnpricedToolCall
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"unpriced-json-1","arguments":{"query":"x"}}`)
+	if status != http.StatusUnprocessableEntity || fx.calls.Load() != 0 {
+		t.Fatalf("unpriced call status %d calls=%d: %v", status, fx.calls.Load(), body)
+	}
+	problem, _ := body["error"].(map[string]any)
+	if problem["code"] != "tool_unpriced" {
+		t.Fatalf("unpriced refusal is not typed: %v", body)
+	}
+}
+
+func TestListingToolsReservesNoDebitAndNoRateLimit(t *testing.T) {
+	server, _, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	limiter := &fakeRateLimiter{}
+	server.Limiter = limiter
+	status, _ := request(t, server, http.MethodGet, "/v1/mcp/tools", "")
+	if status != http.StatusOK {
+		t.Fatalf("list status %d", status)
+	}
+	if len(ledger.reserved) != 0 || len(limiter.requests) != 0 {
+		t.Fatalf("discovery reserved money or rate: reserved=%d rates=%d", len(ledger.reserved), len(limiter.requests))
 	}
 }
 
