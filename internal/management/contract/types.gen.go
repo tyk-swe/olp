@@ -3322,9 +3322,66 @@ func (e MCPServerSummaryTransport) Valid() bool {
 	}
 }
 
+// Defines values for MCPToolCallResolveRequestOutcome.
+const (
+	MCPToolCallResolveRequestOutcomeNotAccepted MCPToolCallResolveRequestOutcome = "not_accepted"
+	MCPToolCallResolveRequestOutcomeSettled     MCPToolCallResolveRequestOutcome = "settled"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResolveRequestOutcome enum.
+func (e MCPToolCallResolveRequestOutcome) Valid() bool {
+	switch e {
+	case MCPToolCallResolveRequestOutcomeNotAccepted:
+		return true
+	case MCPToolCallResolveRequestOutcomeSettled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPToolCallResponseDebitState.
+const (
+	MCPToolCallResponseDebitStateConflict       MCPToolCallResponseDebitState = "conflict"
+	MCPToolCallResponseDebitStateDispatched     MCPToolCallResponseDebitState = "dispatched"
+	MCPToolCallResponseDebitStateNotAccepted    MCPToolCallResponseDebitState = "not_accepted"
+	MCPToolCallResponseDebitStateOutcomeUnknown MCPToolCallResponseDebitState = "outcome_unknown"
+	MCPToolCallResponseDebitStatePrepared       MCPToolCallResponseDebitState = "prepared"
+	MCPToolCallResponseDebitStateReady          MCPToolCallResponseDebitState = "ready"
+	MCPToolCallResponseDebitStateReleased       MCPToolCallResponseDebitState = "released"
+	MCPToolCallResponseDebitStateSettled        MCPToolCallResponseDebitState = "settled"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResponseDebitState enum.
+func (e MCPToolCallResponseDebitState) Valid() bool {
+	switch e {
+	case MCPToolCallResponseDebitStateConflict:
+		return true
+	case MCPToolCallResponseDebitStateDispatched:
+		return true
+	case MCPToolCallResponseDebitStateNotAccepted:
+		return true
+	case MCPToolCallResponseDebitStateOutcomeUnknown:
+		return true
+	case MCPToolCallResponseDebitStatePrepared:
+		return true
+	case MCPToolCallResponseDebitStateReady:
+		return true
+	case MCPToolCallResponseDebitStateReleased:
+		return true
+	case MCPToolCallResponseDebitStateSettled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPToolCallResponseStatus.
 const (
+	MCPToolCallResponseStatusDispatched     MCPToolCallResponseStatus = "dispatched"
+	MCPToolCallResponseStatusNotAccepted    MCPToolCallResponseStatus = "not_accepted"
 	MCPToolCallResponseStatusOutcomeUnknown MCPToolCallResponseStatus = "outcome_unknown"
+	MCPToolCallResponseStatusSettled        MCPToolCallResponseStatus = "settled"
 	MCPToolCallResponseStatusSucceeded      MCPToolCallResponseStatus = "succeeded"
 	MCPToolCallResponseStatusUpstreamError  MCPToolCallResponseStatus = "upstream_error"
 )
@@ -3332,7 +3389,13 @@ const (
 // Valid indicates whether the value is a known member of the MCPToolCallResponseStatus enum.
 func (e MCPToolCallResponseStatus) Valid() bool {
 	switch e {
+	case MCPToolCallResponseStatusDispatched:
+		return true
+	case MCPToolCallResponseStatusNotAccepted:
+		return true
 	case MCPToolCallResponseStatusOutcomeUnknown:
+		return true
+	case MCPToolCallResponseStatusSettled:
 		return true
 	case MCPToolCallResponseStatusSucceeded:
 		return true
@@ -9377,25 +9440,51 @@ type MCPToolCallList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// MCPToolCallResolveRequest defines model for MCPToolCallResolveRequest.
+type MCPToolCallResolveRequest struct {
+	EvidenceDigest string `json:"evidence_digest"`
+
+	// ObservedCharge Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound.
+	ObservedCharge *string `json:"observed_charge,omitempty"`
+
+	// ObservedCost Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound.
+	ObservedCost *string                          `json:"observed_cost,omitempty"`
+	Outcome      MCPToolCallResolveRequestOutcome `json:"outcome"`
+}
+
+// MCPToolCallResolveRequestOutcome defines model for MCPToolCallResolveRequest.Outcome.
+type MCPToolCallResolveRequestOutcome string
+
 // MCPToolCallResponse defines model for MCPToolCallResponse.
 type MCPToolCallResponse struct {
-	ApiKeyId          openapi_types.UUID        `json:"api_key_id"`
-	CompletedAt       time.Time                 `json:"completed_at"`
-	CreatedAt         time.Time                 `json:"created_at"`
-	DispatchId        openapi_types.UUID        `json:"dispatch_id"`
-	Id                openapi_types.UUID        `json:"id"`
-	InputDigest       string                    `json:"input_digest"`
-	IsError           bool                      `json:"is_error"`
-	ProjectId         openapi_types.UUID        `json:"project_id"`
-	ResultDigest      string                    `json:"result_digest"`
-	ServerId          openapi_types.UUID        `json:"server_id"`
-	ServerRevisionId  openapi_types.UUID        `json:"server_revision_id"`
-	StartedAt         time.Time                 `json:"started_at"`
-	Status            MCPToolCallResponseStatus `json:"status"`
-	ToolAlias         string                    `json:"tool_alias"`
-	ToolsetId         openapi_types.UUID        `json:"toolset_id"`
-	ToolsetRevisionId openapi_types.UUID        `json:"toolset_revision_id"`
+	ApiKeyId          openapi_types.UUID            `json:"api_key_id"`
+	CallDigest        nullable.Nullable[string]     `json:"call_digest"`
+	ChargeBound       string                        `json:"charge_bound"`
+	CompletedAt       nullable.Nullable[time.Time]  `json:"completed_at"`
+	CostBound         string                        `json:"cost_bound"`
+	CreatedAt         time.Time                     `json:"created_at"`
+	DebitState        MCPToolCallResponseDebitState `json:"debit_state"`
+	DispatchId        openapi_types.UUID            `json:"dispatch_id"`
+	Id                openapi_types.UUID            `json:"id"`
+	InputDigest       string                        `json:"input_digest"`
+	IsError           bool                          `json:"is_error"`
+	ObservedCharge    string                        `json:"observed_charge"`
+	ObservedCost      string                        `json:"observed_cost"`
+	ProjectId         openapi_types.UUID            `json:"project_id"`
+	RemainingCharge   string                        `json:"remaining_charge"`
+	RemainingCost     string                        `json:"remaining_cost"`
+	ResultDigest      nullable.Nullable[string]     `json:"result_digest"`
+	ServerId          openapi_types.UUID            `json:"server_id"`
+	ServerRevisionId  openapi_types.UUID            `json:"server_revision_id"`
+	StartedAt         time.Time                     `json:"started_at"`
+	Status            MCPToolCallResponseStatus     `json:"status"`
+	ToolAlias         string                        `json:"tool_alias"`
+	ToolsetId         openapi_types.UUID            `json:"toolset_id"`
+	ToolsetRevisionId openapi_types.UUID            `json:"toolset_revision_id"`
 }
+
+// MCPToolCallResponseDebitState defines model for MCPToolCallResponse.DebitState.
+type MCPToolCallResponseDebitState string
 
 // MCPToolCallResponseStatus defines model for MCPToolCallResponse.Status.
 type MCPToolCallResponseStatus string
@@ -14785,6 +14874,11 @@ type ListMcpToolCallsParams struct {
 	ToolsetId *openapi_types.UUID `form:"toolset_id,omitempty" json:"toolset_id,omitempty"`
 }
 
+// ResolveMcpToolCallParams defines parameters for ResolveMcpToolCall.
+type ResolveMcpToolCallParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListMediaJobsParams defines parameters for ListMediaJobs.
 type ListMediaJobsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -16383,6 +16477,9 @@ type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
 
 // UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
 type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
+
+// ResolveMcpToolCallJSONRequestBody defines body for ResolveMcpToolCall for application/json ContentType.
+type ResolveMcpToolCallJSONRequestBody = MCPToolCallResolveRequest
 
 // CreateNotificationDestinationJSONRequestBody defines body for CreateNotificationDestination for application/json ContentType.
 type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinationRequest

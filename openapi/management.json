@@ -23124,15 +23124,21 @@
             "pattern": "^[a-f0-9]{64}$"
           },
           "result_digest": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[a-f0-9]{64}$"
           },
           "status": {
             "type": "string",
             "enum": [
+              "dispatched",
               "succeeded",
               "upstream_error",
-              "outcome_unknown"
+              "outcome_unknown",
+              "settled",
+              "not_accepted"
             ]
           },
           "is_error": {
@@ -23143,12 +23149,53 @@
             "format": "date-time"
           },
           "completed_at": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "call_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "debit_state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "ready",
+              "dispatched",
+              "outcome_unknown",
+              "settled",
+              "released",
+              "conflict",
+              "not_accepted"
+            ]
+          },
+          "cost_bound": {
+            "type": "string"
+          },
+          "charge_bound": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
           }
         },
         "required": [
@@ -23167,7 +23214,46 @@
           "is_error",
           "started_at",
           "completed_at",
-          "created_at"
+          "created_at",
+          "call_digest",
+          "debit_state",
+          "cost_bound",
+          "charge_bound",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      },
+      "MCPToolCallResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "settled",
+              "not_accepted"
+            ]
+          },
+          "evidence_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observed_cost": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          },
+          "observed_charge": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          }
+        },
+        "required": [
+          "outcome",
+          "evidence_digest"
         ]
       },
       "MCPToolCallList": {
@@ -57466,6 +57552,87 @@
           },
           "404": {
             "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls/{call_id}/resolve": {
+      "post": {
+        "operationId": "resolve_mcp_tool_call",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "resolve mcp tool call",
+        "description": "Resolve the held debit of a tool call whose outcome is unknown, exactly once, from reviewed evidence. Settled records later observed evidence, and not_accepted records an audited finding that the upstream never accepted the call.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPToolCallResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool call record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Outcome already known or debit already resolved"
+          },
+          "422": {
+            "description": "Invalid outcome or evidence digest"
           }
         }
       }
