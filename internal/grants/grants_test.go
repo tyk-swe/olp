@@ -8,6 +8,22 @@ import (
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
+func TestDevicePollingBackoffPreservesScheduleAndStopsAtLimit(t *testing.T) {
+	scheduled := 2 * defaultInterval
+	if interval := DevicePollInterval(scheduled, false); interval != scheduled {
+		t.Fatalf("pending authorization changed the poll schedule: %s", interval)
+	}
+	if interval := DevicePollInterval(scheduled, true); interval <= scheduled || interval > maxInterval {
+		t.Fatalf("slow-down did not increase the bounded poll interval: %s", interval)
+	}
+	if interval := DevicePollInterval(maxInterval, true); interval != maxInterval {
+		t.Fatalf("repeated slow-down exceeded the poll limit: %s", interval)
+	}
+	if interval := DevicePollInterval(0, false); interval <= 0 || interval > maxInterval {
+		t.Fatalf("missing poll interval did not receive a bounded schedule: %s", interval)
+	}
+}
+
 // A grant whose fact holds the base URL its profile's address begins with
 // must place requests at one of the plugin's approved origins, compared as
 // manifests declare them.
