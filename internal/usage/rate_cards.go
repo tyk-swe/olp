@@ -237,6 +237,14 @@ func CreateCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup st
 	if err != nil {
 		return CardRevision{}, err
 	}
+	if len(normalized) > 0 {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(pricingLockID)); err != nil {
+			return CardRevision{}, fmt.Errorf("lock pricing currency: %w", err)
+		}
+		if err := reserveCurrency(ctx, tx, currency); err != nil {
+			return CardRevision{}, err
+		}
+	}
 	return createCardRevision(ctx, tx, actor, cardID, normalizedMarkup, effectiveAt, normalized)
 }
 
