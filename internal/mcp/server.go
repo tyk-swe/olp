@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -147,6 +148,7 @@ type GuardrailEvaluation struct {
 }
 
 type Server struct {
+	Grants         *mcpgrants.Store
 	Log            *slog.Logger
 	Runtime        Runtime
 	Egress         *egress.Policy
@@ -188,6 +190,7 @@ func (s *Server) finishLeases(ctx context.Context, leases []*limits.Lease, dispa
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/mcp/servers/{server_id}/grant-enrollments", s.startGrantEnrollment)
 	mux.HandleFunc("GET /v1/mcp/tools", s.listTools)
 	mux.HandleFunc("POST /v1/mcp/tools/simulate", s.simulateTool)
 	mux.HandleFunc("POST /v1/mcp/tools/call", s.callTool)

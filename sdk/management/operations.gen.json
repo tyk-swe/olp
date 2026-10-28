@@ -4108,8 +4108,63 @@
               "minimum": 1,
               "maximum": 1024,
               "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
             }
           }
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "authorization_endpoint",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -7130,6 +7185,9 @@
               "minimum": 1,
               "maximum": 1024,
               "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
             }
           },
           "required": [
@@ -7139,6 +7197,58 @@
             "project_id",
             "transport"
           ]
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "authorization_endpoint",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
         }
       }
     }
@@ -26460,8 +26570,63 @@
               "minimum": 1,
               "maximum": 1024,
               "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
             }
           }
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "authorization_endpoint",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -39197,6 +39362,9 @@
               "minimum": 1,
               "maximum": 1024,
               "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
             }
           },
           "required": [
@@ -39204,6 +39372,58 @@
             "endpoint",
             "enabled"
           ]
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "authorization_endpoint",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
         }
       }
     }

@@ -16,7 +16,7 @@
     publish,
     retire,
     savePublication,
-    saveServerPricing,
+    saveServer,
     setLabel,
     type Draft,
     type Kind,
@@ -162,7 +162,7 @@
       const result = await intent.submit(
         { action: 'server-pricing', observed, input },
         async (submission, requestId) =>
-          saveServerPricing(submission.observed, submission.input, requestId)
+          saveServer(submission.observed, submission.input, requestId)
       );
       if (!isCurrent() || version !== epoch) return;
       server = result;
