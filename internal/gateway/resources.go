@@ -228,7 +228,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	x.budget = 1
 	x.attempts = plan.Attempts[:1]
 	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
-	if mode == "realtime" {
+	if mode == "realtime" || mode == "webrtc" {
 		var ok bool
 		deadline, ok = ctx.Deadline()
 		if !ok {

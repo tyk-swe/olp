@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -10,8 +11,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+var uuidNewV7 = uuid.NewV7
 
 // AccountingSink hands every terminal request to the usage pipeline as the
 // content-free event the accounting tables are built from. Emitting is a
@@ -32,20 +36,28 @@ func (a *AccountingSink) Terminal(e Envelope) {
 	if a.Emitter == nil {
 		return
 	}
-	event := accountingEvent(e)
+	event, err := accountingEvent(e)
+	if err != nil {
+		a.drop(e.RequestID, err)
+		return
+	}
 	if event == nil {
 		return
 	}
 	if _, err := usage.Validate(event); err != nil {
-		a.Emitter.Drop()
-		a.recordLoss(e.RequestID)
-		a.logger().Warn("usage event dropped", "request_id", e.RequestID, "error", err.Error())
+		a.drop(e.RequestID, err)
 		return
 	}
 	if err := a.Emitter.Emit(*event); err != nil {
 		a.recordLoss(e.RequestID)
 		a.logger().Warn("usage event not queued", "request_id", e.RequestID, "error", err.Error())
 	}
+}
+
+func (a *AccountingSink) drop(requestID string, err error) {
+	a.Emitter.Drop()
+	a.recordLoss(requestID)
+	a.logger().Warn("usage event dropped", "request_id", requestID, "error", err.Error())
 }
 
 func (a *AccountingSink) recordLoss(requestID string) {
@@ -79,7 +91,11 @@ const persistTimeout = 10 * time.Second
 
 // Terminal records one finished request.
 func (p *PersistingSink) Terminal(e Envelope) {
-	event := accountingEvent(e)
+	event, err := accountingEvent(e)
+	if err != nil {
+		p.logger().Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
+		return
+	}
 	if event == nil {
 		return
 	}
@@ -90,29 +106,36 @@ func (p *PersistingSink) Terminal(e Envelope) {
 		cancel()
 	}
 	if err != nil {
-		log := p.Log
-		if log == nil {
-			log = slog.Default()
-		}
-		log.Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
+		p.logger().Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
 	}
+}
+
+func (p *PersistingSink) logger() *slog.Logger {
+	if p.Log == nil {
+		return slog.Default()
+	}
+	return p.Log
 }
 
 // accountingEvent renders one envelope as a usage event, or nil when there is
 // nothing to account for: no API key owns a caller request, or it ended before
 // a route and a runtime generation could be attributed to it.
-func accountingEvent(e Envelope) *usage.Event {
+func accountingEvent(e Envelope) (*usage.Event, error) {
 	if (e.KeyID == "" && !usage.Keyless(e.Origin)) || e.Route == "" || e.RuntimeGenerationID == "" {
-		return nil
+		return nil, nil
 	}
 	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].GenerationUsageDeferred {
-		return nil
+		return nil, nil
+	}
+	eventID, err := uuidNewV7()
+	if err != nil {
+		return nil, fmt.Errorf("generate usage event ID: %w", err)
 	}
 	event := &usage.Event{
 		CacheResult:          e.CacheResult,
 		EvaluatorGuardrailID: optionalText(e.EvaluatorGuardrailID),
 		Version:              usage.WireVersion,
-		EventID:              uuid.Must(uuid.NewV7()).String(),
+		EventID:              eventID.String(),
 		RequestID:            e.AccountingID,
 		RuntimeGenerationID:  e.RuntimeGenerationID,
 		APIKeyID:             e.KeyID,
@@ -136,7 +159,11 @@ func accountingEvent(e Envelope) *usage.Event {
 		Attempts:           make([]usage.Attempt, 0, len(e.Attempts)),
 	}
 	for index := range e.Attempts {
-		event.Attempts = append(event.Attempts, accountingAttempt(e, index))
+		attempt, err := accountingAttempt(e, index)
+		if err != nil {
+			return nil, err
+		}
+		event.Attempts = append(event.Attempts, attempt)
 	}
 	// A request with no attempt has no target and no metering evidence: every
 	// field that would describe one stays absent.
@@ -162,17 +189,35 @@ func accountingEvent(e Envelope) *usage.Event {
 			event.UsageComplete = false
 		}
 	}
-	return event
+	return event, nil
+}
+
+type attemptPolicy struct {
+	Commitment         *routing.Commitment `json:"commitment"`
+	CommitmentPinned   bool                `json:"commitment_pinned"`
+	DiscountID         *string             `json:"discount_id"`
+	DiscountPinned     bool                `json:"discount_pinned"`
+	Digest             string              `json:"digest"`
+	PricingPinned      bool                `json:"pricing_pinned"`
+	RateCardPinned     bool                `json:"rate_card_pinned"`
+	RateCardRevisionID *string             `json:"rate_card_revision_id"`
+	Strategy           string              `json:"strategy"`
+	VendorID           string              `json:"vendor_id"`
 }
 
 // accountingAttempt renders one attempt, including the provenance that
 // explains why this target served and what it reported.
-func accountingAttempt(e Envelope, index int) usage.Attempt {
+func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 	fact := &e.Attempts[index]
 	evidence := attemptUsage(fact, e.Operation)
+	attemptID, err := uuidNewV7()
+	if err != nil {
+		return usage.Attempt{}, fmt.Errorf("generate usage attempt ID: %w", err)
+	}
 	attempt := usage.Attempt{
+		Execution:          fact.Execution,
 		GuardrailDecisions: fact.GuardrailDecisions,
-		ID:                 uuid.Must(uuid.NewV7()).String(),
+		ID:                 attemptID.String(),
 		// The ordinal is the position in the sequence of attempts made.
 		Ordinal:       index + 1,
 		ProviderID:    fact.ProviderID,
@@ -208,13 +253,17 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		if fact.Discount != nil {
 			discountID = &fact.Discount.ID
 		}
-		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy,
-			"pricing_pinned": pricingPinned, "vendor_id": fact.VendorID,
-			"discount_pinned": pricingPinned, "discount_id": discountID,
-			"commitment_pinned": fact.CommitmentPinned, "commitment": fact.Commitment,
-			"rate_card_pinned": fact.CardPinned, "rate_card_revision_id": fact.CardRevisionID})
-		rawPolicy := json.RawMessage(policy)
-		attempt.Routing.Policy = &rawPolicy
+		policy, err := json.Marshal(attemptPolicy{
+			Commitment: fact.Commitment, CommitmentPinned: fact.CommitmentPinned,
+			DiscountID: discountID, DiscountPinned: pricingPinned,
+			Digest: fact.PolicyDigest, PricingPinned: pricingPinned,
+			RateCardPinned: fact.CardPinned, RateCardRevisionID: fact.CardRevisionID,
+			Strategy: fact.Strategy, VendorID: fact.VendorID,
+		})
+		if err == nil {
+			rawPolicy := json.RawMessage(policy)
+			attempt.Routing.Policy = &rawPolicy
+		}
 		if fact.Price != nil {
 			attempt.Routing.PricingRevisionID = &fact.Price.RevisionID
 		}
@@ -245,13 +294,13 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		attempt.EstimatedInputTokens, attempt.EstimateProvenance, attempt.ModelFamily =
 			estimated, fact.EstimateProvenance, fact.ModelFamily
 	}
-	return attempt
+	return attempt, nil
 }
 
 // attemptSuccessful reports whether the attempt completed successfully, which
 // is when a per-request price component applies.
 func attemptSuccessful(fact *AttemptFact) bool {
-	return (fact.Class == classSuccess || fact.Class == "cache_hit") && fact.Status >= 200 && fact.Status <= 299
+	return (fact.Class == classSuccess || fact.Class == "cache_hit") && (fact.Status >= 200 && fact.Status <= 299 || fact.Status == 304)
 }
 
 // attemptUsage is the billing evidence an attempt carries into its usage event.

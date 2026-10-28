@@ -5,6 +5,8 @@
 ## Validation
 
 - [ ] `make check` passes
+- [ ] New or changed tests assert behavior only, pin no outside fact without a cited source and date, and bug fixes carry a regression test in the existing mapped test file
+- [ ] `make test-ratchet` passes, coverage on changed packages did not drop, and changed code meets the mutation bars
 - [ ] Ran `make integration` for service or browser behavior changes
 - [ ] Regenerated affected API contracts with `make api`
 - [ ] Included screenshots for visible console changes

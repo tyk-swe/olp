@@ -282,7 +282,8 @@
               >{formatDate(revision.activated_at)}<br /><small
                 >By {revision.activated_by}</small
               ></td
-            ><td data-label="Fidelity">{fidelityLabel(revision.fidelity)}</td
+            ><td data-label="Fidelity"
+              >{fidelityLabel(revision.fidelity, revision.passthrough)}</td
             ><td data-label="Operations">{revision.operations.join(', ')}</td
             ><td data-label="Deadline / attempts"
               >{formatInteger(revision.overall_timeout_ms)} ms / {revision.max_attempts}</td

@@ -318,7 +318,7 @@ func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt Validate
 		return attemptPricing{}, err
 	}
 	successful := attempt.Attempt.ErrorClass == nil && attempt.StatusCode != nil &&
-		*attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
+		(*attempt.StatusCode >= 200 && *attempt.StatusCode <= 299 || event.Operation == "passthrough" && *attempt.StatusCode == 304)
 	return priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.StartedAt,
 		successful, attempt.Attempt.ProviderID, attempt.Attempt.UpstreamModel, pin)
 }

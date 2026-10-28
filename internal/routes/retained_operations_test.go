@@ -1,14 +1,35 @@
 package routes
 
-import "testing"
+import (
+	"errors"
+	"testing"
 
-func TestRegisteredRetainedOperations(t *testing.T) {
-	for _, operation := range []string{"fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval", "skill", "context_cache", "agent_resource"} {
-		if !registeredOperation(operation) {
-			t.Fatalf("retained operation %s not registered for route publication", operation)
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/retainedapi"
+)
+
+func TestSimulationAdmitsDeclaredRetainedOperations(t *testing.T) {
+	declared := []struct{ operation, surface string }{{"retrieval", "openai"}}
+	for _, family := range retainedapi.Families() {
+		declared = append(declared, struct{ operation, surface string }{family.Operation, family.Surface})
+	}
+	for _, tuple := range declared {
+		if code := problemCode(validTuple(tuple.operation, tuple.surface, "unary")); code == "operation_unavailable" {
+			t.Errorf("declared retained operation %s is unavailable to route simulation", tuple.operation)
 		}
 	}
-	if registeredOperation("not_an_operation") {
-		t.Fatal("unknown operation registered")
+	if code := problemCode(validTuple("not_an_operation", "openai", "unary")); code != "operation_unavailable" {
+		t.Fatalf("undeclared operation reached route simulation past the availability gate with code %q", code)
 	}
+}
+
+func problemCode(err error) string {
+	var problem *access.Problem
+	if errors.As(err, &problem) {
+		return problem.Code
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }

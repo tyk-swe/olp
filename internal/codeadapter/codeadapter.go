@@ -80,8 +80,11 @@ func (e Endpoint) Supports(transport Transport) bool {
 }
 
 // Client contains the adapter's settings for a generated client configuration.
+// Protocol, when set, is the one protocol the client's provider sends on,
+// where that differs from the client's usual preference.
 type Client struct {
 	ID, Provider, URLSuffix string
+	Protocol                codemode.Protocol
 }
 
 // Vendor is a static adapter declaration. Collections stay private; accessors
@@ -147,6 +150,39 @@ var vendors = []Vendor{
 		enrollmentNotes: keyEnrollmentNotes,
 		notes:           []string{"Z.ai restricts the GLM Coding Plan to its officially supported coding tools; OLP forwards this client's requests unmodified but cannot guarantee that Z.ai accepts pooled use."},
 		clientNotes:     map[string][]string{ClientOpenCode: {"Research services require an explicit route research binding to a Z.ai global account. Vision is not supported."}},
+	},
+	{
+		Adapter: codemode.AdapterMiniMaxPlan, Name: "MiniMax M Plan", profiles: []string{codeplans.MiniMaxProfile, codeplans.MiniMaxCNProfile}, manifest: codeplans.MiniMaxManifest, KeyGrant: true,
+		credential: keyCredential,
+		endpoints: []Endpoint{
+			{ClientPath: "v1/messages", UpstreamPath: "anthropic/v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+			{ClientPath: "v1/chat/completions", UpstreamPath: "v1/chat/completions", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+		},
+		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "minimax-coding-plan", URLSuffix: "/v1", Protocol: codemode.ProtocolMessages}},
+		enrollmentNotes: keyEnrollmentNotes,
+		notes:           []string{"MiniMax's terms govern M Plan use; OLP forwards this client's requests unmodified but cannot guarantee that MiniMax accepts pooled use."},
+	},
+	{
+		Adapter: codemode.AdapterKimiCode, Name: "Kimi Code", profiles: []string{codeplans.KimiProfile, codeplans.KimiCNProfile}, manifest: codeplans.KimiManifest, KeyGrant: true,
+		credential: keyCredential,
+		endpoints: []Endpoint{
+			{ClientPath: "v1/messages", UpstreamPath: "v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "X-Api-Key", Observation: ObserveUsage, transports: HTTP},
+			{ClientPath: "v1/chat/completions", UpstreamPath: "v1/chat/completions", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+		},
+		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "kimi-code-plan-global", URLSuffix: "/v1"}},
+		enrollmentNotes: keyEnrollmentNotes,
+		notes:           []string{"Kimi's terms forbid altering the client's identity; OLP forwards this client's own User-Agent and requests unmodified but cannot guarantee that Kimi accepts pooled use."},
+	},
+	{
+		Adapter: codemode.AdapterQwenTokenPlan, Name: "Qwen Token Plan", profiles: []string{codeplans.QwenTokenPlanProfile, codeplans.QwenTokenPlanCNProfile}, manifest: codeplans.QwenTokenPlanManifest, KeyGrant: true,
+		credential: keyCredential,
+		endpoints: []Endpoint{
+			{ClientPath: "v1/messages", UpstreamPath: "apps/anthropic/v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+			{ClientPath: "v1/chat/completions", UpstreamPath: "compatible-mode/v1/chat/completions", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP},
+		},
+		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "alibaba-token-plan", URLSuffix: "/v1"}},
+		enrollmentNotes: keyEnrollmentNotes,
+		notes:           []string{"Alibaba's terms govern Token Plan use; OLP forwards this client's requests unmodified but cannot guarantee that Alibaba accepts pooled use."},
 	},
 }
 
@@ -321,11 +357,17 @@ func (v Vendor) Reaches(client, model string) bool {
 // a model on through the adapter: the first the client speaks that the adapter
 // serves the model on.
 func (v Vendor) Protocol(client, model string) (codemode.Protocol, bool) {
-	if v.Supports(client) {
-		for _, p := range clientProtocols[client] {
-			if v.ServesModel(p, model) {
-				return p, true
-			}
+	c, ok := v.Client(client)
+	if !ok {
+		return "", false
+	}
+	protocols := clientProtocols[client]
+	if c.Protocol != "" {
+		protocols = []codemode.Protocol{c.Protocol}
+	}
+	for _, p := range protocols {
+		if v.ServesModel(p, model) {
+			return p, true
 		}
 	}
 	return "", false

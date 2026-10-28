@@ -36,6 +36,13 @@ func nativeMediaProbeServer(t *testing.T) *Server {
 				"Sec-Websocket-Accept": []string{base64.StdEncoding.EncodeToString(sum[:])},
 			}, Body: probeSocket{}, Request: r}, nil
 		}
+		if r.Method == "POST" && r.URL.Path == "/v1/realtime/calls" {
+			_, _ = io.Copy(io.Discard, r.Body)
+			return &http.Response{StatusCode: 201, Header: http.Header{"Content-Type": []string{"application/sdp"}, "Location": []string{"/v1/realtime/calls/rtc_probe"}}, Body: io.NopCloser(strings.NewReader("v=0\r\n")), Request: r}, nil
+		}
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/hangup") {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		}
 		if r.Method != "GET" || !strings.HasPrefix(r.URL.String(), DefaultOpenAIEndpoint+"/") {
 			t.Errorf("unexpected certification request: %s %s", r.Method, r.URL)
 		}
@@ -71,8 +78,8 @@ func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
 			t.Fatalf("certify %v: %v", tuple, err)
 		}
 	}
-	if mediaTuples != 23 {
-		t.Fatalf("media capabilities=%d, want 23", mediaTuples)
+	if mediaTuples != 24 {
+		t.Fatalf("media capabilities=%d, want 24", mediaTuples)
 	}
 	if err := s.certifyTuple(t.Context(), &cfg, []byte("test-credential"), "missing-model", CapabilityInput{"speech", "openai", "unary"}, 4096); err == nil {
 		t.Fatal("inaccessible media model certified")

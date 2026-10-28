@@ -1,0 +1,602 @@
+package gateway
+
+import (
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+type passthroughShortWriter struct{ http.ResponseWriter }
+
+func (w passthroughShortWriter) Write(body []byte) (int, error) {
+	return len(body) - 1, nil
+}
+
+type passthroughFlushFailureWriter struct{ http.ResponseWriter }
+
+func (w passthroughFlushFailureWriter) Write(body []byte) (int, error) {
+	return len(body), nil
+}
+
+func (w passthroughFlushFailureWriter) FlushError() error { return io.ErrClosedPipe }
+
+func TestPassthroughShortWriteIsNotSuccessfulDelivery(t *testing.T) {
+	readErr, deliveryErr := copyPassthroughResponse(passthroughShortWriter{}, strings.NewReader("complete response"), 1024)
+	if readErr != nil || deliveryErr != io.ErrShortWrite {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func TestPassthroughFlushFailureDoesNotHideIncompleteUpstream(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		_, _ = io.WriteString(writer, "partial response")
+		_ = writer.CloseWithError(io.ErrUnexpectedEOF)
+	}()
+	readErr, deliveryErr := copyPassthroughResponse(passthroughFlushFailureWriter{}, reader, 1024)
+	if readErr != io.ErrUnexpectedEOF || deliveryErr != io.ErrClosedPipe {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func TestPassthroughHEADPreservesCompressedErrorMetadata(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", "120")
+		w.WriteHeader(http.StatusNotFound)
+	})
+	resp := h.do(t.Context(), http.MethodHead, passthroughURL, fullKey, nil, nil)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusNotFound || len(body) != 0 || resp.Header.Get("Content-Encoding") != "gzip" || resp.Header.Get("Content-Length") != "120" {
+		t.Fatalf("HEAD response: status=%d headers=%v body=%q error=%v", resp.StatusCode, resp.Header, body, err)
+	}
+}
+
+func TestPassthroughDeliveryFailureDoesNotHideIncompleteUpstream(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		_, _ = io.WriteString(writer, "partial response")
+		_ = writer.CloseWithError(io.ErrUnexpectedEOF)
+	}()
+	readErr, deliveryErr := copyPassthroughResponse(failingResponseWriter{}, reader, 1024)
+	if readErr != io.ErrUnexpectedEOF || deliveryErr != io.ErrClosedPipe {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func TestPassthroughDeliveryFailureRetainsCompletedUpstream(t *testing.T) {
+	readErr, deliveryErr := copyPassthroughResponse(failingResponseWriter{}, strings.NewReader("complete response"), 1024)
+	if readErr != nil || deliveryErr != io.ErrClosedPipe {
+		t.Fatalf("completion evidence: read=%v delivery=%v", readErr, deliveryErr)
+	}
+}
+
+func passthroughHarness(t *testing.T) *harness {
+	t.Helper()
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"passthrough"}
+		route.MaxAttempts = 1
+		route.Targets = route.Targets[:1]
+		route.Passthrough = &routing.PassthroughConfig{
+			Dialect:                    "bound-native",
+			Methods:                    []string{"GET", "POST", "HEAD"},
+			Paths:                      []string{"/v1/widgets/*", "/v1/status"},
+			Query:                      []string{"limit"},
+			Headers:                    []string{"X-Widget-Mode", "If-None-Match"},
+			AcknowledgeOpaqueUnmetered: true,
+		}
+		s.Routes[routeSlug] = route
+	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
+	return h
+}
+
+const passthroughURL = "/native/bound-native/routes/" + routeSlug + "/v1/widgets/abc"
+
+func TestPassthroughInstallationPolicyExclusionDispatchesNothing(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"passthrough"}
+		route.MaxAttempts = 1
+		route.Targets = route.Targets[:1]
+		route.Passthrough = &routing.PassthroughConfig{
+			Dialect:                    "bound-native",
+			Methods:                    []string{"GET", "POST", "HEAD"},
+			Paths:                      []string{"/v1/widgets/*", "/v1/status"},
+			Query:                      []string{"limit"},
+			Headers:                    []string{"X-Widget-Mode", "If-None-Match"},
+			AcknowledgeOpaqueUnmetered: true,
+		}
+		s.Routes[routeSlug] = route
+		s.InstallationPolicy = &routing.Policy{Constraints: routing.Preferences{Only: []string{"provider:00000000-0000-0000-0000-000000000000"}}}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("policy-excluded bound connection served the request")
+	}
+	if got := h.mock.count("a"); got != 0 {
+		t.Fatalf("upstream dispatches = %d, want policy refusal before dispatch", got)
+	}
+}
+
+type failingResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (w failingResponseWriter) Write([]byte) (int, error)   { return 0, io.ErrClosedPipe }
+func (w failingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func TestPassthroughClientWriteFailureKeepsProviderSuccess(t *testing.T) {
+	wrap := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(failingResponseWriter{w}, r)
+		})
+	}
+	h := strictRelease(t, newHarnessWrapped(t, Config{}, wrap), func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"passthrough"}
+		route.MaxAttempts = 1
+		route.Targets = route.Targets[:1]
+		route.Passthrough = &routing.PassthroughConfig{
+			Dialect:                    "bound-native",
+			Methods:                    []string{"GET"},
+			Paths:                      []string{"/v1/widgets/*"},
+			AcknowledgeOpaqueUnmetered: true,
+		}
+		s.Routes[routeSlug] = route
+	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "widget-result")
+	})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.server.URL+passthroughURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+fullKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts = %d", len(env.Attempts))
+	}
+	fact := env.Attempts[0]
+	if fact.Class != "success" || !fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
+		t.Fatalf("successful provider work discarded on delivery failure: %+v", fact)
+	}
+	if env.Outcome == "success" {
+		t.Fatal("failed downstream delivery recorded as a successful request outcome")
+	}
+}
+
+func TestPassthroughCallerRoutingExclusionDispatchesNothing(t *testing.T) {
+	h := passthroughHarness(t)
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{
+		"X-OLP-Routing": `{"only":["provider:00000000-0000-0000-0000-000000000000"]}`,
+	})
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("caller-excluded bound connection served the request")
+	}
+	if got := h.mock.count("a"); got != 0 {
+		t.Fatalf("upstream dispatches = %d, want caller routing refusal before dispatch", got)
+	}
+}
+
+func TestPassthroughRoundTripStripsCallerCredentials(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/a/v1/v1/widgets/abc" {
+			t.Errorf("upstream path %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer "+secretA {
+			t.Errorf("bound credential missing: %q", r.Header.Get("Authorization"))
+		}
+		if strings.Contains(r.Header.Get("Authorization"), fullKey) || r.Header.Get("X-Api-Key") != "" || r.Header.Get("Cookie") != "" {
+			t.Errorf("caller credential forwarded: %v", r.Header)
+		}
+		if r.Header.Get("X-Widget-Mode") != "fast" {
+			t.Errorf("allowed header not forwarded: %v", r.Header)
+		}
+		if r.Header.Get("X-Secret-Mode") != "" {
+			t.Errorf("unlisted header forwarded")
+		}
+		if r.URL.Query().Get("limit") != "2" {
+			t.Errorf("allowed query not forwarded: %s", r.URL.RawQuery)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "opaque-body" {
+			t.Errorf("body %q", body)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("X-Widget-Result", "done")
+		io.WriteString(w, "widget-result")
+	})
+	resp := h.do(t.Context(), http.MethodPost, passthroughURL+"?limit=2", fullKey, []byte("opaque-body"), map[string]string{
+		"X-Widget-Mode": "fast", "X-Secret-Mode": "no", "X-Api-Key": "caller-secret", "Cookie": "session=x",
+	})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "widget-result" || resp.Header.Get("X-Widget-Result") != "done" {
+		t.Fatalf("passthrough: %d %s", resp.StatusCode, body)
+	}
+	env := h.sink.last(t)
+	if env.Operation != "passthrough" || env.Route != routeSlug || len(env.Attempts) != 1 || env.Attempts[0].Class != "success" || !env.Attempts[0].UsageObserved || !env.Attempts[0].UsageComplete || env.Attempts[0].BillingUncertain {
+		t.Fatalf("envelope: %+v attempts %+v", env, env.Attempts)
+	}
+	if env.Attempts[0].Price != nil {
+		t.Fatalf("unpriced attempt priced: %+v", env.Attempts[0].Price)
+	}
+}
+
+type feeDenying struct{ *allowing }
+
+func (c *feeDenying) Do(ctx context.Context, args ...string) (any, error) {
+	if slices.Contains(args, "0.75") {
+		return []any{int64(1), int64(0), "daily_cost_estimate", int64(1000), int64(86_400_000), int64(2_678_400_000)}, nil
+	}
+	return c.allowing.Do(ctx, args...)
+}
+
+func TestPassthroughPricedRouteReservesFeeBeforeDispatch(t *testing.T) {
+	h := passthroughHarness(t)
+	fee := "0.75"
+	h.rt.inputs = &usage.RoutingInputs{Prices: []usage.RoutingPrice{
+		{Price: usage.Price{ProviderKind: "openai_compatible", Model: modelA, Operation: "passthrough", PerRequest: &fee, Currency: "usd"}, EffectiveAt: time.Now()},
+	}, RefreshedAt: time.Now()}
+	authority := h.rt.keys[fullKey]
+	authority.LookupID = "lookup_full"
+	authority.Policy.DailyCostLimit = stringptr("0.5")
+	h.rt.keys[fullKey] = authority
+	h.gateway.Admission = newAdmission(t, &feeDenying{allowing: newAllowing(0, 0, 0, false)})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 0 {
+		t.Fatalf("priced passthrough dispatched past its budget: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+	h.rt.inputs.Discounts = []usage.RoutingDiscount{{ID: "discount-1", ProviderKind: "openai_compatible", Multiplier: "0.5", EffectiveAt: time.Now().Add(-time.Hour)}}
+	resp = h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 {
+		t.Fatalf("discounted passthrough not admitted at its discounted fee: %d calls=%d", resp.StatusCode, h.mock.count("a"))
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 || env.Attempts[0].Discount == nil {
+		t.Fatalf("discount not pinned on the attempt fact: %+v", env.Attempts)
+	}
+}
+
+func TestPassthroughOversizedChunkedResponseAbortsDelivery(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 32*1024)
+		flusher := w.(http.Flusher)
+		for range 40 {
+			w.Write(chunk)
+			flusher.Flush()
+		}
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err == nil || int64(len(body)) > h.gateway.cfg.MaxResponseBytes {
+		t.Fatalf("oversized response completed or exceeded its bound: status=%d bytes=%d err=%v", resp.StatusCode, len(body), err)
+	}
+	if fact := h.sink.last(t).Attempts[0]; fact.Class != classProtocol {
+		t.Fatalf("oversized response recorded as %s", fact.Class)
+	}
+}
+
+func TestPassthroughTruncatedResponseAbortsDelivery(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "1048576")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("partial"))
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err == nil {
+		t.Fatalf("truncated response completed as %d with %q", resp.StatusCode, body)
+	}
+}
+
+func TestPassthroughHeadAndConditionalResponsesPassThrough(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.Header().Set("ETag", `"v1"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Length", "2097152")
+		w.WriteHeader(http.StatusOK)
+	})
+	head := h.do(t.Context(), http.MethodHead, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, head.Body)
+	head.Body.Close()
+	if head.StatusCode != http.StatusOK || head.Header.Get("Content-Length") != "2097152" {
+		t.Fatalf("HEAD metadata refused or lost: %d content-length=%q", head.StatusCode, head.Header.Get("Content-Length"))
+	}
+	conditional := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{"If-None-Match": `"v1"`})
+	io.Copy(io.Discard, conditional.Body)
+	conditional.Body.Close()
+	if conditional.StatusCode != http.StatusNotModified {
+		t.Fatalf("conditional response rewritten: %d", conditional.StatusCode)
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != "success" || !attemptSuccessful(&env.Attempts[0]) {
+		t.Fatalf("conditional 304 not priced as a successful attempt: %+v", env.Attempts)
+	}
+}
+
+func TestPassthroughUpstreamErrorRecordsFailureOutcome(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		io.WriteString(w, `{"error":"missing"}`)
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("upstream status not forwarded: %d", resp.StatusCode)
+	}
+	env := h.sink.last(t)
+	if env.Outcome != "failure" {
+		t.Fatalf("forwarded upstream error recorded as %q outcome", env.Outcome)
+	}
+}
+
+func TestPassthroughCoolingSlotDispatchesNothing(t *testing.T) {
+	h := passthroughHarness(t)
+	for _, provider := range h.rt.release.Snapshot.Providers {
+		if provider.Name == "a" {
+			h.gateway.health.cooldown(provider.ID, h.slotA, time.Minute)
+		}
+	}
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || h.mock.count("a") != 0 {
+		t.Fatalf("cooling slot dispatched: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+}
+
+func TestPassthroughRefusalsDispatchNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, url, key string
+		headers                map[string]string
+	}{
+		{"encoded dot", "GET", "/native/bound-native/routes/" + routeSlug + "/v1/widgets/%2e%2e", fullKey, nil},
+		{"encoded slash", "GET", "/native/bound-native/routes/" + routeSlug + "/v1/widgets/a%2fb", fullKey, nil},
+		{"dot segment", "GET", "/native/bound-native/routes/" + routeSlug + "/v1/widgets/..", fullKey, nil},
+		{"two segments", "GET", "/native/bound-native/routes/" + routeSlug + "/v1/widgets/a/b", fullKey, nil},
+		{"zero segments", "GET", "/native/bound-native/routes/" + routeSlug + "/v1/widgets", fullKey, nil},
+		{"unknown query", "GET", passthroughURL + "?evil=1", fullKey, nil},
+		{"method", "DELETE", passthroughURL, fullKey, nil},
+		{"foreign key", "GET", passthroughURL, otherKey, nil},
+		{"wrong dialect", "GET", "/native/other/routes/" + routeSlug + "/v1/widgets/abc", fullKey, nil},
+		{"missing route", "GET", "/native/bound-native/routes/nope/v1/widgets/abc", fullKey, nil},
+		{"websocket", "GET", passthroughURL, fullKey, map[string]string{"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ=="}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := passthroughHarness(t)
+			resp := h.do(t.Context(), tc.method, tc.url, tc.key, nil, tc.headers)
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode < 400 || h.mock.count("a")+h.mock.count("b") != 0 {
+				t.Fatalf("%s dispatched: %d %s", tc.name, resp.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestPassthroughRedirectRefused(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/b/v1/widgets/abc")
+		w.WriteHeader(http.StatusFound)
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), "passthrough_redirect_refused") || h.mock.count("b") != 0 {
+		t.Fatalf("redirect followed: %d %s b=%d", resp.StatusCode, body, h.mock.count("b"))
+	}
+}
+
+func TestPassthroughCannotShadowModeledEndpoint(t *testing.T) {
+	h := passthroughHarness(t)
+	resp := h.do(t.Context(), http.MethodPost, "/native/bound-native/models/"+routeSlug, fullKey, []byte(`{"model":"x"}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || h.mock.count("a") != 0 {
+		t.Fatalf("modeled endpoint shadowed: %d %s", resp.StatusCode, body)
+	}
+}
+
+func TestPassthroughBodyLimit(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"passthrough"}
+		route.MaxAttempts = 1
+		route.Targets = route.Targets[:1]
+		limit := int64(4)
+		route.MaxBodyBytes = &limit
+		route.Passthrough = &routing.PassthroughConfig{Dialect: "bound-native", Methods: []string{"POST"}, Paths: []string{"/v1/widgets/*"}, AcknowledgeOpaqueUnmetered: true}
+		s.Routes[routeSlug] = route
+	})
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = []string{routeSlug}
+	h.rt.keys[fullKey] = authority
+	resp := h.do(t.Context(), http.MethodPost, passthroughURL, fullKey, []byte("12345"), nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || h.mock.count("a") != 0 {
+		t.Fatalf("body limit: %d calls=%d", resp.StatusCode, h.mock.count("a"))
+	}
+}
+
+func TestPassthroughRequiresNamedRoutePermission(t *testing.T) {
+	h := passthroughHarness(t)
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowedRoutes = nil
+	h.rt.keys[fullKey] = authority
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound || h.mock.count("a") != 0 {
+		t.Fatalf("unnamed pass-through route was available: status=%d dispatches=%d", resp.StatusCode, h.mock.count("a"))
+	}
+}
+
+func TestPassthroughStripsConnectionNominatedHeaders(t *testing.T) {
+	h := passthroughHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Widget-Mode") != "" {
+			t.Error("connection-nominated request header reached the provider")
+		}
+		w.Header().Set("Connection", "X-Internal, X-Other")
+		w.Header().Set("X-Internal", "private")
+		w.Header().Set("X-Other", "private")
+		w.Header().Set("X-Public", "visible")
+		io.WriteString(w, "widget")
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{
+		"Connection": "X-Widget-Mode", "X-Widget-Mode": "private",
+	})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "widget" || resp.Header.Get("X-Public") != "visible" || resp.Header.Get("X-Internal") != "" || resp.Header.Get("X-Other") != "" {
+		t.Fatalf("forwarded response headers=%v body=%q status=%d", resp.Header, body, resp.StatusCode)
+	}
+}
+
+func TestPassthroughHonorsCredentialSlotPriority(t *testing.T) {
+	h := passthroughHarness(t)
+	strictRelease(t, h, func(snapshot *routing.Snapshot) {
+		provider := snapshot.Providers[snapshot.Routes[routeSlug].Targets[0].ProviderID]
+		for _, other := range snapshot.Providers {
+			if other.ID == provider.ID {
+				continue
+			}
+			first := provider.Slots[0]
+			first.Priority = 20
+			preferred := other.Slots[0]
+			preferred.Priority = 10
+			provider.Slots = []routing.Slot{first, preferred}
+			snapshot.Providers[provider.ID] = provider
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, r.Header.Get("Authorization"))
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "Bearer "+secretB {
+		t.Fatalf("preferred credential not used: status=%d body=%q", resp.StatusCode, body)
+	}
+}
+
+func TestPassthroughDeliversChunksBeforeProviderCompletion(t *testing.T) {
+	h := passthroughHarness(t)
+	release := make(chan struct{})
+	defer close(release)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, nil)
+	defer resp.Body.Close()
+	chunk := make([]byte, len("data: first\n\n"))
+	if _, err := io.ReadFull(resp.Body, chunk); err != nil || string(chunk) != "data: first\n\n" {
+		t.Fatalf("first chunk was not delivered while the provider was open: status=%d body=%q err=%v", resp.StatusCode, chunk, err)
+	}
+}
+
+func TestPassthroughPreflightPermitsPublishedMethods(t *testing.T) {
+	h := passthroughHarness(t)
+	h.gateway.cfg.CORSAllowedOrigins = []string{"https://app.example"}
+	for _, method := range routing.PassthroughMethods {
+		resp := h.do(t.Context(), http.MethodOptions, passthroughURL, "", nil, map[string]string{
+			"Origin": "https://app.example", "Access-Control-Request-Method": method,
+		})
+		resp.Body.Close()
+		allowed := strings.FieldsFunc(resp.Header.Get("Access-Control-Allow-Methods"), func(r rune) bool { return r == ',' || r == ' ' })
+		if resp.StatusCode != http.StatusNoContent || !slices.Contains(allowed, method) || resp.Header.Get("Access-Control-Allow-Origin") != "https://app.example" {
+			t.Fatalf("preflight refused supported %s requests: status=%d headers=%v", method, resp.StatusCode, resp.Header)
+		}
+	}
+}
+
+func TestPassthroughErrorsRedactBoundCredentials(t *testing.T) {
+	for _, encoding := range []string{"identity", "gzip"} {
+		t.Run(encoding, func(t *testing.T) {
+			h := passthroughHarness(t)
+			strictRelease(t, h, func(snapshot *routing.Snapshot) {
+				route := snapshot.Routes[routeSlug]
+				route.Passthrough.Headers = append(route.Passthrough.Headers, "Accept-Encoding")
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Diagnostic", "credential="+secretA)
+				w.Header().Set("Content-Encoding", encoding)
+				w.WriteHeader(http.StatusBadRequest)
+				payload := `{"error":{"message":"rejected Bearer ` + secretA + `"}}`
+				if encoding == "gzip" {
+					writer := gzip.NewWriter(w)
+					io.WriteString(writer, payload)
+					writer.Close()
+					return
+				}
+				io.WriteString(w, payload)
+			})
+			resp := h.do(t.Context(), http.MethodGet, passthroughURL, fullKey, nil, map[string]string{"Accept-Encoding": encoding})
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil || resp.StatusCode != http.StatusBadRequest || !json.Valid(body) || !strings.Contains(string(body), "[REDACTED]") || strings.Contains(string(body), secretA) || strings.Contains(resp.Header.Get("X-Diagnostic"), secretA) || resp.Header.Get("Content-Encoding") != "" {
+				t.Fatalf("provider diagnostics were not redacted: status=%d headers=%v body=%q err=%v", resp.StatusCode, resp.Header, body, err)
+			}
+		})
+	}
+}

@@ -158,19 +158,38 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | --- | --- | --- |
 | Legacy completions | Protocol/gateway, probes, route inspection, guards/capture, token/usage and pinned SDK fixtures | Console/browser, each provider live, release performance |
 | Text Decisions | Native and one-way mapping, labels/order/usage/pricing, caller-paid budget and inspection fixtures | Console/browser, configuration promotion, each provider live |
-| OCR/search | Codecs, raw-HTTP process fixtures, route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
+| OCR/search | Codecs (including the Brave GET-query transport), raw-HTTP process fixtures (including the Azure Document Intelligence 202/poll submit-once, cancellation and missing-units cases), route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples (including the exact Brave tuple) and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
+| Native duplex (RM6.5) | Compiled-profile contract tests, gateway WebSocket relay fixtures in process, a fake Bedrock stream behind the SDK opener seam, per-vendor frame fixtures, and the endpoint ledger rows for xAI, Vertex AI Live and Bedrock Nova Sonic | Live sessions per exact tuple with real xAI, Google Cloud and AWS accounts, including the 8-minute Nova Sonic stream bound and Vertex setup acknowledgement against the aiplatform endpoint |
+| Governed pass-through (RM6.6) | Adversarial routing normalization and publication refusals, gateway credential isolation, redirect and bound fixtures, configuration plan refusals and console editor units; no locked SDK covers the bound-native namespace, so raw HTTP fixtures are the evidence | Live tuple per bound connection and endpoint family, full `make integration`, release performance |
+| Governed WebRTC (RM6.4) | Gateway session-control fixtures against a mock calls/control/hangup provider, compiled contract, distinct `webrtc` capability tuple, certification probe, ledger rows and a Chromium journey spec with mock provider | Full `make integration` browser run, live OpenAI tuple, durable debit-intent settlement with restart recovery (the slice settles on the realtime lease path and claims no durable settlement), Azure tuple under its own contract |
 | Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
 
 Run `CLIENTS=m9-go tests/clients/run.sh` for locked OpenAI Go completions and
 Decisions plus raw-HTTP OCR/search fixtures, including required route headers,
-refusals and credential isolation. Console selections:
+refusals and credential isolation. Live Azure Document Intelligence evidence is
+opt-in and separate from this local record: run the live operation probe with
+`OLP_LIVE_OPERATION_DIALECT=azure-document-intelligence-ocr`,
+`OLP_LIVE_ENDPOINT` set to the resource endpoint,
+`OLP_LIVE_AZURE_DOCUMENT_INTELLIGENCE_API_KEY` and `OLP_LIVE_MODEL` naming a
+prebuilt or custom document model. Console selections:
 
 ```sh
 pnpm --dir console test src/lib/features/inference/playground/PlaygroundPage.svelte.test.ts src/lib/features/inference/playground/nativeOperation.test.ts
 ```
 
 The OCR/search journey is `console/tests/gateway/ocr-search.spec.ts`.
+The governed WebRTC journey is
+`console/tests/gateway/realtime-webrtc.spec.ts` against
+`console/tests/gateway/mock-realtime-webrtc.mjs`. It is integration-gated and
+has not run outside `make integration` yet.
+Vertex document processing (RM6.3) local evidence covers the Document AI
+dialect and Mistral mapping, plan-level processor addressing and page
+projection, document-location prefix refusals at the gateway, and route
+simulation. Its exact live tuple stays unqualified until an opt-in run of
+`TestVertexDocumentProcessingLive` under the `liveproviders` build tag
+sets `OLP_LIVE_DOCUMENTAI_PROJECT`, `OLP_LIVE_DOCUMENTAI_LOCATION` and
+`OLP_LIVE_MODEL` naming a processor ID under ADC credentials.
 A dedicated resource/accounting integration selection remains required;
 compiling fixtures does not execute it. Every new family needs lifecycle,
 nested-ID/pagination isolation, ambiguous-create, restart, cleanup, revocation,
@@ -353,9 +372,9 @@ The release-contract suite reads every embedded OpenAPI operation and checks
 concrete process registration, including client-config. The generated
 authorization golden records its read/project boundary.
 
-### Coding-plan adapters: OpenCode Go and GLM Coding Plan
+### Coding-plan adapters: OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan
 
-The same evidence class applies to the OpenCode Go and GLM Coding Plan
+The same evidence class applies to the OpenCode Go and coding-plan
 adapters: controlled fixtures only, with no live coding-plan key. Exact package
 URLs and hashes are recorded per run as described above;
 `tests/fixtures/coding-plans/evidence.json` retains historical references.
@@ -382,7 +401,8 @@ allowlist in `tests/codecli/trap.go`, runs each client with the configuration
 the public client-config endpoint generated: Claude Code sources the shell file
 and OpenCode reads the `opencode.json` from its working directory. The
 environment is an allowlist with a private home and XDG directories. A decoy
-workstation key (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `ZHIPU_API_KEY`) must
+workstation key (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `ZHIPU_API_KEY`,
+`MINIMAX_API_KEY`) must
 never reach OLP or the upstream. Proxy variables point at a trap that refuses
 and records every request leaving loopback. OpenCode asks the trap for
 `registry.npmjs.org` at startup to install its own dependencies; the trap
@@ -398,10 +418,11 @@ mode's classifier needs a real model.
 | OLP-key-only configuration | Generated Claude Code shell and OpenCode JSON run unmodified; decoy credentials overridden; no `auth.json` | Controlled only |
 | Claude Code on GLM Coding Plan and OpenCode Go | Tool loop (`Read`), subagent (`Agent`) bound beneath its session, `--continue`; every model variable on the route | Controlled only; OpenCode Go only for Messages models |
 | OpenCode on GLM Coding Plan and OpenCode Go | Tool loop (`read`), child session (`task`) bound beneath its parent, `--continue`; Chat Completions with `include_usage`, and Messages for OpenCode Go | Controlled only |
+| MiniMax M Plan, Kimi Code and Qwen Token Plan | Raw forwarding on each profile's Messages path, and Chat on the global profile: upstream host and path, plan-key prefix at enrollment where the vendor defines one, and the credential header each endpoint documents | Controlled fixed-host TLS peers |
 | Mixed subscriptions | Claude Code plans in plan mode through `opusplan` on an OpenCode Go model and implements on a GLM model; OpenCode's plan agent and build agent do the same. Each model reaches its own host with its own account's key, and the session's tree pins one account per model and holds at most one account of each subscription. Raw forwarding sends each path and model of a mixed route to its subscription; a cooling pin refuses its model while the tree's other models stay served | Controlled scripted vendors only; no live vendor has accepted another vendor's history |
 | OpenCode Go Responses | Raw forwarding through `v1/responses`, client identity, `previous_response_id` reference; OpenCode's request shape captured | Controlled only; no real-client Responses journey |
 | Payload and header fidelity | Byte-identical bodies and SSE (with pings), forwarded `anthropic-*` and client headers, `?beta=true`, OLP key consumed from `Authorization` or `X-API-Key`, the serving account's adapter's single credential header placed | Controlled only |
-| Upstream placement | `api.z.ai` and `open.bigmodel.cn` paths for Messages and Chat; `opencode.ai/zen/go/v1` for all three; Anthropic-shaped refusals on Messages paths | Controlled fixed-host TLS peers |
+| Upstream placement | `api.z.ai` and `open.bigmodel.cn` paths for Messages and Chat; `opencode.ai/zen/go/v1` for all three; `api.minimax.io`, `api.minimax.cn`, `api.kimi.ai`, `api.kimi.com`, `token-plan.ap-southeast-1.maas.aliyuncs.com` and `token-plan.cn-beijing.maas.aliyuncs.com` paths for Messages and Chat; Anthropic-shaped refusals on Messages paths | Controlled fixed-host TLS peers |
 | Conversation trees | Claude Code session, agent and nested agent; OpenCode parent and child; unresolved parent, anonymous and ambiguous identity refused before dispatch | Controlled only |
 | No replay or failover | A 429 is relayed byte for byte, cools the account, and the retry refuses without dispatch or switching accounts | Controlled only |
 | Adapter management | Mixed pools and publications accepted; account `adapter`, route and revision `adapters`, binding `pins`; client-config clients, native models per client, planning model, formats and 422s | Controlled only |
@@ -463,7 +484,7 @@ is still a release gate.
 Exercise hosted search/files, live quota reset, credential rotation during an active task and real enrollment,
 refresh/allowance/inference. Complete the console/browser suite separately.
 
-For OpenCode Go and GLM Coding Plan, live qualification needs a subscriber's
+For OpenCode Go and the coding plans, live qualification needs a subscriber's
 own key, enrolled by paste, and must record which models each vendor serves on
 which endpoint, whether it accepts the client's `anthropic-beta` values, and
 its quota and concurrency refusals.
