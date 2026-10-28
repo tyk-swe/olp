@@ -48,16 +48,18 @@ func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
 // compileDraftExecution checks the same configured links used by release
 // installation. It is read-only and never performs provider inference or probes.
 func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
-	fidelity, err := routing.DecodeFidelity(d.Fidelity)
-	if err != nil || !fidelity.Strict() {
+	route, err := draftRoute(d)
+	if err != nil {
 		return err
+	}
+	fidelity := route.Fidelity
+	if !fidelity.Strict() && !route.IsPassthrough() {
+		return nil
 	}
 	snapshot, err := runtime.ReadSnapshot(ctx, tx)
 	if err != nil {
 		return err
 	}
-	route := simulationRoute(d.ID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
-	route.ProjectID = d.ProjectID
 	var publishedID string
 	if err = tx.QueryRow(ctx, "SELECT id::text FROM olp.routes WHERE slug=$1 AND project_id IS NOT DISTINCT FROM $2::uuid", d.Slug, d.ProjectID).Scan(&publishedID); err == nil {
 		route.ID = publishedID

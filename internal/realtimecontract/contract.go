@@ -24,7 +24,17 @@ type Config struct {
 // Template contains only reviewed configuration, never caller-owned event data.
 type Template struct {
 	model, profileID, profileRevision string
+	webrtc                            bool
 }
+
+func (t *Template) Model() string {
+	if t == nil {
+		return ""
+	}
+	return t.model
+}
+
+func (t *Template) WebRTC() bool { return t != nil && t.webrtc }
 
 func refuse(code, field, requirement, message string) error {
 	return &oif.Incompatibility{Code: code, Field: field, Requirement: requirement, Message: message}
@@ -33,22 +43,40 @@ func refuse(code, field, requirement, message string) error {
 // Compile admits only the reviewed GA OpenAI and Azure v1 WebSocket addresses.
 // A realtime tuple on a versioned Chat/Responses profile uses its own operation
 // dialect; neither generation codec is asked to interpret duplex events.
-func Compile(c Config) (*Template, error) {
+func Compile(c Config) (*Template, error) { return compile(c, false) }
+
+// CompileWebRTC admits only the reviewed OpenAI server-mediated calls
+// contract. Azure WebRTC stays refused until its own transport contract is
+// certified; a WebSocket realtime tuple never implies this one.
+func CompileWebRTC(c Config) (*Template, error) { return compile(c, true) }
+
+func compile(c Config, webrtc bool) (*Template, error) {
 	c.Provider = c.Provider.Clone()
 	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, refuse("target_capability", "/profile", "explicit_profile", "Strict realtime requires a registered versioned provider profile.")
 	}
+	mode := "realtime"
+	hosted := (p.Kind == "openai" && p.Hosting == "direct-openai") ||
+		(p.Kind == "azure_openai" && p.Hosting == "azure-v1")
+	if webrtc {
+		mode = "webrtc"
+		hosted = p.Kind == "openai" && p.Hosting == "direct-openai"
+	}
 	if p.OperationDialect("realtime") != "openai-realtime" ||
 		!slices.Contains(p.Operations, "realtime") ||
-		!c.Provider.Supports("realtime", "openai", "realtime") ||
-		!((p.Kind == "openai" && p.Hosting == "direct-openai") ||
-			(p.Kind == "azure_openai" && p.Hosting == "azure-v1")) {
+		!c.Provider.Supports("realtime", "openai", mode) ||
+		!hosted {
 		return nil, refuse("target_capability", "/profile", "native_realtime_contract", "This provider profile has no strict OpenAI Realtime WebSocket contract.")
 	}
 	if _, err := c.Provider.RealtimeURL(c.Model); err != nil {
 		return nil, refuse("resource_affinity", "/model", "realtime_address", "This target cannot address its native realtime model.")
+	}
+	if webrtc {
+		if _, err := c.Provider.RealtimeCallsURL(c.Model); err != nil {
+			return nil, refuse("resource_affinity", "/model", "realtime_address", "This target cannot address its native realtime model.")
+		}
 	}
 	if c.Policy != nil && len(c.Policy.Rules) > 0 {
 		return nil, refuse("policy_conflict", "/content_policy", "inspectable_policy", "Realtime frames cannot be admitted with a content policy this relay cannot enforce.")
@@ -64,7 +92,7 @@ func Compile(c Config) (*Template, error) {
 			return nil, refuse("target_capability", "/bindings/realtime", "native_realtime_defaults", "Realtime model defaults cannot be applied to opaque duplex events.")
 		}
 	}
-	return &Template{model: c.Provider.Model(c.Model), profileID: p.ID, profileRevision: p.Revision}, nil
+	return &Template{model: c.Provider.Model(c.Model), profileID: p.ID, profileRevision: p.Revision, webrtc: webrtc}, nil
 }
 
 // AdmitHandshake accepts only route selection and OLP accounting metadata.

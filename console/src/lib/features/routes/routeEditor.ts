@@ -9,6 +9,7 @@ import {
   lifecycleNotice,
   type LifecycleNotice
 } from '$lib/features/providers/models/lifecycle';
+import { validatePassthroughConfig } from './routePassthrough';
 
 export type EditableTarget = {
   providerModelId: string;
@@ -97,7 +98,9 @@ export function emptyBehavior(): RouteBehavior {
     selectors: [],
     retry: {},
     affinity: null,
-    budget: null
+    budget: null,
+    passthrough: null,
+    certification: 'certified'
   };
 }
 
@@ -189,8 +192,10 @@ function isSelector(value: unknown): value is RouteSelector {
 
 /** Omitted modes are strict, matching the server's default. */
 export function fidelityLabel(
-  fidelity?: components['schemas']['RouteFidelity'] | null
-): 'Strict' | 'Transformed' {
+  fidelity?: components['schemas']['RouteFidelity'] | null,
+  passthrough?: components['schemas']['PassthroughConfig'] | null
+): 'Strict' | 'Transformed' | 'Pass-through · uncertified' {
+  if (passthrough) return 'Pass-through · uncertified';
   return fidelity?.mode === 'transformed' ? 'Transformed' : 'Strict';
 }
 
@@ -224,7 +229,8 @@ export const operationOptions = [
   ['retrieval', 'Retrieval'],
   ['agent_resource', 'Managed agents'],
   ['realtime', 'Realtime sessions'],
-  ['bedrock_invoke', 'Bedrock InvokeModel']
+  ['bedrock_invoke', 'Bedrock InvokeModel'],
+  ['passthrough', 'Governed pass-through (uncertified)']
 ] as const;
 
 export function toRouteModelOptions(
@@ -242,17 +248,19 @@ export function toRouteModelOptions(
 }
 
 export function surfacesFor(operation: string): string[] {
+  if (operation === 'passthrough') return ['native'];
   if (operation === 'agent_resource') return ['gemini'];
   if (operation === 'bedrock_invoke') return ['bedrock'];
   if (operation === 'generation')
     return ['openai', 'anthropic', 'gemini', 'bedrock'];
   if (operation === 'token_count') return ['openai', 'anthropic', 'gemini'];
+  if (operation === 'realtime') return ['openai', 'native', 'gemini'];
   return ['openai'];
 }
 
 export function modesFor(operation: string): string[] {
   if (operation === 'video_create') return ['async'];
-  if (operation === 'realtime') return ['realtime'];
+  if (operation === 'realtime') return ['realtime', 'webrtc'];
   if (
     [
       'generation',
@@ -498,6 +506,37 @@ export function validateRouteBehavior(
   if (values.selectorsError) return values.selectorsError;
   const behavior = values.behavior;
   if (!behavior) return null;
+  const passthroughProblem = validatePassthroughConfig(behavior.passthrough);
+  if (passthroughProblem) return passthroughProblem;
+  if (behavior.passthrough) {
+    if (
+      values.operations.length !== 1 ||
+      values.operations[0] !== 'passthrough'
+    )
+      return 'A pass-through route serves only the passthrough operation.';
+    if (
+      values.targets.length !== 1 ||
+      values.targets[0]?.shadowSampleRate != null
+    )
+      return 'A pass-through route binds exactly one serving connection without mirroring.';
+    if (values.maxAttempts !== 1)
+      return 'A pass-through route makes exactly one attempt.';
+    if (values.fidelity.mode === 'transformed')
+      return 'A pass-through route cannot declare translation.';
+    if (values.contentPolicyRules.length)
+      return 'A pass-through route cannot carry a content policy.';
+    if (
+      behavior.fallbacks.length ||
+      behavior.selectors.length ||
+      Object.keys(behavior.retry).length ||
+      behavior.affinity ||
+      behavior.cache ||
+      behavior.prompt_cache
+    )
+      return 'A pass-through route cannot use fallback, selectors, retry, affinity or response caching.';
+  } else if (values.operations.includes('passthrough')) {
+    return 'The passthrough operation requires a pass-through binding.';
+  }
   if (behavior.fallbacks.length > 4)
     return 'Declare at most 4 fallback routes.';
   for (const fallback of behavior.fallbacks) {
@@ -572,8 +611,12 @@ function behaviorFields(behavior: RouteBehavior | undefined) {
     budget: value.budget,
     cache: value.cache,
     prompt_cache: value.prompt_cache,
+    passthrough: value.passthrough ?? null,
     ...(value.caller_cost_exempt !== undefined
       ? { caller_cost_exempt: value.caller_cost_exempt }
+      : {}),
+    ...(value.provider_fetched_documents !== undefined
+      ? { provider_fetched_documents: value.provider_fetched_documents }
       : {}),
     ...(value.max_body_bytes !== undefined
       ? { max_body_bytes: value.max_body_bytes }

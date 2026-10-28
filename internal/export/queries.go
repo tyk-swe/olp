@@ -30,9 +30,9 @@ const sinkStatusSQL = `SELECT CASE WHEN st.stream='focus' THEN
  'pending_error_codes',COALESCE(pending.error_codes,'{}'::text[])) END
  FROM olp.export_sinks s CROSS JOIN LATERAL unnest(s.streams) st(stream)
  LEFT JOIN olp.export_cursors c ON c.sink_id=s.id AND c.stream=st.stream
- LEFT JOIN LATERAL (SELECT count(*) FILTER(WHERE p.delivered_at IS NULL) AS pending,
- min(r.queued_at) FILTER(WHERE p.delivered_at IS NULL) AS oldest_pending_at,max(p.last_attempt_at) AS last_attempt_at,
- array_agg(DISTINCT p.last_error_code) FILTER(WHERE p.delivered_at IS NULL AND p.last_error_code IS NOT NULL) AS error_codes
+ LEFT JOIN LATERAL (SELECT count(*) FILTER(WHERE p.delivered_at IS NULL AND p.rejected_at IS NULL) AS pending,
+ min(r.queued_at) FILTER(WHERE p.delivered_at IS NULL AND p.rejected_at IS NULL) AS oldest_pending_at,max(p.last_attempt_at) AS last_attempt_at,
+ array_agg(DISTINCT p.last_error_code) FILTER(WHERE p.delivered_at IS NULL AND p.rejected_at IS NULL AND p.last_error_code IS NOT NULL) AS error_codes
  FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id WHERE p.sink_id=s.id AND r.stream=st.stream) pending ON true
  LEFT JOIN LATERAL (SELECT count(*) FILTER(WHERE fd.delivered_at IS NOT NULL) AS delivered_days,
  max(fd.charge_date) FILTER(WHERE fd.delivered_at IS NOT NULL) AS latest_delivered_date,
@@ -56,13 +56,14 @@ const pendingRecordsSQL = `SELECT r.id::text,r.stream,r.occurred_at,r.queued_at,
  jsonb_build_object('version',1,'event_id',r.id,'stream',r.stream,'source_id',r.source_id,'project_id',r.project_id,
  'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts
  FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id
- WHERE p.sink_id=$1 AND r.stream=$2 AND p.delivered_at IS NULL AND p.next_attempt_at<=now()
+ WHERE p.sink_id=$1 AND r.stream=$2 AND p.delivered_at IS NULL AND p.rejected_at IS NULL AND p.next_attempt_at<=now()
  ORDER BY r.queued_at,r.id LIMIT $3`
 const claimRecordSQL = `UPDATE olp.export_pending SET attempts=LEAST(attempts+1,2147483647),
- last_attempt_at=now(),next_attempt_at=now()+interval '2 minutes' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND attempts=$3`
+ last_attempt_at=now(),next_attempt_at=now()+interval '2 minutes' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL AND attempts=$3`
 const finishRecordSQL = `UPDATE olp.export_pending SET delivered_at=CASE WHEN $3 THEN now() ELSE NULL END,
+ rejected_at=CASE WHEN $6 THEN now() ELSE NULL END,
  last_error_code=$4,next_attempt_at=now()+make_interval(secs=>$5)
- WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL`
+ WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL`
 const checkpointCursorSQL = `INSERT INTO olp.export_cursors(sink_id,stream,cursor,delivered_total,failed_total,last_success_at)
  VALUES($1,$2,$3,$4,$5,CASE WHEN $4::bigint>0 THEN now() END) ON CONFLICT(sink_id,stream) DO UPDATE SET
  cursor=COALESCE(EXCLUDED.cursor,export_cursors.cursor),
@@ -70,7 +71,7 @@ const checkpointCursorSQL = `INSERT INTO olp.export_cursors(sink_id,stream,curso
  failed_total=export_cursors.failed_total+EXCLUDED.failed_total,last_success_at=COALESCE(EXCLUDED.last_success_at,export_cursors.last_success_at),updated_at=now()`
 const maintainSQL = `SELECT olp.maintain_exports($1)`
 const exportMetricsSQL = `SELECT s.id::text,st.stream,
- COALESCE(EXTRACT(epoch FROM now()-min(r.queued_at) FILTER(WHERE p.delivered_at IS NULL)),0)::double precision,
+ COALESCE(EXTRACT(epoch FROM now()-min(r.queued_at) FILTER(WHERE p.delivered_at IS NULL AND p.rejected_at IS NULL)),0)::double precision,
  COALESCE(c.delivered_total,0),COALESCE(c.failed_total,0)
  FROM olp.export_sinks s CROSS JOIN LATERAL unnest(s.streams) AS st(stream)
  LEFT JOIN olp.export_cursors c ON c.sink_id=s.id AND c.stream=st.stream
@@ -80,4 +81,4 @@ const exportMetricsSQL = `SELECT s.id::text,st.stream,
 const exportDeliveryMetricsSQL = `SELECT s.id::text,COALESCE(sum(c.delivered_total),0)::bigint,COALESCE(sum(c.failed_total),0)::bigint,
  COALESCE(sum(c.gaps_total),0)::bigint FROM olp.export_sinks s LEFT JOIN olp.export_cursors c ON c.sink_id=s.id
  GROUP BY s.id ORDER BY s.id LIMIT 1001`
-const exportPendingMetricsSQL = `SELECT count(*) FROM olp.export_pending WHERE delivered_at IS NULL`
+const exportPendingMetricsSQL = `SELECT count(*) FROM olp.export_pending WHERE delivered_at IS NULL AND rejected_at IS NULL`

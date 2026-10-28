@@ -128,6 +128,7 @@ func cloneProvider(p Provider) Provider {
 	p.Network = c.Network
 	p.BatchStorage = c.BatchStorage
 	p.TuningDatasetURIPrefixes = c.TuningDatasetURIPrefixes
+	p.DocumentURIPrefixes = c.DocumentURIPrefixes
 	p.SemanticHeaders = c.SemanticHeaders
 	p.QuerySettings = c.QuerySettings
 	p.OperationDefaults = c.OperationDefaults
@@ -193,6 +194,13 @@ func cloneBehavior(b Behavior) Behavior {
 	}
 	b.Retry = maps.Clone(b.Retry)
 	b.Affinity = copyPointer(b.Affinity)
+	b.Passthrough = copyPointer(b.Passthrough)
+	if b.Passthrough != nil {
+		b.Passthrough.Methods = slices.Clone(b.Passthrough.Methods)
+		b.Passthrough.Paths = slices.Clone(b.Passthrough.Paths)
+		b.Passthrough.Query = slices.Clone(b.Passthrough.Query)
+		b.Passthrough.Headers = slices.Clone(b.Passthrough.Headers)
+	}
 	b.Budget = copyPointer(b.Budget)
 	if b.Budget != nil {
 		b.Budget.DailyCostLimit = copyPointer(b.Budget.DailyCostLimit)
@@ -231,9 +239,10 @@ func cloneCodeRoute(r codemode.Route) codemode.Route {
 	return r
 }
 func cloneConfiguration(c Configuration) Configuration {
-	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()
+	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()
 	c.BatchStorage = cfg.BatchStorage
 	c.Options.TuningDatasetURIPrefixes = cfg.TuningDatasetURIPrefixes
+	c.Options.DocumentURIPrefixes = cfg.DocumentURIPrefixes
 	c.Options.Network = cfg.Network
 	c.Options.SemanticHeaders = cfg.SemanticHeaders
 	c.Options.QuerySettings = cfg.QuerySettings

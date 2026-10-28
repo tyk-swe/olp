@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"slices"
 	"strings"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -87,15 +89,24 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 // for another AWS service of the connector's cloud when signingService names
 // one.
 func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
+	status, _, data, err := s.callAsWithHeaders(ctx, cfg, credential, method, path, body, contentType, signingService)
+	return status, data, err
+}
+
+func (s *Server) callWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, http.Header, []byte, error) {
+	return s.callAsWithHeaders(ctx, cfg, credential, method, path, body, "application/json", "")
+}
+
+func (s *Server) callAsWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
 	base, err := s.Egress.ValidateEndpoint(*cfg.Endpoint)
 	if err != nil {
-		return 0, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+		return 0, nil, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
 	}
 	select {
 	case s.probes <- struct{}{}:
 		defer func() { <-s.probes }()
 	case <-ctx.Done():
-		return 0, nil, ctx.Err()
+		return 0, nil, nil, ctx.Err()
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -108,16 +119,16 @@ func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []by
 		endpoint = path
 		u, e := url.Parse(endpoint)
 		if e != nil {
-			return 0, nil, e
+			return 0, nil, nil, e
 		}
 		u.RawQuery = ""
 		if _, e := s.Egress.ValidateEndpoint(u.String()); e != nil {
-			return 0, nil, e
+			return 0, nil, nil, e
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
@@ -135,34 +146,34 @@ func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []by
 	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
 	switch {
 	case errors.Is(err, connectors.ErrSigningUnavailable):
-		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: err.Error()}
+		return 0, nil, nil, &probeError{Code: "upstream_unavailable", Detail: err.Error()}
 	case err != nil:
-		return 0, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
+		return 0, nil, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
 	var client *http.Client
 	switch {
 	case transport.CarriedByPlugin() && s.Plugins == nil:
-		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
+		return 0, nil, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
 	case transport.CarriedByPlugin():
 		client = transport.CarrierClient(s.Plugins, sensitive.Values())
 	default:
 		if client, err = s.connectionClient(ctx, cfg, credential); err != nil {
-			return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+			return 0, nil, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
 		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, classify(err)
+		return 0, nil, nil, classify(err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, probeBodyLimit+1))
 	if err != nil {
-		return resp.StatusCode, nil, classify(err)
+		return resp.StatusCode, resp.Header.Clone(), nil, classify(err)
 	}
 	if len(data) > probeBodyLimit {
-		return resp.StatusCode, nil, &probeError{Code: "upstream_response_too_large", Detail: "The upstream response exceeded the probe body limit."}
+		return resp.StatusCode, resp.Header.Clone(), nil, &probeError{Code: "upstream_response_too_large", Detail: "The upstream response exceeded the probe body limit."}
 	}
-	return resp.StatusCode, data, nil
+	return resp.StatusCode, resp.Header.Clone(), data, nil
 }
 
 // statusError classifies an unsuccessful probe response by its status and the
@@ -411,12 +422,17 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	if cfg.ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
 		return s.certifyGeminiLive(ctx, cfg, credential, model, maxEventBytes)
 	}
+	if duplexcontract.IsProfile(cfg.ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
+		return s.certifyNativeDuplex(ctx, cfg, credential, model)
+	}
 	if codec, ok := configuredOperation(cfg, tuple.Operation); ok {
 		return s.certifyOperation(ctx, cfg, credential, model, tuple, codec)
 	}
 	switch {
 	case tuple.Operation == "batch":
 		return s.certifyBatch(ctx, cfg, credential)
+	case tuple.Operation == "realtime" && tuple.Mode == "webrtc":
+		return s.certifyWebRTC(ctx, cfg, credential, model)
 	case tuple.Operation == "realtime":
 		return s.certifyRealtime(ctx, cfg, credential, model)
 	case tuple.Surface == "bedrock":
@@ -635,11 +651,60 @@ func validBatchListing(data []byte, field string, optional bool) bool {
 }
 
 func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
-	transport := cfg.transport()
-	endpoint, err := transport.RealtimeURL(model)
+	endpoint, err := cfg.transport().RealtimeURL(model)
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
 	}
+	return s.certifyWebSocketDial(ctx, cfg, credential, endpoint, nil)
+}
+
+func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+	transport := cfg.transport()
+	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: model})
+	if err != nil {
+		return &probeError{Code: "capability_unavailable", Detail: "The native duplex contract could not be compiled."}
+	}
+	switch template.Transport() {
+	case duplexcontract.TransportWebSocket:
+		endpoint, err := transport.DuplexURL(model)
+		if err != nil {
+			return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+		}
+		return s.certifyWebSocketDial(ctx, cfg, credential, endpoint, func(ctx context.Context, conn *websocket.Conn) error {
+			return probeNativeDuplexSetup(ctx, conn, template, transport, model)
+		})
+	case duplexcontract.TransportBedrockBidi:
+		endpoint, err := transport.BedrockDuplexEndpoint()
+		if err != nil {
+			return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+		}
+		if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
+			return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+		}
+		select {
+		case s.probes <- struct{}{}:
+			defer func() { <-s.probes }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+		defer cancel()
+		client, err := s.connectionClient(ctx, cfg, credential)
+		if err != nil {
+			return &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+		}
+		stream, _, err := s.auth.OpenBedrockDuplex(ctx, transport, credential, model, client)
+		if err != nil {
+			return classify(err)
+		}
+		_ = stream.Close()
+		return nil
+	}
+	return &probeError{Code: "capability_unavailable", Detail: "The native duplex transport cannot be certified."}
+}
+
+func (s *Server) certifyWebSocketDial(ctx context.Context, cfg *Configuration, credential []byte, endpoint string, exchange func(context.Context, *websocket.Conn) error) error {
+	transport := cfg.transport()
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
 	u, err := url.Parse(check)
@@ -676,7 +741,200 @@ func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, creden
 		}
 		return classify(err)
 	}
+	defer conn.CloseNow()
+	if exchange != nil {
+		if err := exchange(ctx, conn); err != nil {
+			return err
+		}
+	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+	return nil
+}
+
+func probeNativeDuplexSetup(ctx context.Context, conn *websocket.Conn, template *duplexcontract.Template, transport connectors.Config, model string) error {
+	if !template.SetupAck() {
+		return nil
+	}
+	boundModel, err := transport.DuplexBoundModel(model)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+	}
+	setup, _ := json.Marshal(map[string]map[string]string{"setup": {"model": boundModel}})
+	conn.SetReadLimit(probeBodyLimit)
+	if err := conn.Write(ctx, websocket.MessageText, setup); err != nil {
+		return classify(err)
+	}
+	kind, raw, err := conn.Read(ctx)
+	if err != nil {
+		return classify(err)
+	}
+	if kind != websocket.MessageText {
+		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not acknowledge the model setup."}
+	}
+	frame, err := template.Observer(probeBodyLimit).ServerFrame(raw)
+	if err != nil || !frame.SetupComplete {
+		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not acknowledge the model setup."}
+	}
+	return nil
+}
+
+const webrtcProbeSDP = "v=0\r\n" +
+	"o=- 4611731400430051336 2 IN IP4 127.0.0.1\r\n" +
+	"s=-\r\n" +
+	"t=0 0\r\n" +
+	"a=group:BUNDLE 0 1\r\n" +
+	"a=extmap-allow-mixed\r\n" +
+	"a=msid-semantic: WMS olp-probe\r\n" +
+	"m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n" +
+	"c=IN IP4 0.0.0.0\r\n" +
+	"a=rtcp:9 IN IP4 0.0.0.0\r\n" +
+	"a=ice-ufrag:olpp\r\n" +
+	"a=ice-pwd:olp-probe-password-0000000000\r\n" +
+	"a=ice-options:trickle\r\n" +
+	"a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n" +
+	"a=setup:actpass\r\n" +
+	"a=mid:0\r\n" +
+	"a=sendrecv\r\n" +
+	"a=rtcp-mux\r\n" +
+	"a=rtpmap:111 opus/48000/2\r\n" +
+	"m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" +
+	"c=IN IP4 0.0.0.0\r\n" +
+	"a=ice-ufrag:olpp\r\n" +
+	"a=ice-pwd:olp-probe-password-0000000000\r\n" +
+	"a=ice-options:trickle\r\n" +
+	"a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n" +
+	"a=setup:actpass\r\n" +
+	"a=mid:1\r\n" +
+	"a=sctp-port:5000\r\n"
+
+func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+	transport := cfg.transport()
+	endpoint, err := transport.RealtimeCallsURL(model)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	u.RawQuery = ""
+	if _, err := s.Egress.ValidateEndpoint(u.String()); err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	select {
+	case s.probes <- struct{}{}:
+		defer func() { <-s.probes }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	session, _ := json.Marshal(map[string]string{"type": "realtime", "model": transport.Model(model)})
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	sdpPart, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="sdp"`},
+		"Content-Type":        {"application/sdp"},
+	})
+	if err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	if _, err := io.WriteString(sdpPart, webrtcProbeSDP); err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	sessionPart, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="session"`},
+		"Content-Type":        {"application/json"},
+	})
+	if err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	if _, err := sessionPart.Write(session); err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	if err := writer.Close(); err != nil {
+		return &probeError{Code: "invalid_request", Detail: err.Error()}
+	}
+	body := form.Bytes()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Accept", "application/sdp")
+	if _, err := s.auth.Apply(ctx, req, transport, credential, body); err != nil {
+		return &probeError{Code: "credential_invalid", Detail: err.Error()}
+	}
+	client, err := s.connectionClient(ctx, cfg, credential)
+	if err != nil {
+		return &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return classify(err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, probeBodyLimit))
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return statusError(cfg, resp.StatusCode, nil)
+	}
+	location, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil || location.Path == "" {
+		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
+	}
+	segments := strings.Split(strings.Trim(location.Path, "/"), "/")
+	callID := segments[len(segments)-1]
+	controlErr := s.certifyWebRTCControl(ctx, cfg, credential, model, callID, client)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), probeCancelWait)
+	defer cleanupCancel()
+	hangupErr := s.hangupWebRTCProbe(cleanupCtx, cfg, credential, model, callID, client)
+	return errors.Join(controlErr, hangupErr)
+}
+
+func (s *Server) certifyWebRTCControl(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
+	control, err := cfg.transport().RealtimeControlURL(model, callID)
+	if err != nil {
+		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
+	}
+	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, control, nil)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	if _, err := s.auth.Apply(ctx, probe, cfg.transport(), credential, nil); err != nil {
+		return &probeError{Code: "credential_invalid", Detail: err.Error()}
+	}
+	conn, dialResp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: probe.Header})
+	if err != nil {
+		if dialResp != nil && dialResp.StatusCode != 0 {
+			return statusError(cfg, dialResp.StatusCode, nil)
+		}
+		return classify(err)
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+	return nil
+}
+
+func (s *Server) hangupWebRTCProbe(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
+	hangupURL, err := cfg.transport().RealtimeHangupURL(model, callID)
+	if err != nil {
+		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
+	}
+	hangup, err := http.NewRequestWithContext(ctx, http.MethodPost, hangupURL, nil)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: err.Error()}
+	}
+	if _, err := s.auth.Apply(ctx, hangup, cfg.transport(), credential, nil); err != nil {
+		return &probeError{Code: "credential_invalid", Detail: err.Error()}
+	}
+	hangupResp, err := client.Do(hangup)
+	if err != nil {
+		return classify(err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(hangupResp.Body, probeBodyLimit))
+	hangupResp.Body.Close()
+	if hangupResp.StatusCode < 200 || hangupResp.StatusCode > 299 {
+		return statusError(cfg, hangupResp.StatusCode, nil)
+	}
 	return nil
 }
 
