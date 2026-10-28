@@ -4,6 +4,8 @@ package integration_test
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/agentcontract"
@@ -25,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
@@ -975,4 +979,88 @@ func (f personalOAuthFixture) poll(t *testing.T, id string) mcpgrants.Authorizat
 		t.Fatal(err)
 	}
 	return authorization
+}
+
+type entraTestProfile struct {
+	Issuer string `json:"issuer"`
+}
+type entraTestOAuth struct {
+	ClientID      string           `json:"client_id"`
+	Audience      string           `json:"audience"`
+	Scopes        []string         `json:"scopes"`
+	TokenEndpoint string           `json:"token_endpoint"`
+	EntraOBO      entraTestProfile `json:"entra_obo"`
+}
+type entraTestRegistration struct {
+	Name              string         `json:"name"`
+	Endpoint          string         `json:"endpoint"`
+	Enabled           bool           `json:"enabled"`
+	OAuth             entraTestOAuth `json:"oauth"`
+	EntraClientSecret string         `json:"entra_client_secret"`
+}
+type entraTestClaims struct {
+	Issuer       string `json:"iss"`
+	Audience     string `json:"aud"`
+	Subject      string `json:"sub"`
+	ObjectID     string `json:"oid"`
+	Scopes       string `json:"scp,omitempty"`
+	IdentityType string `json:"idtyp,omitempty"`
+	IssuedAt     int64  `json:"iat"`
+	Expires      int64  `json:"exp"`
+}
+
+func TestMCPEntraOBORequiresDelegatedUserIdentity(t *testing.T) {
+	f := newPersonalOAuthFixture(t)
+	current := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
+	project := mcpExecString(t, current, "project_id")
+	templates := f.h.want(f.owner, "GET", "/api/v1/projects/"+project+"/limit-templates", nil, nil, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/projects/"+project+"/limit-templates", struct {
+		Templates map[string]struct {
+			RequestsPerMinute int `json:"requests_per_minute"`
+		} `json:"templates"`
+	}{Templates: map[string]struct {
+		RequestsPerMinute int `json:"requests_per_minute"`
+	}{"worker": {RequestsPerMinute: 100}}}, etagHeader(templates), 200)
+	public, private, keyErr := ed25519.GenerateKey(rand.Reader)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: public, KeyID: "entra", Algorithm: "EdDSA", Use: "sig"}}})
+	}))
+	defer issuer.Close()
+	const clientID = "middle-tier-fixture"
+	userClaim := "/oid"
+	f.h.want(f.owner, "POST", "/api/v1/workload-issuers", workload.Config{Name: "Entra fixture", Issuer: issuer.URL, JWKSURL: issuer.URL, Enabled: true, Audiences: []string{clientID}, Algorithms: []string{"EdDSA"}, MaxLifetimeSeconds: 600, DisabledKeyIDs: []string{}, Mappings: []workload.Mapping{{Name: "users", Match: map[string]string{}, ProjectID: project, LimitTemplate: "worker", RouteGroups: []string{}, AllowedToolsets: []string{f.toolsetID}, AllowedAgents: []string{}, Scopes: []string{"tools"}, EndUserClaim: &userClaim}}}, idem("entra-issuer"), 201)
+	var exchanges atomic.Int64
+	tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exchanges.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"entra-downstream","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenEndpoint.Close()
+	updated := f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, entraTestRegistration{Name: mcpExecString(t, current, "name"), Endpoint: mcpExecString(t, current, "endpoint"), Enabled: true, OAuth: entraTestOAuth{ClientID: clientID, Audience: "downstream-fixture", Scopes: []string{"tools.read"}, TokenEndpoint: tokenEndpoint.URL, EntraOBO: entraTestProfile{Issuer: issuer.URL}}, EntraClientSecret: "operator-client-secret"}, withMatch(current, idem("entra-registration")), 200)
+	publication := f.h.want(f.owner, "GET", "/api/v1/toolsets/"+f.toolsetID, nil, nil, 200)
+	tool := agentcontract.Tool{ServerID: f.serverID, RevisionID: mcpExecString(t, updated, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, updated, "catalog"), "digest"), Name: "identity", Alias: f.alias}
+	revised := f.h.want(f.owner, "PUT", "/api/v1/toolsets/"+f.toolsetID, personalOAuthToolsetInput{ProjectID: project, Name: "OAuth tools", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, withMatch(publication, idem("entra-toolset")), 200)
+	f.h.want(f.owner, "POST", "/api/v1/toolsets/"+f.toolsetID+"/publish", nil, withMatch(revised, idem("entra-publish")), 200)
+	handler := f.consumer(t)
+	signer, signerErr := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: private}, (&jose.SignerOptions{}).WithHeader("kid", "entra"))
+	if signerErr != nil {
+		t.Fatal(signerErr)
+	}
+	now := time.Now()
+	claims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: "service-principal", ObjectID: "not-a-user", IdentityType: "app", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+	signed, signErr := signer.Sign(mustJSON(claims))
+	if signErr != nil {
+		t.Fatal(signErr)
+	}
+	bearer, encodeErr := signed.CompactSerialize()
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	assertPersonalCall(t, handler, f, mcpPersonalKey{Secret: bearer}, "entra-app-only", http.StatusForbidden, "")
+	if exchanges.Load() != 0 {
+		t.Fatal("app-only assertion reached the token endpoint")
+	}
 }
