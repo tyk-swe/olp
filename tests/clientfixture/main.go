@@ -203,10 +203,12 @@ func (b backend) capabilities(surfaces []string) []routing.Capability {
 var backends = map[string]backend{
 	"systemone":  {name: "systemone", kind: "openai_compatible", vendor: "typesafe-jev", prefix: scripted.OpenAIPrefix, model: scripted.OpenAIModel, surface: "openai"},
 	"mistral":    {name: "mistral", kind: "openai_compatible", vendor: "mistral", prefix: scripted.MistralPrefix, model: scripted.MistralModel, surface: "openai"},
+	"azure":      {name: "azure", kind: "openai_compatible", vendor: "azure-document-intelligence", prefix: scripted.AzurePrefix, model: scripted.AzureModel, surface: "openai"},
 	"perplexity": {name: "perplexity", kind: "openai_compatible", vendor: "perplexity", prefix: scripted.PerplexityPrefix, model: scripted.PerplexityModel, surface: "openai"},
 	"tavily":     {name: "tavily", kind: "openai_compatible", vendor: "tavily", prefix: scripted.TavilyPrefix, model: scripted.TavilyModel, surface: "openai"},
 	"exa":        {name: "exa", kind: "openai_compatible", vendor: "exa", prefix: scripted.ExaPrefix, model: scripted.ExaModel, surface: "openai"},
 	"parallel":   {name: "parallel", kind: "openai_compatible", vendor: "parallel", prefix: scripted.ParallelPrefix, model: scripted.ParallelModel, surface: "openai"},
+	"brave":      {name: "brave", kind: "openai_compatible", vendor: "brave", prefix: scripted.BravePrefix, model: scripted.BraveModel, surface: "openai"},
 	"openai":     {name: "openai", kind: "openai", vendor: "openai", prefix: scripted.OpenAIPrefix, model: scripted.OpenAIModel, surface: "openai", embeddings: true},
 	"anthropic":  {name: "anthropic", kind: "anthropic", vendor: "anthropic", prefix: scripted.AnthropicPrefix, model: scripted.AnthropicModel, surface: "anthropic"},
 	"gemini":     {name: "gemini", kind: "gemini", vendor: "gemini", prefix: scripted.GeminiPrefix, model: scripted.GeminiModel, surface: "gemini", embeddings: true},
@@ -228,6 +230,7 @@ type routeSpec struct {
 	// transformed serves the route's named profiles through their operation
 	// mappings rather than natively.
 	transformed bool
+	fetchedDocs bool
 }
 
 var routeSpecs = []routeSpec{
@@ -237,11 +240,13 @@ var routeSpecs = []routeSpec{
 	{env: "OPENAI", slug: "olp-openai", backend: "openai"},
 	{env: "ANTHROPIC", slug: "olp-anthropic", backend: "anthropic"},
 	{env: "GEMINI", slug: "olp-gemini", backend: "gemini"},
-	{env: "MISTRAL_OCR", slug: "olp-mistral-ocr", backend: "mistral", profiles: []string{"mistral-ocr"}, operations: []string{"ocr"}},
+	{env: "MISTRAL_OCR", slug: "olp-mistral-ocr", backend: "mistral", profiles: []string{"mistral-ocr"}, operations: []string{"ocr"}, fetchedDocs: true},
+	{env: "AZURE_OCR", slug: "olp-azure-ocr", backend: "azure", profiles: []string{"azure-document-intelligence-ocr"}, operations: []string{"ocr"}, transformed: true, fetchedDocs: true},
 	{env: "PERPLEXITY_SEARCH", slug: "olp-perplexity-search", backend: "perplexity", profiles: []string{"perplexity-search"}, operations: []string{"search"}},
 	{env: "SEARCH_TAVILY", slug: "olp-search-tavily", backend: "tavily", profiles: []string{"tavily-search"}, operations: []string{"search"}, transformed: true},
 	{env: "SEARCH_EXA", slug: "olp-search-exa", backend: "exa", profiles: []string{"exa-search"}, operations: []string{"search"}, transformed: true},
 	{env: "SEARCH_PARALLEL", slug: "olp-search-parallel", backend: "parallel", profiles: []string{"parallel-search"}, operations: []string{"search"}, transformed: true},
+	{env: "SEARCH_BRAVE", slug: "olp-search-brave", backend: "brave", profiles: []string{"brave-search"}, operations: []string{"search"}, transformed: true},
 	{env: "OPENAI_STRICT", slug: "olp-openai-strict", backend: "openai", profiles: []string{"openai-chat", "openai-responses"}},
 	{env: "ANTHROPIC_STRICT", slug: "olp-anthropic-strict", backend: "anthropic", profiles: []string{"anthropic-messages"}},
 	{env: "GEMINI_STRICT", slug: "olp-gemini-strict", backend: "gemini", profiles: []string{"gemini-generation"}},
@@ -279,6 +284,7 @@ func fixtureRelease(upstreamURL string) (*runtime.Release, error) {
 			ID: routeID, Slug: spec.slug, OverallTimeout: 60000, MaxAttempts: 1, RoutingID: routeID,
 			RevisionID: uuid.NewString(), Revision: 1, PublishedAt: now, Fidelity: routing.RouteFidelity{Mode: mode},
 		}
+		route.ProviderFetchedDocuments = spec.fetchedDocs
 		for _, profile := range profiles {
 			surfaces := allSurfaces
 			if profile != "" {

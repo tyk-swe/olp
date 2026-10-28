@@ -2095,6 +2095,15 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+            },
+            "document_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
             }
           },
           "type": "object"
@@ -2810,6 +2819,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "expose_upstream_models": {
               "type": "boolean",
               "description": "Explicitly disclose upstream model names in route catalogs."
@@ -2828,6 +2841,17 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
                 },
                 {
                   "type": "null"
@@ -3415,6 +3439,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -8514,6 +8605,15 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+            },
+            "document_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
             }
           },
           "type": "object"
@@ -9900,6 +10000,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "cache": {
               "oneOf": [
                 {
@@ -9914,6 +10018,17 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
                 },
                 {
                   "type": "null"
@@ -10517,6 +10632,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }
@@ -10672,6 +10854,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "cache": {
               "oneOf": [
                 {
@@ -10686,6 +10872,17 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
                 },
                 {
                   "type": "null"
@@ -11289,6 +11486,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }
@@ -23970,6 +24234,15 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+            },
+            "document_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
             }
           },
           "type": "object"
@@ -24685,6 +24958,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "expose_upstream_models": {
               "type": "boolean",
               "description": "Explicitly disclose upstream model names in route catalogs."
@@ -24703,6 +24980,17 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
                 },
                 {
                   "type": "null"
@@ -25290,6 +25578,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -31246,6 +31601,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "cache": {
               "oneOf": [
                 {
@@ -31260,6 +31619,17 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
                 },
                 {
                   "type": "null"
@@ -31857,6 +32227,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }
@@ -36066,10 +36503,13 @@
             "openai-decisions",
             "systemone",
             "mistral-ocr",
+            "azure-document-intelligence-ocr",
+            "vertex-document-processing-ocr",
             "perplexity-search",
             "tavily-search",
             "exa-search",
-            "parallel-search"
+            "parallel-search",
+            "brave-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -36220,7 +36660,8 @@
             "unary",
             "streaming",
             "async",
-            "realtime"
+            "realtime",
+            "webrtc"
           ],
           "type": "string"
         },
@@ -36472,10 +36913,13 @@
             "openai-decisions",
             "systemone",
             "mistral-ocr",
+            "azure-document-intelligence-ocr",
+            "vertex-document-processing-ocr",
             "perplexity-search",
             "tavily-search",
             "exa-search",
-            "parallel-search"
+            "parallel-search",
+            "brave-search"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -39415,6 +39859,15 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+            },
+            "document_uri_prefixes": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
             }
           },
           "type": "object"
@@ -40153,6 +40606,10 @@
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
             },
+            "provider_fetched_documents": {
+              "type": "boolean",
+              "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+            },
             "cache": {
               "oneOf": [
                 {
@@ -40167,6 +40624,17 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PromptCachePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passthrough": {
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
                 },
                 {
                   "type": "null"
@@ -40764,6 +41232,73 @@
             }
           },
           "required": []
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+          "properties": {
+            "dialect": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+            },
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "query": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "headers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "acknowledge_opaque_unmetered": {
+              "type": "boolean",
+              "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+            }
+          },
+          "required": [
+            "dialect",
+            "methods",
+            "paths",
+            "acknowledge_opaque_unmetered"
+          ],
+          "type": "object"
         }
       }
     }

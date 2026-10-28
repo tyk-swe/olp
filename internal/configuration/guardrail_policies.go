@@ -174,6 +174,9 @@ func validateGuardrailPolicies(doc *Document) error {
 					}
 				}
 				if applies {
+					if route.Passthrough != nil {
+						return access.Fail(422, "passthrough_conflict", "A pass-through route cannot carry guardrails.")
+					}
 					f, fidelityErr := routing.DecodeFidelity(route.Fidelity)
 					if fidelityErr != nil {
 						continue // Route validation reports the invalid fidelity field.

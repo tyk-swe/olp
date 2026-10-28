@@ -21,6 +21,71 @@ prior console build is required. Focused `.only` tests fail validation.
 Vitest uses `TZ=America/New_York` to exercise local-time and daylight-saving
 behavior. Component tests use jsdom and browser exports.
 
+## Test rules
+
+These rules bind every new or changed test, in every suite. Untouched legacy
+tests join the rules through the ranked cleanup in the
+[baseline](baseline.md), and touching a test file brings the whole file under
+the rules. Reviewers enforce the parts that need judgement, and the automated
+ratchet described below enforces the parts that can be decided mechanically.
+
+A test asserts behavior, never structure or implementation. It must fail when
+the feature breaks or is removed, and keep passing through any refactor that
+preserves behavior. Asserting that a constant holds its own value, that source
+text contains a string, that a mock was called an exact number of times, or
+that a registry restates its own switch is structure, and none of it merges. A
+test whose only failure mode is someone deliberately undoing the change does
+not get written.
+
+A test must only fail when project code changes. Never pin a fact the project
+does not own, such as a vendor price, a third party field, an upstream
+default, or the current date, as a literal or as a must-be-absent assertion.
+Assert the invariant our code guarantees instead, for example that two rows
+agree, a value is within range, or a field is derived from another. When an
+outside fact is truly load-bearing, cite its source and observation date next
+to the assertion so a reader can tell stale from broken. Protocol fixtures,
+signed catalog data with enforced provenance, and the token oracle fixtures
+are conformance evidence under this exception, and each carries its citation
+in data or in a sibling README.
+
+Placement follows the mapped file rule. A bug fix extends the existing mapped
+test file for the code it touches, with one focused regression test that fails
+without the fix. Create a new test file only for a new feature that has no
+mapped test yet, and follow the naming convention of the directory.
+
+| Area | Convention | Example |
+|---|---|---|
+| internal, sdk | colocated `<subject>_test.go`, same package | internal/access/agent_authority_test.go |
+| internal service tests | same naming, `integration` build tag, `TestIntegration` prefix | internal/export/commitments_integration_test.go |
+| package main tools | colocated `main_test.go`, package main | tests/bench/cmd/loadgen/main_test.go |
+| tests/integration | `<feature>_test.go`, `integration` tag, integration_test package | tests/integration/process_test.go |
+| console logic | colocated `<module>.test.ts`, Vitest unit project | src/lib/features/usage/priceEntry.test.ts |
+| console components | colocated `<Component>.svelte.test.ts`, Vitest client project | src/routes/(console)/layout.svelte.test.ts |
+| console browser | `*.spec.ts` under a feature directory in console/tests | tests/gateway/openai-route.spec.ts |
+| scripts | `<tool>.test.mjs`, node:test, run by `make test-scripts` | scripts/test-baseline.test.mjs |
+
+Coverage and mutation form the ratchet. Coverage on a changed Go unit package
+under internal, sdk, cmd, or plugins must not drop against the merge base in
+the same container-free lane the [baseline](baseline.md) measured, so the merge
+base itself is the floor and it ratchets with every merge. Mutation testing
+measures whether tests
+can fail at all, and changed code must reach the kill rate configured for its
+surface on the way to over 90 percent, as recorded with the gate. Run
+`make test-ratchet` for the mechanical test rules on a diff,
+`make test-coverage-gate` for the coverage comparison, and
+`make test-mutation-go` or `make test-mutation-console` for the mutation gates
+on changed code. A package new at head has no base coverage to drop from, so
+the coverage comparison starts with its next change, and a package with no
+killable mutants reports that nothing was assessed instead of passing quietly.
+A weekly scheduled workflow mutation-tests every Go unit package under
+internal and sdk plus the in-scope console modules (TypeScript under
+console/src/lib) and uploads the reports
+for triage as test bugs. It reports rather than gates, and the changed-code
+gates above stay the merge requirement. A shallow test that cannot fail gets
+rewritten as a behavior
+test or deleted. No signal beats false signal, and no threshold ever moves
+down to make a failure pass.
+
 ## Focused runs
 
 ### Code-mode qualification
@@ -88,15 +153,18 @@ make test-go GO_TEST_PACKAGES='./internal/access ./internal/gateway' GO_TEST_ARG
 make test-go GO_TEST_ARGS=-cover
 ```
 
-Authorization, key-location, and secret-purpose changes surface as diffs to
-golden files under `internal/*/testdata` and to the generated tables in
-[security architecture](../docs/develop/security.md). Review such a diff as a security
-change, then regenerate deliberately with
-`go test ./internal/access ./internal/secrets -update`.
+Authorization changes surface as diffs to the one remaining golden file,
+`internal/access/testdata/authorization.golden.json`, which records the callers
+every management route admits, derived from the contract and the policy, and
+is maintained by hand. Secret-purpose changes surface in the generated tables
+in [security architecture](../docs/develop/security.md). Review such a diff as
+a security change, then regenerate the tables deliberately with
+`go test ./internal/secrets -update`.
 
 `GO_TEST_PACKAGES` defaults to `./...`, `GO_TEST_TIMEOUT` to `5m` per package,
 and `GO_TEST_ARGS` and `CONSOLE_TEST_ARGS` to empty. Go tests use
-`-mod=readonly`. Coverage reporting is optional; there is no numeric threshold.
+`-mod=readonly`. Coverage is gated by the ratchet in [Test rules](#test-rules),
+which compares changed packages against the merge base in this lane.
 
 ## Integration
 

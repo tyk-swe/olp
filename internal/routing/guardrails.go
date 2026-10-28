@@ -32,6 +32,9 @@ func (s *Snapshot) compileGuardrails() error {
 			if err = e.ValidateRoute(route.Fidelity.Strict(), route.OverallTimeout); err != nil {
 				return fmt.Errorf("route %q guardrails: %w", slug, err)
 			}
+			if e != nil && route.IsPassthrough() {
+				return &Refusal{Code: "passthrough_conflict", Message: "A pass-through route cannot carry guardrails."}
+			}
 			if e != nil {
 				s.guardrailEngines[slug+"\x00"+key] = e
 			}

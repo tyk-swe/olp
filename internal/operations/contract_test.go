@@ -3,6 +3,8 @@ package operations
 import (
 	"encoding/json"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -20,14 +22,19 @@ func TestEndpointAdmissionContracts(t *testing.T) {
 	if err := json.Unmarshal(data, &ledger); err != nil {
 		t.Fatal(err)
 	}
+	checked := 0
 	for _, row := range ledger.Endpoints {
-		if row.Status != "pending" {
+		if row.Contract == "" {
 			continue
 		}
+		checked++
 		c, ok := ContractFor(row.Operation)
-		if !ok || row.Contract != ContractRevision || c.Scope != "inference" || !c.InspectionByCodec {
+		if !ok || !slices.Contains(strings.Split(row.Contract, "; "), ContractRevision) || c.Revision != ContractRevision || c.Scope != "inference" || !c.InspectionByCodec {
 			t.Errorf("missing admission contract for %s", row.Operation)
 		}
+	}
+	if checked == 0 {
+		t.Fatal("endpoint ledger declares no admission contracts to check")
 	}
 	if _, ok := ContractFor("unknown"); ok {
 		t.Fatal("unknown operation acquired a contract")
