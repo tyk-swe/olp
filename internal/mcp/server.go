@@ -161,6 +161,8 @@ type Server struct {
 	Guardrails     func(ctx context.Context, in GuardrailEvaluation) (guardrails.Result, error)
 	Now            func() time.Time
 
+	legacyStreams sync.Map
+
 	resultsMu sync.Mutex
 	results   map[string]retainedResult
 }
@@ -194,6 +196,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/mcp/tools", s.listTools)
 	mux.HandleFunc("POST /v1/mcp/tools/simulate", s.simulateTool)
 	mux.HandleFunc("POST /v1/mcp/tools/call", s.callTool)
+	mux.HandleFunc("GET /mcp/sse", s.serveLegacyGET)
+	mux.HandleFunc("POST /mcp/messages", s.serveLegacyPOST)
 	for _, path := range []string{"/mcp", "/mcp/"} {
 		mux.HandleFunc("POST "+path, s.serveStreamableHTTP)
 		mux.HandleFunc("GET "+path, s.serveStreamableGET)

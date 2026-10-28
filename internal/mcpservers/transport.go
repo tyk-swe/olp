@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 var ErrTransport = errors.New("upstream MCP transport failed")
@@ -26,6 +27,7 @@ func SupportedProtocols() []string { return slices.Clone(protocols) }
 type TransportOptions struct {
 	ClientName string
 	Timeout    time.Duration
+	Transport  routing.MCPTransport
 }
 
 type ListedTool struct {
@@ -77,6 +79,7 @@ type Transport struct {
 	endpoint, token, session, protocol string
 	nextID                             atomic.Int64
 	listChanged                        atomic.Bool
+	legacy                             *legacyTransport
 }
 
 func (c *Transport) ListChanged() bool { return c.listChanged.Load() }
@@ -103,7 +106,14 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 	if err != nil {
 		return nil, ErrTransport
 	}
-	c := &Transport{client: policy.Client(opts.Timeout), endpoint: u.String(), token: string(credential)}
+	if !opts.Transport.OrDefault().Valid() {
+		return nil, ErrTransport
+	}
+	client, legacy, wireErr := openHTTPTransport(ctx, policy, u, string(credential), opts)
+	if wireErr != nil {
+		return nil, wireErr
+	}
+	c := &Transport{client: client, endpoint: u.String(), token: string(credential), legacy: legacy}
 	c.nextID.Store(1)
 	var init struct {
 		Protocol     string `json:"protocolVersion"`
@@ -111,7 +121,8 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 			Tools json.RawMessage `json:"tools"`
 		} `json:"capabilities"`
 	}
-	if err = c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: protocols[0], ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !slices.Contains(protocols, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
+	requested := requestedTransportProtocol(opts.Transport)
+	if err = c.call(ctx, 1, "initialize", initializeParams{ProtocolVersion: requested, ClientInfo: clientInfo{Name: opts.ClientName, Version: "1"}}, &init); err != nil || !transportProtocolAllowed(opts.Transport, init.Protocol) || len(init.Capabilities.Tools) == 0 || string(init.Capabilities.Tools) == "null" {
 		c.Close(ctx)
 		return nil, ErrTransport
 	}
@@ -154,6 +165,17 @@ func (c *Transport) applyHeaders(h http.Header) {
 }
 
 func (c *Transport) call(ctx context.Context, id int, method string, params any, out any) error {
+	if c.legacy != nil {
+		encoded, err := json.Marshal(params)
+		if err != nil {
+			return ErrTransport
+		}
+		raw, err := c.callLegacy(ctx, id, method, encoded)
+		if err != nil || id == 0 {
+			return err
+		}
+		return decodeResult(raw, id, out)
+	}
 	message := map[string]any{"jsonrpc": "2.0", "method": method}
 	if id != 0 {
 		message["id"] = id
@@ -253,6 +275,10 @@ func decodeResult(raw []byte, id int, out any) error {
 
 func (c *Transport) Close(ctx context.Context) {
 	defer c.client.CloseIdleConnections()
+	if c.legacy != nil {
+		_ = c.legacy.connection.Close()
+		return
+	}
 	if c.session == "" {
 		return
 	}

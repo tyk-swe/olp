@@ -18,6 +18,23 @@ type MCPTool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
+type MCPTransport string
+
+const (
+	MCPStreamableHTTP MCPTransport = "streamable_http"
+	MCPLegacySSE      MCPTransport = "sse"
+	MCPLegacyProtocol              = "2024-11-05"
+)
+
+func (t MCPTransport) Valid() bool { return t == MCPStreamableHTTP || t == MCPLegacySSE }
+
+func (t MCPTransport) OrDefault() MCPTransport {
+	if t == "" {
+		return MCPStreamableHTTP
+	}
+	return t
+}
+
 const (
 	DefaultToolCallsPerMinute = int64(60)
 	DefaultToolMaxConcurrency = int64(8)
@@ -47,6 +64,7 @@ type MCPServer struct {
 	ProjectID            string            `json:"project_id"`
 	RevisionID           string            `json:"revision_id"`
 	Endpoint             string            `json:"endpoint"`
+	Transport            MCPTransport      `json:"transport,omitempty"`
 	Protocol             string            `json:"protocol_version"`
 	Digest               string            `json:"digest"`
 	CredentialID         *string           `json:"credential_id,omitempty"`
@@ -60,6 +78,7 @@ type MCPServer struct {
 }
 
 type MCPToolsetTool struct {
+	Transport            MCPTransport
 	OAuth                *MCPOAuth
 	Alias                string
 	Name                 string
@@ -278,7 +297,7 @@ func (s *Snapshot) compileMCP() {
 			resolution.Tools = append(resolution.Tools, MCPToolsetTool{
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
-				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint,
+				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint, Transport: server.Transport.OrDefault(),
 				CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(),
 				CallsPerMinute:       effective.CallsPerMinute,
 				MaxConcurrency:       effective.MaxConcurrency,

@@ -4049,7 +4049,8 @@
             "transport": {
               "type": "string",
               "enum": [
-                "streamable_http"
+                "streamable_http",
+                "sse"
               ]
             },
             "endpoint": {
@@ -7142,7 +7143,8 @@
             "transport": {
               "type": "string",
               "enum": [
-                "streamable_http"
+                "streamable_http",
+                "sse"
               ]
             },
             "unit_price": {
@@ -26511,7 +26513,8 @@
             "transport": {
               "type": "string",
               "enum": [
-                "streamable_http"
+                "streamable_http",
+                "sse"
               ]
             },
             "endpoint": {

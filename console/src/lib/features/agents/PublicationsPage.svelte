@@ -297,8 +297,8 @@
   <p class="eyebrow">Execution foundations</p>
   <h1>Agent publications</h1>
   <p>
-    Review project-owned toolsets, agent contracts, and prompts. These
-    publications do not enable tool calls or agent execution.
+    Publish toolsets for authorized tool calls, and review project-owned agent
+    contracts and prompts.
   </p>
 </header>
 <nav aria-label="Publication kind">
@@ -391,7 +391,11 @@
                 >{/each}</select
             ></label
           >
-          {#if server}<p>Catalog <code>{server.catalog.digest}</code></p>
+          {#if server}<p>
+              Transport <code>{server.transport}</code>, MCP
+              <code>{server.catalog.protocol_version}</code>
+            </p>
+            <p>Catalog <code>{server.catalog.digest}</code></p>
             {#each server.catalog.tools as tool (tool.name)}<button
                 type="button"
                 onclick={() => addTool(tool.name)}

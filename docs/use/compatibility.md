@@ -35,9 +35,18 @@ publishes its tool, lists it through the consumer boundary, invokes it with
 the reference client and checks the settled record. This is local fixture
 qualification, not a claim about every third-party MCP deployment.
 
-Per-user OAuth, legacy HTTP+SSE and stdio are separate RM7 slices and remain
-unqualified here. Standalone consumer event streams, sampling, elicitation,
-roots and arbitrary resource/prompt calls are not supported by this slice.
+Explicit legacy HTTP+SSE is also qualified at MCP 2024-11-05 using the same
+SDK pin. `TestMCPLegacyReferenceServerRoundTrip` registers and recertifies a legacy
+server, round-trips its portable configuration, publishes the tool and calls it
+through a legacy reference client. It checks the resulting durable settlement.
+Public-handler fixtures cover exact argument-byte identity, authority revocation,
+modern/legacy session isolation and refusal when a replica lacks the live stream.
+Legacy deployments require connection affinity between the SSE GET and its
+POSTs. Modern sessions never fall back to the legacy transport.
+
+Per-user OAuth and stdio are separate RM7 slices and remain unqualified here.
+Standalone modern consumer event streams, sampling, elicitation, roots and
+arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
 
 ## Guardrail compatibility

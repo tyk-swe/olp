@@ -89,8 +89,8 @@ func (s *Server) validateMCPServers(doc *Document) error {
 		e.Name, e.Project = strings.TrimSpace(e.Name), strings.TrimSpace(e.Project)
 		key := mcpKey(*e)
 		digest, err := hex.DecodeString(e.CatalogDigest)
-		if !guardrailLabel(e.Project) || seen[key] || e.Transport != "streamable_http" || err != nil || len(digest) != 32 || strings.ToLower(e.CatalogDigest) != e.CatalogDigest {
-			return access.Invalid("mcp_servers", "Use unique project/name pairs, streamable_http and a certified catalog digest.")
+		if !guardrailLabel(e.Project) || seen[key] || !routing.MCPTransport(e.Transport).Valid() || err != nil || len(digest) != 32 || strings.ToLower(e.CatalogDigest) != e.CatalogDigest {
+			return access.Invalid("mcp_servers", "Use unique project/name pairs, a supported MCP transport and a certified catalog digest.")
 		}
 		seen[key] = true
 		in := mcpservers.Input{
@@ -306,7 +306,7 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 				return nil, access.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
 			}
 		}
-		catalog, err := mcpservers.Certify(ctx, s.Egress, e.Endpoint, material)
+		catalog, err := mcpservers.CertifyTransport(ctx, s.Egress, e.Endpoint, material, routing.MCPTransport(e.Transport))
 		clear(material)
 		if err != nil || catalog.Digest != e.CatalogDigest {
 			return nil, access.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
