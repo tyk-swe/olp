@@ -8,8 +8,10 @@ export type Publication = components['schemas']['AgentPublication'];
 export type Draft = components['schemas']['AgentPublicationWrite'];
 export type ToolPin = components['schemas']['AgentToolPin'];
 export type MCPServer = components['schemas']['MCPServerResponse'];
+export type MCPServerUpdate = components['schemas']['UpdateMCPServerRequest'];
 export type Revision = components['schemas']['AgentPublicationRevision'];
 export type Exposure = components['schemas']['ExecutionDebit'];
+export type ToolCall = components['schemas']['MCPToolCallResponse'];
 
 const collections = {
   toolsets: '/api/v1/toolsets',
@@ -74,10 +76,46 @@ export const getServer = async (id: string) =>
       params: { path: { server_id: id } }
     })
   );
+export async function saveServer(
+  current: MCPServer,
+  input: MCPServerUpdate,
+  requestId: string
+) {
+  return unwrap(
+    await apiClient.PUT('/api/v1/mcp-servers/{server_id}', {
+      params: {
+        path: { server_id: current.id },
+        header: {
+          'If-Match': `"${current.etag}"`,
+          'Idempotency-Key': requestId
+        }
+      },
+      body: input
+    })
+  );
+}
 export const listExposures = async (key?: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/execution-debits', {
       params: { query: { api_key_id: key || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const listToolCalls = async (
+  project?: string,
+  key?: string,
+  cursor?: string
+) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/mcp-tool-calls', {
+      params: {
+        query: {
+          project_id: project || undefined,
+          api_key_id: key || undefined,
+          cursor,
+          limit: 50
+        }
+      }
     })
   );
 
@@ -157,6 +195,77 @@ export async function setLabel(
         }
       },
       body: { revision_id: revision }
+    })
+  );
+}
+
+export type MCPGrantStanding = components['schemas']['MCPUserGrantStanding'];
+export const listMCPGrants = () =>
+  collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/mcp-user-grants', {
+        params: { query: { cursor, limit: 200 } }
+      })
+    )
+  );
+export const startMCPGrant = async (serverID: string, keyID: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-servers/{server_id}/grant-enrollments', {
+      params: { path: { server_id: serverID } },
+      body: { api_key_id: keyID }
+    })
+  );
+export const claimMCPGrant = async (
+  enrollmentID: string,
+  handoffToken: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-grant-enrollments/claim', {
+      body: { enrollment_id: enrollmentID, handoff_token: handoffToken }
+    })
+  );
+export const revokeMCPGrant = async (grantID: string) =>
+  unwrap(
+    await apiClient.DELETE('/api/v1/mcp-user-grants/{grant_id}', {
+      params: { path: { grant_id: grantID } }
+    })
+  );
+
+export type MCPGrantAuthorization =
+  components['schemas']['MCPGrantAuthorization'];
+export async function authorizeMCPGrant(
+  enrollmentID: string,
+  flow: 'authorization_code' | 'device_code'
+) {
+  return unwrap(
+    await apiClient.POST(
+      '/api/v1/mcp-grant-enrollments/{enrollment_id}/authorize',
+      {
+        params: { path: { enrollment_id: enrollmentID } },
+        body: { flow }
+      }
+    )
+  );
+}
+export async function completeMCPGrant(
+  enrollmentID: string,
+  code: string,
+  state: string
+) {
+  return unwrap(
+    await apiClient.POST(
+      '/api/v1/mcp-grant-enrollments/{enrollment_id}/complete',
+      {
+        params: { path: { enrollment_id: enrollmentID } },
+        body: { code, state }
+      }
+    )
+  );
+}
+export async function pollMCPGrant(enrollmentID: string) {
+  return unwrap(
+    await apiClient.POST('/api/v1/mcp-grant-enrollments/{enrollment_id}/poll', {
+      params: { path: { enrollment_id: enrollmentID } }
     })
   );
 }

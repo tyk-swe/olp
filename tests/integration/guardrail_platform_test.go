@@ -69,4 +69,56 @@ func TestGuardrailPlatformActivationAttachmentsAndApply(t *testing.T) {
 	}
 }
 
+func TestToolsetGuardrailAttachmentsSurviveConfigurationPromotion(t *testing.T) {
+	source := newAccessHarness(t)
+	owner := source.owner()
+	for _, projectName := range []string{"Tool safeguards", "Other safeguards"} {
+		prefix := strings.ReplaceAll(projectName, " ", "-")
+		project := createProject(source, owner, projectName)
+		toolset := source.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+			"project_id": project, "name": "Guarded tools", "toolset": map[string]any{"tools": []any{}},
+		}, idem(prefix+"-toolset"), 201)
+		definition := source.want(owner, "POST", "/api/v1/guardrails", map[string]any{
+			"name": "Private words", "project_id": project, "type": "builtin.keywords",
+			"configuration": map[string]any{"words": []string{"restricted"}}, "timeout_ms": 1000, "on_error": "fail_closed",
+		}, idem(prefix+"-definition"), 201)
+		source.want(owner, "POST", "/api/v1/guardrails/"+definition["id"].(string)+"/activate", map[string]any{"revision_id": definition["revision_id"]}, withMatch(definition, idem(prefix+"-activate")), 204)
+		policy := source.want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{
+			"name": "Tool policy", "project_id": project, "entries": []any{map[string]any{
+				"guardrail_id": definition["id"], "revision_id": definition["revision_id"], "phase": "input", "action": "block",
+			}},
+		}, idem(prefix+"-policy"), 201)
+		source.want(owner, "POST", "/api/v1/guardrail-policies/"+policy["id"].(string)+"/activate", map[string]any{"revision_id": policy["revision_id"]}, withMatch(policy, idem(prefix+"-policy-activate")), 204)
+		source.want(owner, "POST", "/api/v1/guardrail-attachments", map[string]any{
+			"scope": "toolset", "scope_id": toolset["id"], "policy_revision_id": policy["revision_id"], "order": 0,
+		}, idem(prefix+"-attach"), 201)
+	}
+	exported := source.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	document := mcpExecObject(t, exported, "document")
+	attachments := mcpExecItems(t, document, "guardrail_attachments")
+	if len(attachments) != 2 || mcpExecItem(t, attachments, 0, document)["name"] != "Guarded tools" || mcpExecItem(t, attachments, 1, document)["name"] != "Guarded tools" {
+		t.Fatalf("configuration lost the portable toolset attachment: %v", attachments)
+	}
+	destination := newAccessHarness(t)
+	destinationOwner := destination.owner()
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("tool-guardrail-promote"), 200)
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("tool-guardrail-promote-again"), 200)
+	promoted := destination.want(destinationOwner, "GET", "/api/v1/toolsets", nil, nil, 200)
+	promotedTools := mcpExecItems(t, promoted, "items")
+	if len(promotedTools) != 2 {
+		t.Fatalf("promotion did not create the toolset: %v", promotedTools)
+	}
+	listed := destination.want(destinationOwner, "GET", "/api/v1/guardrail-attachments", nil, nil, 200)
+	installed := mcpExecItems(t, listed, "items")
+	if len(installed) != 2 {
+		t.Fatalf("promotion lost the guardrail attachment: %v", installed)
+	}
+	for i := range installed {
+		attachment := mcpExecItem(t, installed, i, listed)
+		if attachment["scope"] != "toolset" || (attachment["scope_id"] != mcpExecItem(t, promotedTools, 0, promoted)["id"] && attachment["scope_id"] != mcpExecItem(t, promotedTools, 1, promoted)["id"]) {
+			t.Fatalf("promotion bound the policy to the wrong resource: %v", attachment)
+		}
+	}
+}
+
 // The project contains a strict native route.

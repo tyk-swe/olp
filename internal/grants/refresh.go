@@ -165,15 +165,9 @@ func (r *Refresher) due(ctx context.Context) ([]string, error) {
 // holds the lock. It reports whether it refreshed the grant or recorded a
 // failure.
 func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID string) (bool, error) {
-	var held bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended($1, $2))", credentialID, refreshLockSeed).Scan(&held); err != nil || !held {
-		return false, err
-	}
-	refreshed, err := r.refreshLocked(ctx, conn, credentialID)
-	if _, unlock := conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock(hashtextextended($1, $2))", credentialID, refreshLockSeed); unlock != nil {
-		err = errors.Join(err, unlock)
-	}
-	return refreshed, err
+	return WithRefreshLock(ctx, conn, credentialID, false, func() (bool, error) {
+		return r.refreshLocked(ctx, conn, credentialID)
+	})
 }
 
 // using is the configuration a grant refreshes on behalf of, as a column of a

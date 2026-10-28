@@ -1382,6 +1382,7 @@ const (
 	ConfigurationGuardrailAttachmentScopeOrganization ConfigurationGuardrailAttachmentScope = "organization"
 	ConfigurationGuardrailAttachmentScopeProject      ConfigurationGuardrailAttachmentScope = "project"
 	ConfigurationGuardrailAttachmentScopeRoute        ConfigurationGuardrailAttachmentScope = "route"
+	ConfigurationGuardrailAttachmentScopeToolset      ConfigurationGuardrailAttachmentScope = "toolset"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationGuardrailAttachmentScope enum.
@@ -1396,6 +1397,8 @@ func (e ConfigurationGuardrailAttachmentScope) Valid() bool {
 	case ConfigurationGuardrailAttachmentScopeProject:
 		return true
 	case ConfigurationGuardrailAttachmentScopeRoute:
+		return true
+	case ConfigurationGuardrailAttachmentScopeToolset:
 		return true
 	default:
 		return false
@@ -1452,12 +1455,18 @@ func (e ConfigurationGuardrailPolicyEntryEntriesPhase) Valid() bool {
 
 // Defines values for ConfigurationMCPServerTransport.
 const (
+	ConfigurationMCPServerTransportSse            ConfigurationMCPServerTransport = "sse"
+	ConfigurationMCPServerTransportStdio          ConfigurationMCPServerTransport = "stdio"
 	ConfigurationMCPServerTransportStreamableHttp ConfigurationMCPServerTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationMCPServerTransport enum.
 func (e ConfigurationMCPServerTransport) Valid() bool {
 	switch e {
+	case ConfigurationMCPServerTransportSse:
+		return true
+	case ConfigurationMCPServerTransportStdio:
+		return true
 	case ConfigurationMCPServerTransportStreamableHttp:
 		return true
 	default:
@@ -2223,12 +2232,18 @@ func (e CreateGuardrailRequestType) Valid() bool {
 
 // Defines values for CreateMCPServerRequestTransport.
 const (
+	CreateMCPServerRequestTransportSse            CreateMCPServerRequestTransport = "sse"
+	CreateMCPServerRequestTransportStdio          CreateMCPServerRequestTransport = "stdio"
 	CreateMCPServerRequestTransportStreamableHttp CreateMCPServerRequestTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the CreateMCPServerRequestTransport enum.
 func (e CreateMCPServerRequestTransport) Valid() bool {
 	switch e {
+	case CreateMCPServerRequestTransportSse:
+		return true
+	case CreateMCPServerRequestTransportStdio:
+		return true
 	case CreateMCPServerRequestTransportStreamableHttp:
 		return true
 	default:
@@ -2639,6 +2654,7 @@ const (
 	GuardrailAttachmentScopeOrganization GuardrailAttachmentScope = "organization"
 	GuardrailAttachmentScopeProject      GuardrailAttachmentScope = "project"
 	GuardrailAttachmentScopeRoute        GuardrailAttachmentScope = "route"
+	GuardrailAttachmentScopeToolset      GuardrailAttachmentScope = "toolset"
 )
 
 // Valid indicates whether the value is a known member of the GuardrailAttachmentScope enum.
@@ -2653,6 +2669,8 @@ func (e GuardrailAttachmentScope) Valid() bool {
 	case GuardrailAttachmentScopeProject:
 		return true
 	case GuardrailAttachmentScopeRoute:
+		return true
+	case GuardrailAttachmentScopeToolset:
 		return true
 	default:
 		return false
@@ -3271,8 +3289,132 @@ func (e KeyExpiringEventReason) Valid() bool {
 	}
 }
 
+// Defines values for MCPGrantAuthorizationState.
+const (
+	MCPGrantAuthorizationStateActive  MCPGrantAuthorizationState = "active"
+	MCPGrantAuthorizationStateDenied  MCPGrantAuthorizationState = "denied"
+	MCPGrantAuthorizationStateExpired MCPGrantAuthorizationState = "expired"
+	MCPGrantAuthorizationStateFailed  MCPGrantAuthorizationState = "failed"
+	MCPGrantAuthorizationStatePending MCPGrantAuthorizationState = "pending"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantAuthorizationState enum.
+func (e MCPGrantAuthorizationState) Valid() bool {
+	switch e {
+	case MCPGrantAuthorizationStateActive:
+		return true
+	case MCPGrantAuthorizationStateDenied:
+		return true
+	case MCPGrantAuthorizationStateExpired:
+		return true
+	case MCPGrantAuthorizationStateFailed:
+		return true
+	case MCPGrantAuthorizationStatePending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPGrantAuthorizationRequestFlow.
+const (
+	AuthorizationCode MCPGrantAuthorizationRequestFlow = "authorization_code"
+	DeviceCode        MCPGrantAuthorizationRequestFlow = "device_code"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantAuthorizationRequestFlow enum.
+func (e MCPGrantAuthorizationRequestFlow) Valid() bool {
+	switch e {
+	case AuthorizationCode:
+		return true
+	case DeviceCode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPGrantClaimResponseState.
+const (
+	MCPGrantClaimResponseStatePending MCPGrantClaimResponseState = "pending"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantClaimResponseState enum.
+func (e MCPGrantClaimResponseState) Valid() bool {
+	switch e {
+	case MCPGrantClaimResponseStatePending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPGrantIdentityKind.
+const (
+	MCPGrantIdentityKindApiKey  MCPGrantIdentityKind = "api_key"
+	MCPGrantIdentityKindEndUser MCPGrantIdentityKind = "end_user"
+)
+
+// Valid indicates whether the value is a known member of the MCPGrantIdentityKind enum.
+func (e MCPGrantIdentityKind) Valid() bool {
+	switch e {
+	case MCPGrantIdentityKindApiKey:
+		return true
+	case MCPGrantIdentityKindEndUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPIdentityDecisionHook.
+const (
+	Agent365             MCPIdentityDecisionHook = "agent_365"
+	McpEndUserPermission MCPIdentityDecisionHook = "mcp_end_user_permission"
+	McpJwtSigner         MCPIdentityDecisionHook = "mcp_jwt_signer"
+	McpSecurity          MCPIdentityDecisionHook = "mcp_security"
+)
+
+// Valid indicates whether the value is a known member of the MCPIdentityDecisionHook enum.
+func (e MCPIdentityDecisionHook) Valid() bool {
+	switch e {
+	case Agent365:
+		return true
+	case McpEndUserPermission:
+		return true
+	case McpJwtSigner:
+		return true
+	case McpSecurity:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPIdentityDecisionOutcome.
+const (
+	MCPIdentityDecisionOutcomeDenied        MCPIdentityDecisionOutcome = "denied"
+	MCPIdentityDecisionOutcomeNotConfigured MCPIdentityDecisionOutcome = "not_configured"
+	MCPIdentityDecisionOutcomePassed        MCPIdentityDecisionOutcome = "passed"
+)
+
+// Valid indicates whether the value is a known member of the MCPIdentityDecisionOutcome enum.
+func (e MCPIdentityDecisionOutcome) Valid() bool {
+	switch e {
+	case MCPIdentityDecisionOutcomeDenied:
+		return true
+	case MCPIdentityDecisionOutcomeNotConfigured:
+		return true
+	case MCPIdentityDecisionOutcomePassed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
+	N20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
 	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
 	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
 	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
@@ -3281,6 +3423,8 @@ const (
 // Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
 func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 	switch e {
+	case N20241105:
+		return true
 	case N20250326:
 		return true
 	case N20250618:
@@ -3294,12 +3438,18 @@ func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 
 // Defines values for MCPServerResponseTransport.
 const (
+	MCPServerResponseTransportSse            MCPServerResponseTransport = "sse"
+	MCPServerResponseTransportStdio          MCPServerResponseTransport = "stdio"
 	MCPServerResponseTransportStreamableHttp MCPServerResponseTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the MCPServerResponseTransport enum.
 func (e MCPServerResponseTransport) Valid() bool {
 	switch e {
+	case MCPServerResponseTransportSse:
+		return true
+	case MCPServerResponseTransportStdio:
+		return true
 	case MCPServerResponseTransportStreamableHttp:
 		return true
 	default:
@@ -3309,13 +3459,160 @@ func (e MCPServerResponseTransport) Valid() bool {
 
 // Defines values for MCPServerSummaryTransport.
 const (
+	MCPServerSummaryTransportSse            MCPServerSummaryTransport = "sse"
+	MCPServerSummaryTransportStdio          MCPServerSummaryTransport = "stdio"
 	MCPServerSummaryTransportStreamableHttp MCPServerSummaryTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the MCPServerSummaryTransport enum.
 func (e MCPServerSummaryTransport) Valid() bool {
 	switch e {
+	case MCPServerSummaryTransportSse:
+		return true
+	case MCPServerSummaryTransportStdio:
+		return true
 	case MCPServerSummaryTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPToolCallResolveRequestOutcome.
+const (
+	MCPToolCallResolveRequestOutcomeNotAccepted MCPToolCallResolveRequestOutcome = "not_accepted"
+	MCPToolCallResolveRequestOutcomeSettled     MCPToolCallResolveRequestOutcome = "settled"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResolveRequestOutcome enum.
+func (e MCPToolCallResolveRequestOutcome) Valid() bool {
+	switch e {
+	case MCPToolCallResolveRequestOutcomeNotAccepted:
+		return true
+	case MCPToolCallResolveRequestOutcomeSettled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPToolCallResponseDebitState.
+const (
+	MCPToolCallResponseDebitStateConflict       MCPToolCallResponseDebitState = "conflict"
+	MCPToolCallResponseDebitStateDispatched     MCPToolCallResponseDebitState = "dispatched"
+	MCPToolCallResponseDebitStateNotAccepted    MCPToolCallResponseDebitState = "not_accepted"
+	MCPToolCallResponseDebitStateOutcomeUnknown MCPToolCallResponseDebitState = "outcome_unknown"
+	MCPToolCallResponseDebitStatePrepared       MCPToolCallResponseDebitState = "prepared"
+	MCPToolCallResponseDebitStateReady          MCPToolCallResponseDebitState = "ready"
+	MCPToolCallResponseDebitStateReleased       MCPToolCallResponseDebitState = "released"
+	MCPToolCallResponseDebitStateSettled        MCPToolCallResponseDebitState = "settled"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResponseDebitState enum.
+func (e MCPToolCallResponseDebitState) Valid() bool {
+	switch e {
+	case MCPToolCallResponseDebitStateConflict:
+		return true
+	case MCPToolCallResponseDebitStateDispatched:
+		return true
+	case MCPToolCallResponseDebitStateNotAccepted:
+		return true
+	case MCPToolCallResponseDebitStateOutcomeUnknown:
+		return true
+	case MCPToolCallResponseDebitStatePrepared:
+		return true
+	case MCPToolCallResponseDebitStateReady:
+		return true
+	case MCPToolCallResponseDebitStateReleased:
+		return true
+	case MCPToolCallResponseDebitStateSettled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPToolCallResponsePricingState.
+const (
+	Free     MCPToolCallResponsePricingState = "free"
+	Priced   MCPToolCallResponsePricingState = "priced"
+	Unpriced MCPToolCallResponsePricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResponsePricingState enum.
+func (e MCPToolCallResponsePricingState) Valid() bool {
+	switch e {
+	case Free:
+		return true
+	case Priced:
+		return true
+	case Unpriced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPToolCallResponseStatus.
+const (
+	MCPToolCallResponseStatusDispatched       MCPToolCallResponseStatus = "dispatched"
+	MCPToolCallResponseStatusGuardrailBlocked MCPToolCallResponseStatus = "guardrail_blocked"
+	MCPToolCallResponseStatusNotAccepted      MCPToolCallResponseStatus = "not_accepted"
+	MCPToolCallResponseStatusOutcomeUnknown   MCPToolCallResponseStatus = "outcome_unknown"
+	MCPToolCallResponseStatusRefusedUnpriced  MCPToolCallResponseStatus = "refused_unpriced"
+	MCPToolCallResponseStatusSettled          MCPToolCallResponseStatus = "settled"
+	MCPToolCallResponseStatusSucceeded        MCPToolCallResponseStatus = "succeeded"
+	MCPToolCallResponseStatusUpstreamError    MCPToolCallResponseStatus = "upstream_error"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResponseStatus enum.
+func (e MCPToolCallResponseStatus) Valid() bool {
+	switch e {
+	case MCPToolCallResponseStatusDispatched:
+		return true
+	case MCPToolCallResponseStatusGuardrailBlocked:
+		return true
+	case MCPToolCallResponseStatusNotAccepted:
+		return true
+	case MCPToolCallResponseStatusOutcomeUnknown:
+		return true
+	case MCPToolCallResponseStatusRefusedUnpriced:
+		return true
+	case MCPToolCallResponseStatusSettled:
+		return true
+	case MCPToolCallResponseStatusSucceeded:
+		return true
+	case MCPToolCallResponseStatusUpstreamError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPUserGrantStandingState.
+const (
+	MCPUserGrantStandingStateActive  MCPUserGrantStandingState = "active"
+	MCPUserGrantStandingStateDenied  MCPUserGrantStandingState = "denied"
+	MCPUserGrantStandingStateExpired MCPUserGrantStandingState = "expired"
+	MCPUserGrantStandingStateFailed  MCPUserGrantStandingState = "failed"
+	MCPUserGrantStandingStatePending MCPUserGrantStandingState = "pending"
+	MCPUserGrantStandingStateRevoked MCPUserGrantStandingState = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the MCPUserGrantStandingState enum.
+func (e MCPUserGrantStandingState) Valid() bool {
+	switch e {
+	case MCPUserGrantStandingStateActive:
+		return true
+	case MCPUserGrantStandingStateDenied:
+		return true
+	case MCPUserGrantStandingStateExpired:
+		return true
+	case MCPUserGrantStandingStateFailed:
+		return true
+	case MCPUserGrantStandingStatePending:
+		return true
+	case MCPUserGrantStandingStateRevoked:
 		return true
 	default:
 		return false
@@ -4818,16 +5115,16 @@ func (e RouteBehaviorCertification) Valid() bool {
 
 // Defines values for RouteDetailResponseState.
 const (
-	Active  RouteDetailResponseState = "active"
-	Retired RouteDetailResponseState = "retired"
+	RouteDetailResponseStateActive  RouteDetailResponseState = "active"
+	RouteDetailResponseStateRetired RouteDetailResponseState = "retired"
 )
 
 // Valid indicates whether the value is a known member of the RouteDetailResponseState enum.
 func (e RouteDetailResponseState) Valid() bool {
 	switch e {
-	case Active:
+	case RouteDetailResponseStateActive:
 		return true
-	case Retired:
+	case RouteDetailResponseStateRetired:
 		return true
 	default:
 		return false
@@ -6907,6 +7204,12 @@ type ChangePasswordRequest struct {
 	NewPassword     *string `json:"new_password,omitempty"`
 }
 
+// ClaimMCPGrantEnrollmentRequest defines model for ClaimMCPGrantEnrollmentRequest.
+type ClaimMCPGrantEnrollmentRequest struct {
+	EnrollmentId openapi_types.UUID `json:"enrollment_id"`
+	HandoffToken *string            `json:"handoff_token,omitempty"`
+}
+
 // ClassifierPredicate Sends the request text to another OLP route and tests the label it returns: a classification route's top label, or a generation route's reply. The call is an accounted request with its own deadline; a failure falls through to the next selector.
 type ClassifierPredicate struct {
 	Labels    []string                   `json:"labels"`
@@ -7509,16 +7812,39 @@ type ConfigurationGuardrailPolicyEntryEntriesPhase string
 
 // ConfigurationMCPServer defines model for ConfigurationMCPServer.
 type ConfigurationMCPServer struct {
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
+
 	// CatalogDigest Reviewed tool catalog. Destination certification must match before configuration changes commit.
 	CatalogDigest string `json:"catalog_digest"`
 
 	// CredentialRef Logical destination sealed bearer binding; never source credential bytes.
-	CredentialRef *string                         `json:"credential_ref,omitempty"`
-	Enabled       bool                            `json:"enabled"`
-	Endpoint      string                          `json:"endpoint"`
-	Name          string                          `json:"name"`
-	Project       string                          `json:"project"`
-	Transport     ConfigurationMCPServerTransport `json:"transport"`
+	CredentialRef *string                                       `json:"credential_ref,omitempty"`
+	Delegation    nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
+	Enabled       bool                                          `json:"enabled"`
+	Endpoint      *string                                       `json:"endpoint,omitempty"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
+	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth,omitempty"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency *int                               `json:"per_key_max_concurrency,omitempty"`
+	Project              string                             `json:"project"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices *map[string]string              `json:"tool_prices,omitempty"`
+	Transport  ConfigurationMCPServerTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // ConfigurationMCPServerTransport defines model for ConfigurationMCPServer.Transport.
@@ -8222,13 +8548,42 @@ type CreateInvitationResponse struct {
 
 // CreateMCPServerRequest defines model for CreateMCPServerRequest.
 type CreateMCPServerRequest struct {
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
+
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
-	Credential nullable.Nullable[string]       `json:"credential,omitempty"`
-	Enabled    bool                            `json:"enabled"`
-	Endpoint   string                          `json:"endpoint"`
-	Name       string                          `json:"name"`
-	ProjectId  openapi_types.UUID              `json:"project_id"`
+	Credential nullable.Nullable[string]                     `json:"credential,omitempty"`
+	Delegation nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
+
+	// DelegationPrivateKey PKCS8 Ed25519 private signing key. Omit to retain the existing local key.
+	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
+	Enabled              bool                      `json:"enabled"`
+	Endpoint             *string                   `json:"endpoint,omitempty"`
+
+	// EntraClientSecret Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports.
+	EntraClientSecret *string `json:"entra_client_secret,omitempty"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
+	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth,omitempty"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency *int                               `json:"per_key_max_concurrency,omitempty"`
+	ProjectId            openapi_types.UUID                 `json:"project_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices *map[string]string              `json:"tool_prices,omitempty"`
 	Transport  CreateMCPServerRequestTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // CreateMCPServerRequestTransport defines model for CreateMCPServerRequest.Transport.
@@ -9278,6 +9633,140 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// MCPDelegationConfiguration defines model for MCPDelegationConfiguration.
+type MCPDelegationConfiguration struct {
+	Audience string `json:"audience"`
+	Issuer   string `json:"issuer"`
+}
+
+// MCPEntraOBO defines model for MCPEntraOBO.
+type MCPEntraOBO struct {
+	// Issuer Exact registered workload issuer trusted for delegated user assertions.
+	Issuer string `json:"issuer"`
+}
+
+// MCPExecutableFile defines model for MCPExecutableFile.
+type MCPExecutableFile struct {
+	Digest    string `json:"digest"`
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// MCPExecutableList defines model for MCPExecutableList.
+type MCPExecutableList struct {
+	Items []MCPExecutableFile `json:"items"`
+}
+
+// MCPExecutablePermission defines model for MCPExecutablePermission.
+type MCPExecutablePermission struct {
+	Digest    string `json:"digest"`
+	Name      string `json:"name"`
+	Permitted bool   `json:"permitted"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// MCPGrantAuthorization defines model for MCPGrantAuthorization.
+type MCPGrantAuthorization struct {
+	AuthorizationUrl *string                    `json:"authorization_url,omitempty"`
+	Device           *MCPGrantDeviceChallenge   `json:"device,omitempty"`
+	State            MCPGrantAuthorizationState `json:"state"`
+}
+
+// MCPGrantAuthorizationState defines model for MCPGrantAuthorization.State.
+type MCPGrantAuthorizationState string
+
+// MCPGrantAuthorizationRequest defines model for MCPGrantAuthorizationRequest.
+type MCPGrantAuthorizationRequest struct {
+	Flow MCPGrantAuthorizationRequestFlow `json:"flow"`
+}
+
+// MCPGrantAuthorizationRequestFlow defines model for MCPGrantAuthorizationRequest.Flow.
+type MCPGrantAuthorizationRequestFlow string
+
+// MCPGrantBinding defines model for MCPGrantBinding.
+type MCPGrantBinding struct {
+	Endpoint string           `json:"endpoint"`
+	Identity MCPGrantIdentity `json:"identity"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth     nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+	ProjectId openapi_types.UUID                       `json:"project_id"`
+	ServerId  openapi_types.UUID                       `json:"server_id"`
+}
+
+// MCPGrantClaimResponse defines model for MCPGrantClaimResponse.
+type MCPGrantClaimResponse struct {
+	Enrollment MCPGrantEnrollment         `json:"enrollment"`
+	State      MCPGrantClaimResponseState `json:"state"`
+}
+
+// MCPGrantClaimResponseState defines model for MCPGrantClaimResponse.State.
+type MCPGrantClaimResponseState string
+
+// MCPGrantCompletionRequest defines model for MCPGrantCompletionRequest.
+type MCPGrantCompletionRequest struct {
+	Code  *string `json:"code,omitempty"`
+	State *string `json:"state,omitempty"`
+}
+
+// MCPGrantDeviceChallenge defines model for MCPGrantDeviceChallenge.
+type MCPGrantDeviceChallenge struct {
+	ExpiresAt       time.Time `json:"expires_at"`
+	Interval        int       `json:"interval"`
+	UserCode        string    `json:"user_code"`
+	VerificationUrl string    `json:"verification_url"`
+}
+
+// MCPGrantEnrollment defines model for MCPGrantEnrollment.
+type MCPGrantEnrollment struct {
+	Binding   MCPGrantBinding              `json:"binding"`
+	ClaimedAt nullable.Nullable[time.Time] `json:"claimed_at"`
+	ExpiresAt time.Time                    `json:"expires_at"`
+	Id        openapi_types.UUID           `json:"id"`
+}
+
+// MCPGrantHandoff defines model for MCPGrantHandoff.
+type MCPGrantHandoff struct {
+	EnrollmentId openapi_types.UUID `json:"enrollment_id"`
+
+	// EnrollmentUrl One-use browser link. Its secret remains in the URL fragment and must not be logged or retained.
+	EnrollmentUrl string    `json:"enrollment_url"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
+// MCPGrantIdentity defines model for MCPGrantIdentity.
+type MCPGrantIdentity struct {
+	Id               string               `json:"id"`
+	Kind             MCPGrantIdentityKind `json:"kind"`
+	WorkloadIssuerId *openapi_types.UUID  `json:"workload_issuer_id,omitempty"`
+}
+
+// MCPGrantIdentityKind defines model for MCPGrantIdentity.Kind.
+type MCPGrantIdentityKind string
+
+// MCPIdentityDecision defines model for MCPIdentityDecision.
+type MCPIdentityDecision struct {
+	Hook    MCPIdentityDecisionHook    `json:"hook"`
+	Outcome MCPIdentityDecisionOutcome `json:"outcome"`
+}
+
+// MCPIdentityDecisionHook defines model for MCPIdentityDecision.Hook.
+type MCPIdentityDecisionHook string
+
+// MCPIdentityDecisionOutcome defines model for MCPIdentityDecision.Outcome.
+type MCPIdentityDecisionOutcome string
+
+// MCPOAuthConfiguration Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+type MCPOAuthConfiguration struct {
+	Audience                    string       `json:"audience"`
+	AuthorizationEndpoint       *string      `json:"authorization_endpoint,omitempty"`
+	ClientId                    string       `json:"client_id"`
+	DeviceAuthorizationEndpoint *string      `json:"device_authorization_endpoint,omitempty"`
+	EntraObo                    *MCPEntraOBO `json:"entra_obo,omitempty"`
+	Scopes                      []string     `json:"scopes"`
+	TokenEndpoint               string       `json:"token_endpoint"`
+}
+
 // MCPRegisteredCatalog defines model for MCPRegisteredCatalog.
 type MCPRegisteredCatalog struct {
 	Digest          string                              `json:"digest"`
@@ -9303,19 +9792,41 @@ type MCPServerListResponse struct {
 
 // MCPServerResponse defines model for MCPServerResponse.
 type MCPServerResponse struct {
-	Catalog       MCPRegisteredCatalog         `json:"catalog"`
-	CertifiedAt   time.Time                    `json:"certified_at"`
-	Enabled       bool                         `json:"enabled"`
-	Endpoint      string                       `json:"endpoint"`
-	Etag          openapi_types.UUID           `json:"etag"`
-	HasCredential bool                         `json:"has_credential"`
-	Id            openapi_types.UUID           `json:"id"`
-	Name          string                       `json:"name"`
-	ProjectId     openapi_types.UUID           `json:"project_id"`
-	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision      int64                        `json:"revision"`
-	RevisionId    openapi_types.UUID           `json:"revision_id"`
-	Transport     MCPServerResponseTransport   `json:"transport"`
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute int                                           `json:"calls_per_minute"`
+	Catalog        MCPRegisteredCatalog                          `json:"catalog"`
+	CertifiedAt    time.Time                                     `json:"certified_at"`
+	Delegation     nullable.Nullable[MCPDelegationConfiguration] `json:"delegation"`
+	Enabled        bool                                          `json:"enabled"`
+	Endpoint       string                                        `json:"endpoint"`
+	Etag           openapi_types.UUID                            `json:"etag"`
+	HasCredential  bool                                          `json:"has_credential"`
+	Id             openapi_types.UUID                            `json:"id"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency int    `json:"max_concurrency"`
+	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	ProjectId            openapi_types.UUID                 `json:"project_id"`
+	RetiredAt            nullable.Nullable[time.Time]       `json:"retired_at"`
+	Revision             int64                              `json:"revision"`
+	RevisionId           openapi_types.UUID                 `json:"revision_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices map[string]string          `json:"tool_prices"`
+	Transport  MCPServerResponseTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPServerResponseTransport defines model for MCPServerResponse.Transport.
@@ -9323,32 +9834,170 @@ type MCPServerResponseTransport string
 
 // MCPServerRevisionResponse defines model for MCPServerRevisionResponse.
 type MCPServerRevisionResponse struct {
-	Catalog     MCPRegisteredCatalog `json:"catalog"`
-	CertifiedAt time.Time            `json:"certified_at"`
-	Endpoint    string               `json:"endpoint"`
-	Id          openapi_types.UUID   `json:"id"`
-	Revision    int64                `json:"revision"`
-	ServerId    openapi_types.UUID   `json:"server_id"`
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute int                                           `json:"calls_per_minute"`
+	Catalog        MCPRegisteredCatalog                          `json:"catalog"`
+	CertifiedAt    time.Time                                     `json:"certified_at"`
+	Delegation     nullable.Nullable[MCPDelegationConfiguration] `json:"delegation"`
+	Endpoint       string                                        `json:"endpoint"`
+	Id             openapi_types.UUID                            `json:"id"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency int `json:"max_concurrency"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	Revision             int64                              `json:"revision"`
+	ServerId             openapi_types.UUID                 `json:"server_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices map[string]string `json:"tool_prices"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPServerSummary defines model for MCPServerSummary.
 type MCPServerSummary struct {
-	CertifiedAt   time.Time                    `json:"certified_at"`
-	Enabled       bool                         `json:"enabled"`
-	Endpoint      string                       `json:"endpoint"`
-	Etag          openapi_types.UUID           `json:"etag"`
-	HasCredential bool                         `json:"has_credential"`
-	Id            openapi_types.UUID           `json:"id"`
-	Name          string                       `json:"name"`
-	ProjectId     openapi_types.UUID           `json:"project_id"`
-	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision      int64                        `json:"revision"`
-	RevisionId    openapi_types.UUID           `json:"revision_id"`
-	Transport     MCPServerSummaryTransport    `json:"transport"`
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute int                                           `json:"calls_per_minute"`
+	CertifiedAt    time.Time                                     `json:"certified_at"`
+	Delegation     nullable.Nullable[MCPDelegationConfiguration] `json:"delegation"`
+	Enabled        bool                                          `json:"enabled"`
+	Endpoint       string                                        `json:"endpoint"`
+	Etag           openapi_types.UUID                            `json:"etag"`
+	HasCredential  bool                                          `json:"has_credential"`
+	Id             openapi_types.UUID                            `json:"id"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency int    `json:"max_concurrency"`
+	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	ProjectId            openapi_types.UUID                 `json:"project_id"`
+	RetiredAt            nullable.Nullable[time.Time]       `json:"retired_at"`
+	Revision             int64                              `json:"revision"`
+	RevisionId           openapi_types.UUID                 `json:"revision_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices map[string]string         `json:"tool_prices"`
+	Transport  MCPServerSummaryTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPServerSummaryTransport defines model for MCPServerSummary.Transport.
 type MCPServerSummaryTransport string
+
+// MCPStdioBinding defines model for MCPStdioBinding.
+type MCPStdioBinding struct {
+	Digest     string `json:"digest"`
+	Executable string `json:"executable"`
+}
+
+// MCPToolCallList defines model for MCPToolCallList.
+type MCPToolCallList struct {
+	Items      []MCPToolCallResponse     `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// MCPToolCallResolveRequest defines model for MCPToolCallResolveRequest.
+type MCPToolCallResolveRequest struct {
+	EvidenceDigest string `json:"evidence_digest"`
+
+	// ObservedCharge Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound.
+	ObservedCharge *string `json:"observed_charge,omitempty"`
+
+	// ObservedCost Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound.
+	ObservedCost *string                          `json:"observed_cost,omitempty"`
+	Outcome      MCPToolCallResolveRequestOutcome `json:"outcome"`
+}
+
+// MCPToolCallResolveRequestOutcome defines model for MCPToolCallResolveRequest.Outcome.
+type MCPToolCallResolveRequestOutcome string
+
+// MCPToolCallResponse defines model for MCPToolCallResponse.
+type MCPToolCallResponse struct {
+	ApiKeyId    openapi_types.UUID           `json:"api_key_id"`
+	CallDigest  nullable.Nullable[string]    `json:"call_digest"`
+	ChargeBound string                       `json:"charge_bound"`
+	CompletedAt nullable.Nullable[time.Time] `json:"completed_at"`
+	CostBound   string                       `json:"cost_bound"`
+	CreatedAt   time.Time                    `json:"created_at"`
+
+	// Currency Installation pricing currency the bounds and observed amounts use.
+	Currency           nullable.Nullable[string]     `json:"currency"`
+	DebitState         MCPToolCallResponseDebitState `json:"debit_state"`
+	DispatchId         openapi_types.UUID            `json:"dispatch_id"`
+	GuardrailDecisions []GuardrailEvidence           `json:"guardrail_decisions"`
+	Id                 openapi_types.UUID            `json:"id"`
+	IdentityDecisions  []MCPIdentityDecision         `json:"identity_decisions"`
+	InputDigest        string                        `json:"input_digest"`
+	IsError            bool                          `json:"is_error"`
+	ObservedCharge     string                        `json:"observed_charge"`
+	ObservedCost       string                        `json:"observed_cost"`
+
+	// PricingState Whether the call settled at a price, at an explicit free price, or without any price.
+	PricingState      MCPToolCallResponsePricingState `json:"pricing_state"`
+	ProjectId         openapi_types.UUID              `json:"project_id"`
+	RemainingCharge   string                          `json:"remaining_charge"`
+	RemainingCost     string                          `json:"remaining_cost"`
+	ResultDigest      nullable.Nullable[string]       `json:"result_digest"`
+	ServerId          openapi_types.UUID              `json:"server_id"`
+	ServerRevisionId  openapi_types.UUID              `json:"server_revision_id"`
+	StartedAt         time.Time                       `json:"started_at"`
+	Status            MCPToolCallResponseStatus       `json:"status"`
+	ToolAlias         string                          `json:"tool_alias"`
+	ToolsetId         openapi_types.UUID              `json:"toolset_id"`
+	ToolsetRevisionId openapi_types.UUID              `json:"toolset_revision_id"`
+
+	// UnitPrice Pinned unit price charged for the dispatched call. Null only when pricing_state is unpriced.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
+}
+
+// MCPToolCallResponseDebitState defines model for MCPToolCallResponse.DebitState.
+type MCPToolCallResponseDebitState string
+
+// MCPToolCallResponsePricingState Whether the call settled at a price, at an explicit free price, or without any price.
+type MCPToolCallResponsePricingState string
+
+// MCPToolCallResponseStatus defines model for MCPToolCallResponse.Status.
+type MCPToolCallResponseStatus string
+
+// MCPUserGrantList defines model for MCPUserGrantList.
+type MCPUserGrantList struct {
+	Items      []MCPUserGrantStanding    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// MCPUserGrantStanding defines model for MCPUserGrantStanding.
+type MCPUserGrantStanding struct {
+	Binding   MCPGrantBinding                       `json:"binding"`
+	CreatedAt time.Time                             `json:"created_at"`
+	ExpiresAt time.Time                             `json:"expires_at"`
+	GrantId   nullable.Nullable[openapi_types.UUID] `json:"grant_id"`
+	Id        openapi_types.UUID                    `json:"id"`
+	State     MCPUserGrantStandingState             `json:"state"`
+}
+
+// MCPUserGrantStandingState defines model for MCPUserGrantStanding.State.
+type MCPUserGrantStandingState string
 
 // MFABootstrapSession defines model for MFABootstrapSession.
 type MFABootstrapSession struct {
@@ -13513,6 +14162,11 @@ type StartGrantEnrollmentRequest struct {
 	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
 }
 
+// StartMCPGrantEnrollmentRequest defines model for StartMCPGrantEnrollmentRequest.
+type StartMCPGrantEnrollmentRequest struct {
+	ApiKeyId openapi_types.UUID `json:"api_key_id"`
+}
+
 // Surface defines model for Surface.
 type Surface string
 
@@ -13754,11 +14408,39 @@ type UpdateInstallationBrandingRequest struct {
 
 // UpdateMCPServerRequest defines model for UpdateMCPServerRequest.
 type UpdateMCPServerRequest struct {
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
+
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
-	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Enabled    bool                      `json:"enabled"`
-	Endpoint   string                    `json:"endpoint"`
-	Name       string                    `json:"name"`
+	Credential nullable.Nullable[string]                     `json:"credential,omitempty"`
+	Delegation nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
+
+	// DelegationPrivateKey PKCS8 Ed25519 private signing key. Omit to retain the existing local key.
+	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
+	Enabled              bool                      `json:"enabled"`
+	Endpoint             *string                   `json:"endpoint,omitempty"`
+
+	// EntraClientSecret Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports.
+	EntraClientSecret *string `json:"entra_client_secret,omitempty"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
+	Name           string `json:"name"`
+
+	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
+	Oauth nullable.Nullable[MCPOAuthConfiguration] `json:"oauth,omitempty"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency *int `json:"per_key_max_concurrency,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices *map[string]string `json:"tool_prices,omitempty"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // UpdateNotificationDestinationRequest Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret.
@@ -14722,6 +15404,32 @@ type DeleteMcpServerParams struct {
 type UpdateMcpServerParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 	IfMatch        string `json:"If-Match"`
+}
+
+// ListMcpToolCallsParams defines parameters for ListMcpToolCalls.
+type ListMcpToolCallsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	ToolsetId *openapi_types.UUID `form:"toolset_id,omitempty" json:"toolset_id,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ResolveMcpToolCallParams defines parameters for ResolveMcpToolCall.
+type ResolveMcpToolCallParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListMcpUserGrantsParams defines parameters for ListMcpUserGrants.
+type ListMcpUserGrantsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListMediaJobsParams defines parameters for ListMediaJobs.
@@ -16317,11 +17025,29 @@ type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
 // ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
 type ManagementMcpJSONRequestBody ManagementMcpJSONBody
 
+// PermitMCPExecutableJSONRequestBody defines body for PermitMCPExecutable for application/json ContentType.
+type PermitMCPExecutableJSONRequestBody = UnconfinedPluginPermitRequest
+
+// ClaimMcpGrantEnrollmentJSONRequestBody defines body for ClaimMcpGrantEnrollment for application/json ContentType.
+type ClaimMcpGrantEnrollmentJSONRequestBody = ClaimMCPGrantEnrollmentRequest
+
+// AuthorizeMcpGrantJSONRequestBody defines body for AuthorizeMcpGrant for application/json ContentType.
+type AuthorizeMcpGrantJSONRequestBody = MCPGrantAuthorizationRequest
+
+// CompleteMcpGrantJSONRequestBody defines body for CompleteMcpGrant for application/json ContentType.
+type CompleteMcpGrantJSONRequestBody = MCPGrantCompletionRequest
+
 // CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
 type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
 
 // UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
 type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
+
+// StartMcpGrantEnrollmentJSONRequestBody defines body for StartMcpGrantEnrollment for application/json ContentType.
+type StartMcpGrantEnrollmentJSONRequestBody = StartMCPGrantEnrollmentRequest
+
+// ResolveMcpToolCallJSONRequestBody defines body for ResolveMcpToolCall for application/json ContentType.
+type ResolveMcpToolCallJSONRequestBody = MCPToolCallResolveRequest
 
 // CreateNotificationDestinationJSONRequestBody defines body for CreateNotificationDestination for application/json ContentType.
 type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinationRequest

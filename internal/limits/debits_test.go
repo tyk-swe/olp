@@ -32,6 +32,95 @@ func TestDurableResolutionEvidenceIdentity(t *testing.T) {
 
 const debitTestID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 
+func TestDurableVerificationRefusesUnknownAccountingState(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int64
+		detail string
+		want   error
+	}{
+		{"missing projection", -1, "uninitialized_durable_cost_state", ErrUninitializedCost},
+		{"unresolved exposure", -1, "unsettled_durable_cost_state", ErrUninitializedCost},
+		{"malformed projection", -1, "malformed_durable_cost_state", ErrMalformedState},
+		{"unknown response", -1, "unknown", ErrUnexpectedResponse},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := &scripted{answer: func([]string) (any, error) {
+				return reply(int64(1), test.status, test.detail, int64(0), int64(1), int64(2)), nil
+			}}
+			limiter, err := New(server, "limits")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cap := "1"
+			if err := limiter.verifyDurableCost(t.Context(), Request{CostOwnerID: debitTestID, CostBasis: BasisCharge, DailyCostLimit: &cap}); !errors.Is(err, test.want) {
+				t.Fatalf("unknown charge accounting admitted: %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestDurableVerificationRetainsRefusedBudgetBasisAndRetry(t *testing.T) {
+	server := &scripted{answer: func([]string) (any, error) {
+		return reply(int64(1), int64(0), "daily_cost", int64(250), int64(1), int64(2)), nil
+	}}
+	limiter, err := New(server, "limits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cap := "1"
+	verificationErr := limiter.verifyDurableCost(t.Context(), Request{CostOwnerID: debitTestID, CostBasis: BasisCharge, DailyCostLimit: &cap})
+	var exceeded *ExceededError
+	if !errors.As(verificationErr, &exceeded) || exceeded.Basis != BasisCharge || exceeded.Dimension != DimensionDailyCost || exceeded.RetryAfter != 250*time.Millisecond {
+		t.Fatalf("refusal lost the enforced charge budget or retry guidance: %v", verificationErr)
+	}
+}
+
+func TestDurableVerificationRequiresValidOwnerAndBudget(t *testing.T) {
+	badCap := "-1"
+	for _, request := range []Request{
+		{CostOwnerID: "untrusted-owner"},
+		{CostOwnerID: debitTestID, CostBasis: Basis("invalid")},
+		{CostOwnerID: debitTestID, DailyCostLimit: &badCap},
+		{CostOwnerID: debitTestID, WeeklyCostLimit: &badCap},
+		{CostOwnerID: debitTestID, MonthlyCostLimit: &badCap},
+	} {
+		if err := (&Limiter{}).verifyDurableCost(t.Context(), request); !errors.Is(err, ErrDebitConflict) {
+			t.Fatalf("invalid owner or bound was admitted: %v", err)
+		}
+	}
+}
+
+func TestDurableAdmissionFailsWhenLedgerCannotRebuildProjection(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://olp:olp@127.0.0.1:1/olp?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	server := &scripted{answer: func([]string) (any, error) {
+		return reply(int64(1), int64(-1), "uninitialized_durable_cost_state", int64(0), int64(1), int64(2)), nil
+	}}
+	limiter, err := New(server, "limits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter.UseDurableDebits(pool)
+	cap := "1"
+	request := Request{CostOwnerID: debitTestID, DailyCostLimit: &cap}
+	if _, err := limiter.reserveCost(ctx, request, limiter.keysFor(request)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("unavailable authoritative accounting cleared the missing projection: %v", err)
+	}
+	store := &DebitStore{Pool: pool, Limiter: limiter}
+	if err := store.CheckOwnerAccounting(ctx, debitTestID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("unreadable accounting was considered current: %v", err)
+	}
+	if err := store.ReconcileDebits(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reconciliation silently accepted an unreadable ledger: %v", err)
+	}
+}
+
 func TestHasUnknownDebitRejectsNonCanonicalKeyBeforeQuery(t *testing.T) {
 	store := &DebitStore{}
 	for _, id := range []string{"", "not-a-uuid", strings.ToUpper(debitTestID), "00000000-0000-0000-0000-000000000000", debitTestID + " "} {

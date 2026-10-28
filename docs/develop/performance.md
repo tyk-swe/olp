@@ -328,7 +328,9 @@ success rate beside it.
 `make bench-gate` alternates merge-base/working-tree samples, compares pinned
 benchstat time/allocations and fails reproducible statistically significant >10%
 regressions. Bytes/op report without gating. Flagged names remeasure with twice
-samples before failure. CI retains samples/report as `bench-gate`.
+samples before failure. Each side's test binaries are built once and every sample
+runs them. CI splits the packages across three shards with `BENCH_SHARD` and
+retains each shard's samples/report as `bench-gate-<shard>`.
 
 | Path | Benchmark | What an iteration does |
 | --- | --- | --- |
@@ -350,6 +352,7 @@ samples before failure. CI retains samples/report as `bench-gate`.
 | `BENCH_COUNT` | Samples per side, at least 6 (10); a regression is measured again with twice as many |
 | `BENCH_THRESHOLD` | Regression percentage that fails (10) |
 | `BENCH_ALLOW_REMOVED` | `1` lets benchmarks of the base be absent from the head (0) |
+| `BENCH_SHARD` | `INDEX/TOTAL` compares one of `TOTAL` disjoint package shards, balanced by benchmark count (`1/1`) |
 | `BENCH_TIME`, `BENCH_RUN`, `BENCH_FILTER` | `-benchtime`, the `-bench` pattern and a package filter |
 | `BENCH_OUT` | Output directory (`.local/bench/gate`) |
 
@@ -365,7 +368,8 @@ head names fail unless reviewed `BENCH_ALLOW_REMOVED=1` (CI's
 `allow-removed-benchmarks` label). Empty output/no shared names fails; only a base
 with no benchmarks is explicitly exempt. Do not raise thresholds to clear noise.
 Use at least six samples and confirm flags. CI uses 500 ms samples and a one-hour
-job; lower duration/count within these bounds rather than extending deadlines.
+job per shard; lower duration/count within these bounds rather than extending
+deadlines.
 
 ## Performance budget
 
