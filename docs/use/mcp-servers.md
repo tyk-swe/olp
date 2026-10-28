@@ -317,9 +317,12 @@ configured scope must start with that resource audience and a slash, such as
 `api://<resource>/.default`. Set the declared token endpoint and supply the
 write-only `entra_client_secret` once through the management API or Personal
 tool grants console. The installation seals this dedicated credential
-separately from grant tokens. Later updates can omit it to retain the local
-credential. Configuration export includes the trust profile but excludes the
-client secret; import requires it to be installed locally.
+separately from grant tokens. Later updates can omit it only while the issuer,
+middle-tier client and token endpoint stay unchanged. Changing any of those
+requires an explicit replacement credential. Configuration export includes the
+trust profile but excludes the client secret. Before importing a changed
+credential boundary, install that profile and its replacement secret through
+the management API or console.
 
 The incoming assertion must pass the current workload issuer's signature,
 expiry, mapping and authority checks. It must have the middle-tier audience and

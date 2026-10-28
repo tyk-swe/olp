@@ -218,8 +218,8 @@ func (s *Server) planMCPServers(ctx context.Context, q access.Queryer, doc *Docu
 		if err != nil {
 			return err
 		}
-		if e.OAuth != nil && e.OAuth.EntraOBO != nil && (current == nil || current.EntraClientSecretID == nil) {
-			result.conflict("mcp_server", e.Name, "Install this server's Entra client secret locally before applying its metadata.")
+		if e.OAuth != nil && e.OAuth.EntraOBO != nil && !mcpservers.CanRetainEntraClientSecret(current, e.OAuth) {
+			result.conflict("mcp_server", e.Name, "Install this Entra issuer, client, and token endpoint with its replacement secret locally before applying the metadata.")
 		}
 		if e.Delegation != nil && (current == nil || current.DelegationKeyID == nil) {
 			result.conflict("mcp_server", e.Name, "Install this server's delegation signing key locally before applying its metadata.")
@@ -278,6 +278,9 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 			if err = p.Project(&d.ProjectID, access.Change); err != nil {
 				return nil, err
 			}
+		}
+		if e.OAuth != nil && e.OAuth.EntraOBO != nil && !mcpservers.CanRetainEntraClientSecret(d, e.OAuth) {
+			return nil, access.Invalid("mcp_servers", "Install this Entra issuer, client, and token endpoint with its replacement secret locally before applying the metadata.")
 		}
 		equal, err := s.mcpMatches(ctx, s.Access.Pool, e, d, bindings)
 		if err != nil {
@@ -409,7 +412,7 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 }
 
 func entraConfigurationSecret(e MCPServerEntry, current *mcpservers.Definition) *string {
-	if current == nil || e.OAuth == nil || e.OAuth.EntraOBO == nil {
+	if !mcpservers.CanRetainEntraClientSecret(current, e.OAuth) {
 		return nil
 	}
 	return current.EntraClientSecretID

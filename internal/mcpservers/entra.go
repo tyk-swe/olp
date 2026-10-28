@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -43,8 +44,15 @@ func (s *Server) saveEntraClientSecret(ctx context.Context, tx pgx.Tx, in Input,
 		}
 		return &id, nil
 	}
-	if previous != nil && previous.EntraClientSecretID != nil {
+	if CanRetainEntraClientSecret(previous, in.OAuth) {
 		return previous.EntraClientSecretID, nil
 	}
-	return nil, access.Invalid("entra_client_secret", "Install this middle-tier client's secret before enabling Entra on-behalf-of authorization.")
+	return nil, access.Invalid("entra_client_secret", "Supply this middle-tier client's secret when enabling Entra or changing its issuer, client, or token endpoint.")
+}
+
+func CanRetainEntraClientSecret(previous *Definition, next *routing.MCPOAuth) bool {
+	if previous == nil || previous.EntraClientSecretID == nil || previous.OAuth == nil || previous.OAuth.EntraOBO == nil || next == nil || next.EntraOBO == nil {
+		return false
+	}
+	return previous.OAuth.ClientID == next.ClientID && previous.OAuth.TokenEndpoint == next.TokenEndpoint && previous.OAuth.EntraOBO.Issuer == next.EntraOBO.Issuer
 }
