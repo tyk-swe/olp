@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
-import type { ProviderModel } from '../../src/lib/features/providers/api/models';
 import { manage } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
+import type { ProviderModel } from '../../src/lib/features/providers/api/models';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
 import { takeSecret, waitForRoutePublication } from '../journeys/fixtures';
 import { verifyDraftSave } from '../journeys/draft-saving';
