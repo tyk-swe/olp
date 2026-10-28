@@ -5,6 +5,7 @@ package operations
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"regexp"
 	"slices"
 	"sync"
@@ -42,15 +43,47 @@ type Field struct {
 // are adapters, never operation IR.
 type Address struct{ FamilyPath, RelativePath string }
 
+type Transport string
+
+const (
+	TransportJSON     Transport = "json"
+	TransportGetQuery Transport = "get-query"
+	TransportPoll202  Transport = "poll-202"
+)
+
+func (t Transport) Normalized() Transport {
+	if t == "" {
+		return TransportJSON
+	}
+	return t
+}
+
+type PollState string
+
+const (
+	PollPending   PollState = "pending"
+	PollSucceeded PollState = "succeeded"
+	PollFailed    PollState = "failed"
+)
+
+// WireRequest is the bounded wire lowering of an effective request document:
+// query parameters plus the exact body bytes to submit, if any.
+type WireRequest struct {
+	Query url.Values
+	Body  []byte
+}
+
 // Dialect is the small unary contract. Optional hooks are absent where that
 // operation has no model-body identity, textual policy surface or usage record.
 type Dialect struct {
 	Identity, Operation           oif.Identity
 	Surface, Label, Documentation string
 	Address                       Address
+	Transport                     Transport
 	RequestSchema, ResultSchema   json.RawMessage
 	Defaults                      map[string]Field
 	Request                       func(oif.Request) (oif.View, error)
+	Query                         func(oif.Request) (url.Values, error)
 	Result                        func(oif.Request, oif.Result) (oif.View, error)
 	ValidateRoute                 func(oif.Request, string) error
 	BindModel                     func(oif.Document, string) ([]oif.Change, error)
@@ -60,8 +93,13 @@ type Dialect struct {
 	RequiredClient                func(oif.View) string
 	InputText                     func(oif.Request) ([]Text, error)
 	OutputText                    func(oif.Result) ([]Text, error)
+	DocumentLocation              func(oif.Request) (string, bool)
+	FetchedDocument               func(oif.Request) bool
 	Probe                         func(string) []byte
 	Evidence                      string
+	Wire                          func(oif.View) (WireRequest, error)
+	Poll                          func(oif.Document) (PollState, error)
+	CancelPoll                    func(pollURL string) (method, url string, ok bool)
 }
 
 // Mapping qualifies one actual source/target pair. It owns both directions;
@@ -91,6 +129,23 @@ func (r *Registry) Register(d Dialect) error {
 	if d.Address.FamilyPath == "" && d.Address.RelativePath == "" || d.Address.FamilyPath != "" && d.Address.RelativePath != "" {
 		return errors.New("unary dialect requires one addressing contract")
 	}
+	switch d.Transport.Normalized() {
+	case TransportJSON:
+		if d.Query != nil || d.Wire != nil || d.Poll != nil || d.CancelPoll != nil {
+			return errors.New("json unary dialect must not lower to query parameters or polling hooks")
+		}
+	case TransportGetQuery:
+		if d.Query == nil || d.Wire != nil || d.Poll != nil || d.CancelPoll != nil {
+			return errors.New("get-query unary dialect requires query lowering and no polling hooks")
+		}
+	case TransportPoll202:
+		if d.Wire == nil || d.Poll == nil || d.Query != nil {
+			return errors.New("poll-202 unary dialect requires a wire lowering and a poll reading")
+		}
+	default:
+		return errors.New("unary dialect transport is not registered")
+	}
+	d.Transport = d.Transport.Normalized()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.dialects[d.Identity]; exists || len(r.dialects) >= 256 {

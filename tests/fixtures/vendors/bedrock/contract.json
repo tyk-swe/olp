@@ -1,5 +1,13 @@
 {
   "vendor": "amazon-bedrock",
+  "realtime": {
+    "basis": "documented",
+    "documentation_links": {
+      "bidirectional_stream": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html"
+    },
+    "notes": "Nova Sonic evidence added 2026-10-27. Speech-to-speech runs over InvokeModelWithBidirectionalStream, an HTTP/2 bidirectional event stream signed with the bound AWS credential, not a WebSocket. Each chunk is a JSON event object (sessionStart, promptStart, contentStart, audioInput or textInput, contentEnd, promptEnd, sessionEnd in, completionStart, contentStart, textOutput, audioOutput, contentEnd, usageEvent, completionEnd out) with audio as base64 content. usageEvent carries cumulative session token totals with speech and text shares, so a completion that reports them settles with observed usage and a session without them stays billing uncertain. Frames in realtime.frames.json are schema-built offline fixtures from those documented event names, not captured traffic",
+    "fixtures": ["realtime.frames.json"]
+  },
   "batch_jobs": {
     "basis": "documented",
     "documentation_links": {

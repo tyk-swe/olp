@@ -19,9 +19,9 @@ func registerUnaryProfiles() {
 		switch d.Identity.ID {
 		case "openai-embeddings", "openai-moderation", "openai-input-tokens", "openai-decisions":
 			kind, hosting = "openai", "direct-openai"
-		case "cohere-embed-v2", "cohere-rerank-v2", "mistral-ocr", "perplexity-search", "tavily-search", "exa-search", "parallel-search":
+		case "cohere-embed-v2", "cohere-rerank-v2", "mistral-ocr", "azure-document-intelligence-ocr", "perplexity-search", "tavily-search", "exa-search", "parallel-search", "brave-search":
 			auth = []string{"api_key"}
-		case "anthropic-count-tokens", "gemini-count-tokens", "bedrock-count-tokens", "gemini-embeddings", "vertex-embeddings", "bedrock-embeddings":
+		case "anthropic-count-tokens", "gemini-count-tokens", "bedrock-count-tokens", "gemini-embeddings", "vertex-embeddings", "bedrock-embeddings", "vertex-document-processing-ocr":
 			continue // established cloud/native compositions
 		case "gemini-batch-embeddings":
 			kind, hosting = "gemini", "direct-gemini"
@@ -112,6 +112,15 @@ func (c Config) OperationURL(d operations.Dialect, model string) (string, error)
 		if c.Hosting() != "direct-compatible" || strings.ContainsAny(path, "?#\\") || strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
 			return "", errors.New("invalid registered operation path")
 		}
+		if strings.Contains(path, "{model}") {
+			model = c.Model(model)
+			if !validPathModel(model) || strings.Count(path, "{model}") != 1 {
+				return "", errors.New("invalid registered operation path")
+			}
+			path = strings.Replace(path, "{model}", url.PathEscape(model), 1)
+		} else if strings.ContainsAny(path, "{}") {
+			return "", errors.New("invalid registered operation path")
+		}
 		base, err := url.Parse(c.profileBase())
 		if err != nil {
 			return "", err
@@ -119,10 +128,22 @@ func (c Config) OperationURL(d operations.Dialect, model string) (string, error)
 		base.Path = strings.TrimRight(base.Path, "/") + "/" + path
 		return base.String(), nil
 	}
-	paths := map[string]wire.Format{"decisions": wire.Decisions, "systemone": wire.SystemOne, "embeddings": wire.Embeddings, "moderation": wire.Moderation, "input_tokens": wire.InputTokens, "anthropic_count": wire.AnthropicCount, "gemini_count": wire.GeminiCount, "bedrock_count": wire.Format("bedrock_count"), "gemini_embeddings": wire.GeminiEmbeddings, "gemini_embeddings_batch": wire.GeminiEmbeddingsBatch, "vertex_embeddings": wire.VertexEmbeddings, "bedrock_embeddings": wire.BedrockEmbeddings, "rerank": wire.Rerank}
+	paths := map[string]wire.Format{"decisions": wire.Decisions, "systemone": wire.SystemOne, "embeddings": wire.Embeddings, "moderation": wire.Moderation, "input_tokens": wire.InputTokens, "anthropic_count": wire.AnthropicCount, "gemini_count": wire.GeminiCount, "bedrock_count": wire.Format("bedrock_count"), "gemini_embeddings": wire.GeminiEmbeddings, "gemini_embeddings_batch": wire.GeminiEmbeddingsBatch, "vertex_embeddings": wire.VertexEmbeddings, "bedrock_embeddings": wire.BedrockEmbeddings, "rerank": wire.Rerank, "documentai_process": wire.DocumentAIProcess}
 	encodedWire, ok := paths[d.Address.FamilyPath]
 	if !ok {
 		return "", errors.New("operation path adapter is not registered")
 	}
 	return c.URL(encodedWire, model, false)
+}
+
+func validPathModel(model string) bool {
+	if model == "" || len(model) > 128 || model == "." || model == ".." {
+		return false
+	}
+	for _, r := range model {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '~' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

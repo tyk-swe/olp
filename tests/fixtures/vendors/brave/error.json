@@ -1,0 +1,10 @@
+{
+  "type": "ErrorResponse",
+  "error": {
+    "id": "9f2c4a2f-0000-4d5e-9a11-7f2f0c5b6d71",
+    "status": 422,
+    "detail": "Missing query parameter: q",
+    "code": "VALIDATION"
+  },
+  "time": 1761523200
+}

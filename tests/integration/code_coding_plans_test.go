@@ -151,7 +151,10 @@ func newCodingPlanFixture(t *testing.T, plugin, profile string, keys ...string) 
 	t.Helper()
 	h := newAccessHarness(t)
 	owner := h.owner()
-	f := &codingPlanFixture{h: h, owner: owner, profile: profile, keys: keys, peer: newFixedHostPeer(t, "api.z.ai", "open.bigmodel.cn", "opencode.ai")}
+	f := &codingPlanFixture{h: h, owner: owner, profile: profile, keys: keys, peer: newFixedHostPeer(t,
+		"api.z.ai", "open.bigmodel.cn", "opencode.ai",
+		"api.minimax.io", "api.minimax.cn", "api.kimi.ai", "api.kimi.com",
+		"token-plan.ap-southeast-1.maas.aliyuncs.com", "token-plan.cn-beijing.maas.aliyuncs.com")}
 	f.project = createProject(h, owner, "Coding plan qualification")
 	f.digest = installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/"+plugin))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Code key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("code-key"), 201)
@@ -224,7 +227,12 @@ func (f *codingPlanFixture) enroll(t *testing.T, provider, key string) string {
 	t.Helper()
 	path := "/api/v1/providers/" + provider
 	enrollment := startGrantEnrollment(t, f.h, f.owner, path)
-	pages := map[string]string{codeplans.ZAIProfile: codeplans.ZAIKeyPage, codeplans.BigModelProfile: codeplans.BigModelKeyPage, codeplans.OpenCodeGoProfile: codeplans.OpenCodeGoKeyPage}
+	pages := map[string]string{
+		codeplans.ZAIProfile: codeplans.ZAIKeyPage, codeplans.BigModelProfile: codeplans.BigModelKeyPage, codeplans.OpenCodeGoProfile: codeplans.OpenCodeGoKeyPage,
+		codeplans.MiniMaxProfile: codeplans.MiniMaxKeyPage, codeplans.MiniMaxCNProfile: codeplans.MiniMaxCNKeyPage,
+		codeplans.KimiProfile: codeplans.KimiKeyPage, codeplans.KimiCNProfile: codeplans.KimiCNKeyPage,
+		codeplans.QwenTokenPlanProfile: codeplans.QwenTokenPlanKeyPage, codeplans.QwenTokenPlanCNProfile: codeplans.QwenTokenPlanCNKeyPage,
+	}
 	if enrollment["input"] != "secret" || enrollment["authorization_url"] != pages[f.profileOf(t, provider)] || enrollment["device"] != nil {
 		t.Fatalf("pasted-key enrollment: %v", enrollment)
 	}
@@ -304,24 +312,45 @@ func TestCodeCodingPlanForwardsClientTrafficWithTheAccountsKey(t *testing.T) {
 	chat := `{"model":"glm-5.3","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"CONTROLLED_PRIVATE_PROMPT"}]}`
 	responses := `{"model":"gpt-5.5","stream":true,"store":false,"input":"CONTROLLED_PRIVATE_PROMPT"}`
 	for _, test := range []struct {
-		plugin, profile, host string
-		calls                 []call
+		plugin, profile, host, keyPrefix string
+		calls                            []call
 	}{
-		{"zai-coding", codeplans.ZAIProfile, "api.z.ai", []call{
+		{"zai-coding", codeplans.ZAIProfile, "api.z.ai", "", []call{
 			{"v1/messages?beta=true", "/api/anthropic/v1/messages", "Authorization", "messages", claude, messages, codingPlanMessagesSSE},
 			{"v1/chat/completions", "/api/coding/paas/v4/chat/completions", "Authorization", "chat", opencode, chat, codingPlanChatSSE},
 		}},
-		{"zai-coding", codeplans.BigModelProfile, "open.bigmodel.cn", []call{
+		{"zai-coding", codeplans.BigModelProfile, "open.bigmodel.cn", "", []call{
 			{"v1/messages?beta=true", "/api/anthropic/v1/messages", "Authorization", "messages", claude, messages, codingPlanMessagesSSE},
 		}},
-		{"opencode-go", codeplans.OpenCodeGoProfile, "opencode.ai", []call{
+		{"opencode-go", codeplans.OpenCodeGoProfile, "opencode.ai", "", []call{
 			{"v1/messages", "/zen/go/v1/messages", "X-Api-Key", "messages", opencode, messages, codingPlanMessagesSSE},
 			{"v1/chat/completions", "/zen/go/v1/chat/completions", "Authorization", "chat", opencode, chat, codingPlanChatSSE},
 			{"v1/responses", "/zen/go/v1/responses", "Authorization", "responses", opencode, responses, codingPlanResponsesSSE},
 		}},
+		{"minimax-plan", codeplans.MiniMaxProfile, "api.minimax.io", "sk-cp-", []call{
+			{"v1/messages?beta=true", "/anthropic/v1/messages", "Authorization", "messages", claude, messages, codingPlanMessagesSSE},
+			{"v1/chat/completions", "/v1/chat/completions", "Authorization", "chat", opencode, chat, codingPlanChatSSE},
+		}},
+		{"minimax-plan", codeplans.MiniMaxCNProfile, "api.minimax.cn", "sk-cp-", []call{
+			{"v1/messages?beta=true", "/anthropic/v1/messages", "Authorization", "messages", claude, messages, codingPlanMessagesSSE},
+		}},
+		{"kimi-code", codeplans.KimiProfile, "api.kimi.ai", "", []call{
+			{"v1/messages?beta=true", "/coding/v1/messages", "X-Api-Key", "messages", claude, messages, codingPlanMessagesSSE},
+			{"v1/chat/completions", "/coding/v1/chat/completions", "Authorization", "chat", opencode, chat, codingPlanChatSSE},
+		}},
+		{"kimi-code", codeplans.KimiCNProfile, "api.kimi.com", "", []call{
+			{"v1/messages?beta=true", "/coding/v1/messages", "X-Api-Key", "messages", claude, messages, codingPlanMessagesSSE},
+		}},
+		{"qwen-token-plan", codeplans.QwenTokenPlanProfile, "token-plan.ap-southeast-1.maas.aliyuncs.com", "sk-sp-", []call{
+			{"v1/messages?beta=true", "/apps/anthropic/v1/messages", "Authorization", "messages", claude, messages, codingPlanMessagesSSE},
+			{"v1/chat/completions", "/compatible-mode/v1/chat/completions", "Authorization", "chat", opencode, chat, codingPlanChatSSE},
+		}},
+		{"qwen-token-plan", codeplans.QwenTokenPlanCNProfile, "token-plan.cn-beijing.maas.aliyuncs.com", "sk-sp-", []call{
+			{"v1/messages?beta=true", "/apps/anthropic/v1/messages", "Authorization", "messages", claude, messages, codingPlanMessagesSSE},
+		}},
 	} {
 		t.Run(test.profile, func(t *testing.T) {
-			key := "0123456789abcdef0123456789abcdef." + test.profile
+			key := test.keyPrefix + "0123456789abcdef0123456789abcdef." + test.profile
 			f := newCodingPlanFixture(t, test.plugin, test.profile, key)
 			for i, c := range test.calls {
 				header := c.header.Clone()
