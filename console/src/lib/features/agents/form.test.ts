@@ -186,3 +186,222 @@ describe('publication configuration', () => {
     }
   });
 });
+
+describe('publication editor boundaries', () => {
+  it('starts a new editor with blank resource bindings and the supported default protocol', () => {
+    expect(publicationForm()).toEqual({
+      project: '',
+      name: '',
+      tools: [],
+      template: '',
+      variables: '',
+      protocol: 'a2a-1.0.0',
+      endpoint: '',
+      cardDigest: '',
+      pricingRevision: '',
+      maxCost: '',
+      toolsetRevisions: '',
+      routeRevisions: ''
+    });
+  });
+
+  it.each(['a2a-0.3.0', 'a2a-1.0.0'] as const)(
+    'round trips %s agent bindings and trims edited identifiers',
+    (protocol) => {
+      const draft: Publication['draft'] = {
+        project_id: id,
+        name: 'Agent',
+        agent: {
+          protocol,
+          endpoint: 'https://agent.example.test',
+          card_digest: 'catalog',
+          pricing_revision_id: 'price-revision',
+          max_cost: '12.34',
+          toolset_revisions: ['tool-a', 'tool-b'],
+          route_revisions: ['route-a', 'route-b']
+        }
+      };
+      const current: Publication = {
+        id,
+        project_id: id,
+        kind: 'agent',
+        name: 'Agent',
+        etag: id,
+        revision_id: id,
+        retired: false,
+        draft
+      };
+      const form = publicationForm(current);
+      expect(publicationInput('agents', form)).toEqual(draft);
+      const edited = {
+        ...form,
+        name: ' Edited ',
+        endpoint: ' https://other.example.test ',
+        cardDigest: ' new-catalog ',
+        pricingRevision: ' new-pricing ',
+        maxCost: ' 0.25 ',
+        toolsetRevisions: ' tool-c,\ntool-d ',
+        routeRevisions: ' route-c\t route-d '
+      };
+      expect(publicationInput('agents', edited)).toEqual({
+        project_id: id,
+        name: 'Edited',
+        agent: {
+          protocol,
+          endpoint: 'https://other.example.test',
+          card_digest: 'new-catalog',
+          pricing_revision_id: 'new-pricing',
+          max_cost: '0.25',
+          toolset_revisions: ['tool-c', 'tool-d'],
+          route_revisions: ['route-c', 'route-d']
+        }
+      });
+    }
+  );
+
+  it('round trips prompt variables and removes empty separators from edited variables', () => {
+    const draft: Publication['draft'] = {
+      project_id: id,
+      name: 'Prompt',
+      prompt: {
+        template: 'Hello {{name}} in {{language}}',
+        variables: ['name', 'language']
+      }
+    };
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'prompt',
+      name: 'Prompt',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft
+    };
+    const form = publicationForm(current);
+    expect(publicationInput('prompts', form)).toEqual(draft);
+    expect(
+      publicationInput('prompts', {
+        ...form,
+        variables: ' , name,\n\tlanguage , '
+      }).prompt?.variables
+    ).toEqual(['name', 'language']);
+  });
+
+  it('allows a catalog member when other certified tools have different names', async () => {
+    const result = await toolPin(
+      {
+        ...server,
+        catalog: {
+          ...server.catalog,
+          tools: [
+            ...server.catalog.tools,
+            { name: 'other', description: '', input_schema: { type: 'object' } }
+          ]
+        }
+      },
+      'lookup'
+    );
+    expect(result.ok && result.pin.name).toBe('lookup');
+  });
+
+  it('accepts inclusive installation limits and bounded multi-digit decimal prices', () => {
+    const result = serverPricingInput(server, {
+      ...serverPricingForm(server),
+      unitPrice: ' 123456789012.123456789012 ',
+      toolPrices: { lookup: ' 12.345678901234 ' },
+      callsPerMinute: ' 60000 ',
+      maxConcurrency: ' 1024 ',
+      perKeyCallsPerMinute: ' 1 ',
+      perKeyMaxConcurrency: ' 1 '
+    });
+    expect(result.ok && result.input).toEqual({
+      name: server.name,
+      endpoint: server.endpoint,
+      enabled: server.enabled,
+      unit_price: '123456789012.123456789012',
+      tool_prices: { lookup: '12.345678901234' },
+      calls_per_minute: 60000,
+      max_concurrency: 1024,
+      per_key_calls_per_minute: 1,
+      per_key_max_concurrency: 1
+    });
+    for (const price of [
+      '1234567890123',
+      '0.1234567890123',
+      '12x',
+      '+12',
+      '.5',
+      '5.'
+    ]) {
+      expect(
+        serverPricingInput(server, {
+          ...serverPricingForm(server),
+          unitPrice: price
+        }).ok
+      ).toBe(false);
+      expect(
+        serverPricingInput(server, {
+          ...serverPricingForm(server),
+          toolPrices: { lookup: price }
+        }).ok
+      ).toBe(false);
+    }
+  });
+});
+
+describe('pricing editor feedback', () => {
+  it('prices a certified tool without requiring every other tool to share its name', () => {
+    const catalog = {
+      ...server,
+      catalog: {
+        ...server.catalog,
+        tools: [
+          ...server.catalog.tools,
+          { name: 'other', description: '', input_schema: { type: 'object' } }
+        ]
+      }
+    };
+    const result = serverPricingInput(catalog, {
+      ...serverPricingForm(catalog),
+      toolPrices: { lookup: '12.5' }
+    });
+    expect(result.ok && result.input.tool_prices).toEqual({ lookup: '12.5' });
+  });
+  it.each([
+    ['callsPerMinute', 'Calls per minute'],
+    ['maxConcurrency', 'Max concurrency'],
+    ['perKeyCallsPerMinute', 'Per-key calls per minute'],
+    ['perKeyMaxConcurrency', 'Per-key max concurrency']
+  ] as const)('identifies the invalid %s field', (field, label) => {
+    const result = serverPricingInput(server, {
+      ...serverPricingForm(server),
+      [field]: 'invalid'
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain(label);
+  });
+  it('keeps complete tool pins when reopening and submitting a publication', async () => {
+    const result = await toolPin(server, 'lookup');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const draft: Publication['draft'] = {
+      project_id: id,
+      name: 'Pinned',
+      toolset: { tools: [result.pin] }
+    };
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'toolset',
+      name: 'Pinned',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft
+    };
+    const form = publicationForm(current);
+    expect(form.tools).toEqual([result.pin]);
+    expect(publicationInput('toolsets', form)).toEqual(draft);
+  });
+});
