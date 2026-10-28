@@ -458,12 +458,6 @@ func TestExplicitCardPricesReserveInstallationCurrency(t *testing.T) {
 				return f.h.want(f.Owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": []usage.Price{price}}, idem(key), want)
 			}
 			if ordinaryFirst {
-				ordinary["currency"] = "EUR"
-			}
-			publish := func(price map[string]any, key string, want int) map[string]any {
-				return f.h.want(f.Owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": []any{price}}, idem(key), want)
-			}
-			if ordinaryFirst {
 				publish(ordinary, "ordinary-first", 201)
 			}
 			card := f.h.want(f.Owner, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "installation"}}, idem("currency-card"), 201)
@@ -480,7 +474,7 @@ func TestExplicitCardPricesReserveInstallationCurrency(t *testing.T) {
 			if !ordinaryFirst {
 				publish(ordinary, "ordinary-after-card", 201)
 			}
-			publish(price("same-currency-model", currency), "same-currency", 201)
+			publish(price("currency-model", currency), "same-currency", 201)
 			quote := f.h.want(f.Owner, "POST", "/api/v1/pricing/quote", map[string]any{"provider_id": f.P1, "model": "currency-model", "operation": "generation", "usage": map[string]any{"input_tokens": 1000000, "output_tokens": 0}}, nil, 200)
 			if quote["currency"] != currency {
 				t.Fatalf("card currency %s differs from quote %v", currency, quote)
