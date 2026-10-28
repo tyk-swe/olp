@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -599,6 +600,7 @@ type transportBoundaryReply struct {
 }
 
 func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
+	multiline := json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("x", 70<<10) + `"},{"type":"text","text":"` + strings.Repeat("y", 70<<10) + `"}]}`)
 	const answer = `{"content":[{"type":"text","text":"answer"}]}`
 	for _, tc := range []struct {
 		name               string
@@ -606,6 +608,9 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 		session            string
 		callResult         json.RawMessage
 		responseBytes      int
+		sse                bool
+		multiline          bool
+		discovery          bool
 		valid              bool
 	}{
 		{name: "notification accepted", notificationStatus: 202, callResult: json.RawMessage(answer), valid: true},
@@ -616,6 +621,13 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 		{name: "session identifier overflow", notificationStatus: 202, session: strings.Repeat("s", 257), callResult: json.RawMessage(answer)},
 		{name: "result bound", notificationStatus: 202, responseBytes: 1 << 20, valid: true},
 		{name: "result overflow", notificationStatus: 202, responseBytes: (1 << 20) + 1},
+		{name: "JSON large result", notificationStatus: 202, responseBytes: 256 << 10, valid: true},
+		{name: "SSE large result", notificationStatus: 202, responseBytes: 256 << 10, sse: true, valid: true},
+		{name: "SSE result bound", notificationStatus: 202, responseBytes: 1 << 20, sse: true, valid: true},
+		{name: "SSE result overflow", notificationStatus: 202, responseBytes: (1 << 20) + 1, sse: true},
+		{name: "JSON multiple content blocks", notificationStatus: 202, callResult: multiline, valid: true},
+		{name: "SSE multiline result", notificationStatus: 202, callResult: multiline, sse: true, multiline: true, valid: true},
+		{name: "discovery retains SSE bound", notificationStatus: 202, callResult: json.RawMessage(`{"tools":[{"name":"lookup","description":"` + strings.Repeat("x", 256<<10) + `","inputSchema":{"type":"object"}}]}`), sse: true, discovery: true},
 		{name: "missing content", notificationStatus: 202, callResult: json.RawMessage(`{}`)},
 		{name: "null result", notificationStatus: 202, callResult: json.RawMessage(`null`)},
 		{name: "null content", notificationStatus: 202, callResult: json.RawMessage(`{"content":null}`)},
@@ -647,19 +659,34 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}`)})
 					return
 				}
+				prefix, suffix := func() (string, string) {
+					if tc.sse {
+						return "event: message\ndata: ", "\n\n"
+					}
+					return "", ""
+				}()
 				result := func() json.RawMessage {
 					if tc.responseBytes == 0 {
 						return tc.callResult
 					}
 					empty, _ := json.Marshal(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":""}]}`)})
-					return json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("x", tc.responseBytes-len(empty)) + `"}]}`)
+					return json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("x", tc.responseBytes-len(empty)-len(prefix)-len(suffix)) + `"}]}`)
 				}()
 				encoded, err := json.Marshal(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: result})
 				if err != nil {
 					t.Error(err)
 					return
 				}
-				_, _ = w.Write(encoded)
+				if tc.sse {
+					w.Header().Set("Content-Type", "text/event-stream")
+				}
+				body := func() string {
+					if tc.multiline {
+						return strings.ReplaceAll(string(encoded), "},{", "},\ndata: {")
+					}
+					return string(encoded)
+				}()
+				_, _ = fmt.Fprint(w, prefix, body, suffix)
 			}))
 			defer upstream.Close()
 			transport, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, nil, TransportOptions{ClientName: "boundary-fixture", Timeout: time.Second})
@@ -675,9 +702,24 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer transport.Close(t.Context())
+			if tc.discovery {
+				if _, err := transport.ListTools(t.Context(), ""); err == nil {
+					t.Fatal("oversized discovery event accepted")
+				}
+				return
+			}
 			result, callErr := transport.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
 			if (callErr == nil) != tc.valid {
 				t.Fatalf("result accepted=%v, expected %v: %v", callErr == nil, tc.valid, callErr)
+			}
+			if tc.valid && len(tc.callResult) > 0 {
+				var expected ToolResult
+				if err := json.Unmarshal(tc.callResult, &expected); err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(result.Content, expected.Content) {
+					t.Fatal("accepted result changed its content")
+				}
 			}
 			if tc.responseBytes > 0 && tc.valid && (len(result.Content) != 1 || len(result.Content[0].Text) < 1) {
 				t.Fatal("boundary result lost its text")

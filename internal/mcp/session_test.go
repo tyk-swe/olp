@@ -1196,7 +1196,8 @@ func TestStreamableHTTPCallRequiresMetaCallID(t *testing.T) {
 }
 
 func TestStreamableHTTPExactRepeatReturnsRetainedResult(t *testing.T) {
-	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "large_result")
+	fx.notify.Store(true)
 	sessionID := openSession(t, server, "test-key", latestProtocol())
 	first := rpcRequest(t, server, "test-key", sessionID, latestProtocol(), "/mcp", sessionCallBody(2, "order-session", "x"))
 	firstResult := rpcResult(t, first)
@@ -1218,6 +1219,14 @@ func TestStreamableHTTPExactRepeatReturnsRetainedResult(t *testing.T) {
 	secondContent, _ := secondResult["content"].([]any)
 	if len(firstContent) != 1 || len(secondContent) != 1 {
 		t.Fatalf("session repeat did not return the retained result: first=%v second=%v", firstResult, secondResult)
+	}
+	firstText, _ := firstContent[0].(map[string]any)
+	secondText, _ := secondContent[0].(map[string]any)
+	if firstText["text"] != strings.Repeat("x", 256<<10) || firstText["text"] != secondText["text"] {
+		t.Fatal("large SSE result changed during delivery or replay")
+	}
+	if len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusSucceeded {
+		t.Fatalf("large SSE result did not settle exactly once: %+v", ledger.evidence)
 	}
 }
 
