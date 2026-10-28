@@ -326,7 +326,7 @@ func newTestServer(t *testing.T, authority *access.Authority, mode string) (*Ser
 	fx.setMode(mode)
 	ledger := &fakeLedger{tl: tl}
 	server := &Server{
-		Runtime: rt, Ledger: ledger, Auth: testAuthKey(),
+		Runtime: rt, Ledger: ledger, Auth: testAuthKey(), Limiter: &fakeRateLimiter{},
 		Egress: testEgress(),
 		Credentials: func(_ context.Context, id string) ([]byte, error) {
 			if id != testCredID {
@@ -535,6 +535,19 @@ func TestCallToolRateLimitRefusalReservesAndDispatchesNothing(t *testing.T) {
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"limited-json-2","arguments":{"query":"x"}}`)
 	if status != http.StatusTooManyRequests || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
 		t.Fatalf("concurrency limited call dispatched: status=%d calls=%d reserved=%d", status, fx.calls.Load(), len(ledger.reserved))
+	}
+}
+
+func TestCallToolMissingLimiterFailsClosed(t *testing.T) {
+	server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	server.Limiter = nil
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"missing-limiter-1","arguments":{"query":"x"}}`)
+	if status != http.StatusServiceUnavailable || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+		t.Fatalf("missing limiter dispatched: status=%d calls=%d reserved=%d body=%v", status, fx.calls.Load(), len(ledger.reserved), body)
+	}
+	if body["error"].(map[string]any)["code"] != "limits_unavailable" {
+		t.Fatalf("missing limiter refusal is not limits_unavailable: %v", body)
 	}
 }
 

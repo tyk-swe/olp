@@ -36,50 +36,35 @@ func tighterToolLimit(server int64, key *int64) *int64 {
 	return &value
 }
 
-func toolRateLimit(value, fallback int64) *int64 {
-	if value <= 0 {
-		value = fallback
-	}
-	return &value
-}
-
 func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
-	limiter := s.rateLimiter()
+	limiter := s.Limiter
+	if concrete, ok := limiter.(*limits.Limiter); ok && concrete == nil {
+		limiter = nil
+	}
 	if limiter == nil {
-		return nil, nil, 0
+		return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
 	}
-	perKeyRate := in.tool.PerKeyCallsPerMinute
-	if perKeyRate <= 0 {
-		perKeyRate = routing.DefaultToolCallsPerMinute
-	}
-	perKeyConcurrency := in.tool.PerKeyMaxConcurrency
-	if perKeyConcurrency <= 0 {
-		perKeyConcurrency = routing.DefaultToolMaxConcurrency
-	}
+	effective := routing.EffectiveToolLimits(in.tool.CallsPerMinute, in.tool.MaxConcurrency, in.tool.PerKeyCallsPerMinute, in.tool.PerKeyMaxConcurrency)
 	requests := []limits.Request{
 		{
 			CostOwnerID: in.authority.ID, LookupID: toolPerKeyLookup(in.authority, in.tool.ServerID),
-			RequestsPerMinute: tighterToolLimit(perKeyRate, in.authority.Policy.RequestsPerMinute),
-			MaxConcurrency:    tighterToolLimit(perKeyConcurrency, in.authority.Policy.MaxConcurrency),
+			RequestsPerMinute: tighterToolLimit(effective.PerKeyCallsPerMinute, in.authority.Policy.RequestsPerMinute),
+			MaxConcurrency:    tighterToolLimit(effective.PerKeyMaxConcurrency, in.authority.Policy.MaxConcurrency),
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 		{
-			CostOwnerID: in.tool.ServerID, LookupID: toolPerServerLookup(in.tool.ServerID),
-			RequestsPerMinute: toolRateLimit(in.tool.CallsPerMinute, routing.DefaultToolCallsPerMinute),
-			MaxConcurrency:    toolRateLimit(in.tool.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+			CostOwnerID:       in.tool.ServerID,
+			LookupID:          toolPerServerLookup(in.tool.ServerID),
+			RequestsPerMinute: &effective.CallsPerMinute,
+			MaxConcurrency:    &effective.MaxConcurrency,
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 	}
 	leases := make([]*limits.Lease, 0, len(requests))
-	release := func() {
-		for _, lease := range leases {
-			_ = lease.Release(context.WithoutCancel(ctx))
-		}
-	}
 	for _, request := range requests {
 		lease, err := limiter.Reserve(ctx, request)
 		if err != nil {
-			release()
+			s.finishLeases(ctx, leases, false)
 			var exceeded *limits.ExceededError
 			if errors.As(err, &exceeded) {
 				return nil, fail(http.StatusTooManyRequests, "tool_rate_limited", "rate_limit_error", "The call exceeds a tool rate or concurrency limit, so it was not dispatched."), exceeded.RetryAfter
@@ -117,6 +102,7 @@ type execution struct {
 }
 
 type dispatchResult struct {
+	dispatched    bool
 	result        mcpservers.ToolResult
 	started       time.Time
 	completed     time.Time
@@ -145,6 +131,7 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
 		CallDigest: s.callDigest(in.authority, in.callID), UnitPrice: cloneUnitPrice(in.tool.UnitPrice),
+		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
 	})
 	if err == nil && reservedResult.Repeat != nil {
 		outcome := execution{repeat: reservedResult.Repeat}
@@ -206,7 +193,8 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTo
 	}
 	result, callErr := transport.CallTool(ctx, tool.Name, arguments)
 	return dispatchResult{
-		result: result, started: started, completed: time.Now(),
+		dispatched: true,
+		result:     result, started: started, completed: time.Now(),
 		listChanged: transport.ListChanged(), callErr: callErr,
 		certification: certificationCertified,
 	}
@@ -254,28 +242,26 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if rateFailure != nil {
 		return execution{failure: rateFailure, retryAfter: retryAfter}
 	}
-	defer func() {
-		for _, lease := range leases {
-			_ = lease.Release(context.WithoutCancel(ctx))
-		}
-	}()
+	dispatched := false
+	defer func() { s.finishLeases(ctx, leases, dispatched) }()
 	reservation, reserved := s.reserveToolCall(ctx, in)
 	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved
 	}
-	dispatched := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)
-	if dispatched.failure != nil {
-		return execution{failure: dispatched.failure, certification: dispatched.certification}
+	dispatchedResult := s.dispatchToolCall(ctx, in.tool, credential, reservation, in.arguments)
+	dispatched = dispatchedResult.dispatched
+	if dispatchedResult.failure != nil {
+		return execution{failure: dispatchedResult.failure, certification: dispatchedResult.certification}
 	}
-	if dispatched.callErr != nil {
+	if dispatchedResult.callErr != nil {
 		evidence := AttemptEvidence{
 			ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
 			Status: StatusOutcomeUnknown, IsError: false,
 			ResultDigest: digestBytes([]byte(string(StatusOutcomeUnknown) + ":" + reservation.DispatchID)),
-			StartedAt:    dispatched.started, CompletedAt: dispatched.completed,
+			StartedAt:    dispatchedResult.started, CompletedAt: dispatchedResult.completed,
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidence)
-		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed.", listChanged: dispatched.listChanged, certification: dispatched.certification}
+		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call may have run upstream, but its outcome could not be confirmed.", listChanged: dispatchedResult.listChanged, certification: dispatchedResult.certification}
 	}
-	return s.settleToolCall(ctx, in.tool, reservation, dispatched)
+	return s.settleToolCall(ctx, in.tool, reservation, dispatchedResult)
 }

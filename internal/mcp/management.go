@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"math/big"
 	"net/http"
 	"regexp"
 	"strings"
@@ -45,7 +44,7 @@ type ToolCall struct {
 	RemainingCost     string            `json:"remaining_cost"`
 	RemainingCharge   string            `json:"remaining_charge"`
 	UnitPrice         *string           `json:"unit_price"`
-	PricingState      string            `json:"pricing_state"`
+	PricingState      PricingState      `json:"pricing_state"`
 	Currency          *string           `json:"currency"`
 }
 
@@ -115,33 +114,11 @@ func resolveAmountIsZero(amount string) bool {
 	return strings.Trim(amount, "0.") == ""
 }
 
-func decimalWithinBound(bound, observed, amount string) bool {
-	limit, ok := new(big.Rat).SetString(bound)
-	if !ok {
-		return false
-	}
-	total, ok := new(big.Rat).SetString(observed)
-	if !ok {
-		return false
-	}
-	added, ok := new(big.Rat).SetString(amount)
-	if !ok {
-		return false
-	}
-	return total.Add(total, added).Cmp(limit) <= 0
-}
-
-func decimalEqual(a, b string) bool {
-	left, okLeft := new(big.Rat).SetString(a)
-	right, okRight := new(big.Rat).SetString(b)
-	return okLeft && okRight && left.Cmp(right) == 0
-}
-
 func checkResolveBounds(call ToolCall, observedCost, observedCharge string) error {
-	if !decimalWithinBound(call.CostBound, call.ObservedCost, observedCost) {
+	if !limits.WithinBound(call.CostBound, call.ObservedCost, observedCost) {
 		return access.Invalid("observed_cost", "The observed cost exceeds the held debit bound.")
 	}
-	if !decimalWithinBound(call.ChargeBound, call.ObservedCharge, observedCharge) {
+	if !limits.WithinBound(call.ChargeBound, call.ObservedCharge, observedCharge) {
 		return access.Invalid("observed_charge", "The observed charge exceeds the held debit bound.")
 	}
 	return nil
@@ -210,7 +187,7 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply,
 		if storedErr != nil {
 			return access.Reply{}, storedErr
 		}
-		if found && bytes.Equal(stored, evidence) && decimalEqual(call.ObservedCost, observedCost) && decimalEqual(call.ObservedCharge, observedCharge) {
+		if found && bytes.Equal(stored, evidence) && limits.AmountEqual(call.ObservedCost, observedCost) && limits.AmountEqual(call.ObservedCharge, observedCharge) {
 			return access.Detail(call, call.ID), nil
 		}
 		return access.Reply{}, access.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")

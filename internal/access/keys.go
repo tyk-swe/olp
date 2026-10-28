@@ -730,12 +730,43 @@ func (a Authority) KeyDebitRequest(leaseTTL time.Duration) limits.Request {
 	}
 }
 
-func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ([]limits.DebitOwner, []limits.Request, bool, bool) {
-	owners := []limits.DebitOwner{a.KeyDebitOwner()}
-	requests := []limits.Request{a.KeyDebitRequest(leaseTTL)}
+type ToolDebitBoundary struct {
+	Owner          limits.DebitOwner
+	Request        limits.Request
+	AggregateLevel string
+	AggregateKey   string
+	AggregateValue string
+}
+
+type ToolDebitBoundariesResult struct {
+	Boundaries   []ToolDebitBoundary
+	CostBudgeted bool
+	Resolved     bool
+}
+
+func (r ToolDebitBoundariesResult) Owners() []limits.DebitOwner {
+	owners := make([]limits.DebitOwner, 0, len(r.Boundaries))
+	for _, boundary := range r.Boundaries {
+		owners = append(owners, boundary.Owner)
+	}
+	return owners
+}
+
+func (r ToolDebitBoundariesResult) Requests() []limits.Request {
+	requests := make([]limits.Request, 0, len(r.Boundaries))
+	for _, boundary := range r.Boundaries {
+		requests = append(requests, boundary.Request)
+	}
+	return requests
+}
+
+func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ToolDebitBoundariesResult {
+	boundaries := []ToolDebitBoundary{{Owner: a.KeyDebitOwner(), Request: a.KeyDebitRequest(leaseTTL)}}
 	add := func(owner limits.DebitOwner, request limits.Request) {
-		owners = append(owners, owner)
-		requests = append(requests, request)
+		boundaries = append(boundaries, ToolDebitBoundary{Owner: owner, Request: request})
+	}
+	addAggregate := func(owner limits.DebitOwner, request limits.Request, level, key, value string) {
+		boundaries = append(boundaries, ToolDebitBoundary{Owner: owner, Request: request, AggregateLevel: level, AggregateKey: key, AggregateValue: value})
 	}
 	if a.BudgetGroupID != nil && a.GroupLimits().CostBudgeted() {
 		add(limits.DebitOwner{ID: *a.BudgetGroupID, Kind: "group", Basis: limits.Basis(a.BudgetGroupCostBasis)}, limits.Request{
@@ -763,15 +794,15 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ([]limits.DebitOw
 			continue
 		}
 		if boundary.subject == "" {
-			return nil, nil, false, false
+			return ToolDebitBoundariesResult{}
 		}
 		owner := limits.AggregateBudgetID(boundary.level, boundary.subject)
-		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: boundary.policy.Basis()}, limits.Request{
+		addAggregate(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: boundary.policy.Basis()}, limits.Request{
 			CostOwnerID: owner, CostBasis: boundary.policy.Basis(), LookupID: limits.AggregateBudgetLookup(owner),
 			CostIncreases:  a.BudgetIncreases[owner],
 			DailyCostLimit: boundary.policy.DailyCostLimit, WeeklyCostLimit: boundary.policy.WeeklyCostLimit,
 			MonthlyCostLimit: boundary.policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
-		})
+		}, boundary.level, boundary.subject, "")
 	}
 	for _, key := range slices.Sorted(maps.Keys(a.Attribution)) {
 		policy, found := a.ProjectAttributionBudgets[key][a.Attribution[key]]
@@ -779,15 +810,15 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ([]limits.DebitOw
 			continue
 		}
 		if a.ProjectID == nil {
-			return nil, nil, false, false
+			return ToolDebitBoundariesResult{}
 		}
 		owner := limits.AttributionBudgetID(*a.ProjectID, key, a.Attribution[key])
-		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: policy.Basis()}, limits.Request{
+		addAggregate(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: policy.Basis()}, limits.Request{
 			CostOwnerID: owner, CostBasis: policy.Basis(), LookupID: limits.AggregateBudgetLookup(owner),
 			CostIncreases:  a.BudgetIncreases[owner],
 			DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
 			MonthlyCostLimit: policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
-		})
+		}, "attribution", key, a.Attribution[key])
 	}
 	if a.EndUserDigest != "" {
 		for _, boundary := range [...]struct {
@@ -803,7 +834,7 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ([]limits.DebitOw
 			owner := limits.EndUserKeyID(a.ID, a.EndUserDigest)
 			if boundary.project {
 				if a.ProjectID == nil {
-					return nil, nil, false, false
+					return ToolDebitBoundariesResult{}
 				}
 				owner = limits.EndUserProjectID(*a.ProjectID, a.EndUserDigest)
 			}
@@ -816,8 +847,8 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ([]limits.DebitOw
 		}
 	}
 	costBudgeted := false
-	for _, request := range requests {
-		costBudgeted = costBudgeted || request.HasCostBudget()
+	for _, boundary := range boundaries {
+		costBudgeted = costBudgeted || boundary.Request.HasCostBudget()
 	}
-	return owners, requests, costBudgeted, true
+	return ToolDebitBoundariesResult{Boundaries: boundaries, CostBudgeted: costBudgeted, Resolved: true}
 }

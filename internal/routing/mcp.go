@@ -70,11 +70,40 @@ func validToolLimit(value, ceiling int64) bool {
 	return value >= 0 && value <= ceiling
 }
 
-func toolLimitOrDefault(value, fallback int64) int64 {
-	if value == 0 {
+type ToolLimits struct {
+	CallsPerMinute       int64
+	MaxConcurrency       int64
+	PerKeyCallsPerMinute int64
+	PerKeyMaxConcurrency int64
+}
+
+func ToolLimitOr(value *int64, fallback int64) int64 {
+	if value == nil {
 		return fallback
 	}
-	return value
+	return *value
+}
+
+func EffectiveToolLimits(callsPerMinute, maxConcurrency, perKeyCallsPerMinute, perKeyMaxConcurrency int64) ToolLimits {
+	or := func(value, fallback int64) int64 {
+		if value <= 0 {
+			return fallback
+		}
+		return value
+	}
+	return ToolLimits{
+		CallsPerMinute:       or(callsPerMinute, DefaultToolCallsPerMinute),
+		MaxConcurrency:       or(maxConcurrency, DefaultToolMaxConcurrency),
+		PerKeyCallsPerMinute: or(perKeyCallsPerMinute, DefaultToolCallsPerMinute),
+		PerKeyMaxConcurrency: or(perKeyMaxConcurrency, DefaultToolMaxConcurrency),
+	}
+}
+
+func (l ToolLimits) WithinInstallation() bool {
+	return l.CallsPerMinute >= 1 && l.CallsPerMinute <= MaxToolCallsPerMinute &&
+		l.PerKeyCallsPerMinute >= 1 && l.PerKeyCallsPerMinute <= MaxToolCallsPerMinute &&
+		l.MaxConcurrency >= 1 && l.MaxConcurrency <= MaxToolConcurrency &&
+		l.PerKeyMaxConcurrency >= 1 && l.PerKeyMaxConcurrency <= MaxToolConcurrency
 }
 
 type MCPDriftedTool struct {
@@ -220,6 +249,7 @@ func (s *Snapshot) compileMCP() {
 				resolution.Invalid = append(resolution.Invalid, drifted)
 				continue
 			}
+			effective := EffectiveToolLimits(server.CallsPerMinute, server.MaxConcurrency, server.PerKeyCallsPerMinute, server.PerKeyMaxConcurrency)
 			price := copyPointer(server.UnitPrice)
 			if toolPrice, ok := server.ToolPrices[pin.Name]; ok {
 				price = &toolPrice
@@ -229,10 +259,10 @@ func (s *Snapshot) compileMCP() {
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint,
 				CredentialID: copyPointer(server.CredentialID), UnitPrice: price,
-				CallsPerMinute:       toolLimitOrDefault(server.CallsPerMinute, DefaultToolCallsPerMinute),
-				MaxConcurrency:       toolLimitOrDefault(server.MaxConcurrency, DefaultToolMaxConcurrency),
-				PerKeyCallsPerMinute: toolLimitOrDefault(server.PerKeyCallsPerMinute, DefaultToolCallsPerMinute),
-				PerKeyMaxConcurrency: toolLimitOrDefault(server.PerKeyMaxConcurrency, DefaultToolMaxConcurrency),
+				CallsPerMinute:       effective.CallsPerMinute,
+				MaxConcurrency:       effective.MaxConcurrency,
+				PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute,
+				PerKeyMaxConcurrency: effective.PerKeyMaxConcurrency,
 				schema:               schema,
 			})
 		}

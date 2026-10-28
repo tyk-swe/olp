@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"slices"
@@ -29,13 +30,15 @@ type RateLimiter interface {
 	Reserve(ctx context.Context, request limits.Request) (*limits.Lease, error)
 }
 
+type PricingState string
+
 const (
-	PricingPriced   = "priced"
-	PricingFree     = "free"
-	PricingUnpriced = "unpriced"
+	PricingPriced   PricingState = "priced"
+	PricingFree     PricingState = "free"
+	PricingUnpriced PricingState = "unpriced"
 )
 
-func pricingStateFor(price *string) string {
+func pricingStateFor(price *string) PricingState {
 	if price == nil {
 		return PricingUnpriced
 	}
@@ -56,12 +59,13 @@ func cloneUnitPrice(price *string) *string {
 type Status string
 
 const (
-	StatusDispatched     Status = "dispatched"
-	StatusSucceeded      Status = "succeeded"
-	StatusUpstreamError  Status = "upstream_error"
-	StatusOutcomeUnknown Status = "outcome_unknown"
-	StatusSettled        Status = "settled"
-	StatusNotAccepted    Status = "not_accepted"
+	StatusDispatched      Status = "dispatched"
+	StatusSucceeded       Status = "succeeded"
+	StatusUpstreamError   Status = "upstream_error"
+	StatusOutcomeUnknown  Status = "outcome_unknown"
+	StatusSettled         Status = "settled"
+	StatusNotAccepted     Status = "not_accepted"
+	StatusRefusedUnpriced Status = "refused_unpriced"
 
 	defaultCallTimeout = 30 * time.Second
 	maxCallBodyBytes   = 1 << 20
@@ -82,6 +86,8 @@ type ReserveInput struct {
 	InputDigest       string
 	CallDigest        string
 	UnitPrice         *string
+	ServerID          string
+	ServerRevisionID  string
 }
 
 type Reservation struct {
@@ -127,6 +133,7 @@ type Ledger interface {
 }
 
 type Server struct {
+	Log            *slog.Logger
 	Runtime        Runtime
 	Egress         *egress.Policy
 	Ledger         Ledger
@@ -141,16 +148,28 @@ type Server struct {
 	results   map[string]retainedResult
 }
 
-func (s *Server) rateLimiter() RateLimiter {
-	if s.Limiter != nil {
-		if concrete, ok := s.Limiter.(*limits.Limiter); !ok || concrete != nil {
-			return s.Limiter
+func (s *Server) log() *slog.Logger {
+	if s.Log != nil {
+		return s.Log
+	}
+	return slog.Default()
+}
+
+func (s *Server) finishLeases(ctx context.Context, leases []*limits.Lease, dispatched bool) {
+	for _, lease := range leases {
+		finish := lease.Refund
+		action := "refund"
+		if dispatched {
+			finish = lease.Release
+			action = "release"
+		}
+		if err := finish(context.WithoutCancel(ctx)); err != nil {
+			s.log().Warn("tool rate lease "+action+" failed, retrying once", "error", err)
+			if retryErr := finish(context.WithoutCancel(ctx)); retryErr != nil {
+				s.log().Warn("tool rate lease "+action+" failed after retry", "error", retryErr)
+			}
 		}
 	}
-	if durable, ok := s.Ledger.(*DurableLedger); ok && durable.Store != nil && durable.Store.Limiter != nil {
-		return durable.Store.Limiter
-	}
-	return nil
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -282,6 +301,33 @@ func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
 	if authority.ProjectID == nil {
 		return access.Authority{}, fail(http.StatusForbidden, "permission_denied", "permission_error", "This API key does not have the tools scope for a project.")
 	}
+	return s.identifyEndUser(r, authority)
+}
+
+func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (access.Authority, *apiError) {
+	if authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
+		return authority, nil
+	}
+	if authority.Policy.EndUserSource == nil {
+		if authority.ProjectEndUserPolicy != nil || authority.Policy.EndUserPolicy != nil {
+			return access.Authority{}, fail(http.StatusBadRequest, "end_user_source_required", "invalid_request_error", "This key must configure an end-user identifier source before using an end-user policy.")
+		}
+		return authority, nil
+	}
+	identifier := ""
+	if *authority.Policy.EndUserSource == "header" {
+		if values := r.Header.Values("X-OLP-End-User"); len(values) == 1 {
+			identifier = values[0]
+		}
+	}
+	if !access.ValidEndUserIdentifier(identifier) {
+		return access.Authority{}, fail(http.StatusBadRequest, "invalid_end_user", "invalid_request_error", "Provide an end-user machine token of 1-128 characters in the key's configured source.")
+	}
+	digester, ok := s.Runtime.(interface{ EndUserDigest(*string, string) string })
+	if !ok {
+		return access.Authority{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "End-user identity is unavailable.")
+	}
+	authority.EndUserDigest = digester.EndUserDigest(authority.ProjectID, identifier)
 	return authority, nil
 }
 

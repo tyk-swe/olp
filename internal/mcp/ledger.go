@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -42,13 +43,11 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
 		return ReserveResult{}, limits.ErrDebitConflict
 	}
-	owners, requests, costBudgeted, resolved := in.Authority.ToolDebitBoundaries(time.Hour)
-	if !resolved {
+	boundaries := in.Authority.ToolDebitBoundaries(time.Hour)
+	if !boundaries.Resolved {
 		return ReserveResult{}, limits.ErrDebitAuthority
 	}
-	if in.UnitPrice == nil && costBudgeted {
-		return ReserveResult{}, ErrUnpricedToolCall
-	}
+	owners, requests := boundaries.Owners(), boundaries.Requests()
 	bound := "0"
 	if in.UnitPrice != nil {
 		bound = *in.UnitPrice
@@ -78,12 +77,21 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		Currency: currency, CostBound: bound, ChargeBound: bound, PreparedUntil: time.Now().Add(90 * time.Second),
 		Affinity: limits.ExecutionAffinity{ReleaseID: in.ReleaseID, RevisionID: in.ToolsetRevisionID, ToolAlias: in.ToolAlias, InputDigest: in.InputDigest},
 	}
+	if in.UnitPrice == nil && boundaries.CostBudgeted {
+		if err = l.recordRefusedUnpriced(ctx, in, reservation, intent, boundaries); err != nil {
+			return ReserveResult{}, err
+		}
+		return ReserveResult{}, ErrUnpricedToolCall
+	}
 	tx, err := l.Pool.Begin(ctx)
 	if err != nil {
 		return ReserveResult{}, err
 	}
 	defer tx.Rollback(ctx)
 	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+		return ReserveResult{}, err
+	}
+	if err = ensureBoundaryAccountsTx(ctx, tx, in, boundaries); err != nil {
 		return ReserveResult{}, err
 	}
 	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, owners)
@@ -112,18 +120,76 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	return ReserveResult{Reservation: reservation}, nil
 }
 
-func reservationPrice(reservation *Reservation) any {
+func reservationPrice(reservation *Reservation) *string {
 	if reservation.UnitPrice == nil {
 		return nil
 	}
-	return *reservation.UnitPrice
+	price := *reservation.UnitPrice
+	return &price
 }
 
-func reservationCurrency(reservation *Reservation) any {
+func reservationCurrency(reservation *Reservation) *string {
 	if reservation.Currency == "" {
 		return nil
 	}
-	return reservation.Currency
+	currency := reservation.Currency
+	return &currency
+}
+
+func ensureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, in ReserveInput, boundaries access.ToolDebitBoundariesResult) error {
+	if in.Authority.EndUserDigest != "" {
+		if err := limits.EnsureEndUserAccounts(ctx, tx, in.Authority.ID, in.Authority.ProjectID, in.Authority.EndUserDigest); err != nil {
+			return err
+		}
+	}
+	for _, boundary := range boundaries.Boundaries {
+		switch {
+		case boundary.AggregateLevel == "attribution":
+			if err := limits.EnsureAttributionBudget(ctx, tx, *in.Authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
+				return err
+			}
+		case boundary.AggregateLevel != "":
+			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInput, reservation *Reservation, intent limits.DebitIntent, boundaries access.ToolDebitBoundariesResult) error {
+	tx, err := l.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+		return err
+	}
+	if err = ensureBoundaryAccountsTx(ctx, tx, in, boundaries); err != nil {
+		return err
+	}
+	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, boundaries.Owners())
+	if err != nil {
+		return err
+	}
+	if state != limits.DebitPrepared {
+		return limits.ErrDebitState
+	}
+	now := time.Now().UTC()
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'refused_unpriced',false,$12,$12,NULL,'unpriced',$13)`,
+		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
+		reservation.ToolsetID, reservation.ToolsetRevisionID, in.ServerID, in.ServerRevisionID,
+		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, now,
+		reservationCurrency(reservation)); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return l.Store.ReleaseUndispatched(releaseCtx, reservation.DispatchID, reservation.ClaimID)
 }
 
 func claimCallTx(ctx context.Context, tx pgx.Tx, in ReserveInput, reservation *Reservation) (*RetainedCall, error) {
@@ -293,6 +359,7 @@ func (l *DurableLedger) Settle(ctx context.Context, reservation *Reservation, ev
 	result := limits.DebitResult{
 		DispatchID: reservation.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:],
 		EventID: reservation.AttemptID, Cost: reservation.amount(), Charge: reservation.amount(), Final: true, Complete: true,
+		Unpriced: reservation.UnitPrice == nil, ObservedAt: evidence.CompletedAt,
 	}
 	tx, err := l.Pool.Begin(ctx)
 	if err != nil {
