@@ -297,3 +297,69 @@ After claiming an enrollment, choose browser authorization or device authorizati
 Access tokens, refresh tokens, PKCE verifiers and device codes are sealed separately from public metadata. An expired access token is refreshed once per grant under a distributed lock before dispatch. Token HTTP requests run outside database mutation transactions. Concurrent callers reuse the completed refresh, and an abandoned or failed rotating-token attempt refuses further use until re-enrollment. No device or token HTTP exchange follows redirects. Per-call upstream connections and consumer sessions remain bound to their individual.
 
 The PKCE, device, refresh and isolation behavior is exercised against the repository OAuth fixture. Live identity-provider qualification is separate.
+
+## Experimental stdio executables
+
+Stdio registration is experimental and uses the existing unconfined executable
+contract. An operator installs a native executable in the directory named by
+`OLP_UNCONFINED_PLUGIN_DIR` on every serving node. The process runs with the
+operating system privileges of the gateway, can read its files and can reach
+networks directly. Its own network access is outside the HTTP egress policy.
+Use only executables trusted as much as the gateway itself.
+
+An owner opens **Plugins**, then **Unconfined MCP executables**, reviews the
+installed file's SHA-256 digest, acknowledges the native execution risk and
+confirms their identity. Review reads metadata without starting the executable.
+Permission applies to the exact executable name and digest. The corresponding
+management operations are `GET /api/v1/mcp-executables`, followed by POST to
+`/api/v1/mcp-executables/{executable}/review` and `/permit`. Permission requires
+an owner browser session, CSRF protection and one-use recent authentication for
+`plugin_permit`. A project registration cannot grant native execution permission.
+
+Register the approved executable with `transport: "stdio"` and a `stdio` object
+containing `executable` and `digest`. Omit the HTTP endpoint, credential and OAuth
+configuration. For example, the registration body can be:
+
+```json
+{
+  "name": "Installed tools",
+  "project_id": "<project UUID>",
+  "transport": "stdio",
+  "stdio": {
+    "executable": "installed-tools",
+    "digest": "<reviewed SHA-256 digest>"
+  },
+  "enabled": true,
+  "unit_price": "0"
+}
+```
+
+The registered transport and executable binding are immutable. Certification
+starts a sealed copy of the approved build and checks its MCP catalog before a
+toolset can pin it. Subsequent calls recheck permission, the installed digest
+and the catalog. Replacing a binary, revoking its permission or changing its
+catalog refuses new dispatches. Revoke the permission in the console or with
+`DELETE /api/v1/mcp-executables/{executable}/permissions/{digest}`.
+
+Each operation gets an isolated subprocess with no extra command arguments, an
+empty environment and the operator's executable directory as its working
+directory. Stdin and stdout carry bounded MCP messages. Stderr is discarded and
+is not a diagnostic persistence channel. Processes and their process groups
+are stopped when the operation completes, times out or is canceled. Consumer
+requests cannot select a command, executable, path, environment, working
+directory or transport. Those names remain available as ordinary properties
+inside a tool's schema-defined `arguments` object.
+
+Published stdio tools use the same JSON and MCP consumer paths, authority,
+guardrails, pinned prices, limits, call identifiers and durable accounting as
+HTTP tools. A process exit, oversized reply or cancellation after possible
+dispatch retains an unknown outcome and its exposure. Reusing that call ID does
+not run the executable again. Configuration export includes the pinned name and
+digest, but omits owner permissions; importing a document cannot approve code.
+
+Local fixture qualification builds and runs an actual installed executable,
+checks owner permission and digest refusal, calls through both consumer
+surfaces, and covers catalog drift, isolated callers, concurrency, settlement,
+process termination and retained unknown outcomes. This evidence qualifies the
+implemented experimental contract, not a sandbox or arbitrary third-party
+executable.

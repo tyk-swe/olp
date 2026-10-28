@@ -80,7 +80,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		return m.Gateway.EvaluateGuardrails(r, p, in)
 	}}).Register(mux)
 	(&agents.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
-	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	(&mcpservers.Server{Access: m.Access, Egress: m.Egress, Executables: &mcpservers.Executables{Tier: m.Unconfined, Query: m.Access.Pool}}).Register(mux)
 	(&mcp.Management{Access: m.Access}).Register(mux)
 	(&mcpgrants.Server{Access: m.Access}).Register(mux)
 	(&retrieval.Server{Access: m.Access}).Register(mux)

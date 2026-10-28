@@ -44,7 +44,11 @@ modern/legacy session isolation and refusal when a replica lacks the live stream
 Legacy deployments require connection affinity between the SSE GET and its
 POSTs. Modern sessions never fall back to the legacy transport.
 
-Per-user OAuth and stdio are separate RM7 slices and remain unqualified here.
+Per-user OAuth is qualified separately. Experimental stdio is covered by a
+locally built, owner-permitted executable fixture through the shared consumer
+path. It preserves the unconfined native execution contract and does not provide
+a sandbox. See [MCP servers](mcp-servers.md#experimental-stdio-executables) for
+deployment, permission and lifecycle requirements.
 Standalone modern consumer event streams, sampling, elicitation, roots and
 arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.

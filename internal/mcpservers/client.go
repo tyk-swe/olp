@@ -44,9 +44,13 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 }
 
 func CertifyTransport(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, transport routing.MCPTransport) (*Catalog, error) {
+	return CertifyOptions(ctx, policy, endpoint, credential, TransportOptions{Transport: transport})
+}
+
+func CertifyOptions(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, opts TransportOptions) (*Catalog, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	c, err := DialTransport(ctx, policy, endpoint, credential, TransportOptions{ClientName: "openllmproxy-certifier", Timeout: 10 * time.Second, Transport: transport})
+	c, err := DialTransport(ctx, policy, endpoint, credential, TransportOptions{ClientName: "openllmproxy-certifier", Timeout: 10 * time.Second, Transport: opts.Transport, Stdio: opts.Stdio, Executables: opts.Executables})
 	if err != nil {
 		return nil, ErrCertification
 	}

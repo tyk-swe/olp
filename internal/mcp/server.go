@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -148,6 +149,7 @@ type GuardrailEvaluation struct {
 }
 
 type Server struct {
+	Executables    *mcpservers.Executables
 	Grants         *mcpgrants.Store
 	Log            *slog.Logger
 	Runtime        Runtime
@@ -543,7 +545,30 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
 }
 
+type executionSelection struct {
+	Transport        json.RawMessage `json:"transport"`
+	Stdio            json.RawMessage `json:"stdio"`
+	Executable       json.RawMessage `json:"executable"`
+	Command          json.RawMessage `json:"command"`
+	Path             json.RawMessage `json:"path"`
+	Args             json.RawMessage `json:"args"`
+	Env              json.RawMessage `json:"env"`
+	Environment      json.RawMessage `json:"environment"`
+	Cwd              json.RawMessage `json:"cwd"`
+	WorkingDirectory json.RawMessage `json:"working_directory"`
+}
+
+func (s executionSelection) supplied() bool {
+	for _, value := range [...]json.RawMessage{s.Transport, s.Stdio, s.Executable, s.Command, s.Path, s.Args, s.Env, s.Environment, s.Cwd, s.WorkingDirectory} {
+		if len(value) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 type callRequest struct {
+	executionSelection
 	ToolsetID string          `json:"toolset_id"`
 	Name      string          `json:"name"`
 	CallID    *string         `json:"call_id"`

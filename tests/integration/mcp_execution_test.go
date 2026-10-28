@@ -8,26 +8,534 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/testutil"
 	"golang.org/x/oauth2"
 )
+
+type stdioRegistrationInput struct {
+	Name      string                  `json:"name"`
+	ProjectID string                  `json:"project_id"`
+	Transport routing.MCPTransport    `json:"transport"`
+	Stdio     routing.MCPStdioBinding `json:"stdio"`
+	Enabled   bool                    `json:"enabled"`
+	UnitPrice string                  `json:"unit_price"`
+}
+type stdioPermitInput struct {
+	Digest          string `json:"digest"`
+	AcknowledgeRisk bool   `json:"acknowledge_risk"`
+}
+type stdioReauthenticationInput struct {
+	CurrentPassword string `json:"current_password"`
+	Purpose         string `json:"purpose"`
+}
+type stdioPublicationInput struct {
+	ProjectID string                `json:"project_id"`
+	Name      string                `json:"name"`
+	Toolset   agentcontract.Toolset `json:"toolset"`
+}
+type stdioKeyInput struct {
+	Name            string   `json:"name"`
+	ProjectID       string   `json:"project_id"`
+	Scopes          []string `json:"scopes"`
+	AllowedToolsets []string `json:"allowed_toolsets"`
+	DailyCostLimit  string   `json:"daily_cost_limit,omitempty"`
+}
+type stdioServerUpdate struct {
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	MaxConcurrency int    `json:"max_concurrency,omitempty"`
+}
+
+func TestMCPOwnerPermitsInstalledStdioProcess(t *testing.T) {
+	disabled := newAccessHarness(t)
+	owner := disabled.owner()
+	dir := t.TempDir()
+	testutil.BuildExecutablePlugin(t, filepath.Join(dir, "stdio-tools"), "./internal/mcpservers/testdata/stdio")
+	h := newUnconfinedHarness(t, disabled.Pool, disabled.DBURL, dir)
+	h.want(owner, "GET", "/api/v1/mcp-executables", nil, nil, 200)
+	reviewed := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/review", nil, nil, 200)
+	digest := mcpExecString(t, reviewed, "digest")
+	project := createProject(h, owner, "Installed tools")
+	registration := stdioRegistrationInput{Name: "Installed MCP", ProjectID: project, Transport: routing.MCPStdio, Stdio: routing.MCPStdioBinding{Executable: "stdio-tools", Digest: digest}, Enabled: true, UnitPrice: "0"}
+	h.want(owner, "POST", "/api/v1/mcp-servers", registration, idem("stdio-unapproved"), 422)
+	request := stdioPermitInput{Digest: digest, AcknowledgeRisk: true}
+	operator := h.invite(owner, "stdio-operator@example.com", "operator")
+	h.want(operator, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, nil, 403)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, nil, 428)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: digest, AcknowledgeRisk: false}, nil, 422)
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", stdioReauthenticationInput{CurrentPassword: accessPassword, Purpose: "plugin_permit"}, nil, 204)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: strings.Repeat("0", 64), AcknowledgeRisk: true}, nil, 409)
+	granted := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, idem("stdio-permit"), 201)
+	if granted["digest"] != digest || granted["permitted"] != true {
+		t.Fatalf("owner permission did not retain reviewed digest: %v", granted)
+	}
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, idem("stdio-permit-again"), 428)
+	h.want(owner, "POST", "/api/v1/mcp-servers", registration, idem("stdio-registration"), 201)
+}
+
+type stdioFixture struct {
+	h         *accessHarness
+	owner     *browser
+	directory string
+	serverID  string
+	digest    string
+	toolsetID string
+	alias     string
+	secret    string
+	mux       *http.ServeMux
+	consumer  *httptest.Server
+}
+
+type stdioReply struct {
+	status int
+	body   []byte
+	header http.Header
+}
+
+func newStdioFixture(t *testing.T) stdioFixture {
+	t.Helper()
+	base := newAccessHarness(t)
+	owner := base.owner()
+	directory := t.TempDir()
+	testutil.BuildExecutablePlugin(t, filepath.Join(directory, "stdio-tools"), "./internal/mcpservers/testdata/stdio")
+	h := newUnconfinedHarness(t, base.Pool, base.DBURL, directory)
+	reviewed := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/review", nil, nil, 200)
+	digest := mcpExecString(t, reviewed, "digest")
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", stdioReauthenticationInput{CurrentPassword: accessPassword, Purpose: "plugin_permit"}, nil, 204)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: digest, AcknowledgeRisk: true}, idem("stdio-fixture-permit"), 201)
+	project := createProject(h, owner, "Native tool calls")
+	registered := h.want(owner, "POST", "/api/v1/mcp-servers", stdioRegistrationInput{Name: "Native tools", ProjectID: project, Transport: routing.MCPStdio, Stdio: routing.MCPStdioBinding{Executable: "stdio-tools", Digest: digest}, Enabled: true, UnitPrice: "0.25"}, idem("stdio-fixture-server"), 201)
+	serverID := mcpExecString(t, registered, "id")
+	alias := agentcontract.ToolAlias(serverID, "echo")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "echo", Alias: alias}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", stdioPublicationInput{ProjectID: project, Name: "Native calls", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("stdio-fixture-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("stdio-fixture-publish")), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", stdioKeyInput{Name: "Native caller", ProjectID: project, Scopes: []string{"tools"}, AllowedToolsets: []string{toolsetID}, DailyCostLimit: "5"}, idem("stdio-fixture-key"), 201)
+	client, prefix, _ := acctKeyspace(t)
+	limiter, limiterErr := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if limiterErr != nil {
+		t.Fatal(limiterErr)
+	}
+	sessions, sessionErr := mcp.NewSessionStore(client, strings.TrimSuffix(prefix, ":")+":stdio")
+	if sessionErr != nil {
+		t.Fatal(sessionErr)
+	}
+	tier := plugins.NewUnconfined(directory, plugins.DefaultLimits, nil)
+	server := &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessions, Limiter: limiter, Executables: &mcpservers.Executables{Tier: tier, Query: h.Pool}, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	consumer := httptest.NewServer(mux)
+	t.Cleanup(consumer.Close)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	return stdioFixture{h: h, owner: owner, directory: directory, serverID: serverID, digest: digest, toolsetID: toolsetID, alias: alias, secret: mcpExecString(t, key, "secret"), mux: mux, consumer: consumer}
+}
+
+func sendStdioRequest(ctx context.Context, endpoint, secret, path string, body []byte, session string) (stdioReply, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+path, bytes.NewReader(body))
+	if err != nil {
+		return stdioReply{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+secret)
+	request.Header.Set("Content-Type", "application/json")
+	if session != "" {
+		request.Header.Set("Mcp-Session-Id", session)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return stdioReply{}, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	return stdioReply{status: response.StatusCode, body: raw, header: response.Header.Clone()}, err
+}
+
+func (f stdioFixture) request(t *testing.T, path string, body []byte, session string) stdioReply {
+	t.Helper()
+	reply, err := sendStdioRequest(t.Context(), f.consumer.URL, f.secret, path, body, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reply
+}
+
+func (f stdioFixture) callBody(callID string, arguments string) []byte {
+	return []byte(fmt.Sprintf(`{"toolset_id":%q,"name":%q,"call_id":%q,"arguments":%s}`, f.toolsetID, f.alias, callID, arguments))
+}
+
+func (f stdioFixture) session(t *testing.T) string {
+	t.Helper()
+	initialized := f.request(t, "/mcp?toolset_id="+f.toolsetID, []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"stdio-check","version":"1"}}}`), "")
+	session := initialized.header.Get("Mcp-Session-Id")
+	if initialized.status != 200 || session == "" {
+		t.Fatalf("MCP initialization failed: %s", initialized.body)
+	}
+	response := f.request(t, "/mcp", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), session)
+	if response.status != 202 {
+		t.Fatalf("MCP notification failed: %s", response.body)
+	}
+	return session
+}
+
+func (f stdioFixture) starts(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.directory, "starts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func (f stdioFixture) debitCount(t *testing.T) int {
+	t.Helper()
+	var count int
+	if err := f.h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.mcp_tool_calls WHERE server_id=$1", f.serverID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func TestMCPStdioCallsPreserveArgumentsAndRefuseTransportOverrides(t *testing.T) {
+	f := newStdioFixture(t)
+	arguments := `{ "query" : "hel\u006co", "command":"ordinary", "path":"ordinary", "env":"ordinary", "cwd":"ordinary", "environment":"ordinary", "working_directory":"ordinary" }`
+	success := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-json", arguments), "")
+	var call struct {
+		AttemptID string                   `json:"attempt_id"`
+		Content   []mcpservers.ToolContent `json:"content"`
+	}
+	if json.Unmarshal(success.body, &call) != nil || success.status != 200 || len(call.Content) != 1 {
+		t.Fatalf("stdio call failed: %d %s", success.status, success.body)
+	}
+	var echoed struct {
+		Query            string `json:"query"`
+		Command          string `json:"command"`
+		Path             string `json:"path"`
+		Env              string `json:"env"`
+		Cwd              string `json:"cwd"`
+		Environment      string `json:"environment"`
+		WorkingDirectory string `json:"working_directory"`
+	}
+	if json.Unmarshal([]byte(call.Content[0].Text), &echoed) != nil || echoed.Query != "hello" || echoed.Command != "ordinary" || echoed.Path != "ordinary" || echoed.Env != "ordinary" || echoed.Cwd != "ordinary" || echoed.Environment != "ordinary" || echoed.WorkingDirectory != "ordinary" {
+		t.Fatalf("schema-defined arguments were changed: %+v", echoed)
+	}
+	record := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls/"+call.AttemptID, nil, nil, 200)
+	expectedDigest := hex.EncodeToString(f.h.AuthKey.Digest(secrets.ToolInputDigest, arguments))
+	if record["status"] != "succeeded" || record["debit_state"] != "settled" || record["input_digest"] != expectedDigest || mcpAmount(t, record, "observed_charge").Cmp(big.NewRat(1, 4)) != 0 {
+		t.Fatalf("stdio settlement lost arguments, price, or outcome: %v", record)
+	}
+	session := f.session(t)
+	starts := f.starts(t)
+	debits := f.debitCount(t)
+	for _, field := range []string{"transport", "stdio", "executable", "command", "path", "args", "env", "environment", "cwd", "working_directory"} {
+		t.Run(field, func(t *testing.T) {
+			jsonBody := []byte(fmt.Sprintf(`{"toolset_id":%q,"name":%q,"call_id":%q,"arguments":{"query":"ignored"},%q:"caller-selected"}`, f.toolsetID, f.alias, "json-override-"+field, field))
+			jsonResponse := f.request(t, "/v1/mcp/tools/call", jsonBody, "")
+			if jsonResponse.status != 400 {
+				t.Fatalf("JSON accepted transport override: %d %s", jsonResponse.status, jsonResponse.body)
+			}
+			rpcBody := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":%q,"arguments":{"query":"ignored"},"_meta":{"olp.call_id":%q},%q:"caller-selected"}}`, f.alias, "mcp-override-"+field, field))
+			rpcResponse := f.request(t, "/mcp", rpcBody, session)
+			var refused struct {
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(rpcResponse.body, &refused) != nil || len(refused.Error) == 0 {
+				t.Fatalf("MCP accepted transport override: %s", rpcResponse.body)
+			}
+			outerBody := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call",%q:"caller-selected","params":{"name":%q,"arguments":{"query":"ignored"},"_meta":{"olp.call_id":%q}}}`, field, f.alias, "outer-override-"+field))
+			outer := f.request(t, "/mcp", outerBody, session)
+			var outerError struct {
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(outer.body, &outerError) != nil || len(outerError.Error) == 0 {
+				t.Fatalf("MCP envelope accepted transport override: %s", outer.body)
+			}
+
+		})
+	}
+	if !bytes.Equal(starts, f.starts(t)) || debits != f.debitCount(t) {
+		t.Fatal("refused caller transport controls started a subprocess or reserved accounting")
+	}
+	valid := f.request(t, "/mcp", []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":%q,"arguments":%s,"_meta":{"olp.call_id":"stdio-mcp-ok"}}}`, f.alias, arguments)), session)
+	var rpc struct {
+		Error  json.RawMessage `json:"error"`
+		Result json.RawMessage `json:"result"`
+	}
+	if json.Unmarshal(valid.body, &rpc) != nil || len(rpc.Error) > 0 || len(rpc.Result) == 0 {
+		t.Fatalf("MCP rejected ordinary schema properties: %s", valid.body)
+	}
+
+}
+
+func (f stdioFixture) unknown(t *testing.T, reply stdioReply) string {
+	t.Helper()
+	var result struct {
+		AttemptID string `json:"attempt_id"`
+		Status    string `json:"status"`
+	}
+	if json.Unmarshal(reply.body, &result) != nil || reply.status != 502 || result.Status != "outcome_unknown" || result.AttemptID == "" {
+		t.Fatalf("ambiguous process outcome was not retained: %d %s", reply.status, reply.body)
+	}
+	record := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls/"+result.AttemptID, nil, nil, 200)
+	if record["debit_state"] != "outcome_unknown" || !mcpAmountsEqual(t, record, "remaining_cost", "cost_bound") || mcpAmountIsZero(t, record, "remaining_cost") {
+		t.Fatalf("ambiguous process outcome lost held exposure: %v", record)
+	}
+	return result.AttemptID
+}
+
+func TestMCPStdioRetainsAmbiguousOutcomesAndStopsProcesses(t *testing.T) {
+	f := newStdioFixture(t)
+	for _, query := range []string{"exit", "oversize"} {
+		reply := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-"+query, fmt.Sprintf(`{"query":%q}`, query)), "")
+		attempt := f.unknown(t, reply)
+		starts := f.starts(t)
+		repeated := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-"+query, fmt.Sprintf(`{"query":%q}`, query)), "")
+		if f.unknown(t, repeated) != attempt || !bytes.Equal(starts, f.starts(t)) {
+			t.Fatal("ambiguous call was dispatched again")
+		}
+	}
+	current := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, stdioServerUpdate{Name: mcpExecString(t, current, "name"), Enabled: true, MaxConcurrency: 1}, withMatch(current, idem("stdio-concurrency")), 200)
+	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { f.mux.ServeHTTP(w, r.WithContext(waiting)) }))
+	defer endpoint.Close()
+	type pending struct {
+		reply stdioReply
+		err   error
+	}
+	done := make(chan pending, 1)
+	before, err := os.ReadFile(filepath.Join(f.directory, "effects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		reply, err := sendStdioRequest(t.Context(), endpoint.URL, f.secret, "/v1/mcp/tools/call", f.callBody("stdio-cancel", `{"query":"wait"}`), "")
+		done <- pending{reply, err}
+	}()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+awaitEffect:
+	for {
+		select {
+		case <-ticker.C:
+			after, err := os.ReadFile(filepath.Join(f.directory, "effects"))
+			if err == nil && !bytes.Equal(before, after) {
+				break awaitEffect
+			}
+		case <-deadline.C:
+			t.Fatal("waiting process never reached its tool effect")
+		}
+	}
+	refused := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-while-busy", `{"query":"must not run"}`), "")
+	if refused.status != http.StatusTooManyRequests {
+		t.Fatalf("held native operation escaped its concurrency bound: %s", refused.body)
+	}
+	cancel()
+	select {
+	case outcome := <-done:
+		if outcome.err != nil {
+			t.Fatal(outcome.err)
+		}
+		f.unknown(t, outcome.reply)
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancellation did not terminate the process and settle its standing")
+	}
+	normal := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-after-exit", `{"query":"still works"}`), "")
+	if normal.status != 200 {
+		t.Fatalf("failed processes left execution wedged: %s", normal.body)
+	}
+	for _, rawPID := range strings.Fields(string(f.starts(t))) {
+		pid, err := strconv.Atoi(rawPID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+			t.Fatalf("tool subprocess %d remained after its operation: %v", pid, err)
+		}
+	}
+}
+
+func TestMCPStdioSettlesFinalResponseBeforeImmediateExit(t *testing.T) {
+	f := newStdioFixture(t)
+	reply := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-final", `{"query":"final"}`), "")
+	var response struct {
+		AttemptID string                   `json:"attempt_id"`
+		Content   []mcpservers.ToolContent `json:"content"`
+	}
+	if json.Unmarshal(reply.body, &response) != nil || reply.status != 200 || len(response.Content) != 1 {
+		t.Fatalf("flushed final result was lost: %d %s", reply.status, reply.body)
+	}
+	var echoed struct {
+		Query string `json:"query"`
+	}
+	if json.Unmarshal([]byte(response.Content[0].Text), &echoed) != nil || echoed.Query != "final" {
+		t.Fatalf("final result changed: %s", reply.body)
+	}
+	record := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls/"+response.AttemptID, nil, nil, 200)
+	if record["status"] != "succeeded" || record["debit_state"] != "settled" || !mcpAmountIsZero(t, record, "remaining_cost") || mcpAmount(t, record, "observed_charge").Cmp(big.NewRat(1, 4)) != 0 {
+		t.Fatalf("final response was treated as unknown exposure: %v", record)
+	}
+}
+
+func TestMCPStdioConfigurationKeepsNativeExecutionOperatorControlled(t *testing.T) {
+	f := newStdioFixture(t)
+	exported := mcpExecObject(t, f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, 200), "document")
+	entry := mcpExecItem(t, mcpExecItems(t, exported, "mcp_servers"), 0, exported)
+	binding := mcpExecObject(t, entry, "stdio")
+	if entry["transport"] != "stdio" || binding["executable"] != "stdio-tools" || binding["digest"] != f.digest {
+		t.Fatalf("configuration lost approved executable binding: %v", entry)
+	}
+	encodedDocument, encodeErr := json.Marshal(exported)
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	var document configuration.Document
+	if decodeErr := json.Unmarshal(encodedDocument, &document); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", struct {
+		Document configuration.Document `json:"document"`
+	}{Document: document}, idem("stdio-config"), 200)
+	path := "/api/v1/mcp-servers/" + f.serverID
+	current := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	f.h.want(f.owner, "PUT", path, stdioServerUpdate{Name: mcpExecString(t, current, "name"), Enabled: true, Endpoint: "https://invalid.example"}, withMatch(current, idem("stdio-http-override")), 422)
+	f.h.want(f.owner, "PUT", path, struct {
+		Name    string                   `json:"name"`
+		Enabled bool                     `json:"enabled"`
+		Stdio   *routing.MCPStdioBinding `json:"stdio"`
+	}{Name: mcpExecString(t, current, "name"), Enabled: true}, withMatch(current, idem("stdio-clear-binding")), 422)
+	updated := f.h.want(f.owner, "PUT", path, stdioServerUpdate{Name: mcpExecString(t, current, "name"), Enabled: true}, withMatch(current, idem("stdio-recertify")), 200)
+	revision := f.h.want(f.owner, "GET", path+"/revisions/"+mcpExecString(t, updated, "revision_id"), nil, nil, 200)
+	if mcpExecObject(t, revision, "stdio")["digest"] != f.digest {
+		t.Fatal("revision lost immutable executable binding")
+	}
+	if mcpExecObject(t, updated, "stdio")["digest"] != f.digest {
+		t.Fatal("recertification lost approved native binding")
+	}
+}
+
+func TestMCPStdioRechecksPermissionDigestAndCatalog(t *testing.T) {
+	f := newStdioFixture(t)
+	baseline := f.starts(t)
+	permission := "/api/v1/mcp-executables/stdio-tools/permissions/" + f.digest
+	f.h.want(f.owner, "DELETE", permission, nil, idem("stdio-revoke"), 204)
+	refused := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-revoked", `{"query":"must not run"}`), "")
+	if refused.status == 200 || !bytes.Equal(baseline, f.starts(t)) {
+		t.Fatalf("revoked native permission started a process: %s", refused.body)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/profile/reauthenticate", stdioReauthenticationInput{CurrentPassword: accessPassword, Purpose: "plugin_permit"}, nil, 204)
+	f.h.want(f.owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: f.digest, AcknowledgeRisk: true}, idem("stdio-repermit"), 201)
+	executable := filepath.Join(f.directory, "stdio-tools")
+	original, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, append(slices.Clone(original), byte(0)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	changed := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-changed", `{"query":"must not run"}`), "")
+	if changed.status == 200 || !bytes.Equal(baseline, f.starts(t)) {
+		t.Fatalf("changed executable started under an old digest: %s", changed.body)
+	}
+	if err := os.WriteFile(executable, original, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.directory, "drift"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	drifted := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-drifted", `{"query":"must not run"}`), "")
+	if drifted.status == 200 {
+		t.Fatalf("drifted stdio catalog was dispatched: %s", drifted.body)
+	}
+	if _, err := os.Stat(filepath.Join(f.directory, "effects")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused native calls reached a tool effect: %v", err)
+	}
+	var held int
+	if err := f.h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debits WHERE state IN ('prepared','dispatched','outcome_unknown')`).Scan(&held); err != nil || held != 0 {
+		t.Fatalf("predispatch failures left unexplained exposure: held=%d err=%v", held, err)
+	}
+}
+
+func TestMCPStdioKeepsConcurrentCallerResultsIsolated(t *testing.T) {
+	f := newStdioFixture(t)
+	server := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
+	key := f.h.want(f.owner, "POST", "/api/v1/api-keys", stdioKeyInput{Name: "Second native caller", ProjectID: mcpExecString(t, server, "project_id"), Scopes: []string{"tools"}, AllowedToolsets: []string{f.toolsetID}}, idem("stdio-second-key"), 201)
+	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	type call struct {
+		secret string
+		query  string
+	}
+	type result struct {
+		query string
+		reply stdioReply
+		err   error
+	}
+	done := make(chan result, 2)
+	for _, caller := range []call{{f.secret, "first-private-value"}, {mcpExecString(t, key, "secret"), "second-private-value"}} {
+		go func() {
+			reply, err := sendStdioRequest(t.Context(), f.consumer.URL, caller.secret, "/v1/mcp/tools/call", f.callBody(caller.query, fmt.Sprintf(`{"query":%q}`, caller.query)), "")
+			done <- result{caller.query, reply, err}
+		}()
+	}
+	for range 2 {
+		outcome := <-done
+		if outcome.err != nil || outcome.reply.status != 200 {
+			t.Fatalf("parallel stdio call failed: %v %s", outcome.err, outcome.reply.body)
+		}
+		var reply struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(outcome.reply.body, &reply) != nil || len(reply.Content) != 1 {
+			t.Fatalf("invalid native result: %s", outcome.reply.body)
+		}
+		var echoed struct {
+			Query string `json:"query"`
+		}
+		if json.Unmarshal([]byte(reply.Content[0].Text), &echoed) != nil || echoed.Query != outcome.query {
+			t.Fatalf("caller received another process's result: %s", outcome.reply.body)
+		}
+	}
+}
 
 func TestMCPReferenceServerRoundTrip(t *testing.T) {
 	mcpReferenceRoundTrip(t, routing.MCPStreamableHTTP, "2025-11-25")

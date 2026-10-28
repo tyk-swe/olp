@@ -18,20 +18,21 @@ import (
 )
 
 type MCPServerEntry struct {
-	OAuth                *routing.MCPOAuth `json:"oauth,omitempty"`
-	Name                 string            `json:"name"`
-	Project              string            `json:"project"`
-	Transport            string            `json:"transport"`
-	Endpoint             string            `json:"endpoint"`
-	Enabled              bool              `json:"enabled"`
-	CatalogDigest        string            `json:"catalog_digest"`
-	CredentialRef        *string           `json:"credential_ref,omitempty"`
-	UnitPrice            *string           `json:"unit_price"`
-	ToolPrices           map[string]string `json:"tool_prices,omitempty"`
-	CallsPerMinute       *int64            `json:"calls_per_minute"`
-	MaxConcurrency       *int64            `json:"max_concurrency"`
-	PerKeyCallsPerMinute *int64            `json:"per_key_calls_per_minute"`
-	PerKeyMaxConcurrency *int64            `json:"per_key_max_concurrency"`
+	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
+	OAuth                *routing.MCPOAuth        `json:"oauth,omitempty"`
+	Name                 string                   `json:"name"`
+	Project              string                   `json:"project"`
+	Transport            string                   `json:"transport"`
+	Endpoint             string                   `json:"endpoint"`
+	Enabled              bool                     `json:"enabled"`
+	CatalogDigest        string                   `json:"catalog_digest"`
+	CredentialRef        *string                  `json:"credential_ref,omitempty"`
+	UnitPrice            *string                  `json:"unit_price"`
+	ToolPrices           map[string]string        `json:"tool_prices,omitempty"`
+	CallsPerMinute       *int64                   `json:"calls_per_minute"`
+	MaxConcurrency       *int64                   `json:"max_concurrency"`
+	PerKeyCallsPerMinute *int64                   `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency *int64                   `json:"per_key_max_concurrency"`
 }
 
 func mcpEntryPrice(value *string) *string {
@@ -62,7 +63,7 @@ func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcps
 		prices[name] = price
 	}
 	return &mcpservers.Definition{
-		OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
+		OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
 		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -94,7 +95,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 		}
 		seen[key] = true
 		in := mcpservers.Input{
-			OAuth: e.OAuth.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
+			OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
 			UnitPrice: e.UnitPrice, ToolPrices: e.ToolPrices,
 			CallsPerMinute: e.CallsPerMinute, MaxConcurrency: e.MaxConcurrency,
 			PerKeyCallsPerMinute: e.PerKeyCallsPerMinute, PerKeyMaxConcurrency: e.PerKeyMaxConcurrency,
@@ -111,7 +112,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 	return nil
 }
 func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, error) {
-	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
+	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.stdio FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +122,7 @@ func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, 
 		var e MCPServerEntry
 		var credential bool
 		var callsPerMinute, maxConcurrency, perKeyCallsPerMinute, perKeyMaxConcurrency int64
-		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency, &e.OAuth); err != nil {
+		if err = rows.Scan(&e.Name, &e.Project, &e.Transport, &e.Endpoint, &e.Enabled, &e.CatalogDigest, &credential, &e.UnitPrice, &e.ToolPrices, &callsPerMinute, &maxConcurrency, &perKeyCallsPerMinute, &perKeyMaxConcurrency, &e.OAuth, &e.Stdio); err != nil {
 			return nil, err
 		}
 		e.CallsPerMinute = &callsPerMinute
@@ -161,7 +162,7 @@ func mcpEntry(d *mcpservers.Definition, project string) MCPServerEntry {
 	}
 	e := MCPServerEntry{
 		Name: d.Name, Project: project, Transport: d.Transport, Endpoint: d.Endpoint, Enabled: d.Enabled, CatalogDigest: d.Catalog.Digest,
-		OAuth: d.OAuth.Clone(), UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
+		OAuth: d.OAuth.Clone(), Stdio: d.Stdio.Clone(), UnitPrice: mcpEntryPrice(d.UnitPrice), ToolPrices: prices,
 		CallsPerMinute: mcpEntryLimit(d.CallsPerMinute), MaxConcurrency: mcpEntryLimit(d.MaxConcurrency),
 		PerKeyCallsPerMinute: mcpEntryLimit(d.PerKeyCallsPerMinute), PerKeyMaxConcurrency: mcpEntryLimit(d.PerKeyMaxConcurrency),
 	}
@@ -306,7 +307,7 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 				return nil, access.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
 			}
 		}
-		catalog, err := mcpservers.CertifyTransport(ctx, s.Egress, e.Endpoint, material, routing.MCPTransport(e.Transport))
+		catalog, err := mcpservers.CertifyOptions(ctx, s.Egress, e.Endpoint, material, mcpservers.TransportOptions{Transport: routing.MCPTransport(e.Transport), Stdio: e.Stdio.Clone(), Executables: &mcpservers.Executables{Tier: s.Unconfined, Query: s.Access.Pool}})
 		clear(material)
 		if err != nil || catalog.Digest != e.CatalogDigest {
 			return nil, access.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
