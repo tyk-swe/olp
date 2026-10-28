@@ -197,7 +197,7 @@ type Route struct {
 type Snapshot struct {
 	AgentPublications  []agentcontract.Revision `json:"agent_publications,omitempty"`
 	MCPServers         []MCPServer              `json:"mcp_servers,omitempty"`
-	mcpTools           map[string][]MCPToolsetTool
+	mcpTools           map[string]MCPToolsetResolution
 	Commitments        map[string][]Commitment `json:"commitments,omitempty"`
 	Guardrails         *guardrails.Registry    `json:"guardrails,omitempty"`
 	guardrailEngines   map[string]*guardrails.Engine

@@ -36,9 +36,25 @@ type MCPToolsetTool struct {
 	InputSchema      json.RawMessage
 	ServerID         string
 	ServerRevisionID string
+	CatalogDigest    string
 	Endpoint         string
 	CredentialID     *string
 	schema           *jsonschema.Schema
+}
+
+type MCPDriftedTool struct {
+	Alias            string
+	Name             string
+	ServerID         string
+	ServerRevisionID string
+	CatalogDigest    string
+}
+
+type MCPToolsetResolution struct {
+	Tools   []MCPToolsetTool
+	Drifted []MCPDriftedTool
+	Invalid []MCPDriftedTool
+	Missing []MCPDriftedTool
 }
 
 var mcpDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -113,19 +129,29 @@ func (s *Snapshot) compileMCP() {
 		byID[server.ID] = server
 	}
 	compiled := map[string]*jsonschema.Schema{}
-	s.mcpTools = map[string][]MCPToolsetTool{}
+	s.mcpTools = map[string]MCPToolsetResolution{}
 	for _, revision := range s.AgentPublications {
 		if revision.Kind != "toolset" || revision.Definition.Toolset == nil {
 			continue
 		}
-		tools := []MCPToolsetTool{}
+		resolution := MCPToolsetResolution{Tools: []MCPToolsetTool{}, Drifted: []MCPDriftedTool{}, Invalid: []MCPDriftedTool{}, Missing: []MCPDriftedTool{}}
 		for _, pin := range revision.Definition.Toolset.Tools {
+			drifted := MCPDriftedTool{
+				Alias: pin.Alias, Name: pin.Name, ServerID: pin.ServerID,
+				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest,
+			}
 			server, ok := byID[pin.ServerID]
-			if !ok || server.ProjectID != revision.ProjectID || server.RevisionID != pin.RevisionID || server.Digest != pin.CatalogDigest {
+			if !ok || server.ProjectID != revision.ProjectID {
+				resolution.Missing = append(resolution.Missing, drifted)
+				continue
+			}
+			if server.RevisionID != pin.RevisionID || server.Digest != pin.CatalogDigest {
+				resolution.Drifted = append(resolution.Drifted, drifted)
 				continue
 			}
 			index := slices.IndexFunc(server.Tools, func(tool MCPTool) bool { return tool.Name == pin.Name })
 			if index < 0 {
+				resolution.Drifted = append(resolution.Drifted, drifted)
 				continue
 			}
 			catalog := server.Tools[index]
@@ -136,27 +162,37 @@ func (s *Snapshot) compileMCP() {
 				schema, err = compileMCPSchema(catalog.InputSchema)
 				compiled[key] = schema
 				if err != nil {
+					resolution.Invalid = append(resolution.Invalid, drifted)
 					continue
 				}
 			}
 			if schema == nil {
+				resolution.Invalid = append(resolution.Invalid, drifted)
 				continue
 			}
-			tools = append(tools, MCPToolsetTool{
+			resolution.Tools = append(resolution.Tools, MCPToolsetTool{
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
-				ServerRevisionID: pin.RevisionID, Endpoint: server.Endpoint,
+				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint,
 				CredentialID: copyPointer(server.CredentialID), schema: schema,
 			})
 		}
-		s.mcpTools[revision.ID] = tools
+		s.mcpTools[revision.ID] = resolution
 	}
 }
 
-func (s *Snapshot) MCPTools(revisionID string) ([]MCPToolsetTool, bool) {
+func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	if s == nil {
-		return nil, false
+		return MCPToolsetResolution{}, false
 	}
-	tools, ok := s.mcpTools[revisionID]
-	return slices.Clone(tools), ok
+	resolution, ok := s.mcpTools[revisionID]
+	if !ok {
+		return MCPToolsetResolution{}, false
+	}
+	return MCPToolsetResolution{
+		Tools:   slices.Clone(resolution.Tools),
+		Drifted: slices.Clone(resolution.Drifted),
+		Invalid: slices.Clone(resolution.Invalid),
+		Missing: slices.Clone(resolution.Missing),
+	}, true
 }

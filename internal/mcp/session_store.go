@@ -6,6 +6,8 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"errors"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,9 @@ var sessionInitializeSource string
 //go:embed scripts/session_delete.lua
 var sessionDeleteSource string
 
+//go:embed scripts/session_certify.lua
+var sessionCertifySource string
+
 type sessionScript struct{ source, digest string }
 
 func newSessionScript(source string) sessionScript {
@@ -37,6 +42,7 @@ var (
 	sessionTouchScript      = newSessionScript(sessionTouchSource)
 	sessionInitializeScript = newSessionScript(sessionInitializeSource)
 	sessionDeleteScript     = newSessionScript(sessionDeleteSource)
+	sessionCertifyScript    = newSessionScript(sessionCertifySource)
 )
 
 var errMalformedSessionState = errors.New("mcp: malformed session state in the shared store")
@@ -100,13 +106,18 @@ func noSessionScript(err error) bool {
 }
 
 func (s *SessionStore) createSession(ctx context.Context, record sessionRecord) (bool, error) {
-	value, err := s.eval(ctx, sessionCreateScript,
-		[]string{s.sessionKey(record.binding, record.id), s.indexKey(record.binding)},
+	args := []string{
 		record.id,
 		strconv.FormatInt(sessionIdleTimeout.Milliseconds(), 10),
 		strconv.Itoa(maxSessionsPerKey),
 		record.binding.installationID, record.binding.projectID, record.binding.scope(),
-		record.protocol, record.toolsetID, record.toolsetRevisionID, record.releaseID)
+		record.protocol, record.toolsetID, record.toolsetRevisionID, record.releaseID,
+	}
+	for _, serverID := range slices.Sorted(maps.Keys(record.certifications)) {
+		args = append(args, serverID, string(record.certifications[serverID]))
+	}
+	value, err := s.eval(ctx, sessionCreateScript,
+		[]string{s.sessionKey(record.binding, record.id), s.indexKey(record.binding)}, args...)
 	if err != nil {
 		return false, err
 	}
@@ -148,6 +159,18 @@ func (s *SessionStore) markSessionInitialized(ctx context.Context, id string, bi
 		return errMalformedSessionState
 	}
 	return nil
+}
+
+func (s *SessionStore) setSessionCertification(ctx context.Context, id string, binding sessionBinding, serverID string, state certificationState) (bool, error) {
+	value, err := s.eval(ctx, sessionCertifyScript, []string{s.sessionKey(binding, id)}, serverID, string(state))
+	if err != nil {
+		return false, err
+	}
+	updated, ok := sessionReplyInt(value)
+	if !ok || updated < 0 || updated > 1 {
+		return false, errMalformedSessionState
+	}
+	return updated == 1, nil
 }
 
 func (s *SessionStore) deleteSession(ctx context.Context, id string, binding sessionBinding) (bool, error) {
@@ -211,6 +234,18 @@ func sessionRecordFromFields(id string, binding sessionBinding, fields map[strin
 		fields["toolset_id"] == "" || fields["toolset_revision_id"] == "" || fields["release_id"] == "" {
 		return sessionRecord{}, errMalformedSessionState
 	}
+	certifications := map[string]certificationState{}
+	for name, value := range fields {
+		serverID, found := strings.CutPrefix(name, "cert:")
+		if !found {
+			continue
+		}
+		state := certificationState(value)
+		if serverID == "" || (state != certificationCertified && state != certificationDrifted && state != certificationInvalid) {
+			return sessionRecord{}, errMalformedSessionState
+		}
+		certifications[serverID] = state
+	}
 	stored := sessionBinding{
 		installationID: fields["installation_id"],
 		projectID:      fields["project_id"],
@@ -222,7 +257,7 @@ func sessionRecordFromFields(id string, binding sessionBinding, fields map[strin
 	return sessionRecord{
 		id: id, binding: stored, protocol: fields["protocol"],
 		toolsetID: fields["toolset_id"], toolsetRevisionID: fields["toolset_revision_id"],
-		releaseID: fields["release_id"],
+		releaseID: fields["release_id"], certifications: certifications,
 		createdAt: time.UnixMilli(createdMS).UTC(), lastActiveAt: time.UnixMilli(activeMS).UTC(),
 		initialized: initialized == "1",
 	}, nil

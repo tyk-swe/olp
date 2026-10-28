@@ -9761,7 +9761,9 @@
         "missing tools scope",
         "toolset outside the key allowlist",
         "arguments outside the pinned schema",
-        "enforced budget exhausted"
+        "enforced budget exhausted",
+        "tool definitions changed since publication",
+        "revoked key or retired publication"
       ],
       "reference_revision": "MCP 2025-11-25 tools over the OLP JSON endpoints; no locked SDK covers the first-party JSON surface"
     },
@@ -9801,7 +9803,9 @@
         "missing tools scope",
         "toolset outside the key allowlist",
         "arguments outside the pinned schema",
-        "enforced budget exhausted"
+        "enforced budget exhausted",
+        "tool definitions changed since publication",
+        "revoked key or retired publication"
       ],
       "reference_revision": "MCP 2025-11-25 tools over the OLP JSON endpoints; no locked SDK covers the first-party JSON surface"
     },
@@ -9851,7 +9855,9 @@
         "session belongs to another principal",
         "session idle for fifteen minutes",
         "sixty-five sessions for one key",
-        "sampling, elicitation, roots and arbitrary resource access"
+        "sampling, elicitation, roots and arbitrary resource access",
+        "tool definitions changed since publication",
+        "revoked key or retired publication"
       ],
       "reference_revision": "MCP Streamable HTTP at 2025-03-26, 2025-06-18 and 2025-11-25; no locked SDK covers the first-party consumer surface"
     },

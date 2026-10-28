@@ -308,3 +308,122 @@ func TestCertificationRejectsRemoteSchemasPrivateDestinationsAndReflectedSecrets
 		})
 	}
 }
+
+func TestTransportCertifiesCatalogOnAnEstablishedSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			w.WriteHeader(204)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			t.Error("bad request")
+			return
+		}
+		var result any
+		switch request.Method {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "fixture-session")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "notifications/initialized":
+			w.WriteHeader(202)
+			return
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "description": "Look up", "inputSchema": map[string]any{"type": "object"}}}}
+		default:
+			t.Errorf("certification invoked %s", request.Method)
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+	certified, err := Certify(t.Context(), fixturePolicy(), server.URL, []byte("fixture-only"))
+	if err != nil {
+		t.Fatalf("certify: %v", err)
+	}
+	transport, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("fixture-only"), TransportOptions{ClientName: "test", Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer transport.Close(t.Context())
+	live, err := transport.CertifyCatalog(t.Context())
+	if err != nil {
+		t.Fatalf("certify on session: %v", err)
+	}
+	if live.Digest != certified.Digest || live.Protocol != certified.Protocol || len(live.Tools) != 1 || live.Tools[0].Name != "lookup" {
+		t.Fatalf("session catalog disagrees with certification: live=%+v certified=%+v", live, certified)
+	}
+	if transport.ListChanged() {
+		t.Fatal("quiet catalog listing reported a change notification")
+	}
+}
+
+func TestTransportObservesToolListChangedNotifications(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		notify string
+		want   bool
+	}{
+		{"list changed", "notifications/tools/list_changed", true},
+		{"other notification", "notifications/progress", false},
+		{"no notification", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "DELETE" {
+					w.WriteHeader(204)
+					return
+				}
+				var request struct {
+					ID     int    `json:"id"`
+					Method string `json:"method"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					t.Error("bad request")
+					return
+				}
+				switch request.Method {
+				case "initialize":
+					w.Header().Set("Mcp-Session-Id", "fixture-session")
+					w.Header().Set("Content-Type", "application/json")
+					body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}})
+					_, _ = w.Write(body)
+				case "notifications/initialized":
+					w.WriteHeader(202)
+				case "tools/call":
+					w.Header().Set("Content-Type", "text/event-stream")
+					if tc.notify != "" {
+						note, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": tc.notify})
+						fmt.Fprintf(w, "event: message\ndata: %s\n\n", note)
+					}
+					body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "ok"}}}})
+					fmt.Fprintf(w, "event: message\ndata: %s\n\n", body)
+					w.(http.Flusher).Flush()
+					<-r.Context().Done()
+				default:
+					t.Errorf("unexpected method %s", request.Method)
+					w.WriteHeader(400)
+				}
+			}))
+			defer server.Close()
+			transport, err := DialTransport(t.Context(), fixturePolicy(), server.URL, []byte("fixture-only"), TransportOptions{ClientName: "test", Timeout: 10 * time.Second})
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer transport.Close(t.Context())
+			out, err := transport.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+			if err != nil || len(out.Content) != 1 || out.Content[0].Text != "ok" {
+				t.Fatalf("call beside a notification failed: %v, %v", out, err)
+			}
+			if transport.ListChanged() != tc.want {
+				t.Fatalf("list changed observation = %v, want %v", transport.ListChanged(), tc.want)
+			}
+		})
+	}
+}

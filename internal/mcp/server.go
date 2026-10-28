@@ -121,6 +121,10 @@ func fail(status int, code, kind, msg string) *apiError {
 var (
 	errToolsetNotFound          = fail(http.StatusNotFound, "toolset_not_found", "invalid_request_error", "The toolset does not exist or this key may not use it.")
 	errToolNotFound             = fail(http.StatusNotFound, "tool_not_found", "invalid_request_error", "The tool does not exist in the pinned toolset.")
+	errToolDefinitionChanged    = fail(http.StatusConflict, "tool_definition_changed", "api_error", "The upstream tool definitions differ from the pinned published definitions, so the call was not dispatched. Publish a reviewed revision to use the changed definitions.")
+	errToolSchemaInvalid        = fail(http.StatusServiceUnavailable, "tool_schema_invalid", "api_error", "The pinned tool schema could not be compiled, so the call was not dispatched.")
+	errCatalogUnavailable       = fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server catalog could not be verified, so the session was not opened.")
+	errPermissionDenied         = fail(http.StatusForbidden, "permission_denied", "permission_error", "This API key may no longer use the toolset.")
 	errLedger                   = fail(http.StatusServiceUnavailable, "debit_ledger_unavailable", "api_error", "The durable debit ledger is unavailable, so the call was not dispatched.")
 	errSessionRequired          = fail(http.StatusBadRequest, "session_required", "invalid_request_error", "Supply the session in the Mcp-Session-Id header.")
 	errSessionNotFound          = fail(http.StatusNotFound, "session_not_found", "invalid_request_error", "The session does not exist.")
@@ -178,6 +182,57 @@ type resolvedToolset struct {
 	id         string
 	revisionID string
 	tools      []routing.MCPToolsetTool
+	drifted    []routing.MCPDriftedTool
+	invalid    []routing.MCPDriftedTool
+	missing    []routing.MCPDriftedTool
+}
+
+func toolsetFromResolution(id, revisionID string, resolution routing.MCPToolsetResolution) resolvedToolset {
+	return resolvedToolset{
+		id: id, revisionID: revisionID, tools: resolution.Tools,
+		drifted: resolution.Drifted, invalid: resolution.Invalid, missing: resolution.Missing,
+	}
+}
+
+type toolLookup int
+
+const (
+	toolFound toolLookup = iota
+	toolDrifted
+	toolInvalidSchema
+	toolServerMissing
+	toolMissing
+)
+
+func (r resolvedToolset) lookup(alias string) (routing.MCPToolsetTool, toolLookup) {
+	if index := slices.IndexFunc(r.tools, func(tool routing.MCPToolsetTool) bool { return tool.Alias == alias }); index >= 0 {
+		return r.tools[index], toolFound
+	}
+	if slices.ContainsFunc(r.drifted, func(pin routing.MCPDriftedTool) bool { return pin.Alias == alias }) {
+		return routing.MCPToolsetTool{}, toolDrifted
+	}
+	if slices.ContainsFunc(r.invalid, func(pin routing.MCPDriftedTool) bool { return pin.Alias == alias }) {
+		return routing.MCPToolsetTool{}, toolInvalidSchema
+	}
+	if slices.ContainsFunc(r.missing, func(pin routing.MCPDriftedTool) bool { return pin.Alias == alias }) {
+		return routing.MCPToolsetTool{}, toolServerMissing
+	}
+	return routing.MCPToolsetTool{}, toolMissing
+}
+
+func (r resolvedToolset) listingFailure() *apiError {
+	if len(r.drifted) > 0 {
+		return errToolDefinitionChanged
+	}
+	if len(r.invalid) > 0 {
+		return errToolSchemaInvalid
+	}
+	return nil
+}
+
+func (s *Server) driftScoped(authority access.Authority, resolved resolvedToolset) bool {
+	return len(resolved.drifted) > 0 && len(resolved.missing) == 0 &&
+		authority.AllowsResource("tools", resolved.id, *authority.ProjectID, s.now())
 }
 
 func (s *Server) snapshot() (*runtime.Release, *routing.Snapshot, *apiError) {
@@ -212,13 +267,24 @@ func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Sn
 		if errors.Is(err, runtime.ErrStaleAuthority) {
 			return resolvedToolset{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
 		}
-		return resolvedToolset{}, errToolsetNotFound
+		resolution, ok := snapshot.MCPToolset(revisionID)
+		if !ok {
+			return resolvedToolset{}, errToolsetNotFound
+		}
+		resolved := toolsetFromResolution(toolsetID, revisionID, resolution)
+		if !s.driftScoped(authority, resolved) {
+			return resolvedToolset{}, errToolsetNotFound
+		}
+		if len(resolved.tools) == 0 {
+			return resolvedToolset{}, errToolDefinitionChanged
+		}
+		return resolved, nil
 	}
-	tools, ok := snapshot.MCPTools(revisionID)
+	resolution, ok := snapshot.MCPToolset(revisionID)
 	if !ok {
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	return resolvedToolset{id: toolsetID, revisionID: revisionID, tools: tools}, nil
+	return toolsetFromResolution(toolsetID, revisionID, resolution), nil
 }
 
 type listedTool struct {
@@ -249,6 +315,10 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 	if requested := r.URL.Query().Get("toolset_id"); requested != "" {
 		resolved, failure := s.resolveToolset(authority, snapshot, requested)
 		if failure != nil {
+			writeError(w, failure)
+			return
+		}
+		if failure = resolved.listingFailure(); failure != nil {
 			writeError(w, failure)
 			return
 		}
@@ -316,12 +386,19 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, failure)
 		return
 	}
-	index := slices.IndexFunc(resolved.tools, func(tool routing.MCPToolsetTool) bool { return tool.Alias == request.Name })
-	if index < 0 {
+	tool, found := resolved.lookup(request.Name)
+	switch found {
+	case toolFound:
+	case toolDrifted:
+		writeError(w, errToolDefinitionChanged)
+		return
+	case toolInvalidSchema:
+		writeError(w, errToolSchemaInvalid)
+		return
+	default:
 		writeError(w, errToolNotFound)
 		return
 	}
-	tool := resolved.tools[index]
 	arguments := request.Arguments
 	if len(arguments) == 0 || string(arguments) == "null" {
 		arguments = json.RawMessage(`{}`)

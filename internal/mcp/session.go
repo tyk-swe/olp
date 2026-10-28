@@ -57,6 +57,14 @@ func bindingOf(authority access.Authority) sessionBinding {
 
 func (b sessionBinding) scope() string { return b.principal.scope() }
 
+type certificationState string
+
+const (
+	certificationCertified certificationState = "certified"
+	certificationDrifted   certificationState = "drifted"
+	certificationInvalid   certificationState = "invalid"
+)
+
 type sessionRecord struct {
 	id                string
 	binding           sessionBinding
@@ -64,9 +72,21 @@ type sessionRecord struct {
 	toolsetID         string
 	toolsetRevisionID string
 	releaseID         string
+	certifications    map[string]certificationState
 	createdAt         time.Time
 	lastActiveAt      time.Time
 	initialized       bool
+}
+
+func (r sessionRecord) certification(serverID string) certificationState {
+	if r.certifications == nil {
+		return certificationInvalid
+	}
+	state, ok := r.certifications[serverID]
+	if !ok {
+		return certificationInvalid
+	}
+	return state
 }
 
 func newSessionID() (string, error) {

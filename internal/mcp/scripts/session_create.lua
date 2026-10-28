@@ -2,7 +2,7 @@
 --       Valkey Cluster hash tag.
 -- ARGV: session_id, ttl_ms, cap, installation_id, project_id,
 --       principal_digest, protocol, toolset_id, toolset_revision_id,
---       release_id.
+--       release_id, then server_id and certification state pairs.
 -- Returns 1 when the session was created, 0 when the principal already holds
 -- cap live sessions. Index scores are expiry instants, so pruning and
 -- counting stay bounded by the cap.
@@ -27,6 +27,9 @@ redis.call("HSET", KEYS[1],
   "created_at_ms", now_ms,
   "last_active_at_ms", now_ms,
   "initialized", "0")
+for i = 11, #ARGV, 2 do
+  redis.call("HSET", KEYS[1], "cert:" .. ARGV[i], ARGV[i + 1])
+end
 redis.call("PEXPIRE", KEYS[1], ttl_ms)
 redis.call("ZADD", KEYS[2], now_ms + ttl_ms, ARGV[1])
 redis.call("PEXPIRE", KEYS[2], ttl_ms)

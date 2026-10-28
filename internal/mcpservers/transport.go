@@ -76,6 +76,23 @@ type Transport struct {
 	client                             *http.Client
 	endpoint, token, session, protocol string
 	nextID                             atomic.Int64
+	listChanged                        atomic.Bool
+}
+
+func (c *Transport) ListChanged() bool { return c.listChanged.Load() }
+
+func (c *Transport) observeNotification(raw []byte) {
+	var note struct {
+		Version string          `json:"jsonrpc"`
+		Method  string          `json:"method"`
+		ID      json.RawMessage `json:"id"`
+	}
+	if json.Unmarshal(raw, &note) != nil {
+		return
+	}
+	if note.Version == "2.0" && note.Method == "notifications/tools/list_changed" && len(note.ID) == 0 {
+		c.listChanged.Store(true)
+	}
 }
 
 func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, opts TransportOptions) (*Transport, error) {
@@ -197,6 +214,7 @@ func (c *Transport) call(ctx context.Context, id int, method string, params any,
 				if err = decodeResult(data, id, out); err == nil {
 					return nil
 				}
+				c.observeNotification(data)
 				data = nil
 			}
 			continue
