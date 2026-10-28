@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +162,69 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 // Directory replacement preserves an unfamiliar omitted extension.
 
 // Model an independently enrolled local sign-in; SCIM never accepts passwords.
+
+func TestSCIMNullFiltersMatchUnassignedDefinedAttributes(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	for _, kind := range []string{"Users", "Groups"} {
+		t.Run(kind, func(t *testing.T) {
+			schema := map[string]string{"Users": scim.UserSchema, "Groups": scim.GroupSchema}[kind]
+
+			create := func(name string, externalID json.RawMessage) string {
+				username := func() string {
+					if kind == "Groups" {
+						return ""
+					}
+					return name + "@example.com"
+				}()
+				body := struct {
+					Schemas     []string        `json:"schemas"`
+					UserName    string          `json:"userName,omitempty"`
+					DisplayName string          `json:"displayName"`
+					ExternalID  json.RawMessage `json:"externalId,omitempty"`
+				}{[]string{schema}, username, name, externalID}
+				return scimCall(t, h, token, "POST", "/scim/v2/"+kind, body, "", 201)["id"].(string)
+			}
+			ids := []string{create("Omitted", nil), create("Null", json.RawMessage(`null`)), create("Assigned", json.RawMessage(`"assigned"`))}
+
+			for _, method := range []string{"GET", "POST"} {
+				for _, tc := range []struct {
+					filter string
+					want   []string
+				}{
+					{"externalId eq null", ids[:2]},
+					{"not (externalId pr)", ids[:2]},
+					{"externalId ne null", ids[2:]},
+					{"externalId pr", ids[2:]},
+					{schema + ":externalId eq null", ids[:2]},
+					{"unsupported eq null", nil},
+					{map[string]string{"Users": "members", "Groups": "userName"}[kind] + " eq null", nil},
+					{map[string]string{"Users": scim.GroupSchema, "Groups": scim.UserSchema}[kind] + ":externalId eq null", nil},
+				} {
+					filter := fmt.Sprintf(`(id eq "%s" or id eq "%s" or id eq "%s") and (%s)`, ids[0], ids[1], ids[2], tc.filter)
+
+					request := map[string]struct {
+						path string
+						body any
+					}{
+						"GET":  {"/scim/v2/" + kind + "?filter=" + url.QueryEscape(filter), nil},
+						"POST": {"/scim/v2/" + kind + "/.search", map[string]any{"schemas": []string{scim.SearchSchema}, "filter": filter}},
+					}[method]
+					result := scimCall(t, h, token, method, request.path, request.body, "", 200)
+					resources := result["Resources"].([]any)
+					if len(resources) != len(tc.want) {
+						t.Fatalf("%s %s: %v", method, tc.filter, result)
+					}
+					for _, resource := range resources {
+						if !slices.Contains(tc.want, resource.(map[string]any)["id"].(string)) {
+							t.Fatalf("%s matched wrong resource: %v", tc.filter, resource)
+						}
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestSCIMSDKConditionalWriteRoundTrip(t *testing.T) {
 	h := newAccessHarness(t)
