@@ -116,7 +116,25 @@ func TestSnapshotMissingMCPServerIsNotReportedAsDrift(t *testing.T) {
 			if !ok || len(resolved.Tools) != 0 || len(resolved.Drifted) != 0 {
 				t.Fatalf("unavailable server was reported as callable or drifted: ok=%v resolved=%+v", ok, resolved)
 			}
+			if len(resolved.Missing) != 1 || resolved.Missing[0].Alias != agentcontract.ToolAlias(mcpServerID, "lookup") {
+				t.Fatalf("unavailable server pin was not reported as missing: %+v", resolved)
+			}
 		})
+	}
+}
+
+func TestSnapshotReportsUncompilableMCPSchemaAsInvalidNotDrifted(t *testing.T) {
+	snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
+	snapshot.MCPServers[0].Tools[0].InputSchema = json.RawMessage(`{"type":"object","$ref":"https://schemas.example.test/tool"}`)
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	resolved, ok := snapshot.MCPToolset(mcpRevision)
+	if !ok || len(resolved.Tools) != 0 || len(resolved.Drifted) != 0 {
+		t.Fatalf("uncompilable schema stayed callable or was reported as drift: ok=%v resolved=%+v", ok, resolved)
+	}
+	if len(resolved.Invalid) != 1 || resolved.Invalid[0].Alias != agentcontract.ToolAlias(mcpServerID, "lookup") {
+		t.Fatalf("uncompilable schema was not reported as invalid: %+v", resolved)
 	}
 }
 

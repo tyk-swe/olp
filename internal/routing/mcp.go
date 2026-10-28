@@ -53,6 +53,8 @@ type MCPDriftedTool struct {
 type MCPToolsetResolution struct {
 	Tools   []MCPToolsetTool
 	Drifted []MCPDriftedTool
+	Invalid []MCPDriftedTool
+	Missing []MCPDriftedTool
 }
 
 var mcpDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -132,15 +134,16 @@ func (s *Snapshot) compileMCP() {
 		if revision.Kind != "toolset" || revision.Definition.Toolset == nil {
 			continue
 		}
-		resolution := MCPToolsetResolution{Tools: []MCPToolsetTool{}, Drifted: []MCPDriftedTool{}}
+		resolution := MCPToolsetResolution{Tools: []MCPToolsetTool{}, Drifted: []MCPDriftedTool{}, Invalid: []MCPDriftedTool{}, Missing: []MCPDriftedTool{}}
 		for _, pin := range revision.Definition.Toolset.Tools {
-			server, ok := byID[pin.ServerID]
-			if !ok || server.ProjectID != revision.ProjectID {
-				continue
-			}
 			drifted := MCPDriftedTool{
 				Alias: pin.Alias, Name: pin.Name, ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest,
+			}
+			server, ok := byID[pin.ServerID]
+			if !ok || server.ProjectID != revision.ProjectID {
+				resolution.Missing = append(resolution.Missing, drifted)
+				continue
 			}
 			if server.RevisionID != pin.RevisionID || server.Digest != pin.CatalogDigest {
 				resolution.Drifted = append(resolution.Drifted, drifted)
@@ -159,12 +162,12 @@ func (s *Snapshot) compileMCP() {
 				schema, err = compileMCPSchema(catalog.InputSchema)
 				compiled[key] = schema
 				if err != nil {
-					resolution.Drifted = append(resolution.Drifted, drifted)
+					resolution.Invalid = append(resolution.Invalid, drifted)
 					continue
 				}
 			}
 			if schema == nil {
-				resolution.Drifted = append(resolution.Drifted, drifted)
+				resolution.Invalid = append(resolution.Invalid, drifted)
 				continue
 			}
 			resolution.Tools = append(resolution.Tools, MCPToolsetTool{
@@ -189,5 +192,7 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	return MCPToolsetResolution{
 		Tools:   slices.Clone(resolution.Tools),
 		Drifted: slices.Clone(resolution.Drifted),
+		Invalid: slices.Clone(resolution.Invalid),
+		Missing: slices.Clone(resolution.Missing),
 	}, true
 }
