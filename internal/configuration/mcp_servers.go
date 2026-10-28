@@ -45,21 +45,14 @@ func mcpEntryLimit(value int64) *int64 {
 	return &value
 }
 
-func mcpLimitOr(value *int64, fallback int64) int64 {
-	if value == nil {
-		return fallback
-	}
-	return *value
-}
-
 func normalizeMCPEntry(e *MCPServerEntry) {
 	if e.ToolPrices == nil {
 		e.ToolPrices = map[string]string{}
 	}
-	e.CallsPerMinute = mcpEntryLimit(mcpLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute))
-	e.MaxConcurrency = mcpEntryLimit(mcpLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency))
-	e.PerKeyCallsPerMinute = mcpEntryLimit(mcpLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute))
-	e.PerKeyMaxConcurrency = mcpEntryLimit(mcpLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+	e.CallsPerMinute = mcpEntryLimit(routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute))
+	e.MaxConcurrency = mcpEntryLimit(routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency))
+	e.PerKeyCallsPerMinute = mcpEntryLimit(routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute))
+	e.PerKeyMaxConcurrency = mcpEntryLimit(routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
 }
 
 func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcpservers.Definition {
@@ -70,10 +63,10 @@ func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcps
 	return &mcpservers.Definition{
 		Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
-		CallsPerMinute:       mcpLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
-		MaxConcurrency:       mcpLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
-		PerKeyCallsPerMinute: mcpLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
-		PerKeyMaxConcurrency: mcpLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
+		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		PerKeyCallsPerMinute: routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		PerKeyMaxConcurrency: routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
 	}
 }
 
@@ -117,7 +110,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 	return nil
 }
 func exportMCPServers(ctx context.Context, q access.Queryer) ([]MCPServerEntry, error) {
-	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,v.calls_per_minute,v.max_concurrency,v.per_key_calls_per_minute,v.per_key_max_concurrency FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
+	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.transport,s.endpoint,s.enabled,v.digest,s.credential_id IS NOT NULL,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency FROM olp.mcp_servers s JOIN olp.projects p ON p.id=s.project_id JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -242,9 +235,10 @@ func (s *Server) planMCPServers(ctx context.Context, q access.Queryer, doc *Docu
 }
 
 type preparedMCP struct {
-	catalog  *mcpservers.Catalog
-	observed string
-	reuse    bool
+	catalog    *mcpservers.Catalog
+	observed   string
+	reuse      bool
+	limitsOnly bool
 }
 
 func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc *Document, bindings bindingSet) (map[[2]string]preparedMCP, error) {
@@ -279,6 +273,21 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 		if equal {
 			out[mcpKey(e)] = prepared
 			continue
+		}
+		if d != nil {
+			probe := e
+			current := mcpEntry(d, e.Project)
+			probe.CallsPerMinute, probe.MaxConcurrency = current.CallsPerMinute, current.MaxConcurrency
+			probe.PerKeyCallsPerMinute, probe.PerKeyMaxConcurrency = current.PerKeyCallsPerMinute, current.PerKeyMaxConcurrency
+			sameExceptLimits, probeErr := s.mcpMatches(ctx, s.Access.Pool, probe, d, bindings)
+			if probeErr != nil {
+				return nil, probeErr
+			}
+			if sameExceptLimits {
+				prepared.limitsOnly = true
+				out[mcpKey(e)] = prepared
+				continue
+			}
 		}
 		var material []byte
 		if e.CredentialRef != nil {
@@ -328,6 +337,18 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 			return access.Fail(412, "mcp_registration_changed", "The destination MCP registration changed during certification.")
 		}
 		if cert.reuse {
+			continue
+		}
+		if cert.limitsOnly && current != nil {
+			effective := routing.EffectiveToolLimits(
+				routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+				routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+				routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+				routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+			if err = mcpservers.UpdateLimits(ctx, tx, current.ID, effective, access.NewID()); err != nil {
+				return err
+			}
+			changed = true
 			continue
 		}
 		next := mcpDefinitionFromEntry(e, cert.catalog)

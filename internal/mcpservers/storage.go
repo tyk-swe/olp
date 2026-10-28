@@ -29,22 +29,10 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 	if next.ToolPrices == nil {
 		next.ToolPrices = map[string]string{}
 	}
-	if next.CallsPerMinute == 0 {
-		next.CallsPerMinute = routing.DefaultToolCallsPerMinute
-	}
-	if next.MaxConcurrency == 0 {
-		next.MaxConcurrency = routing.DefaultToolMaxConcurrency
-	}
-	if next.PerKeyCallsPerMinute == 0 {
-		next.PerKeyCallsPerMinute = routing.DefaultToolCallsPerMinute
-	}
-	if next.PerKeyMaxConcurrency == 0 {
-		next.PerKeyMaxConcurrency = routing.DefaultToolMaxConcurrency
-	}
-	if next.CallsPerMinute < 1 || next.CallsPerMinute > routing.MaxToolCallsPerMinute ||
-		next.PerKeyCallsPerMinute < 1 || next.PerKeyCallsPerMinute > routing.MaxToolCallsPerMinute ||
-		next.MaxConcurrency < 1 || next.MaxConcurrency > routing.MaxToolConcurrency ||
-		next.PerKeyMaxConcurrency < 1 || next.PerKeyMaxConcurrency > routing.MaxToolConcurrency {
+	effective := routing.EffectiveToolLimits(next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency)
+	next.CallsPerMinute, next.MaxConcurrency = effective.CallsPerMinute, effective.MaxConcurrency
+	next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency = effective.PerKeyCallsPerMinute, effective.PerKeyMaxConcurrency
+	if !effective.WithinInstallation() {
 		return access.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")
 	}
 	next.ETag, next.RevisionID, next.Revision = access.NewID(), access.NewID(), 1
@@ -58,21 +46,25 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 			return access.Fail(409, "mcp_server_limit", "This installation already has 128 active MCP servers.")
 		}
 		next.ID = access.NewID()
-		_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,credential_id,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", next.ID, next.ProjectID, next.Name, next.Transport, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, actor)
+		_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,credential_id,latest_revision_id,etag,created_by,calls_per_minute,max_concurrency,per_key_calls_per_minute,per_key_max_concurrency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)", next.ID, next.ProjectID, next.Name, next.Transport, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, actor, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency)
 	} else {
 		if current.ProjectID != next.ProjectID || current.RetiredAt != nil {
 			return access.Invalid("project_id", "The registered project is immutable.")
 		}
 		next.ID, next.Revision = current.ID, current.Revision+1
-		_, err = tx.Exec(ctx, "UPDATE olp.mcp_servers SET name=$2,endpoint=$3,enabled=$4,credential_id=$5,latest_revision_id=$6,etag=$7 WHERE id=$1", next.ID, next.Name, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag)
+		_, err = tx.Exec(ctx, "UPDATE olp.mcp_servers SET name=$2,endpoint=$3,enabled=$4,credential_id=$5,latest_revision_id=$6,etag=$7,calls_per_minute=$8,max_concurrency=$9,per_key_calls_per_minute=$10,per_key_max_concurrency=$11 WHERE id=$1", next.ID, next.Name, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency)
 	}
 	if err != nil {
 		return err
 	}
-	var unitPrice any
-	if next.UnitPrice != nil {
-		unitPrice = *next.UnitPrice
+	_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by,unit_price,tool_prices) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10)", next.RevisionID, next.ID, next.Revision, next.Endpoint, next.Catalog.Protocol, next.Catalog.Tools, next.Catalog.Digest, actor, next.UnitPrice, next.ToolPrices)
+	return err
+}
+
+func UpdateLimits(ctx context.Context, tx pgx.Tx, id string, limits routing.ToolLimits, etag string) error {
+	if !limits.WithinInstallation() {
+		return access.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by,unit_price,tool_prices,calls_per_minute,max_concurrency,per_key_calls_per_minute,per_key_max_concurrency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10,$11,$12,$13,$14)", next.RevisionID, next.ID, next.Revision, next.Endpoint, next.Catalog.Protocol, next.Catalog.Tools, next.Catalog.Digest, actor, unitPrice, next.ToolPrices, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency)
+	_, err := tx.Exec(ctx, "UPDATE olp.mcp_servers SET calls_per_minute=$2,max_concurrency=$3,per_key_calls_per_minute=$4,per_key_max_concurrency=$5,etag=$6 WHERE id=$1", id, limits.CallsPerMinute, limits.MaxConcurrency, limits.PerKeyCallsPerMinute, limits.PerKeyMaxConcurrency, etag)
 	return err
 }

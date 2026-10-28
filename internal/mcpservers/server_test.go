@@ -101,3 +101,95 @@ func TestDefinitionCarriesEffectivePricingAndLimits(t *testing.T) {
 		t.Fatal("definition shares the input tool price map")
 	}
 }
+
+func TestInputPresenceDistinguishesAbsentFromNull(t *testing.T) {
+	var absent Input
+	if err := absent.UnmarshalJSON([]byte(`{"name":"x","endpoint":"http://127.0.0.1/mcp","enabled":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"unit_price", "tool_prices", "calls_per_minute", "per_key_max_concurrency"} {
+		if absent.Present(field) {
+			t.Fatalf("absent %s reported present", field)
+		}
+	}
+	var cleared Input
+	if err := cleared.UnmarshalJSON([]byte(`{"name":"x","endpoint":"http://127.0.0.1/mcp","enabled":true,"unit_price":null,"calls_per_minute":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !cleared.Present("unit_price") || cleared.UnitPrice != nil {
+		t.Fatalf("explicit null unit price not recorded as a clearing field: %+v", cleared)
+	}
+	if !cleared.Present("calls_per_minute") || cleared.CallsPerMinute != nil {
+		t.Fatalf("explicit null limit not recorded as present: %+v", cleared)
+	}
+}
+
+func TestMergeAbsentPricingAndLimitsPreservesAndClears(t *testing.T) {
+	price := "0.25"
+	previous := &Definition{
+		UnitPrice: &price, ToolPrices: map[string]string{"lookup": "0.5"},
+		CallsPerMinute: 120, MaxConcurrency: 4, PerKeyCallsPerMinute: 30, PerKeyMaxConcurrency: 2,
+	}
+	var absent Input
+	if err := absent.UnmarshalJSON([]byte(`{"name":"x","endpoint":"http://127.0.0.1/mcp","enabled":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	mergeAbsentPricingAndLimits(&absent, previous)
+	if absent.UnitPrice == nil || *absent.UnitPrice != price || absent.ToolPrices["lookup"] != "0.5" ||
+		absent.CallsPerMinute == nil || *absent.CallsPerMinute != 120 || absent.PerKeyMaxConcurrency == nil || *absent.PerKeyMaxConcurrency != 2 {
+		t.Fatalf("absent fields did not preserve current pricing and limits: %+v", absent)
+	}
+	var cleared Input
+	if err := cleared.UnmarshalJSON([]byte(`{"name":"x","endpoint":"http://127.0.0.1/mcp","enabled":true,"unit_price":null,"calls_per_minute":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	mergeAbsentPricingAndLimits(&cleared, previous)
+	if cleared.UnitPrice != nil {
+		t.Fatalf("null unit price did not clear the price: %+v", cleared)
+	}
+	if cleared.CallsPerMinute == nil || *cleared.CallsPerMinute != routing.DefaultToolCallsPerMinute {
+		t.Fatalf("null limit did not reset to the default: %+v", cleared)
+	}
+	if cleared.MaxConcurrency == nil || *cleared.MaxConcurrency != 4 {
+		t.Fatalf("absent limit beside explicit nulls was not preserved: %+v", cleared)
+	}
+}
+
+func TestLimitsOnlyUpdateRejectsCatalogAndPriceChanges(t *testing.T) {
+	price := "0.25"
+	enabled := true
+	previous := &Definition{
+		Name: "Priced tools", Endpoint: "http://127.0.0.1:8080/mcp", Enabled: true,
+		UnitPrice: &price, ToolPrices: map[string]string{"lookup": "0.5"},
+		CallsPerMinute: 60, MaxConcurrency: 8, PerKeyCallsPerMinute: 60, PerKeyMaxConcurrency: 8,
+	}
+	base := func() Input {
+		rate := int64(999)
+		return Input{
+			Name: previous.Name, Endpoint: previous.Endpoint, Enabled: &enabled,
+			UnitPrice: &price, ToolPrices: map[string]string{"lookup": "0.5"}, CallsPerMinute: &rate,
+		}
+	}
+	if !limitsOnlyUpdate(base(), previous) {
+		t.Fatal("pure limits change was not recognized as limits only")
+	}
+	same := base()
+	sameRate := int64(60)
+	same.CallsPerMinute = &sameRate
+	if limitsOnlyUpdate(same, previous) {
+		t.Fatal("identical update skipped recertification instead of approving the live catalog")
+	}
+	for name, mutate := range map[string]func(*Input){
+		"endpoint":   func(in *Input) { in.Endpoint = "http://127.0.0.1:9999/mcp" },
+		"price":      func(in *Input) { changed := "0.30"; in.UnitPrice = &changed },
+		"tool price": func(in *Input) { in.ToolPrices = map[string]string{"lookup": "0.6"} },
+		"credential": func(in *Input) { in.Credential = []byte("null") },
+		"name":       func(in *Input) { in.Name = "Renamed" },
+	} {
+		in := base()
+		mutate(&in)
+		if limitsOnlyUpdate(in, previous) {
+			t.Fatalf("%s change was treated as limits only", name)
+		}
+	}
+}
