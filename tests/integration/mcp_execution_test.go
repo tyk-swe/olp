@@ -28,6 +28,8 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	const argument = "integration-secret-argument"
 	const answer = "integration-secret-answer"
 	var calls atomic.Int64
+	var description atomic.Value
+	description.Store("Look up")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
@@ -55,7 +57,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "tools/list":
 			result = map[string]any{"tools": []any{map[string]any{
-				"name": "lookup", "description": "Look up",
+				"name": "lookup", "description": description.Load().(string),
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
 			}}}
 		case "tools/call":
@@ -297,10 +299,73 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	if status, _, _ = mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 8, "method": "tools/list", "params": map[string]any{}}); status != http.StatusOK {
 		t.Fatalf("owner lost the session after a foreign attempt at the gateway boundary: %d", status)
 	}
+
+	description.Store("Changed after publication")
+	status, driftedCall := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
+	if status != http.StatusConflict || driftedCall["error"].(map[string]any)["code"] != "tool_definition_changed" || calls.Load() != 2 {
+		t.Fatalf("drifted catalog was called over the JSON path: status=%d calls=%d body=%v", status, calls.Load(), driftedCall)
+	}
+	status, driftedHeaders, driftedInit := mcpCall("POST", "/mcp?toolset_id="+toolsetID, "", map[string]any{
+		"jsonrpc": "2.0", "id": 10, "method": "initialize",
+		"params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "integration", "version": "1"}},
+	})
+	driftedSessionID := driftedHeaders.Get("Mcp-Session-Id")
+	if status != http.StatusOK || driftedSessionID == "" {
+		t.Fatalf("session did not initialize against a drifted catalog for review: status=%d body=%v", status, driftedInit)
+	}
+	if status, _, _ = mcpCall("POST", "/mcp", driftedSessionID, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}); status != http.StatusAccepted {
+		t.Fatalf("drifted session initialized notification refused: %d", status)
+	}
+	_, _, driftedSessionCall := mcpCall("POST", "/mcp", driftedSessionID, map[string]any{
+		"jsonrpc": "2.0", "id": 11, "method": "tools/call",
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+	})
+	if data, _ := driftedSessionCall["error"].(map[string]any)["data"].(map[string]any); data["code"] != "tool_definition_changed" || calls.Load() != 2 {
+		t.Fatalf("drifted catalog was called in a fresh session: calls=%d body=%v", calls.Load(), driftedSessionCall)
+	}
+	h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200)
+	published := h.want(owner, "GET", "/api/v1/mcp-servers/"+serverID+"/revisions/"+tool.RevisionID, nil, nil, 200)
+	if published["catalog"].(map[string]any)["digest"] != tool.CatalogDigest {
+		t.Fatalf("published definition stopped being readable while drifted: %v", published)
+	}
+	description.Store("Look up")
 	if status, _, _ = mcpCall("DELETE", "/mcp", sessionID, nil); status != http.StatusNoContent {
 		t.Fatalf("session delete refused: %d", status)
 	}
 	if status, _, _ = mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": map[string]any{}}); status != http.StatusNotFound {
 		t.Fatalf("deleted session stayed usable: %d", status)
+	}
+
+	status, headers, reopened := mcpCall("POST", "/mcp?toolset_id="+toolsetID, "", map[string]any{
+		"jsonrpc": "2.0", "id": 12, "method": "initialize",
+		"params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "integration", "version": "1"}},
+	})
+	liveSessionID := headers.Get("Mcp-Session-Id")
+	if status != http.StatusOK || liveSessionID == "" {
+		t.Fatalf("session did not reopen before retirement: status=%d body=%v", status, reopened)
+	}
+	if status, _, _ = mcpCall("POST", "/mcp", liveSessionID, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}); status != http.StatusAccepted {
+		t.Fatalf("reopened session initialized notification refused: %d", status)
+	}
+	current := h.want(owner, "GET", "/api/v1/mcp-servers/"+serverID, nil, nil, 200)
+	retire := idem("mcp-exec-retire")
+	retire["If-Match"] = `"` + current["etag"].(string) + `"`
+	h.want(owner, "DELETE", "/api/v1/mcp-servers/"+serverID, nil, retire, 204)
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status, _ = call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
+	if status != http.StatusNotFound || calls.Load() != 2 {
+		t.Fatalf("retired server was called over the JSON path: status=%d calls=%d", status, calls.Load())
+	}
+	_, _, refusedList := mcpCall("POST", "/mcp", liveSessionID, map[string]any{"jsonrpc": "2.0", "id": 13, "method": "tools/list", "params": map[string]any{}})
+	if _, ok := refusedList["error"]; !ok {
+		t.Fatalf("live session kept serving after its server retired: %v", refusedList)
+	}
+	if status, _, _ = mcpCall("POST", "/mcp", liveSessionID, map[string]any{"jsonrpc": "2.0", "id": 14, "method": "tools/list", "params": map[string]any{}}); status != http.StatusNotFound {
+		t.Fatalf("live session stayed eligible after its server retired: %d", status)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("retired server dispatched: calls=%d", calls.Load())
 	}
 }
