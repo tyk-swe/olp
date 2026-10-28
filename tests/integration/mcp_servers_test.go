@@ -335,6 +335,7 @@ func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testi
 			case "initialize":
 				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "personal-fixture", Version: "1"}})
 			default:
+
 				return mustJSON(mcpsdk.ListToolsResult{Tools: []*mcpsdk.Tool{{Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
 			}
 		}()
@@ -528,10 +529,15 @@ func newPersonalOAuthFixture(t *testing.T) personalOAuthFixture {
 
 func newPersonalOAuthFixtureWithHook(t *testing.T, hook func(*http.Request)) personalOAuthFixture {
 	t.Helper()
-	return newPersonalOAuthFixtureWithCall(t, hook, nil)
+	return newPersonalOAuthFixtureWithCall(t, hook, personalOAuthCallbacks{})
 }
 
-func newPersonalOAuthFixtureWithCall(t *testing.T, hook func(*http.Request), call func(*http.Request) mcpsdk.CallToolResult) personalOAuthFixture {
+type personalOAuthCallbacks struct {
+	Call    func(*http.Request) mcpsdk.CallToolResult
+	Catalog func()
+}
+
+func newPersonalOAuthFixtureWithCall(t *testing.T, hook func(*http.Request), callbacks personalOAuthCallbacks) personalOAuthFixture {
 	t.Helper()
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -572,8 +578,8 @@ func newPersonalOAuthFixtureWithCall(t *testing.T, hook func(*http.Request), cal
 			case "initialize":
 				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "oauth-fixture", Version: "1"}})
 			case "tools/call":
-				if call != nil {
-					return mustJSON(call(r))
+				if callbacks.Call != nil {
+					return mustJSON(callbacks.Call(r))
 				}
 				identity, authorized := authority.Authorized(r)
 				if !authorized {
@@ -581,6 +587,9 @@ func newPersonalOAuthFixtureWithCall(t *testing.T, hook func(*http.Request), cal
 				}
 				return mustJSON(&mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: identity.Account}}})
 			default:
+				if callbacks.Catalog != nil {
+					callbacks.Catalog()
+				}
 				return mustJSON(mcpsdk.ListToolsResult{Tools: []*mcpsdk.Tool{{Name: "identity", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
 			}
 		}()
@@ -1018,7 +1027,7 @@ func TestMCPDelegatedIdentityIsAudienceBoundAndRecorded(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer peer.Close()
-	fixture := newPersonalOAuthFixtureWithCall(t, nil, func(r *http.Request) mcpsdk.CallToolResult {
+	fixture := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{Call: func(r *http.Request) mcpsdk.CallToolResult {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		claims := &personalDelegatedClaims{}
 		if _, parseErr := jwt.ParseWithClaims(token, claims, func(*jwt.Token) (any, error) { return public, nil }, jwt.WithIssuer(issuer), jwt.WithAudience(audience), jwt.WithValidMethods([]string{"EdDSA"}), jwt.WithExpirationRequired()); parseErr != nil {
@@ -1040,7 +1049,7 @@ func TestMCPDelegatedIdentityIsAudienceBoundAndRecorded(t *testing.T) {
 			t.Error("delegated token was accepted by another audience")
 		}
 		return mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: claims.Subject}}}
-	})
+	}})
 	current := fixture.h.want(fixture.owner, "GET", "/api/v1/mcp-servers/"+fixture.serverID, nil, nil, 200)
 	var definition mcpservers.Definition
 	if decodeErr := json.Unmarshal(mustJSON(current), &definition); decodeErr != nil {
@@ -1134,5 +1143,34 @@ func TestMCPDelegatedIdentityIsAudienceBoundAndRecorded(t *testing.T) {
 	assertPersonalCall(t, handler, fixture, fixture.key, "delegated-revoked-key", http.StatusUnauthorized, "")
 	if strings.Contains(string(mustJSON(attempts)), "BEGIN PRIVATE KEY") {
 		t.Fatal("attempt records contain signing material")
+	}
+}
+
+func TestMCPGrantRevocationDuringCatalogCheckStopsDispatch(t *testing.T) {
+	gate := make(chan func() error, 1)
+	var calls atomic.Int64
+	fixture := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{
+		Catalog: func() {
+			select {
+			case revoke := <-gate:
+				if err := revoke(); err != nil {
+					t.Error(err)
+				}
+			default:
+			}
+		},
+		Call: func(*http.Request) mcpsdk.CallToolResult {
+			calls.Add(1)
+			return mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "dispatched"}}}
+		},
+	})
+	fixture.completePKCE(t, fixture.claim(t), testutil.OAuthIdentity{Subject: "individual", Account: "individual-account"})
+	gate <- func() error {
+		_, err := fixture.h.Pool.Exec(t.Context(), "UPDATE olp.mcp_user_grants SET revoked_at=now() WHERE binding->'identity'->>'id'=$1", fixture.key.ID)
+		return err
+	}
+	assertPersonalCall(t, fixture.consumer(t), fixture, fixture.key, "revoked-during-discovery", http.StatusForbidden, "")
+	if calls.Load() != 0 {
+		t.Fatal("a revoked individual grant reached the tool")
 	}
 }

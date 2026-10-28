@@ -176,7 +176,7 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 
 func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credential []byte, reservation *Reservation, arguments json.RawMessage) dispatchResult {
 	tool := in.tool
-	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-tools", Timeout: defaultCallTimeout, Transport: tool.Transport})
+	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-tools", Timeout: defaultCallTimeout, Transport: tool.Transport, Stdio: tool.Stdio, Executables: s.Executables})
 	if err != nil {
 		s.release(reservation)
 		return dispatchResult{certification: certificationInvalid, failure: fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server could not be reached, so the tool was not called.")}

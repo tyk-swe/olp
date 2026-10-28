@@ -1456,6 +1456,7 @@ func (e ConfigurationGuardrailPolicyEntryEntriesPhase) Valid() bool {
 // Defines values for ConfigurationMCPServerTransport.
 const (
 	ConfigurationMCPServerTransportSse            ConfigurationMCPServerTransport = "sse"
+	ConfigurationMCPServerTransportStdio          ConfigurationMCPServerTransport = "stdio"
 	ConfigurationMCPServerTransportStreamableHttp ConfigurationMCPServerTransport = "streamable_http"
 )
 
@@ -1463,6 +1464,8 @@ const (
 func (e ConfigurationMCPServerTransport) Valid() bool {
 	switch e {
 	case ConfigurationMCPServerTransportSse:
+		return true
+	case ConfigurationMCPServerTransportStdio:
 		return true
 	case ConfigurationMCPServerTransportStreamableHttp:
 		return true
@@ -2230,6 +2233,7 @@ func (e CreateGuardrailRequestType) Valid() bool {
 // Defines values for CreateMCPServerRequestTransport.
 const (
 	CreateMCPServerRequestTransportSse            CreateMCPServerRequestTransport = "sse"
+	CreateMCPServerRequestTransportStdio          CreateMCPServerRequestTransport = "stdio"
 	CreateMCPServerRequestTransportStreamableHttp CreateMCPServerRequestTransport = "streamable_http"
 )
 
@@ -2237,6 +2241,8 @@ const (
 func (e CreateMCPServerRequestTransport) Valid() bool {
 	switch e {
 	case CreateMCPServerRequestTransportSse:
+		return true
+	case CreateMCPServerRequestTransportStdio:
 		return true
 	case CreateMCPServerRequestTransportStreamableHttp:
 		return true
@@ -3430,6 +3436,7 @@ func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 // Defines values for MCPServerResponseTransport.
 const (
 	MCPServerResponseTransportSse            MCPServerResponseTransport = "sse"
+	MCPServerResponseTransportStdio          MCPServerResponseTransport = "stdio"
 	MCPServerResponseTransportStreamableHttp MCPServerResponseTransport = "streamable_http"
 )
 
@@ -3437,6 +3444,8 @@ const (
 func (e MCPServerResponseTransport) Valid() bool {
 	switch e {
 	case MCPServerResponseTransportSse:
+		return true
+	case MCPServerResponseTransportStdio:
 		return true
 	case MCPServerResponseTransportStreamableHttp:
 		return true
@@ -3448,6 +3457,7 @@ func (e MCPServerResponseTransport) Valid() bool {
 // Defines values for MCPServerSummaryTransport.
 const (
 	MCPServerSummaryTransportSse            MCPServerSummaryTransport = "sse"
+	MCPServerSummaryTransportStdio          MCPServerSummaryTransport = "stdio"
 	MCPServerSummaryTransportStreamableHttp MCPServerSummaryTransport = "streamable_http"
 )
 
@@ -3455,6 +3465,8 @@ const (
 func (e MCPServerSummaryTransport) Valid() bool {
 	switch e {
 	case MCPServerSummaryTransportSse:
+		return true
+	case MCPServerSummaryTransportStdio:
 		return true
 	case MCPServerSummaryTransportStreamableHttp:
 		return true
@@ -7807,7 +7819,7 @@ type ConfigurationMCPServer struct {
 	CredentialRef *string                                       `json:"credential_ref,omitempty"`
 	Delegation    nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
 	Enabled       bool                                          `json:"enabled"`
-	Endpoint      string                                        `json:"endpoint"`
+	Endpoint      *string                                       `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
@@ -7820,8 +7832,9 @@ type ConfigurationMCPServer struct {
 	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
 
 	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
-	PerKeyMaxConcurrency *int   `json:"per_key_max_concurrency,omitempty"`
-	Project              string `json:"project"`
+	PerKeyMaxConcurrency *int                               `json:"per_key_max_concurrency,omitempty"`
+	Project              string                             `json:"project"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
 
 	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
 	ToolPrices *map[string]string              `json:"tool_prices,omitempty"`
@@ -8542,7 +8555,7 @@ type CreateMCPServerRequest struct {
 	// DelegationPrivateKey PKCS8 Ed25519 private signing key. Omit to retain the existing local key.
 	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
 	Enabled              bool                      `json:"enabled"`
-	Endpoint             string                    `json:"endpoint"`
+	Endpoint             *string                   `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
@@ -8555,8 +8568,9 @@ type CreateMCPServerRequest struct {
 	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
 
 	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
-	PerKeyMaxConcurrency *int               `json:"per_key_max_concurrency,omitempty"`
-	ProjectId            openapi_types.UUID `json:"project_id"`
+	PerKeyMaxConcurrency *int                               `json:"per_key_max_concurrency,omitempty"`
+	ProjectId            openapi_types.UUID                 `json:"project_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
 
 	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
 	ToolPrices *map[string]string              `json:"tool_prices,omitempty"`
@@ -9619,6 +9633,26 @@ type MCPDelegationConfiguration struct {
 	Issuer   string `json:"issuer"`
 }
 
+// MCPExecutableFile defines model for MCPExecutableFile.
+type MCPExecutableFile struct {
+	Digest    string `json:"digest"`
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// MCPExecutableList defines model for MCPExecutableList.
+type MCPExecutableList struct {
+	Items []MCPExecutableFile `json:"items"`
+}
+
+// MCPExecutablePermission defines model for MCPExecutablePermission.
+type MCPExecutablePermission struct {
+	Digest    string `json:"digest"`
+	Name      string `json:"name"`
+	Permitted bool   `json:"permitted"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
 // MCPGrantAuthorization defines model for MCPGrantAuthorization.
 type MCPGrantAuthorization struct {
 	AuthorizationUrl *string                    `json:"authorization_url,omitempty"`
@@ -9767,11 +9801,12 @@ type MCPServerResponse struct {
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
 
 	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
-	PerKeyMaxConcurrency int                          `json:"per_key_max_concurrency"`
-	ProjectId            openapi_types.UUID           `json:"project_id"`
-	RetiredAt            nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision             int64                        `json:"revision"`
-	RevisionId           openapi_types.UUID           `json:"revision_id"`
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	ProjectId            openapi_types.UUID                 `json:"project_id"`
+	RetiredAt            nullable.Nullable[time.Time]       `json:"retired_at"`
+	Revision             int64                              `json:"revision"`
+	RevisionId           openapi_types.UUID                 `json:"revision_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
 
 	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
 	ToolPrices map[string]string          `json:"tool_prices"`
@@ -9804,9 +9839,10 @@ type MCPServerRevisionResponse struct {
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
 
 	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
-	PerKeyMaxConcurrency int                `json:"per_key_max_concurrency"`
-	Revision             int64              `json:"revision"`
-	ServerId             openapi_types.UUID `json:"server_id"`
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	Revision             int64                              `json:"revision"`
+	ServerId             openapi_types.UUID                 `json:"server_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
 
 	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
 	ToolPrices map[string]string `json:"tool_prices"`
@@ -9838,11 +9874,12 @@ type MCPServerSummary struct {
 	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
 
 	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
-	PerKeyMaxConcurrency int                          `json:"per_key_max_concurrency"`
-	ProjectId            openapi_types.UUID           `json:"project_id"`
-	RetiredAt            nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision             int64                        `json:"revision"`
-	RevisionId           openapi_types.UUID           `json:"revision_id"`
+	PerKeyMaxConcurrency int                                `json:"per_key_max_concurrency"`
+	ProjectId            openapi_types.UUID                 `json:"project_id"`
+	RetiredAt            nullable.Nullable[time.Time]       `json:"retired_at"`
+	Revision             int64                              `json:"revision"`
+	RevisionId           openapi_types.UUID                 `json:"revision_id"`
+	Stdio                nullable.Nullable[MCPStdioBinding] `json:"stdio,omitempty"`
 
 	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
 	ToolPrices map[string]string         `json:"tool_prices"`
@@ -9854,6 +9891,12 @@ type MCPServerSummary struct {
 
 // MCPServerSummaryTransport defines model for MCPServerSummary.Transport.
 type MCPServerSummaryTransport string
+
+// MCPStdioBinding defines model for MCPStdioBinding.
+type MCPStdioBinding struct {
+	Digest     string `json:"digest"`
+	Executable string `json:"executable"`
+}
 
 // MCPToolCallList defines model for MCPToolCallList.
 type MCPToolCallList struct {
@@ -14362,7 +14405,7 @@ type UpdateMCPServerRequest struct {
 	// DelegationPrivateKey PKCS8 Ed25519 private signing key. Omit to retain the existing local key.
 	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
 	Enabled              bool                      `json:"enabled"`
-	Endpoint             string                    `json:"endpoint"`
+	Endpoint             *string                   `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
@@ -16965,6 +17008,9 @@ type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
 
 // ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
 type ManagementMcpJSONRequestBody ManagementMcpJSONBody
+
+// PermitMCPExecutableJSONRequestBody defines body for PermitMCPExecutable for application/json ContentType.
+type PermitMCPExecutableJSONRequestBody = UnconfinedPluginPermitRequest
 
 // ClaimMcpGrantEnrollmentJSONRequestBody defines body for ClaimMcpGrantEnrollment for application/json ContentType.
 type ClaimMcpGrantEnrollmentJSONRequestBody = ClaimMCPGrantEnrollmentRequest

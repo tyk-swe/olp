@@ -19,59 +19,62 @@ import (
 )
 
 type Server struct {
-	Access *access.Server
-	Egress *egress.Policy
+	Executables *Executables
+	Access      *access.Server
+	Egress      *egress.Policy
 }
 type Definition struct {
-	Delegation           *routing.MCPDelegation `json:"delegation"`
-	DelegationKeyID      *string                `json:"-"`
-	OAuth                *routing.MCPOAuth      `json:"oauth"`
-	ID                   string                 `json:"id"`
-	ProjectID            string                 `json:"project_id"`
-	Name                 string                 `json:"name"`
-	Transport            string                 `json:"transport"`
-	Endpoint             string                 `json:"endpoint"`
-	Enabled              bool                   `json:"enabled"`
-	HasCredential        bool                   `json:"has_credential"`
-	ETag                 string                 `json:"etag"`
-	RevisionID           string                 `json:"revision_id"`
-	Revision             int64                  `json:"revision"`
-	Catalog              *Catalog               `json:"catalog"`
-	CertifiedAt          time.Time              `json:"certified_at"`
-	RetiredAt            *time.Time             `json:"retired_at"`
-	UnitPrice            *string                `json:"unit_price"`
-	ToolPrices           map[string]string      `json:"tool_prices"`
-	CallsPerMinute       int64                  `json:"calls_per_minute"`
-	MaxConcurrency       int64                  `json:"max_concurrency"`
-	PerKeyCallsPerMinute int64                  `json:"per_key_calls_per_minute"`
-	PerKeyMaxConcurrency int64                  `json:"per_key_max_concurrency"`
-	CredentialID         *string                `json:"-"`
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
+	DelegationKeyID      *string                  `json:"-"`
+	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
+	OAuth                *routing.MCPOAuth        `json:"oauth"`
+	ID                   string                   `json:"id"`
+	ProjectID            string                   `json:"project_id"`
+	Name                 string                   `json:"name"`
+	Transport            string                   `json:"transport"`
+	Endpoint             string                   `json:"endpoint"`
+	Enabled              bool                     `json:"enabled"`
+	HasCredential        bool                     `json:"has_credential"`
+	ETag                 string                   `json:"etag"`
+	RevisionID           string                   `json:"revision_id"`
+	Revision             int64                    `json:"revision"`
+	Catalog              *Catalog                 `json:"catalog"`
+	CertifiedAt          time.Time                `json:"certified_at"`
+	RetiredAt            *time.Time               `json:"retired_at"`
+	UnitPrice            *string                  `json:"unit_price"`
+	ToolPrices           map[string]string        `json:"tool_prices"`
+	CallsPerMinute       int64                    `json:"calls_per_minute"`
+	MaxConcurrency       int64                    `json:"max_concurrency"`
+	PerKeyCallsPerMinute int64                    `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency int64                    `json:"per_key_max_concurrency"`
+	CredentialID         *string                  `json:"-"`
 }
 type Input struct {
-	Delegation           *routing.MCPDelegation `json:"delegation"`
-	DelegationPrivateKey *string                `json:"delegation_private_key,omitempty"`
-	OAuth                *routing.MCPOAuth      `json:"oauth"`
-	present              map[string]bool        `json:"-"`
-	ProjectID            *string                `json:"project_id,omitempty"`
-	Name                 string                 `json:"name"`
-	Transport            string                 `json:"transport,omitempty"`
-	Endpoint             string                 `json:"endpoint"`
-	Enabled              *bool                  `json:"enabled"`
-	Credential           json.RawMessage        `json:"credential,omitempty"`
-	UnitPrice            *string                `json:"unit_price"`
-	ToolPrices           map[string]string      `json:"tool_prices,omitempty"`
-	CallsPerMinute       *int64                 `json:"calls_per_minute"`
-	MaxConcurrency       *int64                 `json:"max_concurrency"`
-	PerKeyCallsPerMinute *int64                 `json:"per_key_calls_per_minute"`
-	PerKeyMaxConcurrency *int64                 `json:"per_key_max_concurrency"`
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
+	DelegationPrivateKey *string                  `json:"delegation_private_key,omitempty"`
+	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
+	OAuth                *routing.MCPOAuth        `json:"oauth"`
+	present              map[string]bool          `json:"-"`
+	ProjectID            *string                  `json:"project_id,omitempty"`
+	Name                 string                   `json:"name"`
+	Transport            string                   `json:"transport,omitempty"`
+	Endpoint             string                   `json:"endpoint"`
+	Enabled              *bool                    `json:"enabled"`
+	Credential           json.RawMessage          `json:"credential,omitempty"`
+	UnitPrice            *string                  `json:"unit_price"`
+	ToolPrices           map[string]string        `json:"tool_prices,omitempty"`
+	CallsPerMinute       *int64                   `json:"calls_per_minute"`
+	MaxConcurrency       *int64                   `json:"max_concurrency"`
+	PerKeyCallsPerMinute *int64                   `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency *int64                   `json:"per_key_max_concurrency"`
 }
 
-const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.delegation,s.delegation_key_id::text"
+const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.stdio,v.delegation,s.delegation_key_id::text"
 const joined = " FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id"
 
 func scan(row pgx.Row) (*Definition, error) {
 	d := &Definition{Catalog: &Catalog{}}
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth, &d.Delegation, &d.DelegationKeyID)
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth, &d.Stdio, &d.Delegation, &d.DelegationKeyID)
 	d.HasCredential = d.CredentialID != nil
 	if d.ToolPrices == nil {
 		d.ToolPrices = map[string]string{}
@@ -119,7 +122,7 @@ func cloneToolPrices(values map[string]string) map[string]string {
 
 func definitionFromInput(in Input, catalog *Catalog) *Definition {
 	return &Definition{
-		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
+		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), Stdio: in.Stdio.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
 		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute:       routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -138,6 +141,7 @@ func FindActive(ctx context.Context, q access.Queryer, project, name string) (*D
 	return scan(q.QueryRow(ctx, "SELECT "+columns+joined+" WHERE s.project_id=$1 AND lower(s.name)=lower($2) AND s.retired_at IS NULL", project, name))
 }
 func (s *Server) Register(mux *http.ServeMux) {
+	s.registerExecutables(mux)
 	a := s.Access
 	a.Route(mux, "GET /api/v1/mcp-servers", s.list)
 	a.Route(mux, "POST /api/v1/mcp-servers", s.create, access.Deadline(20*time.Second))
@@ -186,6 +190,25 @@ func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) 
 	}
 	return access.Detail(d, d.ETag), nil
 }
+
+type revisionResponse struct {
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
+	Stdio                *routing.MCPStdioBinding `json:"stdio"`
+	OAuth                *routing.MCPOAuth        `json:"oauth"`
+	ID                   string                   `json:"id"`
+	ServerID             string                   `json:"server_id"`
+	Revision             int64                    `json:"revision"`
+	Endpoint             string                   `json:"endpoint"`
+	Catalog              Catalog                  `json:"catalog"`
+	CertifiedAt          time.Time                `json:"certified_at"`
+	UnitPrice            *string                  `json:"unit_price"`
+	ToolPrices           map[string]string        `json:"tool_prices"`
+	CallsPerMinute       int64                    `json:"calls_per_minute"`
+	MaxConcurrency       int64                    `json:"max_concurrency"`
+	PerKeyCallsPerMinute int64                    `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency int64                    `json:"per_key_max_concurrency"`
+}
+
 func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "server_id")
 	if err != nil {
@@ -209,15 +232,16 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	var unitPrice *string
 	var oauth *routing.MCPOAuth
 	var delegation *routing.MCPDelegation
+	var stdio *routing.MCPStdioBinding
 	toolPrices := map[string]string{}
-	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices,oauth,delegation FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices, &oauth, &delegation)
+	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices,oauth,stdio,delegation FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices, &oauth, &stdio, &delegation)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if toolPrices == nil {
 		toolPrices = map[string]string{}
 	}
-	return access.Detail(map[string]any{"delegation": delegation, "oauth": oauth, "id": revision, "server_id": id, "revision": version, "endpoint": endpoint, "catalog": catalog, "certified_at": certified, "unit_price": unitPrice, "tool_prices": toolPrices, "calls_per_minute": d.CallsPerMinute, "max_concurrency": d.MaxConcurrency, "per_key_calls_per_minute": d.PerKeyCallsPerMinute, "per_key_max_concurrency": d.PerKeyMaxConcurrency}, revision), nil
+	return access.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
 }
 func Validate(in *Input, policy *egress.Policy) error {
 	if err := validateDelegation(in); err != nil {
@@ -233,16 +257,25 @@ func Validate(in *Input, policy *egress.Policy) error {
 	if policy == nil {
 		return access.Fail(503, "egress_policy_unavailable", "Certification requires provider egress policy.")
 	}
-	u, err := policy.ValidateEndpoint(in.Endpoint)
-	if err != nil {
-		return access.Invalid("endpoint", "The MCP endpoint is not permitted by provider egress policy.")
+	if in.Transport != "" && !routing.MCPTransport(in.Transport).Valid() {
+		return access.Invalid("transport", "Use streamable_http, sse or stdio.")
 	}
-	in.Endpoint = u.String()
+	if in.Stdio != nil || in.Transport == string(routing.MCPStdio) {
+		if !in.Stdio.Valid() || in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 {
+			return access.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
+		}
+		if in.Transport != "" && in.Transport != string(routing.MCPStdio) {
+			return access.Invalid("transport", "A stdio binding requires stdio transport.")
+		}
+	} else if in.Endpoint != "" || in.Transport != "" {
+		u, err := policy.ValidateEndpoint(in.Endpoint)
+		if err != nil {
+			return access.Invalid("endpoint", "The MCP endpoint is not permitted by provider egress policy.")
+		}
+		in.Endpoint = u.String()
+	}
 	if err := validateOAuth(in.OAuth, policy); err != nil {
 		return err
-	}
-	if in.Transport != "" && !routing.MCPTransport(in.Transport).Valid() {
-		return access.Invalid("transport", "Use streamable_http or sse.")
 	}
 	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
 		return access.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
@@ -344,6 +377,9 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 		if d.RetiredAt != nil {
 			return nil, nil, access.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
 		}
+		if in.Present("stdio") {
+			return nil, nil, access.Invalid("stdio", "The executable binding is immutable.")
+		}
 		if in.ProjectID != nil || in.Transport != "" {
 			return nil, nil, access.Invalid("project_id", "Project and transport are immutable.")
 		}
@@ -441,6 +477,10 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	if replayed != nil {
 		return *replayed, nil
 	}
+	if !retire && definitionTransport(in, previous) == routing.MCPStdio && (in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 || !definitionStdio(in, previous).Valid()) {
+		return access.Reply{}, access.Invalid("stdio", "Use only the immutable approved executable binding for stdio.")
+	}
+
 	var material []byte
 	var catalog *Catalog
 	limitsOnly := !retire && limitsOnlyUpdate(in, previous)
@@ -462,7 +502,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 			}
 		}
 		defer clear(material)
-		catalog, err = CertifyTransport(r.Context(), s.Egress, in.Endpoint, material, definitionTransport(in, previous))
+		catalog, err = CertifyOptions(r.Context(), s.Egress, in.Endpoint, material, TransportOptions{Transport: definitionTransport(in, previous), Stdio: definitionStdio(in, previous), Executables: s.Executables})
 		if err != nil {
 			return access.Reply{}, access.Fail(422, "mcp_certification_failed", "The bounded MCP handshake or tool-schema certification failed.")
 		}
@@ -528,6 +568,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		} else {
 			next.ProjectID = current.ProjectID
 			next.Transport = current.Transport
+			next.Stdio = current.Stdio.Clone()
 			next.CredentialID = current.CredentialID
 		}
 		if len(in.Credential) != 0 {
@@ -594,4 +635,11 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, reply)
+}
+
+func definitionStdio(in Input, previous *Definition) *routing.MCPStdioBinding {
+	if previous != nil {
+		return previous.Stdio.Clone()
+	}
+	return in.Stdio.Clone()
 }

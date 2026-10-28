@@ -3,6 +3,7 @@ package mcpservers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -16,7 +17,8 @@ import (
 
 const LegacyProtocol = routing.MCPLegacyProtocol
 
-type legacyTransport struct {
+type streamTransport struct {
+	process    io.Closer
 	connection sdkmcp.Connection
 	gate       chan struct{}
 }
@@ -51,7 +53,7 @@ func (t legacyRoundTripper) CloseIdleConnections() {
 	}
 }
 
-func openHTTPTransport(ctx context.Context, policy *egress.Policy, endpoint *url.URL, credential string, opts TransportOptions) (*http.Client, *legacyTransport, error) {
+func openHTTPTransport(ctx context.Context, policy *egress.Policy, endpoint *url.URL, credential string, opts TransportOptions) (*http.Client, *streamTransport, error) {
 	base := policy.Client(opts.Timeout)
 	if opts.Transport != routing.MCPLegacySSE {
 		return base, nil, nil
@@ -66,7 +68,7 @@ func openHTTPTransport(ctx context.Context, policy *egress.Policy, endpoint *url
 		client.CloseIdleConnections()
 		return nil, nil, ErrTransport
 	}
-	return client, &legacyTransport{connection: connection, gate: make(chan struct{}, 1)}, nil
+	return client, &streamTransport{connection: connection, gate: make(chan struct{}, 1)}, nil
 }
 
 func requestedTransportProtocol(transport routing.MCPTransport) string {
@@ -83,10 +85,10 @@ func transportProtocolAllowed(transport routing.MCPTransport, protocol string) b
 	return slices.Contains(protocols, protocol)
 }
 
-func (c *Transport) callLegacy(ctx context.Context, id int, method string, params json.RawMessage) (json.RawMessage, error) {
+func (c *Transport) callStream(ctx context.Context, id int, method string, params json.RawMessage) (json.RawMessage, error) {
 	select {
-	case c.legacy.gate <- struct{}{}:
-		defer func() { <-c.legacy.gate }()
+	case c.stream.gate <- struct{}{}:
+		defer func() { <-c.stream.gate }()
 	case <-ctx.Done():
 		return nil, ErrTransport
 	}
@@ -94,14 +96,14 @@ func (c *Transport) callLegacy(ctx context.Context, id int, method string, param
 	if err != nil {
 		return nil, ErrTransport
 	}
-	if err := c.legacy.connection.Write(ctx, &jsonrpc.Request{ID: requestID, Method: method, Params: params}); err != nil {
+	if err := c.stream.connection.Write(ctx, &jsonrpc.Request{ID: requestID, Method: method, Params: params}); err != nil {
 		return nil, ErrTransport
 	}
 	if id == 0 {
 		return nil, nil
 	}
 	for {
-		message, readErr := c.legacy.connection.Read(ctx)
+		message, readErr := c.stream.connection.Read(ctx)
 		if readErr != nil {
 			return nil, ErrTransport
 		}

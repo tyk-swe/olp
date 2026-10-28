@@ -219,9 +219,10 @@ guardrail argument/result execution.
   `2024-11-05` transport while preserving modern sessions' selected transport.
   The pinned reference SDK fixture verifies registration, configuration,
   list/call and durable settlement. Legacy GET and POST need connection affinity.
-- [ ] **RM7.4 — Experimental stdio:** implement operator-installed executable
-  dispatch with the same call, isolation and accounting limits as HTTP.
-  Executable configuration remains operator-controlled.
+- [x] **RM7.4. Experimental stdio:** operator-installed executables share the
+  call, isolation and accounting limits used by HTTP. Owner-approved digests,
+  caller override refusals and bounded process cleanup are fixture-qualified.
+  Executable configuration remains operator-controlled and unconfined.
 
 Implement RM7.1 first; RM7.2–RM7.4 can then proceed independently.
 

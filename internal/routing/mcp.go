@@ -23,10 +23,13 @@ type MCPTransport string
 const (
 	MCPStreamableHTTP MCPTransport = "streamable_http"
 	MCPLegacySSE      MCPTransport = "sse"
+	MCPStdio          MCPTransport = "stdio"
 	MCPLegacyProtocol              = "2024-11-05"
 )
 
-func (t MCPTransport) Valid() bool { return t == MCPStreamableHTTP || t == MCPLegacySSE }
+func (t MCPTransport) Valid() bool {
+	return t == MCPStreamableHTTP || t == MCPLegacySSE || t == MCPStdio
+}
 
 func (t MCPTransport) OrDefault() MCPTransport {
 	if t == "" {
@@ -58,8 +61,27 @@ func (o *MCPOAuth) Clone() *MCPOAuth {
 	return &MCPOAuth{ClientID: o.ClientID, Audience: o.Audience, Scopes: slices.Clone(o.Scopes), AuthorizationEndpoint: o.AuthorizationEndpoint, TokenEndpoint: o.TokenEndpoint, DeviceAuthorizationEndpoint: o.DeviceAuthorizationEndpoint}
 }
 
+type MCPStdioBinding struct {
+	Executable string `json:"executable"`
+	Digest     string `json:"digest"`
+}
+
+func (b *MCPStdioBinding) Clone() *MCPStdioBinding {
+	if b == nil {
+		return nil
+	}
+	copied := *b
+	return &copied
+}
+func (b *MCPStdioBinding) Valid() bool {
+	return b != nil && mcpExecutable.MatchString(b.Executable) && mcpDigest.MatchString(b.Digest)
+}
+
+var mcpExecutable = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
 type MCPServer struct {
 	Delegation           *MCPDelegation    `json:"delegation,omitempty"`
+	Stdio                *MCPStdioBinding  `json:"stdio,omitempty"`
 	OAuth                *MCPOAuth         `json:"oauth,omitempty"`
 	ID                   string            `json:"id"`
 	ProjectID            string            `json:"project_id"`
@@ -80,6 +102,7 @@ type MCPServer struct {
 
 type MCPToolsetTool struct {
 	Delegation           *MCPDelegation
+	Stdio                *MCPStdioBinding
 	Transport            MCPTransport
 	OAuth                *MCPOAuth
 	Alias                string
@@ -211,10 +234,16 @@ func (s *Snapshot) validateMCPServers() error {
 		if !server.Delegation.Valid() || server.Delegation != nil && server.OAuth == nil {
 			return fmt.Errorf("MCP delegation requires personal OAuth and valid metadata")
 		}
+		if server.Transport == MCPStdio && (!server.Stdio.Valid() || server.Endpoint != "" || server.CredentialID != nil || server.OAuth != nil) {
+			return errors.New("invalid stdio binding")
+		}
+		if server.Transport != MCPStdio && server.Stdio != nil {
+			return errors.New("stdio binding requires stdio transport")
+		}
 		if server.OAuth != nil && !server.OAuth.Valid() {
 			return fmt.Errorf("MCP server has invalid OAuth configuration")
 		}
-		if !validUUID(server.ID) || !validUUID(server.ProjectID) || !validUUID(server.RevisionID) || server.Endpoint == "" || len(server.Endpoint) > 2048 || server.Protocol == "" || !mcpDigest.MatchString(server.Digest) || seen[server.ID] || len(server.Tools) > 128 {
+		if !validUUID(server.ID) || !validUUID(server.ProjectID) || !validUUID(server.RevisionID) || (server.Transport != MCPStdio && server.Endpoint == "") || len(server.Endpoint) > 2048 || server.Protocol == "" || !mcpDigest.MatchString(server.Digest) || seen[server.ID] || len(server.Tools) > 128 {
 			return fmt.Errorf("MCP server %q is malformed", server.ID)
 		}
 		if server.CredentialID != nil && !validUUID(*server.CredentialID) {
@@ -303,7 +332,7 @@ func (s *Snapshot) compileMCP() {
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint, Transport: server.Transport.OrDefault(),
-				Delegation: server.Delegation.Clone(), CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(),
+				Delegation: server.Delegation.Clone(), CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(), Stdio: server.Stdio.Clone(),
 				CallsPerMinute:       effective.CallsPerMinute,
 				MaxConcurrency:       effective.MaxConcurrency,
 				PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute,
@@ -329,6 +358,7 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 		tools[i].CredentialID = copyPointer(tools[i].CredentialID)
 		tools[i].OAuth = tools[i].OAuth.Clone()
 		tools[i].Delegation = tools[i].Delegation.Clone()
+		tools[i].Stdio = tools[i].Stdio.Clone()
 	}
 	return MCPToolsetResolution{
 		Tools:   tools,

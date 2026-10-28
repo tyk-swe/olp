@@ -3,5 +3,6 @@ export const pluginKeys = {
   root: ['plugins'] as const,
   list: () => ['plugins', 'list'] as const,
   unconfined: () => ['plugins', 'unconfined'] as const,
+  mcpExecutables: () => ['plugins', 'mcp-executables'] as const,
   index: () => ['plugins', 'index'] as const
 };

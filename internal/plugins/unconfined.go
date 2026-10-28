@@ -39,11 +39,11 @@ var executableName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 // An ExecutableFile is an executable in the unconfined plugin directory.
 type ExecutableFile struct {
 	// Name is the executable's file name in the directory.
-	Name string
+	Name string `json:"name"`
 	// Digest is the lowercase hexadecimal SHA-256 digest of the executable,
 	// which a permitted plugin is identified by and revisions pin.
-	Digest string
-	Size   int64
+	Digest string `json:"digest"`
+	Size   int64  `json:"size_bytes"`
 }
 
 // Executables lists the executables in the unconfined plugin directory, by
@@ -129,3 +129,5 @@ func (u *Unconfined) Inspect(ctx context.Context, name string) (ExecutableFile, 
 func (u *Unconfined) Load(digest, name string) *Executable {
 	return &Executable{Digest: digest, name: name, tier: u}
 }
+
+func (u *Unconfined) Describe(name string) (ExecutableFile, error) { return u.executable(name) }

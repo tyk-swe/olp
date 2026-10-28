@@ -2,6 +2,7 @@ package mcpservers
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -48,6 +49,9 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 		next.ID = access.NewID()
 		_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,credential_id,latest_revision_id,etag,created_by,calls_per_minute,max_concurrency,per_key_calls_per_minute,per_key_max_concurrency,delegation_key_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)", next.ID, next.ProjectID, next.Name, next.Transport, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, actor, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency, next.DelegationKeyID)
 	} else {
+		if current.Transport != next.Transport || !reflect.DeepEqual(current.Stdio, next.Stdio) {
+			return access.Invalid("transport", "The registered transport and executable binding are immutable.")
+		}
 		if current.ProjectID != next.ProjectID || current.RetiredAt != nil {
 			return access.Invalid("project_id", "The registered project is immutable.")
 		}
@@ -57,7 +61,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by,unit_price,tool_prices,oauth,delegation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10,$11,$12)", next.RevisionID, next.ID, next.Revision, next.Endpoint, next.Catalog.Protocol, next.Catalog.Tools, next.Catalog.Digest, actor, next.UnitPrice, next.ToolPrices, next.OAuth, next.Delegation)
+	_, err = tx.Exec(ctx, "INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by,unit_price,tool_prices,oauth,delegation,stdio) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10,$11,$12,$13)", next.RevisionID, next.ID, next.Revision, next.Endpoint, next.Catalog.Protocol, next.Catalog.Tools, next.Catalog.Digest, actor, next.UnitPrice, next.ToolPrices, next.OAuth, next.Delegation, next.Stdio)
 	return err
 }
 
