@@ -3376,6 +3376,27 @@ func (e MCPToolCallResponseDebitState) Valid() bool {
 	}
 }
 
+// Defines values for MCPToolCallResponsePricingState.
+const (
+	Free     MCPToolCallResponsePricingState = "free"
+	Priced   MCPToolCallResponsePricingState = "priced"
+	Unpriced MCPToolCallResponsePricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the MCPToolCallResponsePricingState enum.
+func (e MCPToolCallResponsePricingState) Valid() bool {
+	switch e {
+	case Free:
+		return true
+	case Priced:
+		return true
+	case Unpriced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPToolCallResponseStatus.
 const (
 	MCPToolCallResponseStatusDispatched     MCPToolCallResponseStatus = "dispatched"
@@ -7593,16 +7614,34 @@ type ConfigurationGuardrailPolicyEntryEntriesPhase string
 
 // ConfigurationMCPServer defines model for ConfigurationMCPServer.
 type ConfigurationMCPServer struct {
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
+
 	// CatalogDigest Reviewed tool catalog. Destination certification must match before configuration changes commit.
 	CatalogDigest string `json:"catalog_digest"`
 
 	// CredentialRef Logical destination sealed bearer binding; never source credential bytes.
-	CredentialRef *string                         `json:"credential_ref,omitempty"`
-	Enabled       bool                            `json:"enabled"`
-	Endpoint      string                          `json:"endpoint"`
-	Name          string                          `json:"name"`
-	Project       string                          `json:"project"`
-	Transport     ConfigurationMCPServerTransport `json:"transport"`
+	CredentialRef *string `json:"credential_ref,omitempty"`
+	Enabled       bool    `json:"enabled"`
+	Endpoint      string  `json:"endpoint"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
+	Name           string `json:"name"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency *int   `json:"per_key_max_concurrency,omitempty"`
+	Project              string `json:"project"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices *map[string]string              `json:"tool_prices,omitempty"`
+	Transport  ConfigurationMCPServerTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // ConfigurationMCPServerTransport defines model for ConfigurationMCPServer.Transport.
@@ -8306,13 +8345,31 @@ type CreateInvitationResponse struct {
 
 // CreateMCPServerRequest defines model for CreateMCPServerRequest.
 type CreateMCPServerRequest struct {
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
+
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
-	Credential nullable.Nullable[string]       `json:"credential,omitempty"`
-	Enabled    bool                            `json:"enabled"`
-	Endpoint   string                          `json:"endpoint"`
-	Name       string                          `json:"name"`
-	ProjectId  openapi_types.UUID              `json:"project_id"`
+	Credential nullable.Nullable[string] `json:"credential,omitempty"`
+	Enabled    bool                      `json:"enabled"`
+	Endpoint   string                    `json:"endpoint"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
+	Name           string `json:"name"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency *int               `json:"per_key_max_concurrency,omitempty"`
+	ProjectId            openapi_types.UUID `json:"project_id"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices *map[string]string              `json:"tool_prices,omitempty"`
 	Transport  CreateMCPServerRequestTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // CreateMCPServerRequestTransport defines model for CreateMCPServerRequest.Transport.
@@ -9387,19 +9444,36 @@ type MCPServerListResponse struct {
 
 // MCPServerResponse defines model for MCPServerResponse.
 type MCPServerResponse struct {
-	Catalog       MCPRegisteredCatalog         `json:"catalog"`
-	CertifiedAt   time.Time                    `json:"certified_at"`
-	Enabled       bool                         `json:"enabled"`
-	Endpoint      string                       `json:"endpoint"`
-	Etag          openapi_types.UUID           `json:"etag"`
-	HasCredential bool                         `json:"has_credential"`
-	Id            openapi_types.UUID           `json:"id"`
-	Name          string                       `json:"name"`
-	ProjectId     openapi_types.UUID           `json:"project_id"`
-	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision      int64                        `json:"revision"`
-	RevisionId    openapi_types.UUID           `json:"revision_id"`
-	Transport     MCPServerResponseTransport   `json:"transport"`
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute int                  `json:"calls_per_minute"`
+	Catalog        MCPRegisteredCatalog `json:"catalog"`
+	CertifiedAt    time.Time            `json:"certified_at"`
+	Enabled        bool                 `json:"enabled"`
+	Endpoint       string               `json:"endpoint"`
+	Etag           openapi_types.UUID   `json:"etag"`
+	HasCredential  bool                 `json:"has_credential"`
+	Id             openapi_types.UUID   `json:"id"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency int    `json:"max_concurrency"`
+	Name           string `json:"name"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency int                          `json:"per_key_max_concurrency"`
+	ProjectId            openapi_types.UUID           `json:"project_id"`
+	RetiredAt            nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision             int64                        `json:"revision"`
+	RevisionId           openapi_types.UUID           `json:"revision_id"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices map[string]string          `json:"tool_prices"`
+	Transport  MCPServerResponseTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPServerResponseTransport defines model for MCPServerResponse.Transport.
@@ -9407,28 +9481,62 @@ type MCPServerResponseTransport string
 
 // MCPServerRevisionResponse defines model for MCPServerRevisionResponse.
 type MCPServerRevisionResponse struct {
-	Catalog     MCPRegisteredCatalog `json:"catalog"`
-	CertifiedAt time.Time            `json:"certified_at"`
-	Endpoint    string               `json:"endpoint"`
-	Id          openapi_types.UUID   `json:"id"`
-	Revision    int64                `json:"revision"`
-	ServerId    openapi_types.UUID   `json:"server_id"`
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute int                  `json:"calls_per_minute"`
+	Catalog        MCPRegisteredCatalog `json:"catalog"`
+	CertifiedAt    time.Time            `json:"certified_at"`
+	Endpoint       string               `json:"endpoint"`
+	Id             openapi_types.UUID   `json:"id"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency int `json:"max_concurrency"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency int                `json:"per_key_max_concurrency"`
+	Revision             int64              `json:"revision"`
+	ServerId             openapi_types.UUID `json:"server_id"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices map[string]string `json:"tool_prices"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPServerSummary defines model for MCPServerSummary.
 type MCPServerSummary struct {
-	CertifiedAt   time.Time                    `json:"certified_at"`
-	Enabled       bool                         `json:"enabled"`
-	Endpoint      string                       `json:"endpoint"`
-	Etag          openapi_types.UUID           `json:"etag"`
-	HasCredential bool                         `json:"has_credential"`
-	Id            openapi_types.UUID           `json:"id"`
-	Name          string                       `json:"name"`
-	ProjectId     openapi_types.UUID           `json:"project_id"`
-	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision      int64                        `json:"revision"`
-	RevisionId    openapi_types.UUID           `json:"revision_id"`
-	Transport     MCPServerSummaryTransport    `json:"transport"`
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute int                `json:"calls_per_minute"`
+	CertifiedAt    time.Time          `json:"certified_at"`
+	Enabled        bool               `json:"enabled"`
+	Endpoint       string             `json:"endpoint"`
+	Etag           openapi_types.UUID `json:"etag"`
+	HasCredential  bool               `json:"has_credential"`
+	Id             openapi_types.UUID `json:"id"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency int    `json:"max_concurrency"`
+	Name           string `json:"name"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute int `json:"per_key_calls_per_minute"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency int                          `json:"per_key_max_concurrency"`
+	ProjectId            openapi_types.UUID           `json:"project_id"`
+	RetiredAt            nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision             int64                        `json:"revision"`
+	RevisionId           openapi_types.UUID           `json:"revision_id"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices map[string]string         `json:"tool_prices"`
+	Transport  MCPServerSummaryTransport `json:"transport"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPServerSummaryTransport defines model for MCPServerSummary.Transport.
@@ -9457,34 +9565,46 @@ type MCPToolCallResolveRequestOutcome string
 
 // MCPToolCallResponse defines model for MCPToolCallResponse.
 type MCPToolCallResponse struct {
-	ApiKeyId          openapi_types.UUID            `json:"api_key_id"`
-	CallDigest        nullable.Nullable[string]     `json:"call_digest"`
-	ChargeBound       string                        `json:"charge_bound"`
-	CompletedAt       nullable.Nullable[time.Time]  `json:"completed_at"`
-	CostBound         string                        `json:"cost_bound"`
-	CreatedAt         time.Time                     `json:"created_at"`
-	DebitState        MCPToolCallResponseDebitState `json:"debit_state"`
-	DispatchId        openapi_types.UUID            `json:"dispatch_id"`
-	Id                openapi_types.UUID            `json:"id"`
-	InputDigest       string                        `json:"input_digest"`
-	IsError           bool                          `json:"is_error"`
-	ObservedCharge    string                        `json:"observed_charge"`
-	ObservedCost      string                        `json:"observed_cost"`
-	ProjectId         openapi_types.UUID            `json:"project_id"`
-	RemainingCharge   string                        `json:"remaining_charge"`
-	RemainingCost     string                        `json:"remaining_cost"`
-	ResultDigest      nullable.Nullable[string]     `json:"result_digest"`
-	ServerId          openapi_types.UUID            `json:"server_id"`
-	ServerRevisionId  openapi_types.UUID            `json:"server_revision_id"`
-	StartedAt         time.Time                     `json:"started_at"`
-	Status            MCPToolCallResponseStatus     `json:"status"`
-	ToolAlias         string                        `json:"tool_alias"`
-	ToolsetId         openapi_types.UUID            `json:"toolset_id"`
-	ToolsetRevisionId openapi_types.UUID            `json:"toolset_revision_id"`
+	ApiKeyId    openapi_types.UUID           `json:"api_key_id"`
+	CallDigest  nullable.Nullable[string]    `json:"call_digest"`
+	ChargeBound string                       `json:"charge_bound"`
+	CompletedAt nullable.Nullable[time.Time] `json:"completed_at"`
+	CostBound   string                       `json:"cost_bound"`
+	CreatedAt   time.Time                    `json:"created_at"`
+
+	// Currency Installation pricing currency the bounds and observed amounts use.
+	Currency       nullable.Nullable[string]     `json:"currency"`
+	DebitState     MCPToolCallResponseDebitState `json:"debit_state"`
+	DispatchId     openapi_types.UUID            `json:"dispatch_id"`
+	Id             openapi_types.UUID            `json:"id"`
+	InputDigest    string                        `json:"input_digest"`
+	IsError        bool                          `json:"is_error"`
+	ObservedCharge string                        `json:"observed_charge"`
+	ObservedCost   string                        `json:"observed_cost"`
+
+	// PricingState Whether the call settled at a price, at an explicit free price, or without any price.
+	PricingState      MCPToolCallResponsePricingState `json:"pricing_state"`
+	ProjectId         openapi_types.UUID              `json:"project_id"`
+	RemainingCharge   string                          `json:"remaining_charge"`
+	RemainingCost     string                          `json:"remaining_cost"`
+	ResultDigest      nullable.Nullable[string]       `json:"result_digest"`
+	ServerId          openapi_types.UUID              `json:"server_id"`
+	ServerRevisionId  openapi_types.UUID              `json:"server_revision_id"`
+	StartedAt         time.Time                       `json:"started_at"`
+	Status            MCPToolCallResponseStatus       `json:"status"`
+	ToolAlias         string                          `json:"tool_alias"`
+	ToolsetId         openapi_types.UUID              `json:"toolset_id"`
+	ToolsetRevisionId openapi_types.UUID              `json:"toolset_revision_id"`
+
+	// UnitPrice Pinned unit price charged for the dispatched call. Null only when pricing_state is unpriced.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
 }
 
 // MCPToolCallResponseDebitState defines model for MCPToolCallResponse.DebitState.
 type MCPToolCallResponseDebitState string
+
+// MCPToolCallResponsePricingState Whether the call settled at a price, at an explicit free price, or without any price.
+type MCPToolCallResponsePricingState string
 
 // MCPToolCallResponseStatus defines model for MCPToolCallResponse.Status.
 type MCPToolCallResponseStatus string
@@ -13893,11 +14013,29 @@ type UpdateInstallationBrandingRequest struct {
 
 // UpdateMCPServerRequest defines model for UpdateMCPServerRequest.
 type UpdateMCPServerRequest struct {
+	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
+	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
+
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 	Enabled    bool                      `json:"enabled"`
 	Endpoint   string                    `json:"endpoint"`
-	Name       string                    `json:"name"`
+
+	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
+	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
+	Name           string `json:"name"`
+
+	// PerKeyCallsPerMinute Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits.
+	PerKeyCallsPerMinute *int `json:"per_key_calls_per_minute,omitempty"`
+
+	// PerKeyMaxConcurrency Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits.
+	PerKeyMaxConcurrency *int `json:"per_key_max_concurrency,omitempty"`
+
+	// ToolPrices Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool.
+	ToolPrices *map[string]string `json:"tool_prices,omitempty"`
+
+	// UnitPrice Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision.
+	UnitPrice nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // UpdateNotificationDestinationRequest Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret.

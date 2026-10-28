@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { publicationForm, publicationInput, toolPin } from './form';
+import {
+  publicationForm,
+  publicationInput,
+  serverPricingForm,
+  serverPricingInput,
+  toolPin,
+  type ServerPricingForm
+} from './form';
 import type { MCPServer, Publication } from './api';
 
 const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
@@ -17,6 +24,12 @@ const server: MCPServer = {
   revision: 1,
   certified_at: '2026-10-22T00:00:00Z',
   retired_at: null,
+  unit_price: '0.25',
+  tool_prices: { lookup: '0.5' },
+  calls_per_minute: 90,
+  max_concurrency: 3,
+  per_key_calls_per_minute: 45,
+  per_key_max_concurrency: 2,
   catalog: {
     protocol_version: '2025-11-25',
     digest: 'a'.repeat(64),
@@ -95,5 +108,64 @@ describe('publication configuration', () => {
     input.toolset!.tools[0].name = 'request';
     expect(form.tools[0].name).toBe('edited');
     expect(structuredClone(input)).toEqual(input);
+  });
+
+  it('round trips server pricing and limits without credentials', () => {
+    const form = serverPricingForm(server);
+    expect(form).toEqual({
+      unitPrice: '0.25',
+      toolPrices: { lookup: '0.5' },
+      callsPerMinute: '90',
+      maxConcurrency: '3',
+      perKeyCallsPerMinute: '45',
+      perKeyMaxConcurrency: '2'
+    });
+    const input = serverPricingInput(server, form);
+    expect(input).toEqual({
+      name: server.name,
+      endpoint: server.endpoint,
+      enabled: true,
+      unit_price: '0.25',
+      tool_prices: { lookup: '0.5' },
+      calls_per_minute: 90,
+      max_concurrency: 3,
+      per_key_calls_per_minute: 45,
+      per_key_max_concurrency: 2
+    });
+    expect(input).not.toHaveProperty('credential');
+    form.toolPrices.lookup = '9';
+    expect(server.tool_prices.lookup).toBe('0.5');
+  });
+
+  it('keeps unpriced, free and blank tool prices distinct', () => {
+    const form = serverPricingForm({
+      ...server,
+      unit_price: null,
+      tool_prices: {}
+    });
+    expect(form.unitPrice).toBe('');
+    expect(serverPricingInput(server, form).unit_price).toBeNull();
+    form.unitPrice = '0';
+    expect(serverPricingInput(server, form).unit_price).toBe('0');
+    form.toolPrices = { lookup: '  ' };
+    expect(serverPricingInput(server, form).tool_prices).toEqual({});
+  });
+
+  it('refuses malformed prices and limits outside installation bounds', () => {
+    const base = serverPricingForm(server);
+    const patches: Partial<ServerPricingForm>[] = [
+      { unitPrice: '-1' },
+      { unitPrice: '1e3' },
+      { toolPrices: { lookup: '-0.5' } },
+      { toolPrices: { absent: '1' } },
+      { callsPerMinute: '0' },
+      { callsPerMinute: '60001' },
+      { maxConcurrency: '1025' },
+      { perKeyCallsPerMinute: '1.5' },
+      { perKeyMaxConcurrency: '' }
+    ];
+    for (const patch of patches) {
+      expect(() => serverPricingInput(server, { ...base, ...patch })).toThrow();
+    }
   });
 });

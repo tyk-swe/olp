@@ -1,4 +1,82 @@
-import type { Draft, Kind, MCPServer, Publication, ToolPin } from './api';
+import type {
+  Draft,
+  Kind,
+  MCPServer,
+  MCPServerUpdate,
+  Publication,
+  ToolPin
+} from './api';
+
+export type ServerPricingForm = {
+  unitPrice: string;
+  toolPrices: Record<string, string>;
+  callsPerMinute: string;
+  maxConcurrency: string;
+  perKeyCallsPerMinute: string;
+  perKeyMaxConcurrency: string;
+};
+const pricePattern = /^[0-9]{1,12}(\.[0-9]{1,12})?$/;
+export function serverPricingForm(server: MCPServer): ServerPricingForm {
+  return {
+    unitPrice: server.unit_price ?? '',
+    toolPrices: { ...server.tool_prices },
+    callsPerMinute: String(server.calls_per_minute),
+    maxConcurrency: String(server.max_concurrency),
+    perKeyCallsPerMinute: String(server.per_key_calls_per_minute),
+    perKeyMaxConcurrency: String(server.per_key_max_concurrency)
+  };
+}
+function pricingLimit(raw: string, ceiling: number, label: string): number {
+  const value = Number(raw);
+  if (!/^[0-9]+$/.test(raw.trim()) || value < 1 || value > ceiling)
+    throw new Error(`${label} must be a whole number from 1 to ${ceiling}.`);
+  return value;
+}
+export function serverPricingInput(
+  server: MCPServer,
+  form: ServerPricingForm
+): MCPServerUpdate {
+  const unitPrice = form.unitPrice.trim();
+  if (unitPrice !== '' && !pricePattern.test(unitPrice))
+    throw new Error(
+      'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.'
+    );
+  const toolPrices: Record<string, string> = {};
+  for (const [name, raw] of Object.entries(form.toolPrices)) {
+    const price = raw.trim();
+    if (price === '') continue;
+    if (!server.catalog.tools.some((tool) => tool.name === name))
+      throw new Error(
+        `Price only certified tools. ${name} is not in the catalog.`
+      );
+    if (!pricePattern.test(price))
+      throw new Error(`Use a non-negative decimal price for ${name}.`);
+    toolPrices[name] = price;
+  }
+  return {
+    name: server.name,
+    endpoint: server.endpoint,
+    enabled: server.enabled,
+    unit_price: unitPrice === '' ? null : unitPrice,
+    tool_prices: toolPrices,
+    calls_per_minute: pricingLimit(
+      form.callsPerMinute,
+      60000,
+      'Calls per minute'
+    ),
+    max_concurrency: pricingLimit(form.maxConcurrency, 1024, 'Max concurrency'),
+    per_key_calls_per_minute: pricingLimit(
+      form.perKeyCallsPerMinute,
+      60000,
+      'Per-key calls per minute'
+    ),
+    per_key_max_concurrency: pricingLimit(
+      form.perKeyMaxConcurrency,
+      1024,
+      'Per-key max concurrency'
+    )
+  };
+}
 
 export type PublicationForm = {
   project: string;
