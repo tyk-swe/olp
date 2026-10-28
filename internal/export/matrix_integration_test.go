@@ -500,6 +500,10 @@ func TestIntegrationOTLPResponseDeliveryAccounting(t *testing.T) {
 			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,credential_id,streams,format,etag,created_by) VALUES($1,$2,'otlp_logs',$3,$4,ARRAY['requests'],'otlp',$5,$6)`, sinkID, tc.name, receiver.URL, secretID, uuid.NewString(), owner); err != nil {
 				t.Fatal(err)
 			}
+			var previousPending int
+			if err := pool.QueryRow(t.Context(), exportPendingMetricsSQL).Scan(&previousPending); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := pool.Exec(t.Context(), `SELECT olp.enqueue_export('requests',$1::uuid,NULL,'otlp','success',now(),'{}'::jsonb)`, uuid.NewString()); err != nil {
 				t.Fatal(err)
 			}
@@ -532,8 +536,14 @@ func TestIntegrationOTLPResponseDeliveryAccounting(t *testing.T) {
 			}
 			var metrics strings.Builder
 			WriteMetrics(t.Context(), pool, worker, nil, nil, &metrics)
-			if !strings.Contains(metrics.String(), fmt.Sprintf(`olp_export_deliveries_total{sink=%q,outcome="delivered"} %d`, sinkID, tc.delivered)) {
-				t.Fatalf("delivery metric disagrees: %s", metrics.String())
+			for _, expected := range []string{
+				fmt.Sprintf(`olp_export_deliveries_total{sink=%q,outcome="delivered"} %d`, sinkID, tc.delivered),
+				fmt.Sprintf(`olp_export_deliveries_total{sink=%q,outcome="failed"} %d`, sinkID, 1-tc.delivered),
+				fmt.Sprintf("\nolp_export_pending %d\n", previousPending+tc.pending),
+			} {
+				if !strings.Contains(metrics.String(), expected) {
+					t.Fatalf("missing metric %q in %s", expected, metrics.String())
+				}
 			}
 			if tc.pending == 0 {
 				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_records SET occurred_at=now()-interval '400 days' WHERE id IN (SELECT record_id FROM olp.export_pending WHERE sink_id=$1)`, sinkID); err != nil {
