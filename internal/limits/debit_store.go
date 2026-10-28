@@ -186,7 +186,22 @@ func (s *DebitStore) Admit(ctx context.Context, id, claim string, requests []Req
 		seen[key] = true
 		if r.HasCostBudget() {
 			if err = s.syncOwnerTx(ctx, tx, r.CostOwnerID); err != nil {
-				return err
+				if !errors.Is(err, ErrUninitializedCost) {
+					return err
+				}
+				kind := ""
+				for _, owner := range owners {
+					if owner.ID == r.CostOwnerID {
+						kind = owner.Kind
+						break
+					}
+				}
+				if err = s.initializeFreshOwnerTx(ctx, tx, DebitOwner{ID: r.CostOwnerID, Kind: kind}); err != nil {
+					return err
+				}
+				if err = s.syncOwnerTx(ctx, tx, r.CostOwnerID); err != nil {
+					return err
+				}
 			}
 			if err = s.Limiter.verifyDurableCost(ctx, r); err != nil {
 				return err
@@ -289,6 +304,8 @@ type DebitResult struct {
 	EventID                      string
 	Cost, Charge                 string
 	Final, Complete              bool
+	Unpriced                     bool
+	ObservedAt                   time.Time
 	// ResolvesResultDigests links later verified evidence to incomplete receipts.
 	// Its event contains only newly observed accounting deltas; prior charges
 	// are never replayed. Lifecycle owners verify native evidence before calling.
