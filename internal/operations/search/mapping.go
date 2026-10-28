@@ -175,7 +175,7 @@ func datePrefix(v oif.Value) any {
 	s := text(v)
 	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
 		d := s[:10]
-		if n, err := strconv.Atoi(strings.ReplaceAll(d, "-", "")); err == nil && n > 0 {
+		if _, err := time.Parse(time.DateOnly, d); err == nil {
 			return d
 		}
 	}

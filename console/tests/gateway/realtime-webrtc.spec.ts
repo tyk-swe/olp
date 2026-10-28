@@ -134,34 +134,44 @@ test('browser WebRTC session is created, controlled and closed by the gateway', 
     201
   );
 
-  const created = await page.evaluate(
-    async ({ secret, route, sdp }) => {
-      const form = new FormData();
-      form.append(
-        'sdp',
-        new Blob([sdp], { type: 'application/sdp' }),
-        'offer.sdp'
-      );
-      form.append(
-        'session',
-        new Blob([JSON.stringify({ type: 'realtime', model: route })], {
-          type: 'application/json'
-        })
-      );
-      const response = await fetch('/v1/realtime/calls', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${secret}` },
-        body: form
-      });
-      return {
-        status: response.status,
-        location: response.headers.get('Location') ?? '',
-        body: await response.text()
-      };
-    },
-    { secret: key.secret, route, sdp: offerSDP }
-  );
-  expect(created.status).toBe(201);
+  let created = { status: 0, location: '', body: '' };
+  // A new key reaches the authority snapshot on its next refresh; retry the
+  // call through that window instead of racing it.
+  await expect
+    .poll(
+      async () => {
+        created = await page.evaluate(
+          async ({ secret, route, sdp }) => {
+            const form = new FormData();
+            form.append(
+              'sdp',
+              new Blob([sdp], { type: 'application/sdp' }),
+              'offer.sdp'
+            );
+            form.append(
+              'session',
+              new Blob([JSON.stringify({ type: 'realtime', model: route })], {
+                type: 'application/json'
+              })
+            );
+            const response = await fetch('/v1/realtime/calls', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${secret}` },
+              body: form
+            });
+            return {
+              status: response.status,
+              location: response.headers.get('Location') ?? '',
+              body: await response.text()
+            };
+          },
+          { secret: key.secret, route, sdp: offerSDP }
+        );
+        return created.status;
+      },
+      { timeout: 15_000, intervals: [250, 500, 1_000] }
+    )
+    .toBe(201);
   expect(created.body).toContain('v=0');
   expect(created.body).not.toContain('client_secret');
   expect(created.location).toMatch(/^\/v1\/realtime\/calls\//);
