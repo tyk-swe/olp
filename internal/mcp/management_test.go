@@ -29,3 +29,28 @@ func TestValidateToolCallFiltersReportsFirstInvalidField(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateResolveInputRequiresKnownOutcomeAndEvidenceDigest(t *testing.T) {
+	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := validateResolveInput("settled", digest); err != nil {
+		t.Fatalf("settled outcome refused: %v", err)
+	}
+	if err := validateResolveInput("not_accepted", digest); err != nil {
+		t.Fatalf("not_accepted outcome refused: %v", err)
+	}
+	for _, tc := range []struct {
+		outcome, digest, field string
+	}{
+		{"", digest, "outcome"},
+		{"released", digest, "outcome"},
+		{"settled", "", "evidence_digest"},
+		{"settled", "xyz", "evidence_digest"},
+		{"not_accepted", "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef", "evidence_digest"},
+	} {
+		err := validateResolveInput(tc.outcome, tc.digest)
+		var problem *access.Problem
+		if !errors.As(err, &problem) || problem.Field != tc.field || problem.Status != 422 {
+			t.Fatalf("resolve %q/%q reported %v, want field %s", tc.outcome, tc.digest, err, tc.field)
+		}
+	}
+}

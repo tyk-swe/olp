@@ -5,10 +5,13 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -593,4 +596,292 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 		t.Fatalf("explicit listing silently skipped the snapshot-drifted server: status=%d body=%v", status, listed)
 	}
 	h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200)
+}
+
+func mcpAmount(t *testing.T, body map[string]any, key string) float64 {
+	t.Helper()
+	value, err := strconv.ParseFloat(mcpExecString(t, body, key), 64)
+	if err != nil {
+		t.Fatalf("response field %q is not an amount: %v", key, body)
+	}
+	return value
+}
+
+func mcpAmountIsZero(t *testing.T, body map[string]any, key string) bool {
+	t.Helper()
+	return mcpAmount(t, body, key) == 0
+}
+
+func mcpAmountsEqual(t *testing.T, body map[string]any, left, right string) bool {
+	t.Helper()
+	return mcpAmount(t, body, left) == mcpAmount(t, body, right)
+}
+
+func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "MCP call identity")
+	const credential = "integration-identity-credential"
+	const argument = "integration-identity-argument"
+	const answer = "integration-identity-answer"
+	const callerID = "integration-caller-order-9"
+	var calls atomic.Int64
+	var drop atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+credential {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "identity-session")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{
+				"name": "lookup", "description": "Look up",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
+			}}}
+		case "tools/call":
+			calls.Add(1)
+			if drop.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": answer}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+
+	created := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
+		"name": "Identity server", "project_id": project, "transport": "streamable_http",
+		"endpoint": upstream.URL, "enabled": true, "credential": credential,
+	}, idem("mcp-identity-server"), 201)
+	serverID := mcpExecString(t, created, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+		"project_id": project, "name": "Identity toolset",
+		"toolset": map[string]any{"tools": []agentcontract.Tool{tool}},
+	}, idem("mcp-identity-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("mcp-identity-publish")), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Identity caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
+	}, idem("mcp-identity-key"), 201)
+	secret := mcpExecString(t, key, "secret")
+
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(h.Ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := database.Installation(t.Context(), h.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp-identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newConsumer := func() *httptest.Server {
+		toolServer := &mcp.Server{
+			Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore,
+			Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+			Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+				return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
+			},
+		}
+		mux := http.NewServeMux()
+		toolServer.Register(mux)
+		consumer := httptest.NewServer(mux)
+		t.Cleanup(consumer.Close)
+		return consumer
+	}
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	callOn := func(consumer *httptest.Server, callID, query string) (int, map[string]any) {
+		t.Helper()
+		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": callID, "arguments": map[string]any{"query": query}})
+		req, err := http.NewRequest(http.MethodPost, consumer.URL+"/v1/mcp/tools/call", bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if len(raw) > 0 {
+			if err = json.Unmarshal(raw, &out); err != nil {
+				t.Fatalf("consumer response is not JSON: %s", raw)
+			}
+		}
+		return resp.StatusCode, out
+	}
+	evidenceDigest := func(seed string) string {
+		sum := sha256.Sum256([]byte(seed))
+		return hex.EncodeToString(sum[:])
+	}
+
+	first := newConsumer()
+	status, called := callOn(first, callerID, argument)
+	if status != http.StatusOK || calls.Load() != 1 {
+		t.Fatalf("first identified call did not execute once: status=%d calls=%d body=%v", status, calls.Load(), called)
+	}
+	attemptID := mcpExecString(t, called, "attempt_id")
+	status, repeated := callOn(first, callerID, argument)
+	if status != http.StatusOK || calls.Load() != 1 || mcpExecString(t, repeated, "attempt_id") != attemptID {
+		t.Fatalf("exact repeat re-executed or lost identity: status=%d calls=%d body=%v", status, calls.Load(), repeated)
+	}
+	status, conflicted := callOn(first, callerID, "changed-argument")
+	if status != http.StatusConflict || calls.Load() != 1 {
+		t.Fatalf("changed body under one call id executed: status=%d calls=%d body=%v", status, calls.Load(), conflicted)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, conflicted, "error"), "code"); code != "call_id_conflict" {
+		t.Fatalf("changed body did not conflict by call id: %v", conflicted)
+	}
+	var identityRecord string
+	if err = h.Pool.QueryRow(t.Context(), `SELECT row_to_json(i)::text FROM olp.mcp_call_identities i WHERE i.attempt_id=$1`, attemptID).Scan(&identityRecord); err != nil {
+		t.Fatalf("durable call identity missing: %v", err)
+	}
+	for _, forbidden := range []string{callerID, argument, answer, credential, secret} {
+		if strings.Contains(identityRecord, forbidden) {
+			t.Fatal("durable call identity persisted caller content")
+		}
+	}
+	detail := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+attemptID, nil, nil, 200)
+	if detail["call_digest"] == nil || detail["call_digest"] == callerID || detail["debit_state"] != "settled" {
+		t.Fatalf("management record lost the durable call identity: %v", detail)
+	}
+
+	restarted := newConsumer()
+	status, gone := callOn(restarted, callerID, argument)
+	if status != http.StatusConflict || calls.Load() != 1 {
+		t.Fatalf("repeat after restart replayed upstream: status=%d calls=%d body=%v", status, calls.Load(), gone)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, gone, "error"), "code"); code != "result_not_retained" || mcpExecString(t, gone, "attempt_id") != attemptID || gone["status"] != "succeeded" {
+		t.Fatalf("repeat after restart did not report the unretained retained outcome: %v", gone)
+	}
+
+	drop.Store(true)
+	status, unknown := callOn(restarted, "integration-caller-unknown-1", argument)
+	if status != http.StatusBadGateway || unknown["status"] != "outcome_unknown" || calls.Load() != 2 {
+		t.Fatalf("ambiguous dispatch was not held unknown: status=%d calls=%d body=%v", status, calls.Load(), unknown)
+	}
+	unknownAttempt := mcpExecString(t, unknown, "attempt_id")
+	unknownDispatch := mcpExecString(t, unknown, "dispatch_id")
+	drop.Store(false)
+	store := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
+	if _, err = store.RecoverPrepared(t.Context(), 256); err != nil {
+		t.Fatal(err)
+	}
+	var heldState string
+	if err = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.execution_debits WHERE id=$1`, unknownDispatch).Scan(&heldState); err != nil || heldState != "outcome_unknown" {
+		t.Fatalf("recovery released the held unknown debit: state=%q err=%v", heldState, err)
+	}
+	status, stillUnknown := callOn(newConsumer(), "integration-caller-unknown-1", argument)
+	if status != http.StatusBadGateway || stillUnknown["status"] != "outcome_unknown" || calls.Load() != 2 || mcpExecString(t, stillUnknown, "attempt_id") != unknownAttempt {
+		t.Fatalf("unknown outcome redispatched after restart: status=%d calls=%d body=%v", status, calls.Load(), stillUnknown)
+	}
+	held := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+unknownAttempt, nil, nil, 200)
+	if held["status"] != "outcome_unknown" || held["debit_state"] != "outcome_unknown" || !mcpAmountIsZero(t, held, "observed_cost") || !mcpAmountsEqual(t, held, "remaining_cost", "cost_bound") || !mcpAmountsEqual(t, held, "remaining_charge", "charge_bound") {
+		t.Fatalf("report folded the unresolved bound into observed cost: %v", held)
+	}
+	debits := h.want(owner, "GET", "/api/v1/execution-debits?api_key_id="+mcpExecString(t, key, "id"), nil, nil, 200)
+	foundHeld := false
+	for _, item := range mcpExecItems(t, debits, "items") {
+		debit, _ := item.(map[string]any)
+		if debit["id"] == unknownDispatch {
+			foundHeld = debit["state"] == "outcome_unknown" && mcpAmountIsZero(t, debit, "observed_cost") && mcpAmountsEqual(t, debit, "remaining_cost", "cost_bound")
+		}
+	}
+	if !foundHeld {
+		t.Fatalf("execution debit report lost the held unknown exposure: %v", debits)
+	}
+
+	resolved := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "not_accepted", "evidence_digest": evidenceDigest("upstream-log-shows-no-acceptance"),
+	}, idem("mcp-identity-resolve-unknown"), 200)
+	if resolved["debit_state"] != "not_accepted" || !mcpAmountIsZero(t, resolved, "remaining_cost") {
+		t.Fatalf("evidence-backed finding did not close the held debit: %v", resolved)
+	}
+	var resolutions, audits int
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_resolutions WHERE dispatch_id=$1`, unknownDispatch).Scan(&resolutions); err != nil || resolutions != 1 {
+		t.Fatalf("resolution evidence was not recorded exactly once: count=%d err=%v", resolutions, err)
+	}
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.audit WHERE action='mcp_tool_call.resolve' AND resource_id=$1`, unknownAttempt).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("resolution was not audited exactly once: count=%d err=%v", audits, err)
+	}
+	h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidenceDigest("contradictory-late-evidence"),
+	}, idem("mcp-identity-resolve-again"), 409)
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_resolutions WHERE dispatch_id=$1`, unknownDispatch).Scan(&resolutions); err != nil || resolutions != 1 {
+		t.Fatalf("second resolution rewrote the first finding: count=%d err=%v", resolutions, err)
+	}
+	status, afterResolve := callOn(restarted, "integration-caller-unknown-1", argument)
+	if status != http.StatusBadGateway || calls.Load() != 2 {
+		t.Fatalf("resolved call id redispatched inside its binding: status=%d calls=%d body=%v", status, calls.Load(), afterResolve)
+	}
+
+	drop.Store(true)
+	status, unknownTwo := callOn(restarted, "integration-caller-unknown-2", argument)
+	if status != http.StatusBadGateway || calls.Load() != 3 {
+		t.Fatalf("second ambiguous dispatch was not held unknown: status=%d calls=%d body=%v", status, calls.Load(), unknownTwo)
+	}
+	drop.Store(false)
+	unknownTwoAttempt := mcpExecString(t, unknownTwo, "attempt_id")
+	unknownTwoDispatch := mcpExecString(t, unknownTwo, "dispatch_id")
+	settled := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"),
+	}, idem("mcp-identity-settle-unknown"), 200)
+	if settled["debit_state"] != "settled" {
+		t.Fatalf("later settlement did not close the held debit: %v", settled)
+	}
+	var resultCount int
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=$1`, unknownTwoDispatch).Scan(&resultCount); err != nil || resultCount != 1 {
+		t.Fatalf("later settlement was not recorded exactly once: count=%d err=%v", resultCount, err)
+	}
+	h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidenceDigest("different-late-evidence"),
+	}, idem("mcp-identity-settle-again"), 409)
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=$1`, unknownTwoDispatch).Scan(&resultCount); err != nil || resultCount != 1 {
+		t.Fatalf("second settlement appended another result: count=%d err=%v", resultCount, err)
+	}
+
+	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp.mcp_call_identities SET created_at=clock_timestamp()-interval '25 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE attempt_id=$1`, attemptID); err != nil {
+		t.Fatal(err)
+	}
+	status, reused := callOn(restarted, callerID, argument)
+	if status != http.StatusOK || calls.Load() != 4 || mcpExecString(t, reused, "attempt_id") == attemptID {
+		t.Fatalf("expired call identity stayed bound past 24 hours: status=%d calls=%d body=%v", status, calls.Load(), reused)
+	}
 }

@@ -9783,6 +9783,7 @@
       "supported_fields": [
         "toolset_id",
         "name",
+        "call_id",
         "arguments",
         "content",
         "structured_content",
@@ -9802,6 +9803,9 @@
       "refusals": [
         "missing tools scope",
         "toolset outside the key allowlist",
+        "missing or invalid caller call identifier",
+        "changed body under a bound caller call identifier",
+        "retained result no longer held for a repeated call identifier",
         "arguments outside the pinned schema",
         "enforced budget exhausted",
         "tool definitions changed since publication",
@@ -9850,6 +9854,9 @@
       "refusals": [
         "missing tools scope",
         "toolset outside the key allowlist",
+        "missing or invalid caller call identifier in request _meta",
+        "changed body under a bound caller call identifier",
+        "retained result no longer held for a repeated call identifier",
         "arguments outside the pinned schema",
         "enforced budget exhausted",
         "session belongs to another principal",

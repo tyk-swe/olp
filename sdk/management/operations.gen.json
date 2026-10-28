@@ -32900,6 +32900,92 @@
     }
   },
   {
+    "name": "resolve_mcp_tool_call",
+    "group": "mcp-servers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/mcp-tool-calls/{call_id}/resolve",
+    "description": "resolve mcp tool call",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "call_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "call_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "call_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/MCPToolCallResolveRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "MCPToolCallResolveRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "settled",
+                "not_accepted"
+              ]
+            },
+            "evidence_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "outcome",
+            "evidence_digest"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "restore_provider_as_draft",
     "group": "providers",
     "method": "POST",

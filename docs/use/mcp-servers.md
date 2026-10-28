@@ -119,6 +119,26 @@ call to the server certifies again before it can dispatch, as every dispatch
 now does. Certification compares tool definitions at the moment it runs, and
 it does not attest how the upstream implementation behaves between checks.
 
+Every tool call needs a caller call identifier. Send it as `call_id` on the
+JSON endpoint and as `olp.call_id` inside the request `_meta` on a session
+`tools/call`. The identifier stays bound to the calling key, the pinned
+toolset revision, the tool and a keyed digest of the arguments for 24 hours,
+and only that digest is stored. Repeating the same call with the same
+identifier never runs the tool again. A repeat returns the retained result
+while it is still held in gateway memory, and after that it answers
+`result_not_retained` with the original attempt and dispatch identifiers and
+the retained status. Reusing the identifier with different arguments, a
+different tool or a different pinned revision refuses with `call_id_conflict`.
+When a dispatched call cannot be confirmed either way, it stays
+`outcome_unknown` and its debit stays held across restarts, with no automatic
+redispatch and no expiry release. A project manager closes a held debit
+exactly once through `POST /api/v1/mcp-tool-calls/{call_id}/resolve`, either
+as `settled` from later observed evidence or as `not_accepted` from an audited
+finding, each carrying the SHA-256 digest of the reviewed evidence. Tool call
+records report the debit state with its bounds, observed amounts and
+remaining unresolved amounts as separate fields, so an unresolved bound never
+reads as observed provider cost.
+
 Revoking a key, removing a toolset from its allowlist, retiring a publication
 and disabling or retiring a server all refuse new calls and end live session
 eligibility once the gateway authority view refreshes, which is the same
