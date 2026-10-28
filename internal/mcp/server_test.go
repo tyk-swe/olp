@@ -1672,3 +1672,117 @@ func TestIdentityEvidenceReflectsCredentialAndLiveAuthorityOutcomes(t *testing.T
 		})
 	}
 }
+
+func TestToolRetryGuidanceRoundsUpOnlyPositiveDelays(t *testing.T) {
+	for _, tc := range []struct {
+		delay   time.Duration
+		seconds int64
+	}{
+		{-time.Nanosecond, 0}, {0, 0}, {time.Nanosecond, 1}, {time.Second, 1}, {time.Second + time.Nanosecond, 2}, {1500 * time.Millisecond, 2}, {2 * time.Second, 2},
+	} {
+		t.Run(tc.delay.String(), func(t *testing.T) {
+			server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			session := openSession(t, server, "test-key", latestProtocol())
+			ledger.reserveErr = &limits.ExceededError{Dimension: limits.DimensionDailyCost, RetryAfter: tc.delay}
+			response := rpcRequest(t, server, "test-key", "", "", "/v1/mcp/tools/call", jsonCallBody("retry-guidance", "x"))
+			expectedHeader := func() string {
+				if tc.seconds == 0 {
+					return ""
+				}
+				return strconv.FormatInt(tc.seconds, 10)
+			}()
+			if response.status != http.StatusTooManyRequests || response.headers.Get("Retry-After") != expectedHeader {
+				t.Fatalf("incorrect retry guidance: status=%d header=%q expected%q", response.status, response.headers.Get("Retry-After"), expectedHeader)
+			}
+			rpc := rpcRequest(t, server, "test-key", session, latestProtocol(), "/mcp", sessionCallBody(2, "retry-guidance", "x"))
+			var envelope struct {
+				Error *struct {
+					Data struct {
+						Code    string `json:"code"`
+						Seconds int64  `json:"retry_after_seconds"`
+					} `json:"data"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(rpc.raw), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Data.Code != "budget_exceeded" || envelope.Error.Data.Seconds != tc.seconds {
+				t.Fatalf("incorrect MCP retry guidance: %s", rpc.raw)
+			}
+			if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+				t.Fatal("budget refusal reserved or dispatched a call")
+			}
+		})
+	}
+}
+
+func TestToolCallIdentifiersPreserveSupportedBytesAndRejectControls(t *testing.T) {
+	type jsonCallInput struct {
+		ToolsetID string          `json:"toolset_id"`
+		Name      string          `json:"name"`
+		CallID    string          `json:"call_id"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	type mcpCallInput struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+		Meta      callRequestMeta `json:"_meta"`
+	}
+
+	for _, tc := range []struct {
+		name, id string
+		valid    bool
+	}{
+		{"single byte", "a", true}, {"maximum bytes", strings.Repeat("x", maxCallIDBytes), true}, {"embedded space", "a b", true}, {"leading and trailing space", " a ", true},
+		{"over maximum", strings.Repeat("x", maxCallIDBytes+1), false}, {"empty", "", false}, {"space only", " ", false}, {"null byte", "a\x00b", false}, {"control byte", "a\x1fb", false}, {"delete byte", "a\x7fb", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			session := openSession(t, server, "test-key", latestProtocol())
+			arguments := json.RawMessage(`{"query":"x"}`)
+			raw, err := json.Marshal(jsonCallInput{ToolsetID: testToolset, Name: alias(), CallID: tc.id, Arguments: arguments})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := rpcRequest(t, server, "test-key", "", "", "/v1/mcp/tools/call", string(raw))
+			expectedStatus := func() int {
+				if tc.valid {
+					return http.StatusOK
+				}
+				return http.StatusBadRequest
+			}()
+			if response.status != expectedStatus {
+				t.Fatalf("call identifier validity=%v returned%d: %s", tc.valid, response.status, response.raw)
+			}
+			if tc.valid {
+				ledger.repeat = retainedFrom(t, response.body, StatusSucceeded)
+			}
+			encoded, encodeErr := json.Marshal(struct {
+				Version string       `json:"jsonrpc"`
+				ID      int          `json:"id"`
+				Method  string       `json:"method"`
+				Params  mcpCallInput `json:"params"`
+			}{Version: "2.0", ID: 2, Method: "tools/call", Params: mcpCallInput{Name: alias(), Arguments: arguments, Meta: callRequestMeta{CallID: &tc.id}}})
+			if encodeErr != nil {
+				t.Fatal(encodeErr)
+			}
+			rpc := rpcRequest(t, server, "test-key", session, latestProtocol(), "/mcp", string(encoded))
+			if (rpc.body["error"] == nil) != tc.valid {
+				t.Fatalf("MCP identifier validity=%v: %s", tc.valid, rpc.raw)
+			}
+			if tc.valid {
+				if fx.calls.Load() != 1 || len(ledger.reserved) != 1 {
+					t.Fatal("supported identifier was lost or replayed upstream")
+				}
+				expectedDigest := hex.EncodeToString(server.Auth.Digest(secrets.ToolCallDigest, testKeyID+"\x00"+tc.id))
+				if ledger.reserved[0].CallDigest != expectedDigest {
+					t.Fatal("caller identifier was normalized before binding")
+				}
+				return
+			}
+			if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+				t.Fatal("invalid identifier reserved or dispatched a call")
+			}
+		})
+	}
+}
