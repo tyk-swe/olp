@@ -18,9 +18,12 @@ const BasePath = "/code/"
 type Adapter string
 
 const (
-	AdapterCodex      Adapter = "codex"
-	AdapterOpenCodeGo Adapter = "opencode_go"
-	AdapterZAICoding  Adapter = "zai_coding"
+	AdapterCodex         Adapter = "codex"
+	AdapterOpenCodeGo    Adapter = "opencode_go"
+	AdapterZAICoding     Adapter = "zai_coding"
+	AdapterMiniMaxPlan   Adapter = "minimax_plan"
+	AdapterKimiCode      Adapter = "kimi_code"
+	AdapterQwenTokenPlan Adapter = "qwen_token_plan"
 )
 
 // Protocol is the wire API one forwarded request speaks.

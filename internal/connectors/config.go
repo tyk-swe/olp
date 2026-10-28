@@ -34,6 +34,7 @@ type Config struct {
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
 	BatchStorage                                                                          *BatchStorage
 	TuningDatasetURIPrefixes                                                              []string
+	DocumentURIPrefixes                                                                   []string
 	// SigningService overrides the SigV4 signing name of one call to an AWS
 	// service beside the connector's own, such as Amazon Polly's.
 	SigningService    string `json:"-"`
@@ -49,6 +50,16 @@ type Config struct {
 // gets when it names none: its kind's, or the address the profile's hosting
 // is served at.
 func DefaultProfileEndpoint(kind, profileID, region, project string) string {
+	if profileID == "vertex-document-processing-ocr" {
+		host := region + "-documentai.googleapis.com"
+		if region == "global" {
+			host = "documentai.googleapis.com"
+		}
+		if !cloudIdentifier.MatchString(region) || !cloudIdentifier.MatchString(project) {
+			return ""
+		}
+		return "https://" + host + "/v1/projects/" + project + "/locations/" + region
+	}
 	endpoint := DefaultEndpoint(kind, region, project)
 	if profileID == "bedrock-knowledge-bases" {
 		return strings.Replace(endpoint, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
@@ -303,6 +314,8 @@ func (c Config) URL(encodedWire wire.Format, model string, stream bool) (string,
 		path = "/models/" + url.PathEscape(model) + ":batchEmbedContents"
 	case wire.VertexEmbeddings:
 		path = "/models/" + url.PathEscape(model) + ":predict"
+	case wire.DocumentAIProcess:
+		path = "/processors/" + url.PathEscape(model) + ":process"
 	case wire.BedrockInvoke:
 		operation := "invoke"
 		if stream {
@@ -497,4 +510,43 @@ func (c Config) RealtimeURL(model string) (string, error) {
 		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
 	}
 	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
+}
+
+var realtimeCallID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+func (c Config) RealtimeCallsURL(model string) (string, error) {
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
+		return "", errors.New("profile does not support webrtc")
+	}
+	return c.ResourceURL(model, "realtime/calls", nil)
+}
+
+func (c Config) RealtimeControlURL(model, callID string) (string, error) {
+	if !realtimeCallID.MatchString(callID) {
+		return "", errors.New("invalid realtime call id")
+	}
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
+		return "", errors.New("profile does not support webrtc")
+	}
+	endpoint, err := c.ResourceURL(model, "realtime", url.Values{"call_id": {callID}})
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(endpoint, "https://") {
+		return "wss://" + strings.TrimPrefix(endpoint, "https://"), nil
+	}
+	if strings.HasPrefix(endpoint, "http://") {
+		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
+	}
+	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
+}
+
+func (c Config) RealtimeHangupURL(model, callID string) (string, error) {
+	if !realtimeCallID.MatchString(callID) {
+		return "", errors.New("invalid realtime call id")
+	}
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
+		return "", errors.New("profile does not support webrtc")
+	}
+	return c.ResourceURL(model, "realtime/calls/"+url.PathEscape(callID)+"/hangup", nil)
 }

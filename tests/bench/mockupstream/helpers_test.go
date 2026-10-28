@@ -4,7 +4,6 @@ package mockupstream
 
 import (
 	"bufio"
-	"bytes"
 	"io"
 	"net/http"
 	"strings"
@@ -111,13 +110,4 @@ func (s *Server) post(t testing.TB, r request) (*http.Response, []byte) {
 		t.Fatalf("reading response: %v", err)
 	}
 	return resp, body
-}
-
-func mustContain(t testing.TB, haystack []byte, needles ...string) {
-	t.Helper()
-	for _, n := range needles {
-		if !bytes.Contains(haystack, []byte(n)) {
-			t.Fatalf("response lacks %q:\n%s", n, haystack)
-		}
-	}
 }

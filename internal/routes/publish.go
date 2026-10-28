@@ -20,11 +20,49 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
+func PassthroughAccessError(err error) error {
+	var refusal *routing.Refusal
+	if errors.As(err, &refusal) {
+		return access.Fail(422, refusal.Code, refusal.Message)
+	}
+	var validation *routing.ValidationError
+	if errors.As(err, &validation) {
+		return access.Invalid(validation.Field, validation.Message)
+	}
+	return err
+}
+
+func draftRoute(d *draft) (routing.Route, error) {
+	fidelity, err := routing.DecodeFidelity(d.Fidelity)
+	if err != nil {
+		return routing.Route{}, access.Invalid("fidelity", err.Error())
+	}
+	route := simulationRoute(d.ID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
+	route.ProjectID = d.ProjectID
+	if route.Behavior, err = routing.DecodeBehavior(d.Behavior); err != nil {
+		return routing.Route{}, err
+	}
+	if len(d.ContentPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(d.ContentPolicy), []byte("null")) {
+		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
+		if err != nil {
+			return routing.Route{}, access.Invalid("content_policy", err.Error())
+		}
+	}
+	return route, nil
+}
+
 // check verifies that every target can serve the draft's operations from its
 // provider's activated revision.
 func check(d *draft, live map[string]*resolved) error {
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
 		return err
+	}
+	route, err := draftRoute(d)
+	if err != nil {
+		return err
+	}
+	if err := route.ValidatePassthrough(); err != nil {
+		return PassthroughAccessError(err)
 	}
 	for _, t := range d.Targets {
 		r, ok := live[t.ProviderModelID]
@@ -38,6 +76,9 @@ func check(d *draft, live map[string]*resolved) error {
 			return access.Fail(422, "model_not_published", "Target "+label+" is not part of the connection's activated revision.")
 		}
 		for _, op := range d.Operations {
+			if route.IsPassthrough() && op == routing.PassthroughOperation {
+				continue
+			}
 			certified := false
 			for key := range r.Certified {
 				certified = certified || len(key) > len(op) && key[:len(op)+1] == op+"/"

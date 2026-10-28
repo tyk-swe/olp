@@ -39,6 +39,7 @@ const cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
 var hostings = map[string]hostingTraits{
 	"azure-ai-search":          {azureScope: "https://search.azure.com/.default"},
 	"vertex-rag-engine":        {},
+	"google-document-ai":       {},
 	"bedrock-knowledge-bases":  {awsService: "bedrock"},
 	"azure-deployment":         {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
 	"azure-responses-legacy":   {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
@@ -47,6 +48,7 @@ var hostings = map[string]hostingTraits{
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true},
 	"bedrock-invoke":           {awsService: "bedrock"},
 	"bedrock-batch-inference":  {awsService: "bedrock"},
+	"bedrock-nova-sonic":       {awsService: "bedrock", eventStream: true},
 	"sagemaker-openai":         {awsService: "sagemaker", awsBearer: true},
 	"vertex-google":            {vertexPath: "/publishers/google"},
 	"vertex-anthropic":         {vertexPath: "/publishers/anthropic"},

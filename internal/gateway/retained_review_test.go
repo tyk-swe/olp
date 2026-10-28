@@ -192,6 +192,47 @@ func TestRetainedDeterministicEvalHasNoPhantomModel(t *testing.T) {
 	}
 }
 
+func TestRetainedEvalWithModelConsumesTokens(t *testing.T) {
+	now := time.Now()
+	price := usage.RoutingPrice{Price: usage.Price{ProviderKind: "openai", Model: "m", Operation: "generation", InputPerMillion: new("1"), OutputPerMillion: new("2")}, EffectiveAt: now.Add(-time.Hour)}
+	inputs := &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{price}}
+	provider := routing.Provider{ID: "provider", Kind: "openai"}
+	route := &routing.Route{ID: "route", Slug: "route"}
+	release := &runtime.Release{Snapshot: &routing.Snapshot{Generation: routing.Generation{ID: "gen"}, Providers: map[string]routing.Provider{provider.ID: provider}}}
+	x := &call{request: request{startedAt: now, release: release}, keyID: "key", routingInputs: inputs}
+	x.route = route
+	p := &pin{model: "m", provider: provider, slot: routing.Slot{ID: "slot"}, attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: "m"}}
+	r := &resources.Resource{}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "eval", Surface: "openai", Metered: true}}
+	s := &Server{now: func() time.Time { return now }, Runtime: &fakeRuntime{inputs: inputs, release: release}}
+	if failure := s.prepareRetainedAccounting(x, p, route, r, e, generationReferenceDocument(t, `{}`)); failure != nil {
+		t.Fatal(failure)
+	}
+	if r.RetainedAccounting == nil || len(r.RetainedAccounting.Templates) != 1 || !r.RetainedAccounting.TokenConsuming {
+		t.Fatalf("eval with model lost token liability: %+v", r.RetainedAccounting)
+	}
+}
+
+func TestRetainedAccountingTokenConsumingPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		operation string
+		want      bool
+	}{
+		{"fine_tuning", true},
+		{"eval", false},
+		{"vector_store", false},
+	} {
+		r := &resources.Resource{Metadata: json.RawMessage(`{"upstream_model":"m","authorized_models":[]}`)}
+		e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: tc.operation, Metered: true}}
+		if failure := (&Server{}).prepareRetainedAccounting(&call{}, &pin{model: "m"}, &routing.Route{}, r, e, generationReferenceDocument(t, `{}`)); failure != nil {
+			t.Fatalf("%s empty models failed: %v", tc.operation, failure)
+		}
+		if r.RetainedAccounting == nil || len(r.RetainedAccounting.Templates) != 0 || r.RetainedAccounting.TokenConsuming != tc.want {
+			t.Fatalf("%s TokenConsuming=%v want %v: %+v", tc.operation, r.RetainedAccounting.TokenConsuming, tc.want, r.RetainedAccounting)
+		}
+	}
+}
+
 func TestRetainedGenerationFileAdmissionBoundsRequestFees(t *testing.T) {
 	now := time.Now()
 	provider := routing.Provider{ID: "provider", Kind: "openai"}

@@ -262,7 +262,16 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 	}}
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	if cfg.MaxInFlight == 0 {
-		cfg = Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096}
+		cfg.MaxInFlight = 8
+	}
+	if cfg.MaxBodyBytes == 0 {
+		cfg.MaxBodyBytes = 64 * 1024
+	}
+	if cfg.MaxResponseBytes == 0 {
+		cfg.MaxResponseBytes = 1 << 20
+	}
+	if cfg.MaxEventBytes == 0 {
+		cfg.MaxEventBytes = 4096
 	}
 	sink := &capture{}
 	gw := New(rt, &policy, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))

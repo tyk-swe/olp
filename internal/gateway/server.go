@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/priority"
@@ -75,6 +76,9 @@ type Config struct {
 	// MaxShadowInFlight bounds the mirrored requests in flight on this
 	// gateway; mirrors beyond it are dropped. Zero means the default.
 	MaxShadowInFlight int
+	WebRTCBound       time.Duration
+	WebRTCReauth      time.Duration
+	WebRTCHeartbeat   time.Duration
 }
 
 // Runtime is the pinned authority, release and credential source.
@@ -112,6 +116,7 @@ type Server struct {
 	// means none were configured: keys and targets that bound nothing are
 	// served, and anything that must be metered fails closed.
 	Admission *Admission
+	Debits    SessionDebitLedger
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
 	Media    *MediaDeps
@@ -134,10 +139,14 @@ type Server struct {
 	fleet       *fleetHealth
 	// unhealthy is fleet.unhealthy bound once, so selection never allocates
 	// a method value per request.
-	unhealthy func(string) bool
-	shadows   *shadowing
-	now       func() time.Time
-	counted   func(estimate.Family)
+	unhealthy       func(string) bool
+	shadows         *shadowing
+	now             func() time.Time
+	counted         func(estimate.Family)
+	webrtcMu        sync.Mutex
+	webrtcSessions  map[string]*webrtcSession
+	webrtcExposures map[string]time.Time
+	bedrockStream   func(ctx context.Context, x *call, p *pin) (duplexPeer, error)
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the
@@ -145,6 +154,15 @@ type Server struct {
 const upstreamHeaderTimeout = 5 * time.Minute
 
 func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
+	if cfg.WebRTCBound <= 0 {
+		cfg.WebRTCBound = time.Hour
+	}
+	if cfg.WebRTCReauth <= 0 {
+		cfg.WebRTCReauth = realtimeReauth
+	}
+	if cfg.WebRTCHeartbeat <= 0 {
+		cfg.WebRTCHeartbeat = realtimePing
+	}
 	if cfg.MaxMediaBodyBytes <= 0 {
 		cfg.MaxMediaBodyBytes = 64 << 20
 	}
@@ -206,6 +224,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
+	mux.HandleFunc("POST /v1/realtime/calls", s.realtimeCallsCreate)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(wire.Chat))
 	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -276,6 +295,22 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	return request{cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
+func sameOrigin(r *http.Request, origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host == r.Host && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+func (s *Server) browserOriginAllowed(r *http.Request) bool {
+	values := r.Header.Values("Origin")
+	if len(values) == 0 {
+		return true
+	}
+	if len(values) != 1 {
+		return false
+	}
+	return slices.Contains(s.cfg.CORSAllowedOrigins, values[0]) || sameOrigin(r, values[0]) && values[0] == s.gatewayOrigin(r)
+}
+
 // cors permits browser SDK clients only from explicitly configured origins.
 func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	if !slices.Contains(s.cfg.CORSAllowedOrigins, r.Header.Get("Origin")) {
@@ -294,7 +329,7 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
-	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 	h.Set("Access-Control-Allow-Headers", "Authorization, Idempotency-Key, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length, X-Goog-Upload-Header-Content-Type, X-Goog-Upload-Offset, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, X-OLP-Cache, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Guardrails, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
@@ -365,14 +400,22 @@ func (s *Server) gatewayOrigin(r *http.Request) string {
 // Otherwise the server's own pool bounds the call, so direct handler use (and
 // any composition that skips the middleware) stays bounded.
 func (s *Server) admit(ctx context.Context) bool {
+	return s.acquirePermit(ctx) != nil
+}
+
+func (s *Server) acquirePermit(ctx context.Context) *observability.Permit {
 	if permit := observability.PermitFromContext(ctx); permit != nil {
-		return permit.Await(ctx, observability.ClassNormal, time.Time{})
+		if permit.Await(ctx, observability.ClassNormal, time.Time{}) {
+			return permit
+		}
+		return nil
 	}
-	return s.admission.Acquire()
+	return s.admission.AcquirePermit()
 }
 
 // admitLater is admit for requests that resolve their key and priority
-// first: a queued permit is left waiting for awaitAdmission.
+// first: a queued permit the middleware only reserved waits for awaitAdmission.
+// Otherwise the server's own pool bounds the call.
 func (s *Server) admitLater(ctx context.Context) bool {
 	if observability.PermitFromContext(ctx) != nil {
 		return true

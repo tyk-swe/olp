@@ -530,8 +530,11 @@ export class RouteDraftEditorState {
         budget: current.budget,
         max_body_bytes: current.max_body_bytes,
         caller_cost_exempt: current.caller_cost_exempt,
+        provider_fetched_documents: current.provider_fetched_documents,
         cache: current.cache,
-        prompt_cache: current.prompt_cache
+        prompt_cache: current.prompt_cache,
+        passthrough: current.passthrough,
+        certification: current.certification
       };
       this.selectorsText = JSON.stringify(current.selectors, null, 2);
       this.policyRules = policyRulesFrom(current.content_policy);
