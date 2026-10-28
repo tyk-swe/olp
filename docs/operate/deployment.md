@@ -124,7 +124,7 @@ disconnects:
 
 | Prefix | Service |
 | --- | --- |
-| `/v1`, `/v1beta`, `/native`, `/anthropic`, `/gemini`, `/bedrock`, `/ws` | gateway |
+| `/v1`, `/v1beta`, `/native`, `/anthropic`, `/gemini`, `/bedrock`, `/ws`, `/code` | gateway |
 | `/api`, `/`, and console deep links | control |
 
 Example values:

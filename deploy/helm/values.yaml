@@ -102,8 +102,8 @@ control:
     limits: { cpu: "1", memory: 512Mi }
 
 # Optional same-origin edge routing. The root and management API terminate at
-# control, while the /v1, /v1beta, /native, /anthropic, /gemini, /bedrock and
-# /ws inference prefixes terminate at gateway. Keep this off
+# control, while the /v1, /v1beta, /native, /anthropic, /gemini, /bedrock,
+# /ws and /code inference prefixes terminate at gateway. Keep this off
 # when an external Gateway API/Ingress controller owns the equivalent routes.
 ingress:
   enabled: false
@@ -221,8 +221,8 @@ config:
 
   # HTTP/2 connections receive GOAWAY at this age so clients rebalance.
   httpConnectionMaxAgeSeconds: 300
-  # Draining connections get this long, extended while responses still
-  # stream. Must stay below terminationGracePeriodSeconds - preStopDelaySeconds.
+  # Draining connections have a fixed deadline, even while responses stream.
+  # Must stay below terminationGracePeriodSeconds - preStopDelaySeconds.
   httpConnectionDrainTimeoutSeconds: 30
   # Request body caps. httpMaxMediaBodyBytes must stay within half of
   # mediaSpool.capacityBytes or every multipart request is refused.
