@@ -157,8 +157,8 @@ require it with `auth.mfa_required`. Use an HTTPS DNS public origin for security
 keys and keep recovery codes outside the browser. For Gateway API or a mesh, leave chart Ingress disabled and
 reproduce the same routing table. Disable buffering for SSE and do not lower
 request-size or idle-timeout bounds. Enable WebSocket upgrades for
-`/v1/realtime` and the Gemini Live paths under `/gemini/ws` and `/ws` when they
-are used.
+`/v1/realtime`, the Gemini Live paths under `/gemini/ws` and `/ws`, and the
+native duplex paths under `/native/` when they are used.
 
 The checked-in chart Ingress routes exactly these prefixes, which
 `internal/surface` also reserves from the console and admits from the

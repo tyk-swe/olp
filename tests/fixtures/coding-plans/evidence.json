@@ -57,6 +57,31 @@
       "upstreams": [
         "https://opencode.ai/zen/go/v1"
       ]
+    },
+    "minimax_plan": {
+      "reference": "https://platform.minimax.io/docs/m-plan/other-tools",
+      "upstreams": [
+        "https://api.minimax.io/anthropic",
+        "https://api.minimax.io/v1",
+        "https://api.minimax.cn/anthropic",
+        "https://api.minimax.cn/v1"
+      ]
+    },
+    "kimi_code": {
+      "reference": "https://www.kimi.com/code/docs/en/",
+      "upstreams": [
+        "https://api.kimi.ai/coding/v1",
+        "https://api.kimi.com/coding/v1"
+      ]
+    },
+    "qwen_token_plan": {
+      "reference": "https://www.alibabacloud.com/help/en/model-studio/token-plan-team-quickstart",
+      "upstreams": [
+        "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+        "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+      ]
     }
   },
   "subscription_account_qualified": false,
