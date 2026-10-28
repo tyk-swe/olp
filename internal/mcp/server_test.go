@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1598,6 +1599,75 @@ func TestToolCallRefusesMalformedAndUnsupportedResults(t *testing.T) {
 			}
 			if fixture.calls.Load() != 1 || len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusOutcomeUnknown {
 				t.Fatalf("invalid result lost uncertain dispatch: %+v", ledger.evidence)
+			}
+		})
+	}
+}
+
+func TestIdentityEvidenceReflectsCredentialAndLiveAuthorityOutcomes(t *testing.T) {
+	oauth := &routing.MCPOAuth{ClientID: "client", Audience: "resource", Scopes: []string{"read"}, AuthorizationEndpoint: "https://identity.example.test/authorize", TokenEndpoint: "https://identity.example.test/token"}
+	delegation := &routing.MCPDelegation{Issuer: "https://gateway.example.test", Audience: "resource"}
+	for _, tc := range []struct {
+		name              string
+		oauth             *routing.MCPOAuth
+		delegation        *routing.MCPDelegation
+		missingCredential bool
+		revoke            bool
+		stale             bool
+		status            int
+		registered        IdentityOutcome
+		personal          IdentityOutcome
+		delegated         IdentityOutcome
+		entra             IdentityOutcome
+	}{
+		{name: "static success", status: 200, registered: IdentityPassed, personal: IdentityNotConfigured, delegated: IdentityNotConfigured},
+		{name: "static credential unavailable", missingCredential: true, status: 503, registered: IdentityPassed, personal: IdentityNotConfigured, delegated: IdentityNotConfigured},
+		{name: "personal grant absent", oauth: oauth, status: 403, registered: IdentityPassed, personal: IdentityDenied, delegated: IdentityNotConfigured},
+		{name: "delegation requires personal grant", oauth: oauth, delegation: delegation, status: 403, registered: IdentityPassed, personal: IdentityDenied, delegated: IdentityDenied},
+		{name: "Entra requires verified user", oauth: &routing.MCPOAuth{ClientID: "client", Audience: "resource", Scopes: []string{"resource/read"}, TokenEndpoint: "https://identity.example.test/token", EntraOBO: &routing.MCPEntraOBO{Issuer: "https://identity.example.test"}}, status: 403, registered: IdentityPassed, personal: IdentityDenied, delegated: IdentityNotConfigured, entra: IdentityDenied},
+		{name: "authority revoked before dispatch", revoke: true, status: 403, registered: IdentityDenied, personal: IdentityNotConfigured, delegated: IdentityNotConfigured},
+		{name: "authority stale before dispatch", stale: true, status: 503, registered: IdentityDenied, personal: IdentityNotConfigured, delegated: IdentityNotConfigured},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			source := rt.release.Snapshot
+			registered := source.MCPServers[0]
+			snapshot := &routing.Snapshot{Generation: source.Generation, Providers: source.Providers, Routes: source.Routes, AgentPublications: source.AgentPublications, MCPServers: []routing.MCPServer{{ID: registered.ID, ProjectID: registered.ProjectID, RevisionID: registered.RevisionID, Endpoint: registered.Endpoint, Protocol: registered.Protocol, Digest: registered.Digest, CredentialID: registered.CredentialID, Tools: registered.Tools, OAuth: tc.oauth, Delegation: tc.delegation}}}
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			rt.release = &runtime.Release{Snapshot: snapshot}
+			if tc.missingCredential {
+				server.Credentials = nil
+			}
+			if tc.revoke || tc.stale {
+				server.Credentials = func(context.Context, string) ([]byte, error) {
+					rt.revoked.Store(tc.revoke)
+					rt.stale.Store(tc.stale)
+					return []byte("static-token"), nil
+				}
+			}
+			status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call", `{"toolset_id":"`+testToolset+`","name":"`+agentcontract.ToolAlias(testServerID, "lookup")+`","arguments":{"query":"hello"},"call_id":"identity-evidence"}`)
+			if status != tc.status {
+				t.Fatalf("status=%d expected%d: %v", status, tc.status, body)
+			}
+			if len(ledger.evidence) != 1 {
+				t.Fatalf("missing durable identity evidence: %v", ledger.evidence)
+			}
+			for _, want := range []IdentityDecision{{Hook: RegisteredServerHook, Outcome: tc.registered}, {Hook: UserPermissionHook, Outcome: tc.personal}, {Hook: DelegatedSigningHook, Outcome: tc.delegated}} {
+				actual := slices.IndexFunc(ledger.evidence[0].IdentityDecisions, func(d IdentityDecision) bool { return d.Hook == want.Hook })
+				if actual < 0 || ledger.evidence[0].IdentityDecisions[actual].Outcome != want.Outcome {
+					t.Fatalf("incorrect %s outcome: %v", want.Hook, ledger.evidence[0].IdentityDecisions)
+				}
+			}
+			if tc.entra != "" {
+				index := slices.IndexFunc(ledger.evidence[0].IdentityDecisions, func(d IdentityDecision) bool { return d.Hook == EntraOBOHook })
+				if index < 0 || ledger.evidence[0].IdentityDecisions[index].Outcome != tc.entra {
+					t.Fatalf("incorrect Entra outcome: %v", ledger.evidence[0].IdentityDecisions)
+				}
+			}
+			if tc.status != 200 && fx.calls.Load() != 0 {
+				t.Fatal("denied identity dispatched a tool")
 			}
 		})
 	}

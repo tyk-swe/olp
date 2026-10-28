@@ -3,6 +3,7 @@ package mcpservers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -581,6 +582,187 @@ func TestTransportObservesToolListChangedNotifications(t *testing.T) {
 			}
 			if transport.ListChanged() != tc.want {
 				t.Fatalf("list changed observation = %v, want %v", transport.ListChanged(), tc.want)
+			}
+		})
+	}
+}
+
+type transportBoundaryRequest struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+}
+
+type transportBoundaryReply struct {
+	Version string          `json:"jsonrpc"`
+	ID      int             `json:"id"`
+	Result  json.RawMessage `json:"result"`
+}
+
+func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
+	const answer = `{"content":[{"type":"text","text":"answer"}]}`
+	for _, tc := range []struct {
+		name               string
+		notificationStatus int
+		session            string
+		callResult         json.RawMessage
+		responseBytes      int
+		valid              bool
+	}{
+		{name: "notification accepted", notificationStatus: 202, callResult: json.RawMessage(answer), valid: true},
+		{name: "notification no content", notificationStatus: 204, callResult: json.RawMessage(answer), valid: true},
+		{name: "notification OK", notificationStatus: 200, callResult: json.RawMessage(answer), valid: true},
+		{name: "notification refusal", notificationStatus: 201, callResult: json.RawMessage(answer)},
+		{name: "session identifier bound", notificationStatus: 202, session: strings.Repeat("s", 256), callResult: json.RawMessage(answer), valid: true},
+		{name: "session identifier overflow", notificationStatus: 202, session: strings.Repeat("s", 257), callResult: json.RawMessage(answer)},
+		{name: "result bound", notificationStatus: 202, responseBytes: 1 << 20, valid: true},
+		{name: "result overflow", notificationStatus: 202, responseBytes: (1 << 20) + 1},
+		{name: "missing content", notificationStatus: 202, callResult: json.RawMessage(`{}`)},
+		{name: "null result", notificationStatus: 202, callResult: json.RawMessage(`null`)},
+		{name: "null content", notificationStatus: 202, callResult: json.RawMessage(`{"content":null}`)},
+		{name: "unknown content", notificationStatus: 202, callResult: json.RawMessage(`{"content":[{"type":"resource"}]}`)},
+		{name: "array structured content", notificationStatus: 202, callResult: json.RawMessage(`{"content":[],"structuredContent":[]}`)},
+		{name: "object structured content", notificationStatus: 202, callResult: json.RawMessage(`{"content":[],"structuredContent":{"answer":1}}`), valid: true},
+		{name: "null structured content", notificationStatus: 202, callResult: json.RawMessage(`{"content":[],"structuredContent":null}`), valid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					w.WriteHeader(204)
+					return
+				}
+				var request transportBoundaryRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if request.Method == "notifications/initialized" {
+					w.WriteHeader(tc.notificationStatus)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if request.Method == "initialize" {
+					if tc.session != "" {
+						w.Header().Set("Mcp-Session-Id", tc.session)
+					}
+					_ = json.NewEncoder(w).Encode(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}`)})
+					return
+				}
+				result := func() json.RawMessage {
+					if tc.responseBytes == 0 {
+						return tc.callResult
+					}
+					empty, _ := json.Marshal(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":""}]}`)})
+					return json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("x", tc.responseBytes-len(empty)) + `"}]}`)
+				}()
+				encoded, err := json.Marshal(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: result})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_, _ = w.Write(encoded)
+			}))
+			defer upstream.Close()
+			transport, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, nil, TransportOptions{ClientName: "boundary-fixture", Timeout: time.Second})
+			refusedDuringInitialization := tc.notificationStatus == http.StatusCreated || len(tc.session) > 256
+			if refusedDuringInitialization {
+				if err == nil {
+					transport.Close(t.Context())
+					t.Fatal("invalid transport initialization accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer transport.Close(t.Context())
+			result, callErr := transport.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+			if (callErr == nil) != tc.valid {
+				t.Fatalf("result accepted=%v, expected %v: %v", callErr == nil, tc.valid, callErr)
+			}
+			if tc.responseBytes > 0 && tc.valid && (len(result.Content) != 1 || len(result.Content[0].Text) < 1) {
+				t.Fatal("boundary result lost its text")
+			}
+		})
+	}
+}
+
+func TestTransportInvalidTimeoutRefusesBeforeContactingUpstream(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		if transport, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, nil, TransportOptions{ClientName: "timeout-fixture", Timeout: timeout}); !errors.Is(err, ErrTransport) || transport != nil {
+			t.Fatal("invalid timeout accepted")
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("invalid timeout contacted the upstream")
+	}
+}
+
+func TestCertificationBoundsOpaquePaginationWithoutDroppingSupportedPages(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		pages, cursorSize int
+		valid             bool
+	}{
+		{name: "last supported page", pages: 16, valid: true},
+		{name: "excess page", pages: 17},
+		{name: "largest opaque cursor", pages: 2, cursorSize: 1024, valid: true},
+		{name: "oversized opaque cursor", pages: 2, cursorSize: 1025},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var lists atomic.Int64
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					w.WriteHeader(204)
+					return
+				}
+				var request transportBoundaryRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if request.Method == "notifications/initialized" {
+					w.WriteHeader(202)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if request.Method == "initialize" {
+					_ = json.NewEncoder(w).Encode(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}`)})
+					return
+				}
+				page := int(lists.Add(1))
+				next := func() string {
+					if page == tc.pages {
+						return ""
+					}
+					if tc.cursorSize > 0 {
+						return strings.Repeat("c", tc.cursorSize)
+					}
+					return fmt.Sprintf("page-%d", page+1)
+				}()
+				listing := ToolList{Tools: []ListedTool{{Name: fmt.Sprintf("page_%d", page), InputSchema: json.RawMessage(`{"type":"object"}`)}}, NextCursor: next}
+				encoded, err := json.Marshal(listing)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: encoded})
+			}))
+			defer upstream.Close()
+			catalog, err := Certify(t.Context(), fixturePolicy(), upstream.URL, nil)
+			if (err == nil) != tc.valid {
+				t.Fatalf("catalog accepted=%v, expected%v: %v", err == nil, tc.valid, err)
+			}
+			if tc.valid && len(catalog.Tools) != tc.pages {
+				t.Fatal("supported pagination dropped tools")
+			}
+			if lists.Load() > 16 {
+				t.Fatal("certification contacted pages beyond its supported bound")
 			}
 		})
 	}

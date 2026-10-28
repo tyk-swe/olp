@@ -3,6 +3,7 @@ package routing
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -340,5 +341,75 @@ func TestSnapshotRefusesMoreThan128MCPServers(t *testing.T) {
 	snapshot.MCPServers = servers(129)
 	if err := snapshot.Compile(); err == nil {
 		t.Fatal("snapshot accepted more than 128 MCP servers")
+	}
+}
+
+func TestSnapshotChecksNativeTransportAndSupportedCatalogBounds(t *testing.T) {
+	endpoint := "https://tools.example.test/mcp"
+	credential := mcpCredID
+	native := &MCPStdioBinding{Executable: "fixture", Digest: strings.Repeat("a", 64)}
+	tool := MCPTool{Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}
+	oauth := &MCPOAuth{ClientID: "client", Audience: "resource", Scopes: []string{"read"}, AuthorizationEndpoint: "https://identity.example.test/authorize", TokenEndpoint: "https://identity.example.test/token"}
+	tools := func(count int) []MCPTool {
+		return slices.Collect(func(yield func(MCPTool) bool) {
+			for index := range count {
+				if !yield(MCPTool{Name: fmt.Sprintf("tool_%03d", index), InputSchema: tool.InputSchema}) {
+					return
+				}
+			}
+		})
+	}
+	schema := func(length int) json.RawMessage {
+		const prefix = `{"type":"object","description":"`
+		const suffix = `"}`
+		return json.RawMessage(prefix + strings.Repeat("x", length-len(prefix)-len(suffix)) + suffix)
+	}
+	for _, tc := range []struct {
+		name       string
+		transport  MCPTransport
+		endpoint   string
+		native     *MCPStdioBinding
+		credential *string
+		oauth      *MCPOAuth
+		tools      []MCPTool
+		limits     ToolLimits
+		valid      bool
+	}{
+		{name: "implicit modern", endpoint: endpoint, tools: []MCPTool{tool}, valid: true},
+		{name: "explicit legacy", transport: MCPLegacySSE, endpoint: endpoint, tools: []MCPTool{tool}, valid: true},
+		{name: "native", transport: MCPStdio, native: native, tools: []MCPTool{tool}, valid: true},
+		{name: "native with endpoint", transport: MCPStdio, native: native, endpoint: endpoint, tools: []MCPTool{tool}},
+		{name: "native with credential", transport: MCPStdio, native: native, credential: &credential, tools: []MCPTool{tool}},
+		{name: "native with OAuth", transport: MCPStdio, native: native, oauth: oauth, tools: []MCPTool{tool}},
+		{name: "native without binding", transport: MCPStdio, tools: []MCPTool{tool}},
+		{name: "HTTP with native binding", transport: MCPStreamableHTTP, endpoint: endpoint, native: native, tools: []MCPTool{tool}},
+		{name: "HTTP without endpoint", transport: MCPStreamableHTTP, tools: []MCPTool{tool}},
+		{name: "endpoint bound", endpoint: endpoint + strings.Repeat("x", 2048-len(endpoint)), tools: []MCPTool{tool}, valid: true},
+		{name: "endpoint overflow", endpoint: endpoint + strings.Repeat("x", 2049-len(endpoint)), tools: []MCPTool{tool}},
+		{name: "catalog bound", endpoint: endpoint, tools: tools(128), valid: true},
+		{name: "catalog overflow", endpoint: endpoint, tools: tools(129)},
+		{name: "tool name bound", endpoint: endpoint, tools: []MCPTool{{Name: strings.Repeat("x", 128), InputSchema: tool.InputSchema}}, valid: true},
+		{name: "tool name overflow", endpoint: endpoint, tools: []MCPTool{{Name: strings.Repeat("x", 129), InputSchema: tool.InputSchema}}},
+		{name: "description bound", endpoint: endpoint, tools: []MCPTool{{Name: tool.Name, Description: strings.Repeat("x", 4096), InputSchema: tool.InputSchema}}, valid: true},
+		{name: "description overflow", endpoint: endpoint, tools: []MCPTool{{Name: tool.Name, Description: strings.Repeat("x", 4097), InputSchema: tool.InputSchema}}},
+		{name: "schema bound", endpoint: endpoint, tools: []MCPTool{{Name: tool.Name, InputSchema: schema(64 << 10)}}, valid: true},
+		{name: "schema overflow", endpoint: endpoint, tools: []MCPTool{{Name: tool.Name, InputSchema: schema((64 << 10) + 1)}}},
+		{name: "limits at ceiling", endpoint: endpoint, tools: []MCPTool{tool}, limits: ToolLimits{MaxToolCallsPerMinute, MaxToolConcurrency, MaxToolCallsPerMinute, MaxToolConcurrency}, valid: true},
+		{name: "default limits", endpoint: endpoint, tools: []MCPTool{tool}, valid: true},
+		{name: "per-key rate overflow", endpoint: endpoint, tools: []MCPTool{tool}, limits: ToolLimits{PerKeyCallsPerMinute: MaxToolCallsPerMinute + 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			protocol := func() string {
+				if tc.transport == MCPLegacySSE {
+					return MCPLegacyProtocol
+				}
+				return "2025-11-25"
+			}()
+			snapshot := Snapshot{Generation: fidelitySnapshot(t).Generation, Providers: map[string]Provider{}, Routes: map[string]Route{}, MCPServers: []MCPServer{{ID: mcpServerID, ProjectID: mcpProject, RevisionID: mcpServerRv, Digest: strings.Repeat("a", 64), Protocol: protocol, Transport: tc.transport, Endpoint: tc.endpoint, Stdio: tc.native, CredentialID: tc.credential, OAuth: tc.oauth, Tools: tc.tools, CallsPerMinute: tc.limits.CallsPerMinute, MaxConcurrency: tc.limits.MaxConcurrency, PerKeyCallsPerMinute: tc.limits.PerKeyCallsPerMinute, PerKeyMaxConcurrency: tc.limits.PerKeyMaxConcurrency}}}
+			err := snapshot.Compile()
+			if (err == nil) != tc.valid {
+				t.Fatalf("catalog validity=%v, expected %v: %v", err == nil, tc.valid, err)
+			}
+		})
 	}
 }

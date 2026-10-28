@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/coordination"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/tyk-swe/olp/internal/mcpservers"
@@ -1259,5 +1261,202 @@ func TestStreamableHTTPSameCallIDUnderAnotherPrincipalExecutesIndependently(t *t
 	_ = rpcResult(t, second)
 	if fx.calls.Load() != 2 {
 		t.Fatalf("one principal's call id bound another principal: calls=%d body=%v", fx.calls.Load(), second.body)
+	}
+}
+
+type sessionStoreFault struct {
+	base    Commander
+	script  string
+	reply   any
+	failure error
+}
+
+func (f sessionStoreFault) Do(ctx context.Context, args ...string) (any, error) {
+	if len(args) > 1 && args[1] == f.script {
+		return f.reply, f.failure
+	}
+	return f.base.Do(ctx, args...)
+}
+
+func TestSessionStoreRequiresBoundedSafeNamespaceAndClient(t *testing.T) {
+	client := newFakeSessionCommander(time.Now)
+	for _, namespace := range []string{"a", "0aAzZ9:_-", strings.Repeat("x", 128)} {
+		if _, err := NewSessionStore(client, namespace); err != nil {
+			t.Fatalf("valid namespace refused: %v", err)
+		}
+	}
+	for _, namespace := range []string{"", strings.Repeat("x", 129), "bad/namespace", "bad namespace", "bad{namespace}", "é"} {
+		if _, err := NewSessionStore(client, namespace); err == nil {
+			t.Fatalf("unsafe namespace accepted: %q", namespace)
+		}
+	}
+	var missing *coordination.Client
+	if _, err := NewSessionStore(missing, "valid"); err == nil {
+		t.Fatal("typed nil client accepted")
+	}
+	if _, err := NewSessionStore(nil, "valid"); err == nil {
+		t.Fatal("missing client accepted")
+	}
+}
+
+func TestSessionWritesRefuseMalformedStoreReplies(t *testing.T) {
+	for _, operation := range []string{"create", "delete"} {
+		for _, reply := range []struct {
+			name    string
+			value   any
+			failure error
+		}{
+			{"negative", int64(-1), nil}, {"above one", int64(2), nil}, {"text", "1", nil}, {"missing", nil, nil}, {"unavailable", nil, errors.New("store unavailable")},
+		} {
+			t.Run(operation+"/"+reply.name, func(t *testing.T) {
+				server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+				session := func() string {
+					if operation == "create" {
+						return ""
+					}
+					return openSession(t, server, "test-key", latestProtocol())
+				}()
+				script := func() string {
+					switch operation {
+					case "delete":
+						return sessionDeleteScript.digest
+					default:
+						return sessionCreateScript.digest
+					}
+				}()
+				server.Sessions.client = sessionStoreFault{base: server.Sessions.client, script: script, reply: reply.value, failure: reply.failure}
+				response := func() rpcResponse {
+					switch operation {
+					case "delete":
+						return rpcResponse{status: rpcDelete(t, server, "test-key", session, latestProtocol())}
+					default:
+						return rpcInitialize(t, server, "test-key", latestProtocol(), testToolset)
+					}
+				}()
+				if response.status != http.StatusServiceUnavailable {
+					t.Fatalf("malformed %s reply accepted: %d %v", operation, response.status, response.body)
+				}
+				if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+					t.Fatal("store failure dispatched or reserved a tool call")
+				}
+			})
+		}
+	}
+}
+
+func TestSessionCreateRetainsCapacityRefusalAndSuccessAtStoreBounds(t *testing.T) {
+	for _, reply := range []struct {
+		value  int64
+		status int
+	}{{0, http.StatusTooManyRequests}, {1, http.StatusOK}} {
+		server, _, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+		server.Sessions.client = sessionStoreFault{base: server.Sessions.client, script: sessionCreateScript.digest, reply: reply.value}
+		response := rpcInitialize(t, server, "test-key", latestProtocol(), testToolset)
+		if response.status != reply.status {
+			t.Fatalf("store result %d returned status %d", reply.value, response.status)
+		}
+	}
+}
+
+func TestSessionAccessRefusesCorruptStoreMetadataWithoutDispatch(t *testing.T) {
+	for _, reply := range []struct {
+		name  string
+		value any
+	}{
+		{"wrong type", "session"}, {"unpaired field", []any{"initialized"}}, {"non-string name", []any{1, "value"}}, {"non-string value", []any{"initialized", 1}},
+		{"missing metadata", []any{"initialized", "1"}},
+	} {
+		t.Run(reply.name, func(t *testing.T) {
+			server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			session := openSession(t, server, "test-key", latestProtocol())
+			server.Sessions.client = sessionStoreFault{base: server.Sessions.client, script: sessionTouchScript.digest, reply: reply.value}
+			response := rpcRequest(t, server, "test-key", session, latestProtocol(), "/mcp", sessionCallBody(10, "corrupt-state", "hello"))
+			if response.status != http.StatusServiceUnavailable {
+				t.Fatalf("corrupt metadata accepted: %d %v", response.status, response.body)
+			}
+			if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+				t.Fatal("corrupt session dispatched or reserved a tool call")
+			}
+		})
+	}
+}
+
+type sessionFieldFault struct {
+	base  Commander
+	field string
+	value string
+}
+
+func (f sessionFieldFault) Do(ctx context.Context, args ...string) (any, error) {
+	original, err := f.base.Do(ctx, args...)
+	if err != nil || len(args) < 2 || args[1] != sessionTouchScript.digest {
+		return original, err
+	}
+	values, ok := original.([]any)
+	if !ok {
+		return original, nil
+	}
+	for index := 0; index+1 < len(values); index += 2 {
+		if values[index] == f.field {
+			return slices.Concat(values[:index+1], []any{f.value}, values[index+2:]), nil
+		}
+	}
+	return original, nil
+}
+
+func TestSessionMetadataValidationPreservesIdentityAndTimestampBounds(t *testing.T) {
+	for _, tc := range []struct {
+		field, value string
+		status       int
+	}{
+		{"created_at_ms", "0", 200}, {"last_active_at_ms", "0", 200},
+		{"created_at_ms", "-1", 503}, {"last_active_at_ms", "-1", 503},
+		{"created_at_ms", "invalid", 503}, {"last_active_at_ms", "invalid", 503},
+		{"initialized", "0", 200}, {"initialized", "2", 503},
+		{"installation_id", "", 503}, {"project_id", "", 503}, {"principal_digest", "", 503},
+		{"protocol", "", 503}, {"toolset_id", "", 503}, {"toolset_revision_id", "", 503}, {"release_id", "", 503},
+		{"installation_id", "another-installation", 404}, {"project_id", testOtherTS, 404}, {"principal_digest", "another-principal", 404},
+		{"cert:" + testServerID, "unsupported", 503}, {"cert:" + testServerID, string(certificationDrifted), 200},
+	} {
+		t.Run(tc.field+"/"+tc.value, func(t *testing.T) {
+			server, fx, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			session := openSession(t, server, "test-key", latestProtocol())
+			server.Sessions.client = sessionFieldFault{base: server.Sessions.client, field: tc.field, value: tc.value}
+			response := rpcRequest(t, server, "test-key", session, latestProtocol(), "/mcp", `{"jsonrpc":"2.0","id":10,"method":"ping"}`)
+			if response.status != tc.status {
+				t.Fatalf("metadata response=%d, expected%d: %v", response.status, tc.status, response.body)
+			}
+			if tc.status == http.StatusOK {
+				uninitialized := tc.field == "initialized" && tc.value == "0"
+				if (response.body["error"] != nil) != uninitialized {
+					t.Fatalf("session initialization standing was lost: %v", response.body)
+				}
+			}
+			if fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
+				t.Fatal("session metadata check executed a tool")
+			}
+		})
+	}
+}
+
+func TestSessionStoreFallsBackOnlyForAnUnambiguousMissingScript(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure error
+		status  int
+	}{
+		{"missing script", &coordination.CommandError{Cause: errors.New("NOSCRIPT missing script")}, 200},
+		{"alternate missing script", &coordination.CommandError{Cause: errors.New("NoScriptError missing script")}, 200},
+		{"ambiguous command", &coordination.CommandError{Cause: errors.New("NOSCRIPT missing script"), Ambiguous: true}, 503},
+		{"plain error", errors.New("NOSCRIPT missing script"), 503},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, _, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+			server.Sessions.client = sessionStoreFault{base: server.Sessions.client, script: sessionCreateScript.digest, failure: tc.failure}
+			response := rpcInitialize(t, server, "test-key", latestProtocol(), testToolset)
+			if response.status != tc.status {
+				t.Fatalf("fallback result=%d, expected%d: %v", response.status, tc.status, response.body)
+			}
+		})
 	}
 }
