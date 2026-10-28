@@ -108,7 +108,11 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 	if start > 10000000 {
 		return Reply{}, scim.Invalid("startIndex exceeds the supported offset.")
 	}
-	compiled := scim.SQLFilter{}
+	schema := scim.UserSchema
+	if group {
+		schema = scim.GroupSchema
+	}
+	compiled := scim.SQLFilter{Schema: schema}
 	where, err := compiled.Compile(values.Get("filter"), "resource")
 	if err != nil {
 		return Reply{}, err
