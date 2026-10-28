@@ -309,7 +309,7 @@ coverage by itself and retains the outstanding accounting owner.
 Native family methods have focused fixture coverage. The endpoint ledger keeps
 live qualification required for every provider/profile/model tuple; these local
 checks do not establish service, SDK-service or live-provider qualification.
-The locked OpenAI SDK v3.78.0 has no Evals client; Evals uses the frozen REST
+The locked OpenAI SDK v3.85.1 has no Evals client; Evals uses the frozen REST
 fixtures documented in `internal/resources/testdata/retained/README.md`.
 
 ## Governed pass-through
