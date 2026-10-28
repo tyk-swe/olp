@@ -1,9 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
-import { manage } from '../helpers/management';
+import { manage, provisionGenerationRoute } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
 import { takeSecret, waitForRoutePublication } from '../journeys/fixtures';
 import { verifyDraftSave } from '../journeys/draft-saving';
+import type { RoutingDecision } from '../../src/lib/features/routes/api';
 import { vertical } from '../journeys/fixtures';
 import { verifyProviderRouting } from '../journeys/provider-routing';
 import type { BillingImport } from '../../src/lib/features/providers/api/billing';
@@ -17,6 +18,121 @@ const upstream = {
 };
 const route = 'compatible-chat';
 const keyName = 'Compatible route key';
+
+test('cost calculator distinguishes providers and credential slots', async ({
+  page
+}, info) => {
+  await signIn(page);
+  const slug = `calculator-${crypto.randomUUID()}`;
+  const firstName = `Calculator first ${crypto.randomUUID()}`;
+  const secondName = `Calculator second ${crypto.randomUUID()}`;
+  const { provider } = await provisionGenerationRoute(page, {
+    providerName: firstName,
+    route: slug,
+    endpoint: upstream.endpoint,
+    model: upstream.model,
+    credential: upstream.credential
+  });
+  const second = await manage<{ id: string }>(
+    page,
+    'POST',
+    '/api/v1/providers',
+    {
+      idempotency: crypto.randomUUID(),
+      body: {
+        name: secondName,
+        configuration: {
+          kind: 'openai_compatible',
+          endpoint: upstream.endpoint,
+          auth_mode: 'api_key'
+        },
+        credential: upstream.credential
+      }
+    }
+  );
+  expect(second.status, second.source).toBe(201);
+  const firstTarget = crypto.randomUUID();
+  const decisions: RoutingDecision[] = [
+    {
+      target_id: firstTarget,
+      provider_id: provider.id,
+      upstream_model: upstream.model,
+      credential_slot_id: crypto.randomUUID(),
+      eligible: true,
+      priority: 0,
+      strategy: 'weighted',
+      estimated_cost: { minimum: '0.10', maximum: '0.20', currency: 'USD' }
+    },
+    {
+      target_id: firstTarget,
+      provider_id: provider.id,
+      upstream_model: upstream.model,
+      credential_slot_id: crypto.randomUUID(),
+      eligible: false,
+      reason: 'Credential unavailable',
+      priority: 0,
+      strategy: 'weighted',
+      estimated_cost: { minimum: '0.30', maximum: '0.40', currency: 'USD' }
+    },
+    {
+      target_id: crypto.randomUUID(),
+      provider_id: second.body.id,
+      upstream_model: upstream.model,
+      credential_slot_id: null,
+      eligible: true,
+      priority: 1,
+      strategy: 'weighted',
+      estimated_cost: null
+    }
+  ];
+  await page.route('**/api/v1/routing/simulate', (request) =>
+    request.fulfill({
+      json: decisions,
+      headers: { 'Cache-Control': 'no-store' }
+    })
+  );
+  await page.goto('/usage');
+  const calculator = page.getByRole('region', { name: 'Cost calculator' });
+  await calculator.getByRole('tab', { name: 'Route', exact: true }).click();
+  await calculator.getByLabel('Route', { exact: true }).selectOption(slug);
+  await calculator
+    .getByRole('button', { name: 'Simulate', exact: true })
+    .click();
+  const table = calculator.getByRole('table');
+  await expect(
+    calculator.getByRole('button', { name: 'Simulate', exact: true })
+  ).toBeEnabled();
+  await page.screenshot({
+    path: info.outputPath('calculator-decisions.png'),
+    fullPage: true
+  });
+  await expect(table.getByRole('row')).toHaveCount(decisions.length + 1);
+  for (const [index, decision] of decisions.entries()) {
+    const row = table.getByRole('row').nth(index + 1);
+    await expect(row.getByRole('cell').nth(0)).toContainText(
+      decision.provider_id === provider.id ? firstName : secondName
+    );
+    await expect(row.getByRole('cell').nth(0)).toContainText(upstream.model);
+    await expect(row.getByRole('cell').nth(0)).toContainText(
+      decision.credential_slot_id ?? 'Connection authentication'
+    );
+    await expect(row.getByRole('cell').nth(1)).toContainText(
+      decision.eligible ? 'Yes' : (decision.reason ?? 'No')
+    );
+    if (decision.reason) await expect(row).toContainText(decision.reason);
+    for (const [column, value] of [
+      decision.estimated_cost?.minimum,
+      decision.estimated_cost?.maximum
+    ].entries()) {
+      await expect(row.getByRole('cell').nth(column + 2)).toHaveText(
+        value ? `${value} ${decision.estimated_cost?.currency}` : '—'
+      );
+    }
+  }
+  await calculator.screenshot({
+    path: info.outputPath('calculator-results.png')
+  });
+});
 
 async function gatewayStatus(page: Page, secret: string): Promise<number> {
   return page.evaluate(
