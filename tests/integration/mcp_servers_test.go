@@ -6,8 +6,12 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	jose "github.com/go-jose/go-jose/v4"
+	"github.com/tyk-swe/olp/internal/workload"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	jose "github.com/go-jose/go-jose/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/agentcontract"
@@ -25,10 +29,10 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
-	"github.com/tyk-swe/olp/internal/workload"
 )
 
 func TestMCPConfigurationAdvancesAuthority(t *testing.T) {
@@ -333,6 +337,7 @@ func TestMCPPersonalGrantEnrollmentRequiresOneUseOwnerAndCurrentBinding(t *testi
 			case "initialize":
 				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "personal-fixture", Version: "1"}})
 			default:
+
 				return mustJSON(mcpsdk.ListToolsResult{Tools: []*mcpsdk.Tool{{Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
 			}
 		}()
@@ -526,6 +531,16 @@ func newPersonalOAuthFixture(t *testing.T) personalOAuthFixture {
 
 func newPersonalOAuthFixtureWithHook(t *testing.T, hook func(*http.Request)) personalOAuthFixture {
 	t.Helper()
+	return newPersonalOAuthFixtureWithCall(t, hook, personalOAuthCallbacks{})
+}
+
+type personalOAuthCallbacks struct {
+	Call    func(*http.Request) mcpsdk.CallToolResult
+	Catalog func()
+}
+
+func newPersonalOAuthFixtureWithCall(t *testing.T, hook func(*http.Request), callbacks personalOAuthCallbacks) personalOAuthFixture {
+	t.Helper()
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "OAuth tools")
@@ -565,12 +580,18 @@ func newPersonalOAuthFixtureWithHook(t *testing.T, hook func(*http.Request)) per
 			case "initialize":
 				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "oauth-fixture", Version: "1"}})
 			case "tools/call":
+				if callbacks.Call != nil {
+					return mustJSON(callbacks.Call(r))
+				}
 				identity, authorized := authority.Authorized(r)
 				if !authorized {
 					return mustJSON(&mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "unauthorized"}}})
 				}
 				return mustJSON(&mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: identity.Account}}})
 			default:
+				if callbacks.Catalog != nil {
+					callbacks.Catalog()
+				}
 				return mustJSON(mcpsdk.ListToolsResult{Tools: []*mcpsdk.Tool{{Name: "identity", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
 			}
 		}()
@@ -979,6 +1000,181 @@ func (f personalOAuthFixture) poll(t *testing.T, id string) mcpgrants.Authorizat
 		t.Fatal(err)
 	}
 	return authorization
+}
+
+type personalDelegatedClaims struct {
+	jwt.RegisteredClaims
+	ServerID  string `json:"olp_server_id"`
+	ProjectID string `json:"olp_project_id"`
+}
+
+func TestMCPDelegatedIdentityIsAudienceBoundAndRecorded(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, marshalErr := x509.MarshalPKCS8PrivateKey(private)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	material := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded}))
+	const issuer = "https://gateway.example.test"
+	const audience = "https://tools.example.test/first"
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if _, parseErr := jwt.Parse(token, func(*jwt.Token) (any, error) { return public, nil }, jwt.WithIssuer(issuer), jwt.WithAudience("https://tools.example.test/second"), jwt.WithValidMethods([]string{"EdDSA"})); parseErr == nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer peer.Close()
+	fixture := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{Call: func(r *http.Request) mcpsdk.CallToolResult {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		claims := &personalDelegatedClaims{}
+		if _, parseErr := jwt.ParseWithClaims(token, claims, func(*jwt.Token) (any, error) { return public, nil }, jwt.WithIssuer(issuer), jwt.WithAudience(audience), jwt.WithValidMethods([]string{"EdDSA"}), jwt.WithExpirationRequired()); parseErr != nil {
+			return mcpsdk.CallToolResult{IsError: true}
+		}
+		request, requestErr := http.NewRequestWithContext(r.Context(), http.MethodGet, peer.URL, nil)
+		if requestErr != nil {
+			t.Error(requestErr)
+			return mcpsdk.CallToolResult{IsError: true}
+		}
+		request.Header.Set("Authorization", r.Header.Get("Authorization"))
+		response, callErr := http.DefaultClient.Do(request)
+		if callErr != nil {
+			t.Error(callErr)
+			return mcpsdk.CallToolResult{IsError: true}
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusUnauthorized {
+			t.Error("delegated token was accepted by another audience")
+		}
+		return mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: claims.Subject}}}
+	}})
+	current := fixture.h.want(fixture.owner, "GET", "/api/v1/mcp-servers/"+fixture.serverID, nil, nil, 200)
+	var definition mcpservers.Definition
+	if decodeErr := json.Unmarshal(mustJSON(current), &definition); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	enabled := true
+	updated := fixture.h.want(fixture.owner, "PUT", "/api/v1/mcp-servers/"+fixture.serverID, mcpservers.Input{Name: definition.Name, Endpoint: definition.Endpoint, Enabled: &enabled, OAuth: definition.OAuth, UnitPrice: definition.UnitPrice, Delegation: &routing.MCPDelegation{Issuer: issuer, Audience: audience}, DelegationPrivateKey: &material}, withMatch(current, idem("delegation")), 200)
+	publication := fixture.h.want(fixture.owner, "GET", "/api/v1/toolsets/"+fixture.toolsetID, nil, nil, 200)
+	tool := agentcontract.Tool{ServerID: fixture.serverID, RevisionID: mcpExecString(t, updated, "revision_id"), CatalogDigest: definition.Catalog.Digest, Name: "identity", Alias: fixture.alias}
+	revised := fixture.h.want(fixture.owner, "PUT", "/api/v1/toolsets/"+fixture.toolsetID, personalOAuthToolsetInput{ProjectID: definition.ProjectID, Name: "OAuth tools", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, withMatch(publication, idem("delegated-toolset")), 200)
+	fixture.h.want(fixture.owner, "POST", "/api/v1/toolsets/"+fixture.toolsetID+"/publish", nil, withMatch(revised, idem("delegated-publish")), 200)
+	handler := fixture.consumer(t)
+	assertPersonalCall(t, handler, fixture, fixture.key, "delegated-missing-grant", http.StatusForbidden, "")
+	fixture.completePKCE(t, fixture.claim(t), testutil.OAuthIdentity{Subject: "first", Account: "first-account"})
+	assertPersonalCall(t, handler, fixture, fixture.key, "delegated-json", http.StatusOK, "api_key:"+fixture.key.ID)
+	session := fixture.session(t, handler, fixture.key)
+	initializedRequest := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(mustJSON(struct {
+		JSONRPC string `json:"jsonrpc"`
+		Method  string `json:"method"`
+	}{JSONRPC: "2.0", Method: "notifications/initialized"})))
+	initializedRequest.Header.Set("Authorization", "Bearer "+fixture.key.Secret)
+	initializedRequest.Header.Set("Content-Type", "application/json")
+	initializedRequest.Header.Set("Accept", "application/json, text/event-stream")
+	initializedRequest.Header.Set("Mcp-Protocol-Version", "2025-11-25")
+	initializedRequest.Header.Set("Mcp-Session-Id", session)
+	initializedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(initializedResponse, initializedRequest)
+	if initializedResponse.Code != http.StatusAccepted {
+		t.Fatalf("session initialization failed: %d %s", initializedResponse.Code, initializedResponse.Body.String())
+	}
+
+	params := func(id string) json.RawMessage {
+		return mustJSON(struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+			Meta      struct {
+				CallID string `json:"olp.call_id"`
+			} `json:"_meta"`
+		}{Name: fixture.alias, Arguments: json.RawMessage(`{}`), Meta: struct {
+			CallID string `json:"olp.call_id"`
+		}{CallID: id}})
+	}
+	rpc := personalRPC(handler, fixture.key, "/mcp", session, "tools/call", params("delegated-mcp"))
+	if rpc.Code != http.StatusOK || !strings.Contains(rpc.Body.String(), "api_key:"+fixture.key.ID) {
+		t.Fatalf("MCP delegation failed: %d %s", rpc.Code, rpc.Body.String())
+	}
+	if _, err := fixture.h.Pool.Exec(t.Context(), "UPDATE olp.mcp_user_grants SET revoked_at=now() WHERE binding->'identity'->>'id'=$1", fixture.key.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, handler, fixture, fixture.key, "delegated-revoked-grant", http.StatusForbidden, "")
+	refused := personalRPC(handler, fixture.key, "/mcp", session, "tools/call", params("delegated-mcp-revoked"))
+	if refused.Code != http.StatusOK || !strings.Contains(refused.Body.String(), "user_grant_required") {
+		t.Fatalf("MCP reused a revoked grant: %d %s", refused.Code, refused.Body.String())
+	}
+	attempts := fixture.h.want(fixture.owner, "GET", "/api/v1/mcp-tool-calls", nil, nil, 200)
+	var records struct {
+		Items []mcp.ToolCall `json:"items"`
+	}
+	if decodeErr := json.Unmarshal(mustJSON(attempts), &records); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if len(records.Items) != 5 {
+		t.Fatalf("missing identity attempts: %v", records.Items)
+	}
+	for _, attempt := range records.Items {
+		if len(attempt.IdentityDecisions) != 3 {
+			t.Fatalf("missing bounded identity decisions: %v", attempt)
+		}
+		for _, decision := range attempt.IdentityDecisions {
+			expected := func() mcp.IdentityOutcome {
+				if attempt.Status == mcp.StatusGuardrailBlocked && decision.Hook != mcp.RegisteredServerHook {
+					return mcp.IdentityDenied
+				}
+				return mcp.IdentityPassed
+			}()
+			if decision.Outcome != expected {
+				t.Fatalf("incorrect identity outcome for %s: %v", attempt.Status, decision)
+			}
+		}
+	}
+	exported := fixture.h.want(fixture.owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	encodedExport := string(mustJSON(exported))
+	if !strings.Contains(encodedExport, issuer) || !strings.Contains(encodedExport, audience) || strings.Contains(encodedExport, "BEGIN PRIVATE KEY") || strings.Contains(encodedExport, "delegation_key_id") {
+		t.Fatal("portable delegation lost metadata or leaked its local key")
+	}
+	currentKey := fixture.h.want(fixture.owner, "GET", "/api/v1/api-keys/"+fixture.key.ID, nil, nil, http.StatusOK)
+	fixture.h.want(fixture.owner, "POST", "/api/v1/api-keys/"+fixture.key.ID+"/revoke", nil, withMatch(currentKey, idem("delegated-revoke-key")), http.StatusOK)
+	if err := fixture.h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertPersonalCall(t, handler, fixture, fixture.key, "delegated-revoked-key", http.StatusUnauthorized, "")
+	if strings.Contains(string(mustJSON(attempts)), "BEGIN PRIVATE KEY") {
+		t.Fatal("attempt records contain signing material")
+	}
+}
+
+func TestMCPGrantRevocationDuringCatalogCheckStopsDispatch(t *testing.T) {
+	gate := make(chan func() error, 1)
+	var calls atomic.Int64
+	fixture := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{
+		Catalog: func() {
+			select {
+			case revoke := <-gate:
+				if err := revoke(); err != nil {
+					t.Error(err)
+				}
+			default:
+			}
+		},
+		Call: func(*http.Request) mcpsdk.CallToolResult {
+			calls.Add(1)
+			return mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "dispatched"}}}
+		},
+	})
+	fixture.completePKCE(t, fixture.claim(t), testutil.OAuthIdentity{Subject: "individual", Account: "individual-account"})
+	gate <- func() error {
+		_, err := fixture.h.Pool.Exec(t.Context(), "UPDATE olp.mcp_user_grants SET revoked_at=now() WHERE binding->'identity'->>'id'=$1", fixture.key.ID)
+		return err
+	}
+	assertPersonalCall(t, fixture.consumer(t), fixture, fixture.key, "revoked-during-discovery", http.StatusForbidden, "")
+	if calls.Load() != 0 {
+		t.Fatal("a revoked individual grant reached the tool")
+	}
 }
 
 type entraTestProfile struct {

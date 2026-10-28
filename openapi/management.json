@@ -22927,6 +22927,18 @@
                 "type": "null"
               }
             ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
+          },
+          "delegation_private_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
           }
         },
         "required": [
@@ -23005,6 +23017,18 @@
           },
           "oauth": {
             "$ref": "#/components/schemas/MCPOAuthConfiguration"
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
+          },
+          "delegation_private_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
           }
         },
         "required": [
@@ -23124,6 +23148,9 @@
                 "type": "null"
               }
             ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         },
         "required": [
@@ -23146,7 +23173,8 @@
           "per_key_calls_per_minute",
           "per_key_max_concurrency",
           "oauth",
-          "endpoint"
+          "endpoint",
+          "delegation"
         ]
       },
       "MCPServerSummary": {
@@ -23258,6 +23286,9 @@
                 "type": "null"
               }
             ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         },
         "required": [
@@ -23279,7 +23310,8 @@
           "per_key_calls_per_minute",
           "per_key_max_concurrency",
           "oauth",
-          "endpoint"
+          "endpoint",
+          "delegation"
         ]
       },
       "MCPServerListResponse": {
@@ -23455,6 +23487,13 @@
               "$ref": "#/components/schemas/GuardrailEvidence"
             },
             "maxItems": 512
+          },
+          "identity_decisions": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/MCPIdentityDecision"
+            }
           }
         },
         "required": [
@@ -23485,7 +23524,8 @@
           "unit_price",
           "pricing_state",
           "currency",
-          "guardrail_decisions"
+          "guardrail_decisions",
+          "identity_decisions"
         ]
       },
       "MCPToolCallResolveRequest": {
@@ -23622,6 +23662,9 @@
                 "type": "null"
               }
             ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         },
         "required": [
@@ -23637,7 +23680,8 @@
           "max_concurrency",
           "per_key_calls_per_minute",
           "per_key_max_concurrency",
-          "oauth"
+          "oauth",
+          "delegation"
         ]
       },
       "ConfigurationMCPServer": {
@@ -23738,6 +23782,9 @@
                 "type": "null"
               }
             ]
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/MCPDelegationConfiguration"
           }
         }
       },
@@ -28223,6 +28270,55 @@
         "required": [
           "state"
         ]
+      },
+      "MCPDelegationConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "issuer",
+          "audience"
+        ],
+        "additionalProperties": false
+      },
+      "MCPIdentityDecision": {
+        "type": "object",
+        "properties": {
+          "hook": {
+            "type": "string",
+            "enum": [
+              "mcp_security",
+              "mcp_end_user_permission",
+              "mcp_jwt_signer"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "denied",
+              "not_configured"
+            ]
+          }
+        },
+        "required": [
+          "hook",
+          "outcome"
+        ],
+        "additionalProperties": false
       }
     },
     "securitySchemes": {

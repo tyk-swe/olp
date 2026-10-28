@@ -80,6 +80,7 @@ func (b *MCPStdioBinding) Valid() bool {
 var mcpExecutable = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 type MCPServer struct {
+	Delegation           *MCPDelegation    `json:"delegation,omitempty"`
 	Stdio                *MCPStdioBinding  `json:"stdio,omitempty"`
 	OAuth                *MCPOAuth         `json:"oauth,omitempty"`
 	ID                   string            `json:"id"`
@@ -100,6 +101,7 @@ type MCPServer struct {
 }
 
 type MCPToolsetTool struct {
+	Delegation           *MCPDelegation
 	Stdio                *MCPStdioBinding
 	Transport            MCPTransport
 	OAuth                *MCPOAuth
@@ -229,6 +231,9 @@ func (s *Snapshot) validateMCPServers() error {
 	}
 	seen := map[string]bool{}
 	for _, server := range s.MCPServers {
+		if !server.Delegation.Valid() || server.Delegation != nil && server.OAuth == nil {
+			return fmt.Errorf("MCP delegation requires personal OAuth and valid metadata")
+		}
 		if server.Transport == MCPStdio && (!server.Stdio.Valid() || server.Endpoint != "" || server.CredentialID != nil || server.OAuth != nil) {
 			return errors.New("invalid stdio binding")
 		}
@@ -327,7 +332,7 @@ func (s *Snapshot) compileMCP() {
 				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint, Transport: server.Transport.OrDefault(),
-				CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(), Stdio: server.Stdio.Clone(),
+				Delegation: server.Delegation.Clone(), CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(), Stdio: server.Stdio.Clone(),
 				CallsPerMinute:       effective.CallsPerMinute,
 				MaxConcurrency:       effective.MaxConcurrency,
 				PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute,
@@ -347,13 +352,22 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	if !ok {
 		return MCPToolsetResolution{}, false
 	}
-	tools := slices.Clone(resolution.Tools)
-	for i := range tools {
-		tools[i].UnitPrice = copyPointer(tools[i].UnitPrice)
-		tools[i].CredentialID = copyPointer(tools[i].CredentialID)
-		tools[i].OAuth = tools[i].OAuth.Clone()
-		tools[i].Stdio = tools[i].Stdio.Clone()
-	}
+	tools := slices.Collect(func(yield func(MCPToolsetTool) bool) {
+		for _, tool := range resolution.Tools {
+			if !yield(MCPToolsetTool{
+				Alias: tool.Alias, Name: tool.Name, Description: tool.Description,
+				InputSchema: tool.InputSchema, ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
+				CatalogDigest: tool.CatalogDigest, Endpoint: tool.Endpoint, Transport: tool.Transport,
+				UnitPrice: copyPointer(tool.UnitPrice), CredentialID: copyPointer(tool.CredentialID),
+				OAuth: tool.OAuth.Clone(), Delegation: tool.Delegation.Clone(), Stdio: tool.Stdio.Clone(),
+				CallsPerMinute: tool.CallsPerMinute, MaxConcurrency: tool.MaxConcurrency,
+				PerKeyCallsPerMinute: tool.PerKeyCallsPerMinute, PerKeyMaxConcurrency: tool.PerKeyMaxConcurrency,
+				schema: tool.schema,
+			}) {
+				return
+			}
+		}
+	})
 	return MCPToolsetResolution{
 		Tools:   tools,
 		Drifted: slices.Clone(resolution.Drifted),

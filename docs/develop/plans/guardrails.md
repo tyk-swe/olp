@@ -167,7 +167,7 @@ spans with OLP's local replacement. Neither claims every upstream anonymizer opt
 | `enkryptai` | `enkryptai` native text contract | block, annotate | N | Not run | Connector maintainers: enkryptai |
 | `ibm_guardrails` | `ibm_guardrails` native text contract | block, annotate | N | Not run | Connector maintainers: ibm_guardrails |
 | `litellm_content_filter` | Local analogue: `builtin.keywords` / `builtin.regex` | block, redact, mask, annotate | B | Not applicable; local comparison pending | Guardrail maintainers: rule comparison |
-| `mcp_security` | Excluded from RM2 text inspection: RM7.1: registered-server and tool-call authority | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `mcp_security` | Shared MCP execution checks the live registered server, pinned publication and caller authority | Gateway fixture, JSON and MCP | Identity | Bounded attempt decision | MCP / access maintainers |
 | `onyx` | `onyx` native text contract | block, annotate | N | Not run | Connector maintainers: onyx |
 | `promptguard` | `promptguard` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: promptguard |
 | `xecguard` | `xecguard` native text contract | block, annotate | N | Not run | Connector maintainers: xecguard |
@@ -178,10 +178,10 @@ spans with OLP's local replacement. Neither claims every upstream anonymizer opt
 | `ovalix` | `ovalix` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: ovalix |
 | `microsoft_purview` | `microsoft_purview` native text contract | block, annotate | N | Not run | Connector maintainers: microsoft_purview |
 | `semantic_guard` | `semantic_guard`: accounted embedding similarity against configured utterances | block, annotate | S | Not run | Guardrail / accounting maintainers |
-| `mcp_end_user_permission` | Excluded from RM2 text inspection: RM7.2: caller-bound per-user grants | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `mcp_end_user_permission` | Shared personal-grant resolver checks the exact live caller and server binding | Gateway fixture, missing and revoked grants | Identity | Bounded attempt decision | MCP / access maintainers |
 | `block_code_execution` | `builtin.code_execution`: fenced languages and execution intent | block, redact, mask, annotate | L | Not applicable | Guardrail maintainers |
 | `akto` | `akto` native text contract | block, annotate | N | Not run | Connector maintainers: akto |
-| `mcp_jwt_signer` | Excluded from RM2 text inspection: RM7.2 / RM8.3: delegated audience-bound signing | None in RM2 | Scope | Not applicable | MCP / access maintainers |
+| `mcp_jwt_signer` | Dedicated sealed Ed25519 key signs short-lived server, project and individual claims for the configured audience | Gateway fixture, signature and cross-audience rejection | Identity | Bounded attempt decision | MCP / access maintainers |
 | `llm_as_a_judge` | `model` via operator-configured evaluator route | block, annotate | M | Not run | Guardrail maintainers: judge mapping |
 | `deepkeep` | `deepkeep` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: deepkeep |
 | `qostodian_nexus` | `qostodian_nexus` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: qostodian_nexus |
@@ -200,15 +200,16 @@ spans with OLP's local replacement. Neither claims every upstream anonymizer opt
 
 ### Scope decisions and owned follow-up
 
-The five excluded hooks require authority or execution state absent from a text
-segment. They are implementation dependencies, not exclusions for missing
-credentials or hardware:
+The five hooks outside text inspection require authority or execution state
+absent from a text segment. MCP identity hooks now run in the shared consumer
+execution owner; the remaining hooks still have the dependencies described below:
 
 - `mcp_security` compares tool servers with an authorized MCP registry;
   `mcp_end_user_permission` requires the caller's server-specific grant;
   `mcp_jwt_signer` signs downstream calls with delegated identity. MCP/access
-  maintainers own these in RM7.1/RM7.2 and RM8.3. Evidence is the pinned
-  `mcp_security`, `mcp_end_user_permission` and `mcp_jwt_signer` hook source.
+  maintainers own these in RM7.1/RM7.2. `internal/mcp/identity.go` and the
+  personal-grant owner enforce them; the delegated-identity gateway regression
+  verifies JSON and MCP dispatch, revocation and audience isolation.
 - `agent_365` requires the caller's Entra JWT, on-behalf-of token exchange and
   MCP invocation fields (`_build_evaluate_payload`, `_get_obo_token`). A shared
   API-key text adapter cannot preserve that authority. MCP/access maintainers

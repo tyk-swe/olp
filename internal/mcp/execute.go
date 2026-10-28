@@ -115,7 +115,7 @@ type dispatchResult struct {
 	certification certificationState
 }
 
-func (s *Server) loadCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *apiError) {
+func (s *Server) loadOriginalCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *apiError) {
 	if tool.OAuth != nil {
 		if s.Grants == nil {
 			return nil, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool.")
@@ -167,20 +167,15 @@ func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reserva
 	if reservation == nil {
 		return nil, execution{failure: errLedger}
 	}
-	if err = s.Runtime.AuthorizeAgentResource(in.authority, "tools", in.resolved.id, in.resolved.revisionID, *in.authority.ProjectID); err != nil {
-		if errors.Is(err, runtime.ErrStaleAuthority) {
-			s.release(reservation)
-			return nil, execution{failure: fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")}
-		}
-		if !s.driftScoped(in.authority, in.resolved) {
-			s.release(reservation)
-			return nil, execution{failure: errPermissionDenied}
-		}
+	if failure := s.currentToolAuthority(in); failure != nil {
+		s.release(reservation)
+		return nil, execution{failure: failure}
 	}
 	return reservation, execution{}
 }
 
-func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTool, credential []byte, reservation *Reservation, arguments json.RawMessage) dispatchResult {
+func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credential []byte, reservation *Reservation, arguments json.RawMessage) dispatchResult {
+	tool := in.tool
 	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-tools", Timeout: defaultCallTimeout, Transport: tool.Transport, Stdio: tool.Stdio, Executables: s.Executables})
 	if err != nil {
 		s.release(reservation)
@@ -195,10 +190,21 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool routing.MCPToolsetTo
 		s.release(reservation)
 		return dispatchResult{certification: state, failure: errToolDefinitionChanged}
 	}
+	if failure := s.currentToolAuthority(in); failure != nil {
+		return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, failure)}
+	}
+	if tool.OAuth != nil {
+		if s.Grants == nil {
+			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool."))}
+		}
+		if err := s.Grants.CheckGrant(ctx, in.authority, tool); err != nil {
+			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool."))}
+		}
+	}
 	started := time.Now()
 	dispatchedEvidence := AttemptEvidence{
 		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-		Status: StatusDispatched, StartedAt: started,
+		Status: StatusDispatched, StartedAt: started, IdentityDecisions: toolIdentityDecisions(tool, nil),
 	}
 	if err = s.Ledger.MarkDispatched(ctx, reservation, dispatchedEvidence); err != nil {
 		s.release(reservation)
@@ -222,13 +228,13 @@ func (s *Server) settleToolCall(ctx context.Context, in executeInput, reservatio
 			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 			Status: StatusGuardrailBlocked, IsError: dispatched.result.IsError, ResultDigest: digestBytes(rawEncoded),
 			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-			GuardrailDecisions: decisions,
+			GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
 		}
 		if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
 			unknownEvidence := AttemptEvidence{
 				ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 				Status: StatusOutcomeUnknown, IsError: dispatched.result.IsError, ResultDigest: digestBytes(rawEncoded),
-				StartedAt: dispatched.started, CompletedAt: dispatched.completed, GuardrailDecisions: decisions,
+				StartedAt: dispatched.started, CompletedAt: dispatched.completed, GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
 			}
 			_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
 			return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
@@ -240,14 +246,14 @@ func (s *Server) settleToolCall(ctx context.Context, in executeInput, reservatio
 		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 		Status: completedToolStatus(guarded), IsError: guarded.IsError, ResultDigest: digestBytes(encoded),
 		StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-		GuardrailDecisions: decisions,
+		GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
 	}
 	if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
 		unknownEvidence := AttemptEvidence{
 			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 			Status: StatusOutcomeUnknown, IsError: guarded.IsError, ResultDigest: digestBytes(encoded),
 			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-			GuardrailDecisions: decisions,
+			GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
 		}
 		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
 		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
@@ -267,13 +273,6 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if failure := executeCallIDFailure(in.callID); failure != nil {
 		return execution{failure: failure}
 	}
-	credential, failure := s.loadCredential(parent, in.authority, in.tool)
-	if failure != nil {
-		return execution{failure: failure}
-	}
-	if credential != nil {
-		defer clear(credential)
-	}
 	ctx, cancel := context.WithTimeout(parent, defaultCallTimeout)
 	defer cancel()
 	leases, rateFailure, retryAfter := s.reserveToolRate(ctx, in)
@@ -286,11 +285,16 @@ func (s *Server) execute(parent context.Context, in executeInput) execution {
 	if reserved.failure != nil || reserved.repeat != nil {
 		return reserved
 	}
+	credential, failure := s.loadCredential(ctx, in.authority, in.tool)
+	if failure != nil {
+		return execution{failure: s.refuseToolIdentity(ctx, in, reservation, failure)}
+	}
+	defer clear(credential)
 	arguments, state, refusal := s.guardArguments(ctx, in, reservation, s.toolGuardrails(in))
 	if refusal != nil {
 		return execution{reservation: reservation, blocked: refusal}
 	}
-	dispatchedResult := s.dispatchToolCall(ctx, in.tool, credential, reservation, arguments)
+	dispatchedResult := s.dispatchToolCall(ctx, in, credential, reservation, arguments)
 	dispatched = dispatchedResult.dispatched
 	if dispatchedResult.failure != nil {
 		return execution{failure: dispatchedResult.failure, certification: dispatchedResult.certification}
