@@ -429,3 +429,168 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		t.Fatalf("retired server dispatched: calls=%d", calls.Load())
 	}
 }
+
+func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "MCP per-server drift")
+	const credential = "integration-per-server-credential"
+	upstreamFor := func() (*httptest.Server, *atomic.Value, *atomic.Int64) {
+		description := &atomic.Value{}
+		description.Store("Look up")
+		calls := &atomic.Int64{}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer "+credential {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			var request struct {
+				ID     int    `json:"id"`
+				Method string `json:"method"`
+			}
+			if json.NewDecoder(r.Body).Decode(&request) != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			var result any
+			switch request.Method {
+			case "notifications/initialized":
+				w.WriteHeader(http.StatusAccepted)
+				return
+			case "initialize":
+				w.Header().Set("Mcp-Session-Id", "per-server-session")
+				result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+			case "tools/list":
+				text, _ := description.Load().(string)
+				result = map[string]any{"tools": []any{map[string]any{
+					"name": "lookup", "description": text,
+					"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
+				}}}
+			case "tools/call":
+				calls.Add(1)
+				result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "answer"}}, "isError": false}
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+		}))
+		t.Cleanup(server.Close)
+		return server, description, calls
+	}
+	upstreamA, _, callsA := upstreamFor()
+	upstreamB, descriptionB, callsB := upstreamFor()
+	register := func(name string, upstream *httptest.Server, key string) map[string]any {
+		return h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
+			"name": name, "project_id": project, "transport": "streamable_http",
+			"endpoint": upstream.URL, "enabled": true, "credential": credential,
+		}, idem(key), 201)
+	}
+	pinOf := func(created map[string]any) agentcontract.Tool {
+		serverID := mcpExecString(t, created, "id")
+		return agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	}
+	createdA := register("Healthy server", upstreamA, "mcp-per-server-a")
+	createdB := register("Drifting server", upstreamB, "mcp-per-server-b")
+	pinA, pinB := pinOf(createdA), pinOf(createdB)
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
+		"project_id": project, "name": "Per-server drift toolset",
+		"toolset": map[string]any{"tools": []agentcontract.Tool{pinA, pinB}},
+	}, idem("mcp-per-server-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("mcp-per-server-publish")), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "Per-server drift caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
+	}, idem("mcp-per-server-key"), 201)
+	secret := mcpExecString(t, key, "secret")
+
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(h.Ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := database.Installation(t.Context(), h.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore, err := mcp.NewSessionStore(valkey, strings.TrimSuffix(prefix, ":")+":mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolServer := &mcp.Server{
+		Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessionStore,
+		Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey},
+		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			return ring.Read(ctx, h.Pool, installation, credentialID, secrets.MCPCredential)
+		},
+	}
+	mux := http.NewServeMux()
+	toolServer.Register(mux)
+	consumer := httptest.NewServer(mux)
+	defer consumer.Close()
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	call := func(method, path string, body any) (int, map[string]any) {
+		t.Helper()
+		var data []byte
+		if body != nil {
+			data, _ = json.Marshal(body)
+		}
+		req, err := http.NewRequest(method, consumer.URL+path, bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		out := map[string]any{}
+		if len(raw) > 0 {
+			if err = json.Unmarshal(raw, &out); err != nil {
+				t.Fatalf("consumer response is not JSON: %s", raw)
+			}
+		}
+		return resp.StatusCode, out
+	}
+
+	if status, body := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinA.Alias, "arguments": map[string]any{"query": "x"}}); status != http.StatusOK || callsA.Load() != 1 {
+		t.Fatalf("healthy server did not serve before drift: status=%d calls=%d body=%v", status, callsA.Load(), body)
+	}
+
+	descriptionB.Store("Changed after publication")
+	serverBID := mcpExecString(t, createdB, "id")
+	currentB := h.want(owner, "GET", "/api/v1/mcp-servers/"+serverBID, nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/mcp-servers/"+serverBID,
+		map[string]any{"name": "Drifting server", "endpoint": upstreamB.URL, "enabled": true},
+		withMatch(currentB, idem("mcp-per-server-recertify")), 200)
+	if err = h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if status, body := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinA.Alias, "arguments": map[string]any{"query": "x"}}); status != http.StatusOK || callsA.Load() != 2 {
+		t.Fatalf("snapshot drift on one server blocked the healthy server: status=%d calls=%d body=%v", status, callsA.Load(), body)
+	}
+	status, drifted := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": pinB.Alias, "arguments": map[string]any{"query": "x"}})
+	if status != http.StatusConflict || mcpExecString(t, mcpExecObject(t, drifted, "error"), "code") != "tool_definition_changed" || callsB.Load() != 0 {
+		t.Fatalf("snapshot-drifted server beside a healthy one was not refused as drift: status=%d calls=%d body=%v", status, callsB.Load(), drifted)
+	}
+	status, listed := call("GET", "/v1/mcp/tools?toolset_id="+toolsetID, nil)
+	if status != http.StatusConflict || mcpExecString(t, mcpExecObject(t, listed, "error"), "code") != "tool_definition_changed" {
+		t.Fatalf("explicit listing silently skipped the snapshot-drifted server: status=%d body=%v", status, listed)
+	}
+	h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200)
+}
