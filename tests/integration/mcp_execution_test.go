@@ -20,6 +20,45 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+func mcpExecString(t *testing.T, body map[string]any, key string) string {
+	t.Helper()
+	value, ok := body[key].(string)
+	if !ok {
+		t.Fatalf("response field %q is not a string: %v", key, body)
+	}
+	return value
+}
+
+func mcpExecObject(t *testing.T, body map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := body[key].(map[string]any)
+	if !ok {
+		t.Fatalf("response field %q is not an object: %v", key, body)
+	}
+	return value
+}
+
+func mcpExecItems(t *testing.T, body map[string]any, key string) []any {
+	t.Helper()
+	value, ok := body[key].([]any)
+	if !ok {
+		t.Fatalf("response field %q is not a list: %v", key, body)
+	}
+	return value
+}
+
+func mcpExecItem(t *testing.T, items []any, index int, body map[string]any) map[string]any {
+	t.Helper()
+	if index < 0 || index >= len(items) {
+		t.Fatalf("response list has no item %d: %v", index, body)
+	}
+	value, ok := items[index].(map[string]any)
+	if !ok {
+		t.Fatalf("response list item %d is not an object: %v", index, body)
+	}
+	return value
+}
+
 func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -56,8 +95,9 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 			w.Header().Set("Mcp-Session-Id", "integration-session")
 			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "tools/list":
+			text, _ := description.Load().(string)
 			result = map[string]any{"tools": []any{map[string]any{
-				"name": "lookup", "description": description.Load().(string),
+				"name": "lookup", "description": text,
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false},
 			}}}
 		case "tools/call":
@@ -76,22 +116,22 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		"name": "Execution server", "project_id": project, "transport": "streamable_http",
 		"endpoint": upstream.URL, "enabled": true, "credential": credential,
 	}, idem("mcp-exec-server"), 201)
-	serverID := created["id"].(string)
-	tool := agentcontract.Tool{ServerID: serverID, RevisionID: created["revision_id"].(string), CatalogDigest: created["catalog"].(map[string]any)["digest"].(string), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	serverID := mcpExecString(t, created, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
 	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
 		"project_id": project, "name": "Execution toolset",
 		"toolset": map[string]any{"tools": []agentcontract.Tool{tool}},
 	}, idem("mcp-exec-toolset"), 201)
-	toolsetID := toolset["id"].(string)
+	toolsetID := mcpExecString(t, toolset, "id")
 	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("mcp-exec-publish")), 200)
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "Tool caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
 	}, idem("mcp-exec-key"), 201)
-	secret := key["secret"].(string)
+	secret := mcpExecString(t, key, "secret")
 	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "Other tool caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID},
 	}, idem("mcp-exec-other-key"), 201)
-	otherSecret := otherKey["secret"].(string)
+	otherSecret := mcpExecString(t, otherKey, "secret")
 
 	valkey, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
@@ -195,8 +235,11 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 
 	status, listed := call("GET", "/v1/mcp/tools", nil)
-	tools, _ := listed["tools"].([]any)
-	if status != http.StatusOK || len(tools) != 1 || tools[0].(map[string]any)["name"] != tool.Alias {
+	tools := mcpExecItems(t, listed, "tools")
+	if status != http.StatusOK || len(tools) != 1 {
+		t.Fatalf("pinned tools were not listed under their alias: %d %v", status, listed)
+	}
+	if got := mcpExecString(t, mcpExecItem(t, tools, 0, listed), "name"); got != tool.Alias {
 		t.Fatalf("pinned tools were not listed under their alias: %d %v", status, listed)
 	}
 
@@ -209,8 +252,11 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	if status != http.StatusOK || calls.Load() != 1 {
 		t.Fatalf("valid call did not reach the upstream once: status=%d calls=%d body=%v", status, calls.Load(), called)
 	}
-	content, _ := called["content"].([]any)
-	if len(content) != 1 || content[0].(map[string]any)["text"] != answer {
+	content := mcpExecItems(t, called, "content")
+	if len(content) != 1 {
+		t.Fatalf("upstream result was not returned: %v", called)
+	}
+	if got := mcpExecString(t, mcpExecItem(t, content, 0, called), "text"); got != answer {
 		t.Fatalf("upstream result was not returned: %v", called)
 	}
 	var state, record, recordStatus string
@@ -229,12 +275,12 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 			t.Fatal("attempt record persisted request or credential content")
 		}
 	}
-	detail := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+called["attempt_id"].(string), nil, nil, 200)
+	detail := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, called, "attempt_id"), nil, nil, 200)
 	if detail["status"] != "succeeded" || detail["tool_alias"] != tool.Alias {
 		t.Fatalf("management record does not describe the attempt: %v", detail)
 	}
 	listedCalls := h.want(owner, "GET", "/api/v1/mcp-tool-calls?toolset_id="+toolsetID, nil, nil, 200)
-	if items, _ := listedCalls["items"].([]any); len(items) != 1 {
+	if items := mcpExecItems(t, listedCalls, "items"); len(items) != 1 {
 		t.Fatalf("management list lost the attempt: %v", listedCalls)
 	}
 
@@ -248,7 +294,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		"params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "integration", "version": "1"}},
 	})
 	sessionID := headers.Get("Mcp-Session-Id")
-	initResult, _ := initialized["result"].(map[string]any)
+	initResult := mcpExecObject(t, initialized, "result")
 	if status != http.StatusOK || sessionID == "" || initResult["protocolVersion"] != "2025-11-25" {
 		t.Fatalf("streamable session did not initialize: status=%d body=%v", status, initialized)
 	}
@@ -256,27 +302,34 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		t.Fatalf("initialized notification refused: %d", status)
 	}
 	status, _, sessionListed := mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": map[string]any{}})
-	sessionTools, _ := sessionListed["result"].(map[string]any)["tools"].([]any)
-	if status != http.StatusOK || len(sessionTools) != 1 || sessionTools[0].(map[string]any)["name"] != tool.Alias {
+	sessionTools := mcpExecItems(t, mcpExecObject(t, sessionListed, "result"), "tools")
+	if status != http.StatusOK || len(sessionTools) != 1 {
 		t.Fatalf("session did not list the pinned tool: status=%d body=%v", status, sessionListed)
 	}
-	if _, ok := sessionTools[0].(map[string]any)["inputSchema"]; !ok {
-		t.Fatalf("session listing lost the wire schema: %v", sessionTools)
+	sessionTool := mcpExecItem(t, sessionTools, 0, sessionListed)
+	if got := mcpExecString(t, sessionTool, "name"); got != tool.Alias {
+		t.Fatalf("session did not list the pinned tool: status=%d body=%v", status, sessionListed)
+	}
+	if _, ok := sessionTool["inputSchema"]; !ok {
+		t.Fatalf("session listing lost the wire schema: %v", sessionListed)
 	}
 	_, _, refused := mcpCall("POST", "/mcp", sessionID, map[string]any{"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": map[string]any{}})
-	if data, _ := refused["error"].(map[string]any)["data"].(map[string]any); data["code"] != "unsupported_capability" {
+	if data := mcpExecObject(t, mcpExecObject(t, refused, "error"), "data"); mcpExecString(t, data, "code") != "unsupported_capability" {
 		t.Fatalf("arbitrary resource access was not refused explicitly: %v", refused)
 	}
 	status, _, sessionCalled := mcpCall("POST", "/mcp", sessionID, map[string]any{
 		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
 		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
 	})
-	callResult, _ := sessionCalled["result"].(map[string]any)
-	sessionContent, _ := callResult["content"].([]any)
-	if status != http.StatusOK || calls.Load() != 2 || len(sessionContent) != 1 || sessionContent[0].(map[string]any)["text"] != answer {
+	callResult := mcpExecObject(t, sessionCalled, "result")
+	sessionContent := mcpExecItems(t, callResult, "content")
+	if status != http.StatusOK || calls.Load() != 2 || len(sessionContent) != 1 {
 		t.Fatalf("session call did not return the upstream result: status=%d calls=%d body=%v", status, calls.Load(), sessionCalled)
 	}
-	meta, _ := callResult["_meta"].(map[string]any)
+	if got := mcpExecString(t, mcpExecItem(t, sessionContent, 0, sessionCalled), "text"); got != answer {
+		t.Fatalf("session call did not return the upstream result: status=%d calls=%d body=%v", status, calls.Load(), sessionCalled)
+	}
+	meta := mcpExecObject(t, callResult, "_meta")
 	var sessionState string
 	if err = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.execution_debits WHERE id=$1`, meta["olp.dispatch_id"]).Scan(&sessionState); err != nil || sessionState != "settled" || debitCount() != 2 {
 		t.Fatalf("session dispatch did not settle on the shared ledger: state=%q err=%v debits=%d", sessionState, err, debitCount())
@@ -302,8 +355,15 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 
 	description.Store("Changed after publication")
 	status, driftedCall := call("POST", "/v1/mcp/tools/call", map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "arguments": map[string]any{"query": argument}})
-	if status != http.StatusConflict || driftedCall["error"].(map[string]any)["code"] != "tool_definition_changed" || calls.Load() != 2 {
+	if status != http.StatusConflict || mcpExecString(t, mcpExecObject(t, driftedCall, "error"), "code") != "tool_definition_changed" || calls.Load() != 2 {
 		t.Fatalf("drifted catalog was called over the JSON path: status=%d calls=%d body=%v", status, calls.Load(), driftedCall)
+	}
+	_, _, liveDriftedCall := mcpCall("POST", "/mcp", sessionID, map[string]any{
+		"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
+	})
+	if data := mcpExecObject(t, mcpExecObject(t, liveDriftedCall, "error"), "data"); mcpExecString(t, data, "code") != "tool_definition_changed" || calls.Load() != 2 {
+		t.Fatalf("drifted catalog was called in an established session: calls=%d body=%v", calls.Load(), liveDriftedCall)
 	}
 	status, driftedHeaders, driftedInit := mcpCall("POST", "/mcp?toolset_id="+toolsetID, "", map[string]any{
 		"jsonrpc": "2.0", "id": 10, "method": "initialize",
@@ -320,12 +380,12 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 		"jsonrpc": "2.0", "id": 11, "method": "tools/call",
 		"params": map[string]any{"name": tool.Alias, "arguments": map[string]any{"query": argument}},
 	})
-	if data, _ := driftedSessionCall["error"].(map[string]any)["data"].(map[string]any); data["code"] != "tool_definition_changed" || calls.Load() != 2 {
+	if data := mcpExecObject(t, mcpExecObject(t, driftedSessionCall, "error"), "data"); mcpExecString(t, data, "code") != "tool_definition_changed" || calls.Load() != 2 {
 		t.Fatalf("drifted catalog was called in a fresh session: calls=%d body=%v", calls.Load(), driftedSessionCall)
 	}
 	h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200)
 	published := h.want(owner, "GET", "/api/v1/mcp-servers/"+serverID+"/revisions/"+tool.RevisionID, nil, nil, 200)
-	if published["catalog"].(map[string]any)["digest"] != tool.CatalogDigest {
+	if mcpExecString(t, mcpExecObject(t, published, "catalog"), "digest") != tool.CatalogDigest {
 		t.Fatalf("published definition stopped being readable while drifted: %v", published)
 	}
 	description.Store("Look up")
@@ -349,7 +409,7 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 	}
 	current := h.want(owner, "GET", "/api/v1/mcp-servers/"+serverID, nil, nil, 200)
 	retire := idem("mcp-exec-retire")
-	retire["If-Match"] = `"` + current["etag"].(string) + `"`
+	retire["If-Match"] = `"` + mcpExecString(t, current, "etag") + `"`
 	h.want(owner, "DELETE", "/api/v1/mcp-servers/"+serverID, nil, retire, 204)
 	if err = h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
