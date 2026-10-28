@@ -17,6 +17,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 var ErrCertification = errors.New("upstream MCP certification failed")
@@ -39,9 +40,13 @@ func (noSchemaNetwork) Load(string) (any, error) { return nil, ErrCertification 
 // Certify negotiates a bounded Streamable HTTP session and captures a stable,
 // validated tool catalog. It never invokes tools or runs schema network loaders.
 func Certify(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte) (*Catalog, error) {
+	return CertifyTransport(ctx, policy, endpoint, credential, routing.MCPStreamableHTTP)
+}
+
+func CertifyTransport(ctx context.Context, policy *egress.Policy, endpoint string, credential []byte, transport routing.MCPTransport) (*Catalog, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	c, err := DialTransport(ctx, policy, endpoint, credential, TransportOptions{ClientName: "openllmproxy-certifier", Timeout: 10 * time.Second})
+	c, err := DialTransport(ctx, policy, endpoint, credential, TransportOptions{ClientName: "openllmproxy-certifier", Timeout: 10 * time.Second, Transport: transport})
 	if err != nil {
 		return nil, ErrCertification
 	}

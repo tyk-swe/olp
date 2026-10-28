@@ -162,7 +162,7 @@ func acceptsStreamableHTTP(r *http.Request) bool {
 	return accept == "" || strings.Contains(accept, "application/json") || strings.Contains(accept, "text/event-stream") || strings.Contains(accept, "*/*")
 }
 
-func (s *Server) requireSession(ctx context.Context, r *http.Request, authority access.Authority) (sessionRecord, sessionBinding, *rpcFailure) {
+func (s *Server) requireSession(ctx context.Context, r *http.Request, authority access.Authority, transport sessionTransport) (sessionRecord, sessionBinding, *rpcFailure) {
 	binding := bindingOf(authority)
 	if s.Sessions == nil {
 		failure := failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionUnavailable)
@@ -180,6 +180,10 @@ func (s *Server) requireSession(ctx context.Context, r *http.Request, authority 
 	}
 	if !found {
 		failure := failureRPC(http.StatusNotFound, rpcInvalidRequest, errSessionNotFound)
+		return sessionRecord{}, binding, &failure
+	}
+	if (record.protocol == mcpservers.LegacyProtocol) != (transport == sessionLegacy) {
+		failure := failureRPC(http.StatusBadRequest, rpcInvalidRequest, errSessionProtocolMismatch)
 		return sessionRecord{}, binding, &failure
 	}
 	if protocol := r.Header.Get("MCP-Protocol-Version"); protocol != "" && protocol != record.protocol {
@@ -204,7 +208,7 @@ func (s *Server) serveStreamableDELETE(w http.ResponseWriter, r *http.Request) {
 		writeRPCFailure(w, nil, failureRPC(failure.status, rpcServerError, failure))
 		return
 	}
-	record, binding, refused := s.requireSession(r.Context(), r, authority)
+	record, binding, refused := s.requireSession(r.Context(), r, authority, sessionStreamable)
 	if refused != nil {
 		writeRPCFailure(w, nil, *refused)
 		return
@@ -222,6 +226,10 @@ func (s *Server) serveStreamableDELETE(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveStreamableHTTP(w http.ResponseWriter, r *http.Request) {
+	s.serveSessionHTTP(w, r, sessionStreamable)
+}
+
+func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transport sessionTransport) {
 	if !acceptsStreamableHTTP(r) {
 		writeRPCFailure(w, nil, rpcFailure{status: http.StatusNotAcceptable, code: rpcInvalidRequest, message: "Send application/json and accept application/json or text/event-stream.", data: rpcErrorData{Code: "not_acceptable"}})
 		return
@@ -235,6 +243,9 @@ func (s *Server) serveStreamableHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeRPCFailure(w, nil, rpcFailure{status: http.StatusBadRequest, code: rpcParseError, message: "The message could not be read.", data: rpcErrorData{Code: "parse_error"}})
 		return
+	}
+	if transport == sessionLegacy {
+		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
 	}
 	message, code, ok := parseRPCMessage(raw)
 	if !ok {
@@ -251,10 +262,14 @@ func (s *Server) serveStreamableHTTP(w http.ResponseWriter, r *http.Request) {
 			writeRPCFailure(w, nil, rpcFailure{status: http.StatusBadRequest, code: rpcInvalidRequest, message: "Initialize requires a request ID.", data: rpcErrorData{Code: "invalid_request"}})
 			return
 		}
+		if transport == sessionLegacy {
+			s.initializeLegacySession(w, r, authority, message)
+			return
+		}
 		s.initializeSession(w, r, authority, message)
 		return
 	}
-	record, binding, refused := s.requireSession(r.Context(), r, authority)
+	record, binding, refused := s.requireSession(r.Context(), r, authority, transport)
 	if refused != nil {
 		writeRPCFailure(w, message.id, *refused)
 		return
@@ -264,7 +279,7 @@ func (s *Server) serveStreamableHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !message.hasID {
-		if message.method == "notifications/initialized" {
+		if message.method == "notifications/initialized" && (transport != sessionLegacy || s.legacyNegotiated(record.id)) {
 			_ = s.Sessions.markSessionInitialized(r.Context(), record.id, binding)
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -333,60 +348,69 @@ func (s *Server) initializeSession(w http.ResponseWriter, r *http.Request, autho
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusBadRequest, code: rpcInvalidParams, message: "Supply initialize parameters with a protocol version.", data: rpcErrorData{Code: "invalid_params"}})
 		return
 	}
+	candidate, refused := s.createSessionRecord(r, authority, negotiateProtocol(params.ProtocolVersion))
+	if refused != nil {
+		writeRPCFailure(w, message.id, *refused)
+		return
+	}
+	w.Header().Set("Mcp-Session-Id", candidate.id)
+	writeInitializeResult(w, message.id, candidate)
+}
+
+func writeInitializeResult(w http.ResponseWriter, id json.RawMessage, record sessionRecord) {
+	writeRPCResult(w, http.StatusOK, id, initializeResult{
+		ProtocolVersion: record.protocol,
+		Capabilities:    initializeCapabilities{Tools: toolsCapability{ListChanged: false}},
+		ServerInfo:      serverInfo{Name: "openllmproxy-tools", Version: "1"},
+	})
+}
+
+func (s *Server) createSessionRecord(r *http.Request, authority access.Authority, protocol string) (sessionRecord, *rpcFailure) {
 	release, snapshot, failure := s.snapshot()
 	if failure != nil {
-		writeRPCFailure(w, message.id, failureRPC(failure.status, rpcServerError, failure))
-		return
+		refused := failureRPC(failure.status, rpcServerError, failure)
+		return sessionRecord{}, &refused
 	}
 	resolved, failure := s.sessionToolset(authority, snapshot, r.URL.Query().Get("toolset_id"))
 	if failure != nil {
 		if failure == errToolDefinitionChanged {
-			writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, failure))
-			return
+			refused := failureRPC(http.StatusOK, rpcServerError, failure)
+			return sessionRecord{}, &refused
 		}
-		writeRPCFailure(w, message.id, failureRPC(failure.status, rpcInvalidParams, failure))
-		return
+		refused := failureRPC(failure.status, rpcInvalidParams, failure)
+		return sessionRecord{}, &refused
 	}
 	if s.Sessions == nil {
-		writeRPCFailure(w, message.id, failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable))
-		return
+		refused := failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable)
+		return sessionRecord{}, &refused
 	}
 	certifications := s.certifyToolsetServers(r.Context(), authority, resolved)
 	for _, state := range certifications {
 		if state == certificationInvalid {
-			writeRPCFailure(w, message.id, failureRPC(errCatalogUnavailable.status, rpcServerError, errCatalogUnavailable))
-			return
+			refused := failureRPC(errCatalogUnavailable.status, rpcServerError, errCatalogUnavailable)
+			return sessionRecord{}, &refused
 		}
 	}
 	sessionID, err := newSessionID()
 	if err != nil {
-		writeRPCFailure(w, message.id, failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable))
-		return
+		refused := failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable)
+		return sessionRecord{}, &refused
 	}
 	candidate := sessionRecord{
-		id: sessionID, binding: bindingOf(authority),
-		protocol:  negotiateProtocol(params.ProtocolVersion),
+		id: sessionID, binding: bindingOf(authority), protocol: protocol,
 		toolsetID: resolved.id, toolsetRevisionID: resolved.revisionID,
-		releaseID:      releaseIDFor(release, snapshot),
-		certifications: certifications,
+		releaseID: releaseIDFor(release, snapshot), certifications: certifications,
 	}
 	created, err := s.Sessions.createSession(r.Context(), candidate)
 	if err != nil {
-		writeRPCFailure(w, message.id, failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable))
-		return
+		refused := failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionCreateUnavailable)
+		return sessionRecord{}, &refused
 	}
 	if !created {
-		refused := failureRPC(http.StatusTooManyRequests, rpcServerError, errSessionLimit)
-		refused.data.Limit = maxSessionsPerKey
-		writeRPCFailure(w, message.id, refused)
-		return
+		refused := rpcFailure{status: http.StatusTooManyRequests, code: rpcServerError, message: errSessionLimit.msg, data: rpcErrorData{Code: errSessionLimit.code, Limit: maxSessionsPerKey}}
+		return sessionRecord{}, &refused
 	}
-	w.Header().Set("Mcp-Session-Id", sessionID)
-	writeRPCResult(w, http.StatusOK, message.id, initializeResult{
-		ProtocolVersion: candidate.protocol,
-		Capabilities:    initializeCapabilities{Tools: toolsCapability{ListChanged: false}},
-		ServerInfo:      serverInfo{Name: "openllmproxy-tools", Version: "1"},
-	})
+	return candidate, nil
 }
 
 func unsupportedCapability(method string) (string, bool) {

@@ -86,6 +86,7 @@ require (
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oapi-codegen/oapi-codegen/v2 v2.8.0 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect

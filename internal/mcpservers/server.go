@@ -115,7 +115,7 @@ func cloneToolPrices(values map[string]string) map[string]string {
 
 func definitionFromInput(in Input, catalog *Catalog) *Definition {
 	return &Definition{
-		OAuth: in.OAuth.Clone(), Name: in.Name, Transport: "streamable_http", Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
+		OAuth: in.OAuth.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
 		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute:       routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -233,8 +233,8 @@ func Validate(in *Input, policy *egress.Policy) error {
 	if err := validateOAuth(in.OAuth, policy); err != nil {
 		return err
 	}
-	if in.Transport != "" && in.Transport != "streamable_http" {
-		return access.Invalid("transport", "Use streamable_http.")
+	if in.Transport != "" && !routing.MCPTransport(in.Transport).Valid() {
+		return access.Invalid("transport", "Use streamable_http or sse.")
 	}
 	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
 		return access.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
@@ -314,8 +314,8 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 			return nil, nil, err
 		}
 	} else {
-		if in.ProjectID == nil || in.Transport != "streamable_http" {
-			return nil, nil, access.Invalid("project_id", "Choose an owning project and streamable_http transport.")
+		if in.ProjectID == nil || !routing.MCPTransport(in.Transport).Valid() {
+			return nil, nil, access.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
 		}
 		if err = s.Access.RequireProject(r.Context(), tx, p, in.ProjectID); err != nil {
 			return nil, nil, err
@@ -342,6 +342,13 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 	}
 	return d, nil, nil
 }
+func definitionTransport(in Input, previous *Definition) routing.MCPTransport {
+	if previous != nil {
+		return routing.MCPTransport(previous.Transport)
+	}
+	return routing.MCPTransport(in.Transport)
+}
+
 func mergeAbsentPricingAndLimits(in *Input, previous *Definition) {
 	if !in.Present("oauth") {
 		in.OAuth = previous.OAuth.Clone()
@@ -444,7 +451,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 			}
 		}
 		defer clear(material)
-		catalog, err = Certify(r.Context(), s.Egress, in.Endpoint, material)
+		catalog, err = CertifyTransport(r.Context(), s.Egress, in.Endpoint, material, definitionTransport(in, previous))
 		if err != nil {
 			return access.Reply{}, access.Fail(422, "mcp_certification_failed", "The bounded MCP handshake or tool-schema certification failed.")
 		}
@@ -509,6 +516,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 			action = "mcp_server.create"
 		} else {
 			next.ProjectID = current.ProjectID
+			next.Transport = current.Transport
 			next.CredentialID = current.CredentialID
 		}
 		if len(in.Credential) != 0 {

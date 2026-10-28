@@ -1455,12 +1455,15 @@ func (e ConfigurationGuardrailPolicyEntryEntriesPhase) Valid() bool {
 
 // Defines values for ConfigurationMCPServerTransport.
 const (
+	ConfigurationMCPServerTransportSse            ConfigurationMCPServerTransport = "sse"
 	ConfigurationMCPServerTransportStreamableHttp ConfigurationMCPServerTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationMCPServerTransport enum.
 func (e ConfigurationMCPServerTransport) Valid() bool {
 	switch e {
+	case ConfigurationMCPServerTransportSse:
+		return true
 	case ConfigurationMCPServerTransportStreamableHttp:
 		return true
 	default:
@@ -2226,12 +2229,15 @@ func (e CreateGuardrailRequestType) Valid() bool {
 
 // Defines values for CreateMCPServerRequestTransport.
 const (
+	CreateMCPServerRequestTransportSse            CreateMCPServerRequestTransport = "sse"
 	CreateMCPServerRequestTransportStreamableHttp CreateMCPServerRequestTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the CreateMCPServerRequestTransport enum.
 func (e CreateMCPServerRequestTransport) Valid() bool {
 	switch e {
+	case CreateMCPServerRequestTransportSse:
+		return true
 	case CreateMCPServerRequestTransportStreamableHttp:
 		return true
 	default:
@@ -3312,6 +3318,7 @@ func (e MCPGrantIdentityKind) Valid() bool {
 
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
+	N20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
 	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
 	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
 	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
@@ -3320,6 +3327,8 @@ const (
 // Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
 func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 	switch e {
+	case N20241105:
+		return true
 	case N20250326:
 		return true
 	case N20250618:
@@ -3333,12 +3342,15 @@ func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 
 // Defines values for MCPServerResponseTransport.
 const (
+	MCPServerResponseTransportSse            MCPServerResponseTransport = "sse"
 	MCPServerResponseTransportStreamableHttp MCPServerResponseTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the MCPServerResponseTransport enum.
 func (e MCPServerResponseTransport) Valid() bool {
 	switch e {
+	case MCPServerResponseTransportSse:
+		return true
 	case MCPServerResponseTransportStreamableHttp:
 		return true
 	default:
@@ -3348,12 +3360,15 @@ func (e MCPServerResponseTransport) Valid() bool {
 
 // Defines values for MCPServerSummaryTransport.
 const (
+	MCPServerSummaryTransportSse            MCPServerSummaryTransport = "sse"
 	MCPServerSummaryTransportStreamableHttp MCPServerSummaryTransport = "streamable_http"
 )
 
 // Valid indicates whether the value is a known member of the MCPServerSummaryTransport enum.
 func (e MCPServerSummaryTransport) Valid() bool {
 	switch e {
+	case MCPServerSummaryTransportSse:
+		return true
 	case MCPServerSummaryTransportStreamableHttp:
 		return true
 	default:

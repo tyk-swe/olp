@@ -13,8 +13,166 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/egress"
 )
+
+func legacyFixtureResult(request *jsonrpc.Request) (json.RawMessage, error) {
+	switch request.Method {
+	case "initialize":
+		var params struct {
+			Protocol string `json:"protocolVersion"`
+		}
+		if json.Unmarshal(request.Params, &params) != nil || params.Protocol != "2024-11-05" {
+			return nil, fmt.Errorf("legacy initialization did not pin the declared protocol")
+		}
+		return json.RawMessage(`{"protocolVersion":"2024-11-05","capabilities":{"tools":{}}}`), nil
+	case "tools/call":
+		return json.RawMessage(`{"content":[{"type":"text","text":"legacy answer"}]}`), nil
+	case "tools/list":
+		return json.RawMessage(`{"tools":[{"name":"lookup","inputSchema":{"type":"object"}}]}`), nil
+	default:
+		return nil, fmt.Errorf("unexpected legacy request method %q", request.Method)
+	}
+}
+
+func TestLegacyTransportRequiresExplicitSelectionAndPinsProtocol(t *testing.T) {
+	var sessions sync.Map
+	var sequence atomic.Int64
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer legacy-fixture" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodPost {
+			stored, ok := sessions.Load(r.URL.Query().Get("session"))
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			stored.(*sdkmcp.SSEServerTransport).ServeHTTP(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		id := fmt.Sprint(sequence.Add(1))
+		transport := &sdkmcp.SSEServerTransport{Endpoint: "/messages?session=" + id, Response: w, MaxRequestBodyBytes: 1 << 20}
+		sessions.Store(id, transport)
+		defer sessions.Delete(id)
+		w.Header().Set("Content-Type", "text/event-stream")
+		connection, err := transport.Connect(r.Context())
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		for {
+			message, err := connection.Read(r.Context())
+			if err != nil {
+				return
+			}
+			request, ok := message.(*jsonrpc.Request)
+			if !ok || !request.ID.IsValid() {
+				continue
+			}
+			result, resultErr := legacyFixtureResult(request)
+			if resultErr != nil {
+				t.Error(resultErr)
+				return
+			}
+			if request.Method == "tools/call" {
+				calls.Add(1)
+			}
+			if connection.Write(r.Context(), &jsonrpc.Response{ID: request.ID, Result: result}) != nil {
+				return
+			}
+		}
+	}))
+	defer upstream.Close()
+	if _, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, []byte("legacy-fixture"), TransportOptions{ClientName: "fixture", Timeout: time.Second}); err == nil {
+		t.Fatal("modern transport silently fell back to legacy SSE")
+	}
+	transport, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, []byte("legacy-fixture"), TransportOptions{ClientName: "fixture", Timeout: time.Second, Transport: "sse"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.Close(t.Context())
+	catalog, err := transport.CertifyCatalog(t.Context())
+	if err != nil || catalog.Protocol != "2024-11-05" || len(catalog.Tools) != 1 {
+		t.Fatalf("legacy catalog failed: %#v, %v", catalog, err)
+	}
+	result, err := transport.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+	if err != nil || len(result.Content) != 1 || result.Content[0].Text != "legacy answer" || calls.Load() != 1 {
+		t.Fatalf("legacy call failed: %#v, %v, calls=%d", result, err, calls.Load())
+	}
+}
+
+func TestLegacyTransportTimeoutBoundsStalledHandshake(t *testing.T) {
+	disconnected := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return
+		}
+		<-r.Context().Done()
+		close(disconnected)
+	}))
+	defer upstream.Close()
+	transport, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, nil, TransportOptions{ClientName: "bounded-legacy", Timeout: 50 * time.Millisecond, Transport: "sse"})
+	if transport != nil || err != ErrTransport {
+		t.Fatalf("stalled legacy handshake did not refuse: %v %v", transport, err)
+	}
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("stalled legacy stream remained open after its transport timeout")
+	}
+}
+
+func TestLegacyTransportRefusesUndeclaredPostDestination(t *testing.T) {
+	var foreignCalls atomic.Int64
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		foreignCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer foreign.Close()
+	for _, tc := range []struct {
+		name     string
+		endpoint func(*http.Request) string
+	}{
+		{"other origin", func(*http.Request) string { return foreign.URL }},
+		{"redirect", func(r *http.Request) string { return "http://" + r.Host + "/redirect" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					w.Header().Set("Location", foreign.URL)
+					w.WriteHeader(http.StatusTemporaryRedirect)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", tc.endpoint(r))
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer upstream.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			transport, err := DialTransport(ctx, fixturePolicy(), upstream.URL, []byte("legacy-fixture"), TransportOptions{ClientName: "fixture", Timeout: time.Second, Transport: "sse"})
+			if err == nil {
+				transport.Close(ctx)
+				t.Fatal("legacy transport accepted an undeclared destination")
+			}
+			if foreignCalls.Load() != 0 {
+				t.Fatal("legacy transport contacted a destination outside its registered origin")
+			}
+		})
+	}
+}
 
 func fixturePolicy() *egress.Policy {
 	return &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}

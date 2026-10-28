@@ -22814,7 +22814,8 @@
             "enum": [
               "2025-11-25",
               "2025-06-18",
-              "2025-03-26"
+              "2025-03-26",
+              "2024-11-05"
             ]
           },
           "tools": {
@@ -22868,7 +22869,8 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse"
             ]
           },
           "unit_price": {
@@ -23019,7 +23021,8 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse"
             ]
           },
           "endpoint": {
@@ -23144,7 +23147,8 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse"
             ]
           },
           "endpoint": {
@@ -23620,7 +23624,8 @@
           "transport": {
             "type": "string",
             "enum": [
-              "streamable_http"
+              "streamable_http",
+              "sse"
             ]
           },
           "endpoint": {
