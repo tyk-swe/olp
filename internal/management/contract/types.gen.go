@@ -3378,7 +3378,10 @@ func (e MCPToolCallResponseDebitState) Valid() bool {
 
 // Defines values for MCPToolCallResponseStatus.
 const (
+	MCPToolCallResponseStatusDispatched     MCPToolCallResponseStatus = "dispatched"
+	MCPToolCallResponseStatusNotAccepted    MCPToolCallResponseStatus = "not_accepted"
 	MCPToolCallResponseStatusOutcomeUnknown MCPToolCallResponseStatus = "outcome_unknown"
+	MCPToolCallResponseStatusSettled        MCPToolCallResponseStatus = "settled"
 	MCPToolCallResponseStatusSucceeded      MCPToolCallResponseStatus = "succeeded"
 	MCPToolCallResponseStatusUpstreamError  MCPToolCallResponseStatus = "upstream_error"
 )
@@ -3386,7 +3389,13 @@ const (
 // Valid indicates whether the value is a known member of the MCPToolCallResponseStatus enum.
 func (e MCPToolCallResponseStatus) Valid() bool {
 	switch e {
+	case MCPToolCallResponseStatusDispatched:
+		return true
+	case MCPToolCallResponseStatusNotAccepted:
+		return true
 	case MCPToolCallResponseStatusOutcomeUnknown:
+		return true
+	case MCPToolCallResponseStatusSettled:
 		return true
 	case MCPToolCallResponseStatusSucceeded:
 		return true
@@ -9433,8 +9442,14 @@ type MCPToolCallList struct {
 
 // MCPToolCallResolveRequest defines model for MCPToolCallResolveRequest.
 type MCPToolCallResolveRequest struct {
-	EvidenceDigest string                           `json:"evidence_digest"`
-	Outcome        MCPToolCallResolveRequestOutcome `json:"outcome"`
+	EvidenceDigest string `json:"evidence_digest"`
+
+	// ObservedCharge Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound.
+	ObservedCharge *string `json:"observed_charge,omitempty"`
+
+	// ObservedCost Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound.
+	ObservedCost *string                          `json:"observed_cost,omitempty"`
+	Outcome      MCPToolCallResolveRequestOutcome `json:"outcome"`
 }
 
 // MCPToolCallResolveRequestOutcome defines model for MCPToolCallResolveRequest.Outcome.
@@ -9445,7 +9460,7 @@ type MCPToolCallResponse struct {
 	ApiKeyId          openapi_types.UUID            `json:"api_key_id"`
 	CallDigest        nullable.Nullable[string]     `json:"call_digest"`
 	ChargeBound       string                        `json:"charge_bound"`
-	CompletedAt       time.Time                     `json:"completed_at"`
+	CompletedAt       nullable.Nullable[time.Time]  `json:"completed_at"`
 	CostBound         string                        `json:"cost_bound"`
 	CreatedAt         time.Time                     `json:"created_at"`
 	DebitState        MCPToolCallResponseDebitState `json:"debit_state"`
@@ -9458,7 +9473,7 @@ type MCPToolCallResponse struct {
 	ProjectId         openapi_types.UUID            `json:"project_id"`
 	RemainingCharge   string                        `json:"remaining_charge"`
 	RemainingCost     string                        `json:"remaining_cost"`
-	ResultDigest      string                        `json:"result_digest"`
+	ResultDigest      nullable.Nullable[string]     `json:"result_digest"`
 	ServerId          openapi_types.UUID            `json:"server_id"`
 	ServerRevisionId  openapi_types.UUID            `json:"server_revision_id"`
 	StartedAt         time.Time                     `json:"started_at"`

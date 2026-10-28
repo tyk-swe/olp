@@ -32975,6 +32975,16 @@
             "evidence_digest": {
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
+            },
+            "observed_cost": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "description": "Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+            },
+            "observed_charge": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "description": "Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
             }
           },
           "required": [

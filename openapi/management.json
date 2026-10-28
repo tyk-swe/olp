@@ -23124,15 +23124,21 @@
             "pattern": "^[a-f0-9]{64}$"
           },
           "result_digest": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[a-f0-9]{64}$"
           },
           "status": {
             "type": "string",
             "enum": [
+              "dispatched",
               "succeeded",
               "upstream_error",
-              "outcome_unknown"
+              "outcome_unknown",
+              "settled",
+              "not_accepted"
             ]
           },
           "is_error": {
@@ -23143,7 +23149,10 @@
             "format": "date-time"
           },
           "completed_at": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "created_at": {
@@ -23230,6 +23239,16 @@
           "evidence_digest": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "observed_cost": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          },
+          "observed_charge": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
           }
         },
         "required": [
