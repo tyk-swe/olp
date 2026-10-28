@@ -120,24 +120,40 @@ now does. Certification compares tool definitions at the moment it runs, and
 it does not attest how the upstream implementation behaves between checks.
 
 Every tool call needs a caller call identifier. Send it as `call_id` on the
-JSON endpoint and as `olp.call_id` inside the request `_meta` on a session
-`tools/call`. The identifier stays bound to the calling key, the pinned
-toolset revision, the tool and a keyed digest of the arguments for 24 hours,
-and only that digest is stored. Repeating the same call with the same
-identifier never runs the tool again. A repeat returns the retained result
-while it is still held in gateway memory, and after that it answers
-`result_not_retained` with the original attempt and dispatch identifiers and
-the retained status. Reusing the identifier with different arguments, a
-different tool or a different pinned revision refuses with `call_id_conflict`.
-When a dispatched call cannot be confirmed either way, it stays
-`outcome_unknown` and its debit stays held across restarts, with no automatic
-redispatch and no expiry release. A project manager closes a held debit
-exactly once through `POST /api/v1/mcp-tool-calls/{call_id}/resolve`, either
-as `settled` from later observed evidence or as `not_accepted` from an audited
-finding, each carrying the SHA-256 digest of the reviewed evidence. Tool call
-records report the debit state with its bounds, observed amounts and
-remaining unresolved amounts as separate fields, so an unresolved bound never
-reads as observed provider cost.
+JSON endpoint and as `olp.call_id` inside `params._meta` on a session
+`tools/call`. The caller call identifier is a caller chosen string of 1 to
+256 bytes with no control characters and at least one non-space character.
+It is not the attempt identifier. The `attempt_id` in responses and the
+`{call_id}` path value on the management tool call endpoints name the
+gateway management record for one dispatched attempt, while the caller call
+identifier is the retry key the caller picks and reuses. The identifier
+stays bound to the calling key, the pinned toolset revision, the tool and a
+keyed digest of the exact argument bytes for 24 hours, and only that digest
+is stored. Argument binding is byte exact, so the same JSON value written
+with different key order or spacing counts as a different call. Repeating
+the same call with the same identifier never runs the tool again. A repeat
+returns the retained result while it is still held in gateway memory, and
+after that it answers `result_not_retained` with the original attempt and
+dispatch identifiers and the retained status. While the first call is still
+running, in either the prepared window before dispatch or the dispatched
+window before its outcome is recorded, an exact repeat answers
+`call_in_progress` with that same retained identity. Reusing the identifier
+with different arguments, a different tool or a different pinned revision
+refuses with `call_id_conflict`. When a dispatched call cannot be confirmed
+either way, it stays `outcome_unknown` and its debit stays held across
+restarts, with no automatic redispatch and no expiry release. A project
+manager closes a held debit exactly once through
+`POST /api/v1/mcp-tool-calls/{call_id}/resolve`, either as `settled` from
+later observed evidence or as `not_accepted` from an audited finding, each
+carrying the SHA-256 digest of the reviewed evidence. Resolving updates the
+tool call record in the same step, so later repeats report the resolved
+status instead of unknown. Repeating a resolve with the same outcome and
+evidence returns the existing record. Expired identifier bindings are swept
+after 24 hours, and the digest stays on each tool call record so older
+records keep naming the call they came from after an identifier is reused.
+Tool call records report the debit state with its bounds, observed amounts
+and remaining unresolved amounts as separate fields, so an unresolved bound
+never reads as observed provider cost.
 
 Revoking a key, removing a toolset from its allowlist, retiring a publication
 and disabling or retiring a server all refuse new calls and end live session

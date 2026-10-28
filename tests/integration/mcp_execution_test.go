@@ -9,12 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/database"
@@ -598,10 +599,10 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 	h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200)
 }
 
-func mcpAmount(t *testing.T, body map[string]any, key string) float64 {
+func mcpAmount(t *testing.T, body map[string]any, key string) *big.Rat {
 	t.Helper()
-	value, err := strconv.ParseFloat(mcpExecString(t, body, key), 64)
-	if err != nil {
+	value, ok := new(big.Rat).SetString(mcpExecString(t, body, key))
+	if !ok {
 		t.Fatalf("response field %q is not an amount: %v", key, body)
 	}
 	return value
@@ -609,12 +610,12 @@ func mcpAmount(t *testing.T, body map[string]any, key string) float64 {
 
 func mcpAmountIsZero(t *testing.T, body map[string]any, key string) bool {
 	t.Helper()
-	return mcpAmount(t, body, key) == 0
+	return mcpAmount(t, body, key).Sign() == 0
 }
 
 func mcpAmountsEqual(t *testing.T, body map[string]any, left, right string) bool {
 	t.Helper()
-	return mcpAmount(t, body, left) == mcpAmount(t, body, right)
+	return mcpAmount(t, body, left).Cmp(mcpAmount(t, body, right)) == 0
 }
 
 func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
@@ -628,8 +629,12 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	var calls atomic.Int64
 	var drop atomic.Bool
 	var block atomic.Bool
-	blockEntered := make(chan struct{}, 1)
-	blockRelease := make(chan struct{})
+	var blockChans atomic.Value
+	resetBlock := func() {
+		blockChans.Store([2]chan struct{}{make(chan struct{}, 1), make(chan struct{})})
+	}
+	blockGate := func() [2]chan struct{} { return blockChans.Load().([2]chan struct{}) }
+	resetBlock()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
@@ -667,11 +672,12 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 				return
 			}
 			if block.Load() {
+				gate := blockGate()
 				select {
-				case blockEntered <- struct{}{}:
+				case gate[0] <- struct{}{}:
 				default:
 				}
-				<-blockRelease
+				<-gate[1]
 			}
 			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": answer}}, "isError": false}
 		default:
@@ -841,8 +847,14 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	resolved := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
 		"outcome": "not_accepted", "evidence_digest": evidenceDigest("upstream-log-shows-no-acceptance"),
 	}, idem("mcp-identity-resolve-unknown"), 200)
-	if resolved["debit_state"] != "not_accepted" || !mcpAmountIsZero(t, resolved, "remaining_cost") {
+	if resolved["status"] != "not_accepted" || resolved["debit_state"] != "not_accepted" || !mcpAmountIsZero(t, resolved, "remaining_cost") {
 		t.Fatalf("evidence-backed finding did not close the held debit: %v", resolved)
+	}
+	repeatedResolve := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownAttempt+"/resolve", map[string]any{
+		"outcome": "not_accepted", "evidence_digest": evidenceDigest("upstream-log-shows-no-acceptance"),
+	}, idem("mcp-identity-resolve-unknown-retry"), 200)
+	if repeatedResolve["id"] != resolved["id"] || repeatedResolve["status"] != "not_accepted" {
+		t.Fatalf("repeated resolve with the same evidence did not return the existing record: %v", repeatedResolve)
 	}
 	var resolutions, audits int
 	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_resolutions WHERE dispatch_id=$1`, unknownDispatch).Scan(&resolutions); err != nil || resolutions != 1 {
@@ -858,8 +870,11 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 		t.Fatalf("second resolution rewrote the first finding: count=%d err=%v", resolutions, err)
 	}
 	status, afterResolve := callOn(restarted, "integration-caller-unknown-1", argument)
-	if status != http.StatusBadGateway || calls.Load() != 2 {
+	if status != http.StatusConflict || calls.Load() != 2 {
 		t.Fatalf("resolved call id redispatched inside its binding: status=%d calls=%d body=%v", status, calls.Load(), afterResolve)
+	}
+	if code := mcpExecString(t, mcpExecObject(t, afterResolve, "error"), "code"); code != "result_not_retained" || afterResolve["status"] != "not_accepted" || mcpExecString(t, afterResolve, "attempt_id") != unknownAttempt {
+		t.Fatalf("repeat after resolve still answered unknown: %v", afterResolve)
 	}
 
 	drop.Store(true)
@@ -870,11 +885,20 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 	drop.Store(false)
 	unknownTwoAttempt := mcpExecString(t, unknownTwo, "attempt_id")
 	unknownTwoDispatch := mcpExecString(t, unknownTwo, "dispatch_id")
+	h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"), "observed_cost": "1.5",
+	}, idem("mcp-identity-settle-nonzero"), 409)
 	settled := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
-		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"),
+		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"), "observed_cost": "0", "observed_charge": "0",
 	}, idem("mcp-identity-settle-unknown"), 200)
-	if settled["debit_state"] != "settled" {
+	if settled["status"] != "settled" || settled["debit_state"] != "settled" {
 		t.Fatalf("later settlement did not close the held debit: %v", settled)
+	}
+	repeatedSettle := h.want(owner, "POST", "/api/v1/mcp-tool-calls/"+unknownTwoAttempt+"/resolve", map[string]any{
+		"outcome": "settled", "evidence_digest": evidenceDigest("upstream-log-shows-completion"), "observed_cost": "0", "observed_charge": "0",
+	}, idem("mcp-identity-settle-unknown-retry"), 200)
+	if repeatedSettle["id"] != settled["id"] {
+		t.Fatalf("repeated settle with the same evidence did not return the existing record: %v", repeatedSettle)
 	}
 	var resultCount int
 	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=$1`, unknownTwoDispatch).Scan(&resultCount); err != nil || resultCount != 1 {
@@ -893,8 +917,8 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 		body   map[string]any
 		err    error
 	}
-	rawCall := func() concurrentResult {
-		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": "integration-caller-concurrent", "arguments": map[string]any{"query": argument}})
+	rawCallWith := func(caller string) concurrentResult {
+		data, _ := json.Marshal(map[string]any{"toolset_id": toolsetID, "name": tool.Alias, "call_id": caller, "arguments": map[string]any{"query": argument}})
 		resp, err := func() (*http.Response, error) {
 			req, err := http.NewRequest(http.MethodPost, restarted.URL+"/v1/mcp/tools/call", bytes.NewReader(data))
 			if err != nil {
@@ -916,14 +940,21 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 		return concurrentResult{status: resp.StatusCode, body: out}
 	}
 	firstCall := make(chan concurrentResult, 1)
-	go func() { firstCall <- rawCall() }()
-	<-blockEntered
+	go func() { firstCall <- rawCallWith("integration-caller-concurrent") }()
+	<-blockGate()[0]
 	status, concurrent := callOn(restarted, "integration-caller-concurrent", argument)
-	if status != http.StatusBadGateway || concurrent["status"] != "outcome_unknown" || calls.Load() != 4 {
+	if status != http.StatusConflict || concurrent["status"] != "in_progress" || calls.Load() != 4 {
 		t.Fatalf("concurrent repeat dispatched beside the in-flight call: status=%d calls=%d body=%v", status, calls.Load(), concurrent)
 	}
+	if code := mcpExecString(t, mcpExecObject(t, concurrent, "error"), "code"); code != "call_in_progress" {
+		t.Fatalf("concurrent repeat did not report the in-flight call: %v", concurrent)
+	}
 	concurrentAttempt := mcpExecString(t, concurrent, "attempt_id")
-	close(blockRelease)
+	inFlight := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+concurrentAttempt, nil, nil, 200)
+	if inFlight["status"] != "dispatched" || inFlight["debit_state"] != "dispatched" || inFlight["result_digest"] != nil || inFlight["completed_at"] != nil || inFlight["call_digest"] == nil {
+		t.Fatalf("dispatched call had no management row before its outcome: %v", inFlight)
+	}
+	close(blockGate()[1])
 	block.Store(false)
 	finished := <-firstCall
 	if finished.err != nil || finished.status != http.StatusOK || mcpExecString(t, finished.body, "attempt_id") != concurrentAttempt {
@@ -934,11 +965,57 @@ func TestMCPCallIdentitySurvivesRestartAndResolvesUnknownOnce(t *testing.T) {
 		t.Fatalf("settled concurrent call re-executed on repeat: status=%d calls=%d body=%v", status, calls.Load(), afterConcurrent)
 	}
 
+	resetBlock()
+	block.Store(true)
+	crashedCall := make(chan concurrentResult, 1)
+	go func() { crashedCall <- rawCallWith("integration-caller-crashed") }()
+	<-blockGate()[0]
+	if calls.Load() != 5 {
+		t.Fatalf("crash window call did not dispatch once: calls=%d", calls.Load())
+	}
+	toolLedger := &mcp.DurableLedger{Pool: h.Pool}
+	recovered, err := toolLedger.RecoverOrphanedDispatches(t.Context(), time.Now().Add(time.Hour), 256)
+	if err != nil || recovered < 1 {
+		t.Fatalf("restart recovery left the orphaned dispatch behind: recovered=%d err=%v", recovered, err)
+	}
+	status, orphaned := callOn(newConsumer(), "integration-caller-crashed", argument)
+	if status != http.StatusBadGateway || orphaned["status"] != "outcome_unknown" || calls.Load() != 5 {
+		t.Fatalf("orphaned dispatch redispatched after restart: status=%d calls=%d body=%v", status, calls.Load(), orphaned)
+	}
+	orphanRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, orphaned, "attempt_id"), nil, nil, 200)
+	if orphanRecord["status"] != "outcome_unknown" || orphanRecord["debit_state"] != "outcome_unknown" || orphanRecord["call_digest"] == nil {
+		t.Fatalf("orphaned dispatch is unreachable in management records: %v", orphanRecord)
+	}
+	close(blockGate()[1])
+	block.Store(false)
+	if drained := <-crashedCall; drained.err != nil {
+		t.Fatalf("blocked crash window call could not drain: %v", drained.err)
+	}
 	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp.mcp_call_identities SET created_at=clock_timestamp()-interval '25 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE attempt_id=$1`, attemptID); err != nil {
 		t.Fatal(err)
 	}
 	status, reused := callOn(restarted, callerID, argument)
-	if status != http.StatusOK || calls.Load() != 5 || mcpExecString(t, reused, "attempt_id") == attemptID {
+	if status != http.StatusOK || calls.Load() != 6 || mcpExecString(t, reused, "attempt_id") == attemptID {
 		t.Fatalf("expired call identity stayed bound past 24 hours: status=%d calls=%d body=%v", status, calls.Load(), reused)
+	}
+	oldRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+attemptID, nil, nil, 200)
+	newRecord := h.want(owner, "GET", "/api/v1/mcp-tool-calls/"+mcpExecString(t, reused, "attempt_id"), nil, nil, 200)
+	if oldRecord["call_digest"] == nil || oldRecord["call_digest"] != newRecord["call_digest"] {
+		t.Fatalf("reusing an expired identifier stripped the digest from the old record: old=%v new=%v", oldRecord, newRecord)
+	}
+	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp.mcp_call_identities SET created_at=clock_timestamp()-interval '25 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE attempt_id=$1`, mcpExecString(t, reused, "attempt_id")); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := toolLedger.ExpireCallIdentities(t.Context(), 256)
+	if err != nil || expired < 1 {
+		t.Fatalf("identity expiry sweep kept expired bindings: expired=%d err=%v", expired, err)
+	}
+	var bindings int
+	if err = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.mcp_call_identities WHERE attempt_id=$1`, mcpExecString(t, reused, "attempt_id")).Scan(&bindings); err != nil || bindings != 0 {
+		t.Fatalf("swept call identity remained bound: count=%d err=%v", bindings, err)
+	}
+	status, swept := callOn(restarted, callerID, argument)
+	if status != http.StatusOK || calls.Load() != 7 {
+		t.Fatalf("swept call identity could not be reused: status=%d calls=%d body=%v", status, calls.Load(), swept)
 	}
 }

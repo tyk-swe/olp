@@ -9840,7 +9840,7 @@
         "content",
         "structuredContent",
         "isError",
-        "_meta"
+        "params._meta.olp.call_id"
       ],
       "status": "implemented",
       "expected_refusal": null,
@@ -9854,7 +9854,7 @@
       "refusals": [
         "missing tools scope",
         "toolset outside the key allowlist",
-        "missing or invalid caller call identifier in request _meta",
+        "missing or invalid caller call identifier in params._meta.olp.call_id",
         "changed body under a bound caller call identifier",
         "retained result no longer held for a repeated call identifier",
         "arguments outside the pinned schema",
