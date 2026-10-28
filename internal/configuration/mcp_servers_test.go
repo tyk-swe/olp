@@ -51,7 +51,7 @@ func TestMCPServerPricingRoundTripsConfiguration(t *testing.T) {
 	if !reflect.DeepEqual(doc.MCPServers[0], exported) {
 		t.Fatalf("pricing did not round trip: imported=%+v exported=%+v", doc.MCPServers[0], exported)
 	}
-	applied := mcpDefinitionFromEntry(doc.MCPServers[0], definition.Catalog)
+	applied := mcpDefinitionFromEntry(doc.MCPServers[0], definition.Catalog, nil)
 	if applied.UnitPrice == nil || *applied.UnitPrice != price || applied.ToolPrices["lookup"] != "0.5" ||
 		applied.CallsPerMinute != rate || applied.MaxConcurrency != concurrency ||
 		applied.PerKeyCallsPerMinute != 45 || applied.PerKeyMaxConcurrency != 2 {

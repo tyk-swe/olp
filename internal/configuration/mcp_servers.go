@@ -58,13 +58,19 @@ func normalizeMCPEntry(e *MCPServerEntry) {
 	e.PerKeyMaxConcurrency = mcpEntryLimit(routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
 }
 
-func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog) *mcpservers.Definition {
+func mcpDefinitionFromEntry(e MCPServerEntry, catalog *mcpservers.Catalog, current *mcpservers.Definition) *mcpservers.Definition {
+	signingKeyID := func() *string {
+		if current == nil || e.Delegation == nil {
+			return nil
+		}
+		return current.DelegationKeyID
+	}()
 	prices := make(map[string]string, len(e.ToolPrices))
 	for name, price := range e.ToolPrices {
 		prices[name] = price
 	}
 	return &mcpservers.Definition{
-		Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
+		DelegationKeyID: signingKeyID, Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
 		CallsPerMinute:       routing.ToolLimitOr(e.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -358,11 +364,8 @@ func (s *Server) applyMCPServers(ctx context.Context, tx pgx.Tx, p access.Princi
 			changed = true
 			continue
 		}
-		next := mcpDefinitionFromEntry(e, cert.catalog)
+		next := mcpDefinitionFromEntry(e, cert.catalog, current)
 		next.ProjectID = project
-		if current != nil && next.Delegation != nil {
-			next.DelegationKeyID = current.DelegationKeyID
-		}
 		if e.CredentialRef != nil {
 			if b, ok := bindings[*e.CredentialRef]; ok {
 				id := access.NewID()

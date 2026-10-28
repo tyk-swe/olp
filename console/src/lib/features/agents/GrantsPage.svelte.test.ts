@@ -186,6 +186,46 @@ it('retains ambiguous save identity and treats refresh failure as a saved write'
   });
 });
 
+it('keeps an unsent signing key when an earlier key save completes', async () => {
+  const pending = Promise.withResolvers<api.MCPServer>();
+  vi.mocked(api.saveServer)
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValue(a);
+  const { host } = page();
+  await choose(host, a);
+  fill(host, 'Delegated issuer', 'https://fixture.invalid/issuer');
+  fill(host, 'Delegated audience', 'fixture-tools');
+  const signingKey = host.querySelector('textarea');
+  if (!signingKey) expect.fail('Missing signing key input');
+  const setKey = (value: string) => {
+    signingKey.value = value;
+    signingKey.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
+  setKey('submitted-private-key');
+  button(host, 'Save authorization settings').click();
+  await vi.waitFor(() => expect(api.saveServer).toHaveBeenCalled());
+  setKey('unsent-private-key');
+  pending.resolve({ ...a, etag: 'saved-a' });
+  await vi.waitFor(() => {
+    flushSync();
+    expect(button(host, 'Save authorization settings').disabled).toBe(false);
+    expect(signingKey.value).toBe('unsent-private-key');
+  });
+  button(host, 'Save authorization settings').click();
+  await vi.waitFor(() => {
+    expect(
+      vi.mocked(api.saveServer).mock.calls.at(-1)?.[1].delegation_private_key
+    ).toBe('unsent-private-key');
+  });
+  const submitted = vi.mocked(api.saveServer).mock.calls;
+  expect(submitted[0]?.[1].delegation_private_key).toBe(
+    'submitted-private-key'
+  );
+  expect(submitted[1]?.[0].etag).toBe('saved-a');
+  expect(submitted[1]?.[2]).not.toBe(submitted[0]?.[2]);
+});
+
 it('starts, continues and claims a key enrollment without leaving the page', async () => {
   const enrollmentID = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50701';
   const token = 'private-handoff';

@@ -352,14 +352,22 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	if !ok {
 		return MCPToolsetResolution{}, false
 	}
-	tools := slices.Clone(resolution.Tools)
-	for i := range tools {
-		tools[i].UnitPrice = copyPointer(tools[i].UnitPrice)
-		tools[i].CredentialID = copyPointer(tools[i].CredentialID)
-		tools[i].OAuth = tools[i].OAuth.Clone()
-		tools[i].Delegation = tools[i].Delegation.Clone()
-		tools[i].Stdio = tools[i].Stdio.Clone()
-	}
+	tools := slices.Collect(func(yield func(MCPToolsetTool) bool) {
+		for _, tool := range resolution.Tools {
+			if !yield(MCPToolsetTool{
+				Alias: tool.Alias, Name: tool.Name, Description: tool.Description,
+				InputSchema: tool.InputSchema, ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
+				CatalogDigest: tool.CatalogDigest, Endpoint: tool.Endpoint, Transport: tool.Transport,
+				UnitPrice: copyPointer(tool.UnitPrice), CredentialID: copyPointer(tool.CredentialID),
+				OAuth: tool.OAuth.Clone(), Delegation: tool.Delegation.Clone(), Stdio: tool.Stdio.Clone(),
+				CallsPerMinute: tool.CallsPerMinute, MaxConcurrency: tool.MaxConcurrency,
+				PerKeyCallsPerMinute: tool.PerKeyCallsPerMinute, PerKeyMaxConcurrency: tool.PerKeyMaxConcurrency,
+				schema: tool.schema,
+			}) {
+				return
+			}
+		}
+	})
 	return MCPToolsetResolution{
 		Tools:   tools,
 		Drifted: slices.Clone(resolution.Drifted),

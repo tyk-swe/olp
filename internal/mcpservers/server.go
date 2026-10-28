@@ -120,9 +120,9 @@ func cloneToolPrices(values map[string]string) map[string]string {
 	return out
 }
 
-func definitionFromInput(in Input, catalog *Catalog) *Definition {
+func definitionFromInput(in Input, catalog *Catalog, signingKeyID *string) *Definition {
 	return &Definition{
-		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), Stdio: in.Stdio.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
+		DelegationKeyID: signingKeyID, Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), Stdio: in.Stdio.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
 		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute:       routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -393,33 +393,42 @@ func definitionTransport(in Input, previous *Definition) routing.MCPTransport {
 	return routing.MCPTransport(in.Transport)
 }
 
-func mergeAbsentPricingAndLimits(in *Input, previous *Definition) {
-	if !in.Present("delegation") {
-		in.Delegation = previous.Delegation.Clone()
+func inheritedInputField[T any](in Input, field string, supplied, current T) T {
+	if in.Present(field) {
+		return supplied
 	}
-	if !in.Present("oauth") {
-		in.OAuth = previous.OAuth.Clone()
-	}
-	if !in.Present("unit_price") {
-		in.UnitPrice = clonePrice(previous.UnitPrice)
-	}
-	if !in.Present("tool_prices") {
-		in.ToolPrices = cloneToolPrices(previous.ToolPrices)
-	}
-	merge := func(field string, value **int64, current, fallback int64) {
-		switch {
-		case !in.Present(field):
-			preserved := current
-			*value = &preserved
-		case *value == nil:
-			reset := fallback
-			*value = &reset
+	return current
+}
+
+func mergeAbsentPricingAndLimits(in Input, previous *Definition) Input {
+	limit := func(field string, value *int64, current, fallback int64) *int64 {
+		if !in.Present(field) {
+			return &current
 		}
+		if value == nil {
+			return &fallback
+		}
+		return value
 	}
-	merge("calls_per_minute", &in.CallsPerMinute, previous.CallsPerMinute, routing.DefaultToolCallsPerMinute)
-	merge("max_concurrency", &in.MaxConcurrency, previous.MaxConcurrency, routing.DefaultToolMaxConcurrency)
-	merge("per_key_calls_per_minute", &in.PerKeyCallsPerMinute, previous.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute)
-	merge("per_key_max_concurrency", &in.PerKeyMaxConcurrency, previous.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency)
+	return Input{
+		Delegation:           inheritedInputField(in, "delegation", in.Delegation, previous.Delegation).Clone(),
+		OAuth:                inheritedInputField(in, "oauth", in.OAuth, previous.OAuth).Clone(),
+		UnitPrice:            clonePrice(inheritedInputField(in, "unit_price", in.UnitPrice, previous.UnitPrice)),
+		ToolPrices:           cloneToolPrices(inheritedInputField(in, "tool_prices", in.ToolPrices, previous.ToolPrices)),
+		CallsPerMinute:       limit("calls_per_minute", in.CallsPerMinute, previous.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		MaxConcurrency:       limit("max_concurrency", in.MaxConcurrency, previous.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		PerKeyCallsPerMinute: limit("per_key_calls_per_minute", in.PerKeyCallsPerMinute, previous.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		PerKeyMaxConcurrency: limit("per_key_max_concurrency", in.PerKeyMaxConcurrency, previous.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
+		DelegationPrivateKey: in.DelegationPrivateKey,
+		Stdio:                in.Stdio,
+		present:              in.present,
+		ProjectID:            in.ProjectID,
+		Name:                 in.Name,
+		Transport:            in.Transport,
+		Endpoint:             in.Endpoint,
+		Enabled:              in.Enabled,
+		Credential:           in.Credential,
+	}
 }
 
 func samePrice(a, b *string) bool {
@@ -456,16 +465,21 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 }
 
 func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bool) (access.Reply, error) {
-	var in Input
+	var decoded Input
 	if !retire {
-		if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
+		if err := access.DecodeUnique(r, &decoded, 64<<10); err != nil {
 			return access.Reply{}, err
 		}
-		if id != "" {
+	}
+	in := func() Input {
+		if !retire && id != "" {
 			if current, loadErr := Load(r.Context(), s.Access.Pool, id, false); loadErr == nil {
-				mergeAbsentPricingAndLimits(&in, current)
+				return mergeAbsentPricingAndLimits(decoded, current)
 			}
 		}
+		return decoded
+	}()
+	if !retire {
 		if err := Validate(&in, s.Egress); err != nil {
 			return access.Reply{}, err
 		}
@@ -560,7 +574,11 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		action = "mcp_server.retire"
 		_, err = tx.Exec(r.Context(), "UPDATE olp.mcp_servers SET enabled=false,retired_at=now(),credential_id=NULL,delegation_key_id=NULL,etag=$2 WHERE id=$1", id, etag)
 	} else {
-		next := definitionFromInput(in, catalog)
+		signingID, signingErr := s.saveDelegationKey(r.Context(), tx, in, current)
+		if signingErr != nil {
+			return access.Reply{}, signingErr
+		}
+		next := definitionFromInput(in, catalog, signingID)
 		next.ID = id
 		if current == nil {
 			next.ProjectID = *in.ProjectID
@@ -581,11 +599,6 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 				}
 			}
 		}
-		signingID, signingErr := s.saveDelegationKey(r.Context(), tx, in, current)
-		if signingErr != nil {
-			return access.Reply{}, signingErr
-		}
-		next.DelegationKeyID = signingID
 		if err = Save(r.Context(), tx, p.UserID(), current, next); err != nil {
 			var pg *pgconn.PgError
 			if errors.As(err, &pg) && pg.Code == "23505" {

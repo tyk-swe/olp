@@ -226,7 +226,13 @@
       if (!active()) return;
       patch({
         server: saved,
-        fields: { ...$state.fields, signingKey: '' },
+        fields: {
+          ...$state.fields,
+          signingKey:
+            $state.fields.signingKey === fields.signingKey
+              ? ''
+              : $state.fields.signingKey
+        },
         message: 'Personal authorization configuration saved'
       });
       await refresh(agentKeys.servers(), active);
