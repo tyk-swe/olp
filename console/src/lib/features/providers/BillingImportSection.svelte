@@ -48,6 +48,7 @@
   let error = $state('');
   let notice = $state('');
   let conflicted = $state(false);
+  let initialized = $state(false);
 
   const captureOwner = usePrincipalLifetime(() => {
     adminKey = '';
@@ -56,17 +57,18 @@
     busy = false;
     error = notice = '';
     conflicted = false;
+    initialized = false;
   });
 
   const detail = $derived(billing.data ?? null);
   const editing = $derived(detail !== null);
 
   $effect(() => {
-    // Seed the form once the stored document arrives; edits are not clobbered.
     const current = detail;
-    if (current && !busy && !adminKey && !scopeText) {
+    if (current && !initialized) {
       scopeText = scopeLines(current);
       enabled = current.enabled;
+      initialized = true;
     }
   });
 

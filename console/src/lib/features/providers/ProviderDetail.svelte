@@ -402,7 +402,9 @@
         onResetModelPage={resetModelPage}
         onNotice={reportNotice}
       />
-      <BillingImportSection provider={current} {canManage} />
+      {#key current.id}
+        <BillingImportSection provider={current} {canManage} />
+      {/key}
     </div>
     {#if canManage}<a
         class="button button-secondary"
