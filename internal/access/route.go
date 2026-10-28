@@ -102,12 +102,16 @@ func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...Ro
 }
 
 func presentedInferenceKey(r *http.Request) bool {
-	header := r.Header.Get("Authorization")
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
+	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return false
 	}
-	token := strings.TrimSpace(header[7:])
-	return strings.HasPrefix(token, "olp_") || strings.Count(token, ".") == 2
+	token = strings.TrimSpace(token)
+	if strings.HasPrefix(token, "olp_") {
+		return true
+	}
+	parts := strings.Split(token, ".")
+	return len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 }
 
 // Stream mounts a secured streaming handler, admitted like Route.

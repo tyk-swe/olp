@@ -1,15 +1,20 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -29,6 +34,7 @@ func TestOCRNativeRoundTrip(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"ocr"}
+		route.ProviderFetchedDocuments = true
 		s.Routes[routeSlug] = route
 		ocrSearchProviders(s, "mistral", "mistral-ocr", "ocr")
 	})
@@ -134,6 +140,105 @@ func TestSearchTransformedTargets(t *testing.T) {
 	}
 }
 
+func TestSearchBraveTransformedTarget(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"search"}
+		route.Fidelity.Mode = routing.FidelityTransformed
+		s.Routes[routeSlug] = route
+		ocrSearchProviders(s, "brave", "brave-search", "search")
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method: %s", r.Method)
+		}
+		if r.URL.Path != "/a/v1/res/v1/web/search" {
+			t.Errorf("addressed at %s", r.URL.Path)
+		}
+		query := r.URL.Query()
+		if query.Get("q") != "q" || query.Get("count") != "2" || query.Get("result_filter") != "web" || query.Get("freshness") != "2026-01-02to2026-03-04" {
+			t.Errorf("query: %v", query)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if len(body) != 0 {
+			t.Errorf("get body: %s", body)
+		}
+		if r.Header.Get("X-Subscription-Token") != secretA || r.Header.Get("Authorization") != "" {
+			t.Errorf("credential headers: %v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"type":"search","query":{"original":"q"},"web":{"type":"search","results":[{"title":"t","url":"https://a","description":"d","page_age":"2026-01-02T03:04:05Z"}],"family_friendly":true}}`)
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(`{"query":"q","max_results":2,"search_after_date_filter":"01/02/2026","search_before_date_filter":"03/04/2026"}`), map[string]string{"X-OLP-Route": routeSlug})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var out struct {
+		ID      string `json:"id"`
+		Results []struct {
+			Title, URL, Snippet string
+			Date                *string `json:"date"`
+		} `json:"results"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil {
+		t.Fatalf("brave: %d %s", resp.StatusCode, body)
+	}
+	if !strings.HasPrefix(out.ID, "search_") || len(out.Results) != 1 || out.Results[0].Snippet != "d" || out.Results[0].Date == nil || *out.Results[0].Date != "2026-01-02" {
+		t.Fatalf("brave projection: %+v", out)
+	}
+	if h.mock.count("a") != 1 {
+		t.Fatalf("upstream calls: %d", h.mock.count("a"))
+	}
+}
+
+func TestSearchBraveNativeStrict(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"search"}
+		s.Routes[routeSlug] = route
+		for id, p := range s.Providers {
+			p.Kind, p.VendorID, p.ProfileID = "openai_compatible", "brave", "brave-search"
+			p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "search", Surface: "native", Mode: "unary"}}
+			s.Providers[id] = p
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Query().Get("offset") != "1" || r.URL.Query().Get("count") != "3" {
+			t.Errorf("native wire: %s %v", r.Method, r.URL.Query())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"type":"search","query":{"original":"q"},"web":{"type":"search","results":[{"title":"t","url":"https://a","description":"d"}],"family_friendly":true}}`)
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/native/brave-search/models/"+routeSlug, fullKey, []byte(`{"q":"q","count":3,"offset":1}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"description":"d"`) {
+		t.Fatalf("brave native: %d %s", resp.StatusCode, body)
+	}
+}
+
+func TestSearchBraveRefusalsDispatchNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"query":"q","search_domain_filter":["a.com"]}`,
+		`{"query":"q","search_after_date_filter":"01/02/2026"}`,
+		`{"query":"q","search_recency_filter":"week"}`,
+		`{"query":"q","country":"US"}`,
+	} {
+		h := strictHarness(t, func(s *routing.Snapshot) {
+			route := s.Routes[routeSlug]
+			route.Operations = []string{"search"}
+			route.Fidelity.Mode = routing.FidelityTransformed
+			s.Routes[routeSlug] = route
+			ocrSearchProviders(s, "brave", "brave-search", "search")
+		})
+		resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(body), map[string]string{"X-OLP-Route": routeSlug})
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("refusal dispatched: %d %s", resp.StatusCode, out)
+		}
+	}
+}
+
 func TestSearchMappingRefusalsDispatchNothing(t *testing.T) {
 	for _, body := range []string{
 		`{"query":"q","country":"US"}`,
@@ -196,6 +301,7 @@ func TestCallerPaidOCRExemptsCostCaps(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		r := s.Routes[routeSlug]
 		r.Operations = []string{"ocr"}
+		r.ProviderFetchedDocuments = true
 		r.CallerCostExempt = true
 		r.Budget = &routing.CostLimits{DailyCostLimit: new("1")}
 		s.Routes[routeSlug] = r
@@ -244,6 +350,7 @@ func TestOCRInputPolicyRefusalAndNoCache(t *testing.T) {
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"ocr"}
+		route.ProviderFetchedDocuments = true
 		route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "secret", Phase: "input", Action: contentpolicy.ActionBlock, Pattern: "secret"}}}
 		route.Cache = &cache.Policy{Mode: "exact"}
 		s.Routes[routeSlug] = route
@@ -254,6 +361,57 @@ func TestOCRInputPolicyRefusalAndNoCache(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode < 400 || !strings.Contains(string(body), "policy_conflict") || h.mock.count("a") != 0 {
 		t.Fatalf("input policy: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+}
+
+func vertexOCRProviders(s *routing.Snapshot) {
+	for id, p := range s.Providers {
+		p.Kind, p.VendorID, p.ProfileID, p.ProfileRevision = "vertex_ai", "google-vertex", "vertex-document-processing-ocr", "1"
+		p.AuthMode, p.CloudRegion, p.CloudProject = "service_account", "us", "example-project"
+		model := p.Capabilities[0].Model
+		p.Capabilities = []routing.Capability{
+			{Model: model, Operation: "ocr", Surface: "openai", Mode: "unary"},
+			{Model: model, Operation: "ocr", Surface: "native", Mode: "unary"},
+		}
+		s.Providers[id] = p
+	}
+}
+
+func TestVertexOCRMappingRefusalsDispatchNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"https://example.com/report.pdf"}}`,
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"data:application/pdf;base64,AAA"},"table_format":"markdown"}`,
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"data:application/pdf;base64,AAA"},"extract_header":true}`,
+	} {
+		h := strictHarness(t, func(s *routing.Snapshot) {
+			route := s.Routes[routeSlug]
+			route.Operations = []string{"ocr"}
+			route.Fidelity.Mode = routing.FidelityTransformed
+			s.Routes[routeSlug] = route
+			vertexOCRProviders(s)
+		})
+		resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(body), nil)
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("unmappable vertex ocr dispatched: %d %s", resp.StatusCode, out)
+		}
+	}
+}
+
+func TestVertexOCRDocumentLocationRefusedWithoutPrefixGrant(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"ocr"}
+		s.Routes[routeSlug] = route
+		vertexOCRProviders(s)
+	})
+	body := `{"gcsDocument":{"gcsUri":"gs://docs-bucket/reports/a.pdf","mimeType":"application/pdf"}}`
+	resp := h.do(t.Context(), http.MethodPost, "/native/vertex-document-processing-ocr/models/"+routeSlug, fullKey, []byte(body), nil)
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || !strings.Contains(string(out), "storage_scope") || h.mock.count("a")+h.mock.count("b") != 0 {
+		t.Fatalf("ungranted document location: %d %s calls=%d", resp.StatusCode, out, h.mock.count("a")+h.mock.count("b"))
 	}
 }
 
@@ -271,5 +429,329 @@ func TestSearchMutatingGuardrailRefused(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "guardrail_surface_unavailable") || h.mock.count("a")+h.mock.count("b") != 0 {
 		t.Fatalf("mutating search guardrail: %d %s", resp.StatusCode, body)
+	}
+}
+
+const azureSubmitPath = "/a/v1/documentintelligence/documentModels/prebuilt-layout:analyze"
+const azurePollPath = "/a/v1/documentintelligence/documentModels/model-a/analyzeResults/result-1"
+const azureTwoPages = `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"model-a","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# One\n\n# Two","pages":[{"pageNumber":1,"spans":[{"offset":0,"length":5}]},{"pageNumber":2,"spans":[{"offset":7,"length":5}]}]}}`
+
+type azureMock struct {
+	submits, polls, deletes atomic.Int32
+	poll                    func(n int32, w http.ResponseWriter, r *http.Request)
+	foreign                 bool
+}
+
+func (m *azureMock) handler(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Ocp-Apim-Subscription-Key") != secretA || r.Header.Get("Authorization") != "" {
+			t.Errorf("credential headers on %s %s: %v", r.Method, r.URL.Path, r.Header)
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == azureSubmitPath:
+			m.submits.Add(1)
+			q := r.URL.Query()
+			if q.Get("api-version") != "2024-11-30" || q.Get("outputContentFormat") != "markdown" {
+				t.Errorf("submit query: %s", r.URL.RawQuery)
+			}
+			body, _ := io.ReadAll(r.Body)
+			var req map[string]any
+			if json.Unmarshal(body, &req) != nil || len(req) != 1 {
+				t.Errorf("submit body: %s", body)
+			}
+			loc := "http://" + r.Host + azurePollPath + "?api-version=2024-11-30"
+			if m.foreign {
+				loc = "https://evil.example.net" + azurePollPath + "?api-version=2024-11-30"
+			}
+			w.Header().Set("Operation-Location", loc)
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && r.URL.Path == azurePollPath:
+			m.poll(m.polls.Add(1), w, r)
+		case r.Method == http.MethodDelete && r.URL.Path == azurePollPath:
+			m.deletes.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+}
+
+func azureHarness(t *testing.T, transformed bool, mock *azureMock) *harness {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"ocr"}
+		route.ProviderFetchedDocuments = true
+		if transformed {
+			route.Fidelity.Mode = routing.FidelityTransformed
+		}
+		for i := range route.Targets {
+			route.Targets[i].ProviderModel = "prebuilt-layout"
+		}
+		s.Routes[routeSlug] = route
+		ocrSearchProviders(s, "azure-document-intelligence", "azure-document-intelligence-ocr", "ocr")
+		for id, p := range s.Providers {
+			p.Capabilities = []routing.Capability{{Model: "prebuilt-layout", Operation: "ocr", Surface: p.Capabilities[0].Surface, Mode: "unary"}}
+			s.Providers[id] = p
+		}
+		if !transformed {
+			for id, p := range s.Providers {
+				p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "ocr", Surface: "native", Mode: "unary"}}
+				s.Providers[id] = p
+			}
+		}
+	})
+	h.mock.set("a", mock.handler(t))
+	return h
+}
+
+func TestAzureOCRTransformedPolling(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "0")
+		if n == 1 {
+			io.WriteString(w, `{"status":"running"}`)
+			return
+		}
+		io.WriteString(w, azureTwoPages)
+	}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var out struct {
+		Model string `json:"model"`
+		Pages []struct {
+			Index    int    `json:"index"`
+			Markdown string `json:"markdown"`
+		} `json:"pages"`
+		UsageInfo struct {
+			PagesProcessed int `json:"pages_processed"`
+		} `json:"usage_info"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil {
+		t.Fatalf("azure ocr: %d %s", resp.StatusCode, body)
+	}
+	if out.Model != routeSlug || len(out.Pages) != 2 || out.Pages[0].Markdown != "# One" || out.Pages[1].Markdown != "# Two" || out.UsageInfo.PagesProcessed != 2 {
+		t.Fatalf("projected: %+v", out)
+	}
+	if mock.submits.Load() != 1 || mock.polls.Load() != 2 {
+		t.Fatalf("submits=%d polls=%d", mock.submits.Load(), mock.polls.Load())
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if !fact.UsageObserved || fact.BillingUncertain || fact.Usage == nil || fact.Usage.MediaUnits == nil || *fact.Usage.MediaUnits != "2" {
+		t.Fatalf("fact: observed=%v uncertain=%v usage=%+v", fact.UsageObserved, fact.BillingUncertain, fact.Usage)
+	}
+}
+
+func TestAzureOCRPollNeverResubmits(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, azureTwoPages)
+	}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || mock.submits.Load() != 1 || mock.polls.Load() != 2 {
+		t.Fatalf("ambiguous poll: %d %s submits=%d polls=%d", resp.StatusCode, body, mock.submits.Load(), mock.polls.Load())
+	}
+}
+
+func TestAzureOCRMappingRefusalsDispatchNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"https://x"},"table_format":"html"}`,
+		`{"model":"` + routeSlug + `","document":{"type":"document_url","document_url":"https://x"},"include_image_base64":true}`,
+	} {
+		mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {}}
+		h := azureHarness(t, true, mock)
+		resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(body), nil)
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 || mock.submits.Load() != 0 {
+			t.Fatalf("refusal dispatched: %d %s submits=%d", resp.StatusCode, out, mock.submits.Load())
+		}
+	}
+}
+
+func TestAzureOCRMissingUnitsBillingUncertain(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"status":"succeeded","analyzeResult":{"apiVersion":"2024-11-30","modelId":"model-a","stringIndexType":"utf16CodeUnit","contentFormat":"markdown","content":"# Only"}}`)
+	}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "usage_info") {
+		t.Fatalf("missing units: %d %s", resp.StatusCode, body)
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if fact.UsageObserved || !fact.BillingUncertain || fact.UsageComplete {
+		t.Fatalf("fact: observed=%v uncertain=%v complete=%v", fact.UsageObserved, fact.BillingUncertain, fact.UsageComplete)
+	}
+}
+
+func TestAzureOCRPollForeignLocationRefused(t *testing.T) {
+	mock := &azureMock{foreign: true, poll: func(n int32, w http.ResponseWriter, r *http.Request) {}}
+	h := azureHarness(t, true, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || mock.submits.Load() != 1 || mock.polls.Load() != 0 {
+		t.Fatalf("foreign location: %d %s submits=%d polls=%d", resp.StatusCode, body, mock.submits.Load(), mock.polls.Load())
+	}
+}
+
+func TestAzureOCRCancellationDeletesResult(t *testing.T) {
+	polled := make(chan struct{}, 1)
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		select {
+		case polled <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "0")
+		io.WriteString(w, `{"status":"running"}`)
+	}}
+	h := azureHarness(t, true, mock)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/ocr", bytes.NewReader([]byte(ocrBody)))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-polled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("poll never started")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request never ended after cancel")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for mock.deletes.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mock.submits.Load() != 1 || mock.deletes.Load() != 1 {
+		t.Fatalf("submits=%d deletes=%d", mock.submits.Load(), mock.deletes.Load())
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if !fact.BillingUncertain {
+		t.Fatalf("cancelled fact not billing uncertain: %+v", fact)
+	}
+}
+
+func TestAzureOCRNativeRoundTrip(t *testing.T) {
+	mock := &azureMock{poll: func(n int32, w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, azureTwoPages)
+	}}
+	h := azureHarness(t, false, mock)
+	resp := h.do(t.Context(), http.MethodPost, "/native/azure-document-intelligence-ocr/models/"+routeSlug, fullKey, []byte(`{"model":"`+routeSlug+`","base64Source":"QUJD"}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var out struct {
+		Status        string `json:"status"`
+		AnalyzeResult struct {
+			ModelID string `json:"modelId"`
+		} `json:"analyzeResult"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil || out.Status != "succeeded" || out.AnalyzeResult.ModelID != routeSlug {
+		t.Fatalf("native azure: %d %s", resp.StatusCode, body)
+	}
+	if mock.submits.Load() != 1 || mock.polls.Load() != 1 {
+		t.Fatalf("submits=%d polls=%d", mock.submits.Load(), mock.polls.Load())
+	}
+}
+
+func TestOCRProviderFetchedDocumentRefusedWithoutRouteChoice(t *testing.T) {
+	h := strictHarness(t, func(s *routing.Snapshot) {
+		route := s.Routes[routeSlug]
+		route.Operations = []string{"ocr"}
+		s.Routes[routeSlug] = route
+		ocrSearchProviders(s, "mistral", "mistral-ocr", "ocr")
+	})
+	resp := h.do(t.Context(), http.MethodPost, "/v1/ocr", fullKey, []byte(ocrBody), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 || h.mock.count("a") != 0 {
+		t.Fatalf("provider-fetched document dispatched without the route choice: %d %s calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+	if !strings.Contains(string(body), "provider_fetched_documents") && !strings.Contains(string(body), "content_egress") {
+		t.Fatalf("refusal does not name the egress choice: %s", body)
+	}
+}
+
+type cancelledPollBody struct{ cancel context.CancelFunc }
+
+func (b cancelledPollBody) Read([]byte) (int, error) {
+	b.cancel()
+	return 0, context.Canceled
+}
+
+func (cancelledPollBody) Close() error { return nil }
+
+type pollBodyTransport func(*http.Request) (*http.Response, error)
+
+func (f pollBodyTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestAzureOCRCancellationDuringPollBodyDeletesResult(t *testing.T) {
+	h := azureHarness(t, true, &azureMock{})
+	route := h.rt.release.Snapshot.Routes[routeSlug]
+	target := route.Targets[0]
+	provider := h.rt.release.Snapshot.Providers[target.ProviderID]
+	template, ok := h.rt.release.Snapshot.OperationTemplate(routeSlug, target.ID, "ocr")
+	if !ok {
+		t.Fatal("missing OCR template")
+	}
+	source, err := operationplan.Parse("mistral-ocr", []byte(ocrBody), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := template.Bind(source, operationplan.Context{Route: routeSlug})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var deletes atomic.Int32
+	client := &http.Client{Transport: pollBodyTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodDelete {
+			if r.Context().Err() != nil || r.Header.Get("Ocp-Apim-Subscription-Key") != secretA {
+				t.Error("cleanup lost its independent context or bound credential")
+			}
+			deletes.Add(1)
+			return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: cancelledPollBody{cancel: cancel}}, nil
+	})}
+	exchange := &unaryExchange{
+		server: h.gateway, ctx: ctx, x: &call{request: request{release: h.rt.release}},
+		state: &attemptState{parent: ctx}, plan: plan, client: client, slot: provider.Slots[0], provider: &provider,
+		model: target.ProviderModel, fact: &AttemptFact{StartedAt: time.Now()}, bodyCap: 1 << 20, inject: func(http.Header) {},
+	}
+	_, failure := exchange.poll(h.upstream.URL + azurePollPath)
+	if failure == nil || deletes.Load() != 1 {
+		t.Fatalf("cancelled poll body retained its result: deletes=%d failure=%+v", deletes.Load(), failure)
 	}
 }

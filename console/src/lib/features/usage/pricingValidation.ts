@@ -34,7 +34,8 @@ export function toolFeeRows(
       continue;
     }
     const name = toolNameText(row.name);
-    if (name in calls) throw new Error(`Tool ${name} is listed twice.`);
+    if (Object.hasOwn(calls, name))
+      throw new Error(`Tool ${name} is listed twice.`);
     const fee = optionalDecimal(row.fee);
     if (!fee) throw new Error(`Enter a fee for tool ${name}.`);
     calls[name] = fee;

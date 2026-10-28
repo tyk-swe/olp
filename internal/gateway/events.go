@@ -81,6 +81,7 @@ type AttemptFact struct {
 	GuardrailDecisions []guardrails.Evidence
 	BudgetExempt       bool
 	CredentialSource   string
+	Execution          *usage.ExecutionReference
 	Interaction        *usage.InteractionEvidence
 	// Leg is the fallback or selector route the attempt ran on; nil on the
 	// route the caller named. Selector is the selector that chose its target,

@@ -448,6 +448,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		Selector:           x.selector,
 		Baseline:           x.baseline,
 	}
+	fact.Execution = x.sessionDebit.reference()
 	if !x.cardPinned && s.Runtime != nil {
 		// A retry can outlive the inputs used to plan the request. Resolve
 		// its consumer's card from current inputs and retain it on the fact.

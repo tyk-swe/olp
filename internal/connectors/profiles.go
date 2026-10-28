@@ -78,12 +78,16 @@ var profileRegistry = []Profile{
 	{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
 	{ID: "gemini-agents", Label: "Gemini managed agents", Kind: "gemini", Dialect: "gemini-agents", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
 	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
+	{ID: "xai-realtime", Label: "xAI Realtime", Kind: "openai_compatible", Dialect: "xai-realtime", DialectRevision: "1", Hosting: "xai-realtime"},
+	{ID: "vertex-realtime", Label: "Vertex AI Live", Kind: "vertex_ai", Dialect: "vertex-realtime", DialectRevision: "v1", Hosting: "vertex-live"},
+	{ID: "bedrock-realtime", Label: "Bedrock Nova Sonic", Kind: "bedrock", Dialect: "bedrock-realtime", DialectRevision: "v1", Hosting: "bedrock-nova-sonic"},
 	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
 	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
 	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
 	{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "vertex-document-processing-ocr", Label: "Google Cloud Document AI document processing", Kind: "vertex_ai", Dialect: "vertex-document-processing-ocr", DialectRevision: "v1", Hosting: "google-document-ai"},
 	{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
 	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
 	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
@@ -200,6 +204,13 @@ func init() {
 			p.Authentication = []string{"adc", "service_account"}
 			p.Operations = []string{"batch"}
 			p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/batch-prediction"
+		case "vertex-document-processing-ocr":
+			p.Authentication = []string{"adc", "service_account"}
+			p.Operations = []string{"ocr"}
+			p.OperationDialects = map[string]string{"ocr": "vertex-document-processing-ocr"}
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.Documentation = "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/projects.locations.processors/process"
 		case "bedrock-batch-inference":
 			p.Authentication = []string{"static", "default_chain"}
 			p.Operations = []string{"batch"}
@@ -226,6 +237,30 @@ func init() {
 			p.Authentication = []string{"api_key"}
 			p.Transport = "websocket"
 			p.Documentation = "https://ai.google.dev/api/live"
+		case "xai-realtime":
+			p.Operations = []string{"realtime"}
+			p.Authentication = []string{"api_key"}
+			p.Transport = "websocket"
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.OperationDialects = map[string]string{}
+			p.Documentation = "https://docs.x.ai/developers/model-capabilities/voice"
+		case "vertex-realtime":
+			p.Operations = []string{"realtime"}
+			p.Authentication = []string{"adc", "service_account"}
+			p.Transport = "websocket"
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.OperationDialects = map[string]string{}
+			p.Documentation = "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api/start-manage-session"
+		case "bedrock-realtime":
+			p.Operations = []string{"realtime"}
+			p.Authentication = []string{"static", "default_chain"}
+			p.Transport = "bedrock-bidi"
+			p.SemanticHeaders = []string{}
+			p.QuerySettings = []string{}
+			p.OperationDialects = map[string]string{}
+			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html"
 		}
 		completeProfileMetadata(p)
 	}
@@ -399,17 +434,36 @@ func (c Config) ValidateProfile() error {
 			}
 		}
 	}
+	switch p.Dialect {
+	case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+		if len(c.OperationDefaults) > 0 {
+			return errors.New("native duplex profile does not admit provider defaults on opaque frames")
+		}
+		for _, binding := range c.Bindings {
+			if len(binding.Defaults) > 0 {
+				return errors.New("native duplex profile does not admit model defaults on opaque frames")
+			}
+		}
+	}
+	if p.Dialect == "xai-realtime" && c.VendorID != "xai" ||
+		p.Dialect == "vertex-realtime" && c.VendorID != "google-vertex" ||
+		p.Dialect == "bedrock-realtime" && c.VendorID != "amazon-bedrock" {
+		return errors.New("native duplex profile requires its reviewed vendor")
+	}
 	if p.Dialect == "openai-decisions" && c.VendorID != "openai" || p.Dialect == "systemone" && c.VendorID != "typesafe-jev" {
 		return errors.New("decision profile requires its reviewed vendor")
 	}
 	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
+		p.Dialect == "azure-document-intelligence-ocr" && c.VendorID != "azure-document-intelligence" ||
+		p.Dialect == "vertex-document-processing-ocr" && c.VendorID != "google-vertex" ||
 		p.ID == "groq-files-batches" && c.VendorID != "groq" ||
 		p.ID == "together-files-batches" && c.VendorID != "together" ||
 		p.ID == "mistral-files-batches" && c.VendorID != "mistral" ||
 		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
 		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
 		p.Dialect == "exa-search" && c.VendorID != "exa" ||
-		p.Dialect == "parallel-search" && c.VendorID != "parallel" {
+		p.Dialect == "parallel-search" && c.VendorID != "parallel" ||
+		p.Dialect == "brave-search" && c.VendorID != "brave" {
 		return errors.New("operation profile requires its reviewed vendor")
 	}
 	if p.Dialect == "openai-completions" {
@@ -504,6 +558,9 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 	case "moderation":
 		return wire.Moderation, nil
 	case "ocr":
+		if p.Hosting == "google-document-ai" {
+			return wire.DocumentAIProcess, nil
+		}
 		return wire.OCR, nil
 	case "search":
 		return wire.Search, nil
@@ -551,7 +608,7 @@ func (c Config) Supports(operation, surface, mode string) bool {
 		}
 		// Dedicated single-purpose profiles never gain retained families.
 		switch c.ProfileID {
-		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim":
+		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim", "xai-realtime", "vertex-realtime", "bedrock-realtime":
 			return false
 		}
 		return retainedapi.Supports(c.Kind, operation, surface, mode)
@@ -590,6 +647,8 @@ func (c Config) Supports(operation, surface, mode string) bool {
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
 			case "gemini-live":
 				return operation == "realtime" && surface == "gemini" && mode == "realtime"
+			case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+				return operation == "realtime" && surface == "native" && mode == "realtime"
 			}
 			// An operation outside the profile has no dialect of its own; the
 			// default dialect OperationDialect names for it does not apply.
@@ -685,6 +744,11 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
 	switch c.Hosting() {
+	case "google-document-ai":
+		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
+			return errors.New("Document AI endpoint must match its configured project and location")
+		}
+		return nil
 	case "vertex-rag-engine":
 		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
 			return errors.New("Vertex RAG endpoint must match its configured project and location")
@@ -797,6 +861,10 @@ func (p Profile) OperationDialect(operation string) string {
 	case "realtime":
 		if (p.Kind == "openai" && p.Hosting == "direct-openai") || (p.Kind == "azure_openai" && p.Hosting == "azure-v1") {
 			return "openai-realtime"
+		}
+		switch p.Dialect {
+		case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+			return p.Dialect
 		}
 	}
 	return p.Hosting + "/" + operation

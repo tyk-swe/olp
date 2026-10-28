@@ -53,6 +53,7 @@ type Configuration struct {
 	APIVersion       string                   `json:"api_version"`
 	Options          struct {
 		TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
+		DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
 		Network                  *egress.ConnectionOptions        `json:"network,omitempty"`
 		SemanticHeaders          map[string]string                `json:"semantic_headers,omitempty"`
 		QuerySettings            map[string]string                `json:"query_settings,omitempty"`
@@ -125,7 +126,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
 		CredentialSource: cfg.CredentialSource, Kind: cfg.Kind, AuthMode: cfg.AuthMode, Endpoint: cfg.Endpoint,
-		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, BatchStorage: cfg.BatchStorage, TuningDatasetURIPrefixes: cfg.Options.TuningDatasetURIPrefixes, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
+		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, BatchStorage: cfg.BatchStorage, TuningDatasetURIPrefixes: cfg.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: cfg.Options.DocumentURIPrefixes, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,
 		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Commitment: cfg.Options.Commitment,
