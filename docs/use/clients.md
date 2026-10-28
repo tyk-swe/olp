@@ -118,6 +118,12 @@ It supports Codex, Claude Code and Gemini CLI, all four framework families and e
 JavaScript, Python and Go constructors for the official SDKs. Generated
 configuration runs against the same pinned libraries in client qualification.
 
+Anthropic's Python SDK 2.x and JavaScript SDK 1.x default to an API revision
+that OLP has not qualified. Set `anthropic-version` to `2023-06-01` in the
+client's default headers. Use `default_headers={"anthropic-version": "2023-06-01"}`
+in Python or `defaultHeaders: { "anthropic-version": "2023-06-01" }` in
+JavaScript. The generated SDK constructors set this header for you.
+
 ### Claude Code
 
 Claude Code treats `ANTHROPIC_BASE_URL` as the Anthropic API and sends the beta
