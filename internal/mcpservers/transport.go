@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -157,11 +158,11 @@ func (c *Transport) ListTools(ctx context.Context, cursor string) (ToolList, err
 }
 
 func (c *Transport) CallTool(ctx context.Context, name string, arguments json.RawMessage) (ToolResult, error) {
-	out := ToolResult{}
-	if err := c.call(ctx, int(c.nextID.Add(1)), "tools/call", toolCallParams{Name: name, Arguments: arguments}, &out); err != nil {
+	var raw json.RawMessage
+	if err := c.call(ctx, int(c.nextID.Add(1)), "tools/call", toolCallParams{Name: name, Arguments: arguments}, &raw); err != nil {
 		return ToolResult{}, err
 	}
-	return out, nil
+	return decodeToolResult(raw)
 }
 
 func (c *Transport) applyHeaders(h http.Header) {
@@ -309,4 +310,72 @@ func (c *Transport) Close(ctx context.Context) {
 	if response, err := c.client.Do(r); err == nil {
 		response.Body.Close()
 	}
+}
+
+func decodeToolResult(raw json.RawMessage) (ToolResult, error) {
+	var result struct {
+		Content []struct {
+			Type     string  `json:"type"`
+			Text     *string `json:"text,omitempty"`
+			Data     *string `json:"data,omitempty"`
+			MimeType *string `json:"mimeType,omitempty"`
+		} `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+		IsError           bool            `json:"isError,omitempty"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&result) != nil || result.Content == nil {
+		return ToolResult{}, ErrTransport
+	}
+	if len(result.StructuredContent) > 0 && !bytes.Equal(result.StructuredContent, []byte("null")) && result.StructuredContent[0] != '{' {
+		return ToolResult{}, ErrTransport
+	}
+	for _, part := range result.Content {
+		switch part.Type {
+		case "text":
+			if part.Text == nil || part.Data != nil || part.MimeType != nil {
+				return ToolResult{}, ErrTransport
+			}
+		case "image", "audio":
+			if part.Text != nil || part.Data == nil || part.MimeType == nil || *part.MimeType == "" {
+				return ToolResult{}, ErrTransport
+			}
+			if _, err := base64.StdEncoding.DecodeString(*part.Data); err != nil {
+				return ToolResult{}, ErrTransport
+			}
+		default:
+			return ToolResult{}, ErrTransport
+		}
+	}
+	content := slices.Collect(func(yield func(ToolContent) bool) {
+		for _, part := range result.Content {
+			if !yield(ToolContent{Type: part.Type, Text: resultString(part.Text), Data: resultString(part.Data), MimeType: resultString(part.MimeType)}) {
+				return
+			}
+		}
+	})
+	if len(result.Content) == 0 {
+		return ToolResult{Content: []ToolContent{}, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
+	}
+	return ToolResult{Content: content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
+}
+func resultString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+func (c ToolContent) MarshalJSON() ([]byte, error) {
+	if c.Type == "text" {
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{c.Type, c.Text})
+	}
+	return json.Marshal(struct {
+		Type     string `json:"type"`
+		Data     string `json:"data"`
+		MimeType string `json:"mimeType"`
+	}{c.Type, c.Data, c.MimeType})
 }

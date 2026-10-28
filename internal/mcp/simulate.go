@@ -1,12 +1,15 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -44,7 +47,18 @@ type preparedCall struct {
 
 func decodeCall(w http.ResponseWriter, r *http.Request) (callRequest, *apiError) {
 	var request callRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCallBodyBytes))
+	raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCallBodyBytes))
+	if readErr != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(readErr, &tooLarge) {
+			return callRequest{}, fail(http.StatusRequestEntityTooLarge, "request_too_large", "invalid_request_error", "The call body exceeds the 1 MiB bound.")
+		}
+		return callRequest{}, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object.")
+	}
+	if _, parseErr := oif.ParseJSON(raw, oif.Limits{MaxBytes: maxCallBodyBytes, MaxDepth: 64, MaxNodes: 1 << 16}); parseErr != nil {
+		return callRequest{}, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object.")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		var tooLarge *http.MaxBytesError

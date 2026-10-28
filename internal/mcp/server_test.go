@@ -81,6 +81,7 @@ type fakeRuntime struct {
 	otherAuthority *access.Authority
 	release        *runtime.Release
 	failAuthzOn    int
+	denyResource   bool
 	authzCalls     atomic.Int32
 	live           map[string]string
 	revoked        atomic.Bool
@@ -99,6 +100,19 @@ func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
 
 func (f *fakeRuntime) Release() *runtime.Release { return f.release }
 
+func (f *fakeRuntime) AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error {
+	if int(f.authzCalls.Add(1)) == f.failAuthzOn {
+		return access.Forbidden()
+	}
+	if f.stale.Load() {
+		return runtime.ErrStaleAuthority
+	}
+	if f.revoked.Load() || !a.AllowsResource("tools", id, project, time.Now()) {
+		return access.Forbidden()
+	}
+	return nil
+}
+
 func (f *fakeRuntime) AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error {
 	if int(f.authzCalls.Add(1)) == f.failAuthzOn {
 		return access.Forbidden()
@@ -116,7 +130,7 @@ func (f *fakeRuntime) AuthorizeAgentResource(a access.Authority, scope, id, revi
 	if live == nil {
 		live = map[string]string{testToolset: testRevision, testOtherTS: testOtherRv}
 	}
-	if live[id] != revision || project != testProject {
+	if f.denyResource || live[id] != revision || project != testProject {
 		return access.Forbidden()
 	}
 	return nil
@@ -286,6 +300,20 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 			}
 			if fx.currentMode() == "structured_result" {
 				result = map[string]any{"content": content, "structuredContent": json.RawMessage(`{"nested":[{"message":"pri\u0076ate result"}]}`)}
+			}
+			switch fx.currentMode() {
+			case "missing-result-content":
+				result = json.RawMessage(`{}`)
+			case "missing-content-kind":
+				result = json.RawMessage(`{"content":[{}]}`)
+			case "missing-text":
+				result = json.RawMessage(`{"content":[{"type":"text"}]}`)
+			case "embedded-resource":
+				result = json.RawMessage(`{"content":[{"type":"resource","resource":{"uri":"https://resource.example.test","text":"retained resource"}}]}`)
+			case "empty-text":
+				result = json.RawMessage(`{"content":[{"type":"text","text":""}]}`)
+			case "empty-content":
+				result = json.RawMessage(`{"content":[]}`)
 			}
 			if fx.notify.Load() {
 				note, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
@@ -806,7 +834,7 @@ func TestCallToolSnapshotDriftScopesPerServerAndRefusesExplicitListing(t *testin
 
 	unlive, unliveFixture, _, _, unliveRuntime := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
 	unliveRuntime.release = &runtime.Release{ID: testGenID, Snapshot: twoServerSnapshot(t, unliveFixture.server.URL)}
-	unliveRuntime.failAuthzOn = 2
+	unliveRuntime.denyResource = true
 	status, body = request(t, unlive, http.MethodPost, "/v1/mcp/tools/call",
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"existing-json-15","arguments":{"query":"x"}}`)
 	if status != http.StatusOK || unliveFixture.calls.Load() != 1 {
@@ -1528,5 +1556,49 @@ func TestGrantEnrollmentRefusesAccountingIdentityWithoutVerifiedWorkload(t *test
 	problem, ok := body["error"].(map[string]any)
 	if status != http.StatusForbidden || !ok || problem["code"] != "verified_individual_required" {
 		t.Fatalf("accounting identity authorized personal enrollment: %d %v", status, body)
+	}
+}
+
+func TestJSONCallAndSimulationRejectAmbiguousEnvelopes(t *testing.T) {
+	valid := `{"toolset_id":"` + testToolset + `","name":"` + alias() + `","call_id":"envelope-call","arguments":{"query":"x"}}`
+	for _, path := range []string{"/v1/mcp/tools/call", "/v1/mcp/tools/simulate"} {
+		for name, body := range map[string]string{
+			"duplicate":          strings.Replace(valid, `"call_id":"envelope-call"`, `"call_id":"other","call_id":"envelope-call"`, 1),
+			"trailing":           valid + ` {}`,
+			"invalid UTF-8":      strings.Replace(valid, `"query":"x"`, `"query":"`+string([]byte{0xff})+`"`, 1),
+			"unpaired surrogate": strings.Replace(valid, `"query":"x"`, `"query":"\ud800"`, 1),
+		} {
+			t.Run(path+"/"+name, func(t *testing.T) {
+				server, fixture, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+				status, response := request(t, server, http.MethodPost, path, body)
+				if status != http.StatusBadRequest || jsonErrorCode(t, response) != "invalid_request" {
+					t.Fatalf("ambiguous envelope accepted: %d %v", status, response)
+				}
+				if fixture.calls.Load() != 0 || len(ledger.reserved) != 0 {
+					t.Fatal("ambiguous envelope reached execution")
+				}
+			})
+		}
+	}
+}
+
+func TestToolCallRefusesMalformedAndUnsupportedResults(t *testing.T) {
+	for _, mode := range []string{"missing-result-content", "missing-content-kind", "missing-text", "embedded-resource", "empty-text", "empty-content"} {
+		t.Run(mode, func(t *testing.T) {
+			server, fixture, ledger, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), mode)
+			status, body := request(t, server, "POST", "/v1/mcp/tools/call", `{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"result-check","arguments":{"query":"x"}}`)
+			if mode == "empty-text" || mode == "empty-content" {
+				if status != http.StatusOK {
+					t.Fatalf("valid empty content refused: %d %v", status, body)
+				}
+				return
+			}
+			if status != http.StatusBadGateway || body["status"] != string(StatusOutcomeUnknown) {
+				t.Fatalf("invalid result settled successfully: %d %v", status, body)
+			}
+			if fixture.calls.Load() != 1 || len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusOutcomeUnknown {
+				t.Fatalf("invalid result lost uncertain dispatch: %+v", ledger.evidence)
+			}
+		})
 	}
 }

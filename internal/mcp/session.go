@@ -21,18 +21,34 @@ type principalIdentity struct {
 	issuer         string
 	lookupID       string
 	workloadDigest string
+	endUserDigest  string
 }
 
 func principalOf(authority access.Authority) principalIdentity {
 	return principalIdentity{
 		id: authority.ID, issuer: authority.Issuer,
-		lookupID: authority.LookupID, workloadDigest: authority.WorkloadDigest,
+		lookupID: authority.LookupID, workloadDigest: authority.WorkloadDigest, endUserDigest: verifiedEndUser(authority),
 	}
 }
 
+func verifiedEndUser(a access.Authority) string {
+	if a.WorkloadIssuerID == nil {
+		return ""
+	}
+	return a.EndUserDigest
+}
+func (p principalIdentity) capacityScope() string {
+	return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest)
+}
 func (p principalIdentity) scope() string {
+	if p.endUserDigest == "" {
+		return p.capacityScope()
+	}
+	return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest, p.endUserDigest)
+}
+func principalScope(parts ...string) string {
 	digest := sha256.New()
-	for _, part := range []string{p.id, p.issuer, p.lookupID, p.workloadDigest} {
+	for _, part := range parts {
 		var size [binary.MaxVarintLen64]byte
 		n := binary.PutUvarint(size[:], uint64(len(part)))
 		digest.Write(size[:n])
@@ -56,6 +72,12 @@ func bindingOf(authority access.Authority) sessionBinding {
 }
 
 func (b sessionBinding) scope() string { return b.principal.scope() }
+func (b sessionBinding) member(id string) string {
+	if b.principal.endUserDigest == "" {
+		return id
+	}
+	return b.scope() + ":" + id
+}
 
 type certificationState string
 

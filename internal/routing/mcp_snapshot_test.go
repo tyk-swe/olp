@@ -141,11 +141,21 @@ func TestSnapshotReportsUncompilableMCPSchemaAsInvalidNotDrifted(t *testing.T) {
 
 func TestSnapshotMCPCloneAndDigest(t *testing.T) {
 	snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
+	snapshot.MCPServers[0].OAuth = &MCPOAuth{ClientID: "client", Audience: "audience", Scopes: []string{"tools.read"}}
+	snapshot.MCPServers[0].Delegation = &MCPDelegation{Issuer: "https://issuer.example.test", Audience: "delegated-audience"}
+	snapshot.MCPServers[0].Stdio = &MCPStdioBinding{Executable: "fixture", Digest: strings.Repeat("c", 64)}
 	want, err := snapshot.Digest()
 	if err != nil {
 		t.Fatal(err)
 	}
 	clone := snapshot.Clone()
+	clone.MCPServers[0].OAuth.ClientID = "other-client"
+	clone.MCPServers[0].OAuth.Scopes[0] = "other.scope"
+	clone.MCPServers[0].Delegation.Audience = "other-audience"
+	clone.MCPServers[0].Stdio.Executable = "other-fixture"
+	if snapshot.MCPServers[0].OAuth.ClientID != "client" || snapshot.MCPServers[0].OAuth.Scopes[0] != "tools.read" || snapshot.MCPServers[0].Delegation.Audience != "delegated-audience" || snapshot.MCPServers[0].Stdio.Executable != "fixture" {
+		t.Fatal("snapshot clone shares mutable MCP authentication or transport configuration")
+	}
 	clone.MCPServers[0].Tools[0].InputSchema[0] = '['
 	*clone.MCPServers[0].CredentialID = mcpRevision
 	if snapshot.MCPServers[0].Tools[0].InputSchema[0] != '{' || *snapshot.MCPServers[0].CredentialID != mcpCredID {

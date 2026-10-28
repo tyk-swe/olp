@@ -98,7 +98,7 @@ func (s *Server) callDigest(authority access.Authority, callID string) string {
 	if !validCallID(callID) {
 		return ""
 	}
-	return hex.EncodeToString(s.Auth.Digest(secrets.ToolCallDigest, authority.ID+"\x00"+callID))
+	return hex.EncodeToString(s.Auth.Digest(secrets.ToolCallDigest, retainedPrincipal(authority)+"\x00"+callID))
 }
 
 type retainedResult struct {
@@ -142,4 +142,11 @@ func (s *Server) retainedResultFor(attemptID string) (mcpservers.ToolResult, boo
 		return mcpservers.ToolResult{}, false
 	}
 	return entry.result, true
+}
+
+func retainedPrincipal(authority access.Authority) string {
+	if individual := verifiedEndUser(authority); individual != "" {
+		return authority.ID + "\x00" + individual
+	}
+	return authority.ID
 }

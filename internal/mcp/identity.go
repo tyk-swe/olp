@@ -88,15 +88,12 @@ func (s *Server) loadCredential(ctx context.Context, authority access.Authority,
 }
 
 func (s *Server) currentToolAuthority(in executeInput) *apiError {
-	err := s.Runtime.AuthorizeAgentResource(in.authority, "tools", in.resolved.id, in.resolved.revisionID, *in.authority.ProjectID)
+	err := s.Runtime.AuthorizeMCPTool(in.authority, in.resolved.id, in.resolved.revisionID, *in.authority.ProjectID, in.tool.ServerID, in.tool.ServerRevisionID)
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, runtime.ErrStaleAuthority) {
 		return fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
-	}
-	if s.driftScoped(in.authority, in.resolved) {
-		return nil
 	}
 	return errPermissionDenied
 }

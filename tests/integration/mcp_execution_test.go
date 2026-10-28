@@ -1138,10 +1138,19 @@ func TestMCPToolCallEndToEndSettlesDurableDebit(t *testing.T) {
 }
 
 func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
+	testMCPToolCallSnapshotDrift(t, "")
+}
+func TestMCPToolCallDriftNeverOverridesRevocation(t *testing.T) {
+	for _, change := range []string{"key", "publication", "server"} {
+		t.Run(change, func(t *testing.T) { testMCPToolCallSnapshotDrift(t, change) })
+	}
+}
+func testMCPToolCallSnapshotDrift(t *testing.T, change string) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "MCP per-server drift")
 	const credential = "integration-per-server-credential"
+	revokeDuringDiscovery := make(chan func(), 1)
 	upstreamFor := func() (*httptest.Server, *atomic.Value, *atomic.Int64) {
 		description := &atomic.Value{}
 		description.Store("Look up")
@@ -1172,6 +1181,12 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 				w.Header().Set("Mcp-Session-Id", "per-server-session")
 				result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
 			case "tools/list":
+				select {
+				case revoke := <-revokeDuringDiscovery:
+					revoke()
+				default:
+				}
+
 				text, _ := description.Load().(string)
 				result = map[string]any{"tools": []any{map[string]any{
 					"name": "lookup", "description": text,
@@ -1298,6 +1313,32 @@ func TestMCPToolCallSnapshotDriftScopesPerServerEndToEnd(t *testing.T) {
 	status, listed := call("GET", "/v1/mcp/tools?toolset_id="+toolsetID, nil)
 	if status != http.StatusConflict || mcpExecString(t, mcpExecObject(t, listed, "error"), "code") != "tool_definition_changed" {
 		t.Fatalf("explicit listing silently skipped the snapshot-drifted server: status=%d body=%v", status, listed)
+	}
+
+	if change != "" {
+		revokeDuringDiscovery <- func() {
+			switch change {
+			case "key":
+				h.want(owner, "POST", "/api/v1/api-keys/"+mcpExecString(t, key, "id")+"/revoke", nil, withMatch(h.want(owner, "GET", "/api/v1/api-keys/"+mcpExecString(t, key, "id"), nil, nil, 200), idem("revoke-drift-key")), http.StatusOK)
+			case "publication":
+				h.want(owner, "DELETE", "/api/v1/toolsets/"+toolsetID, nil, withMatch(h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200), idem("retire-drift-toolset")), http.StatusNoContent)
+			case "server":
+				h.want(owner, "DELETE", "/api/v1/mcp-servers/"+mcpExecString(t, createdA, "id"), nil, withMatch(h.want(owner, "GET", "/api/v1/mcp-servers/"+mcpExecString(t, createdA, "id"), nil, nil, 200), idem("retire-drift-server")), http.StatusNoContent)
+			}
+			if err := h.Runtime.Refresh(t.Context()); err != nil {
+				t.Error(err)
+			}
+		}
+		status, body := call("POST", "/v1/mcp/tools/call", struct {
+			ToolsetID string          `json:"toolset_id"`
+			Name      string          `json:"name"`
+			CallID    string          `json:"call_id"`
+			Arguments json.RawMessage `json:"arguments"`
+		}{toolsetID, pinA.Alias, "revoked-during-catalog", json.RawMessage(`{"query":"x"}`)})
+		if status == http.StatusOK || callsA.Load() != 2 {
+			t.Fatalf("drift overrode %s revocation: %d calls=%d body=%v", change, status, callsA.Load(), body)
+		}
+		return
 	}
 	h.want(owner, "GET", "/api/v1/toolsets/"+toolsetID, nil, nil, 200)
 }

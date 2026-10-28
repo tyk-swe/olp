@@ -536,6 +536,7 @@ func newPersonalOAuthFixtureWithHook(t *testing.T, hook func(*http.Request)) per
 }
 
 type personalOAuthCallbacks struct {
+	Result  func() json.RawMessage
 	Call    func(*http.Request) mcpsdk.CallToolResult
 	Catalog func()
 }
@@ -581,6 +582,9 @@ func newPersonalOAuthFixtureWithCall(t *testing.T, hook func(*http.Request), cal
 			case "initialize":
 				return mustJSON(mcpsdk.InitializeResult{ProtocolVersion: "2025-11-25", Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}, ServerInfo: &mcpsdk.Implementation{Name: "oauth-fixture", Version: "1"}})
 			case "tools/call":
+				if callbacks.Result != nil {
+					return callbacks.Result()
+				}
 				if callbacks.Call != nil {
 					return mustJSON(callbacks.Call(r))
 				}
@@ -1263,7 +1267,7 @@ func TestMCPEntraOBORequiresDelegatedUserIdentity(t *testing.T) {
 				return ""
 			}
 			exchanges.Add(1)
-			return claims.Subject
+			return claims.ObjectID
 		}()
 		if subject == "" {
 			w.WriteHeader(http.StatusForbidden)
@@ -1370,11 +1374,12 @@ func TestMCPEntraOBORequiresDelegatedUserIdentity(t *testing.T) {
 	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), "user-one") {
 		t.Fatalf("MCP OBO call failed: %d %s", reply.Code, reply.Body.String())
 	}
-	secondClaims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: "user-two", ObjectID: "user-two", Scopes: "delegated.read", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
+	secondClaims := entraTestClaims{Issuer: issuer.URL, Audience: clientID, Subject: userClaims.Subject, ObjectID: "user-two", Scopes: "delegated.read", IssuedAt: now.Unix(), Expires: now.Add(5 * time.Minute).Unix()}
 	second := mcpPersonalKey{Secret: signEntraAssertion(t, signer, secondClaims)}
+	assertPersonalCall(t, handler, f, second, "entra-user-json", http.StatusOK, "user-two")
 	beforeCalls := calls.Load()
 	crossed := personalRPC(handler, second, "/mcp", session, "tools/call", params("entra-wrong-user"))
-	if crossed.Code != http.StatusNotFound || exchanges.Load() != 1 || calls.Load() != beforeCalls {
+	if crossed.Code != http.StatusNotFound || exchanges.Load() != 2 || calls.Load() != beforeCalls {
 		t.Fatal("another user adopted a session or caused an exchange")
 	}
 	assertPersonalCall(t, handler, f, second, "entra-second-user", http.StatusOK, "user-two")
@@ -1451,6 +1456,15 @@ func TestMCPEntraOBORequiresDelegatedUserIdentity(t *testing.T) {
 	if err := json.Unmarshal(mustJSON(standing), &listed); err != nil {
 		t.Fatal(err)
 	}
+	for i := 1; i < 64; i++ {
+		_ = f.session(t, handler, []mcpPersonalKey{user, second}[i%2])
+	}
+	for _, key := range []mcpPersonalKey{user, second} {
+		blocked := personalRPC(handler, key, "/mcp?toolset_id="+f.toolsetID, "", "initialize", mustJSON(mcpsdk.InitializeParams{ProtocolVersion: "2025-11-25", ClientInfo: &mcpsdk.Implementation{Name: "capacity", Version: "1"}, Capabilities: &mcpsdk.ClientCapabilities{}}))
+		if blocked.Code != http.StatusTooManyRequests {
+			t.Fatalf("per-individual sessions escaped global principal cap: %d %s", blocked.Code, blocked.Body.String())
+		}
+	}
 	authority, authErr := f.h.Runtime.Authenticate(second.Secret)
 	if authErr != nil {
 		t.Fatal(authErr)
@@ -1482,11 +1496,15 @@ func TestMCPEntraOBORequiresDelegatedUserIdentity(t *testing.T) {
 	for _, record := range refusedRecords.Items {
 		assertEntraDecision(t, record, record.Status == "succeeded")
 	}
+
 	redirectToken.Store(false)
 	exerciseEntraCredentialBoundary(t, f, handler, entraTestOAuth{ClientID: clientID, Audience: "downstream-fixture", Scopes: []string{"downstream-fixture/tools.read"}, TokenEndpoint: tokenEndpoint.URL, EntraOBO: entraTestProfile{Issuer: issuer.URL}}, user)
 }
 
-type entraExchangeClaims struct{ jwt.RegisteredClaims }
+type entraExchangeClaims struct {
+	jwt.RegisteredClaims
+	ObjectID string `json:"oid"`
+}
 
 func signEntraAssertion(t *testing.T, signer jose.Signer, claims entraTestClaims) string {
 	t.Helper()
@@ -1637,5 +1655,28 @@ func republishEntraBoundary(t *testing.T, f personalOAuthFixture, project, revis
 	f.h.want(f.owner, "POST", "/api/v1/toolsets/"+f.toolsetID+"/publish", nil, withMatch(updated, idem("entra-boundary-publish-"+revision)), http.StatusOK)
 	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMCPMalformedResultsRetainDispatchedOutcome(t *testing.T) {
+	replies := make(chan json.RawMessage, 1)
+	fixture := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{Result: func() json.RawMessage { return <-replies }})
+	fixture.completePKCE(t, fixture.claim(t), testutil.OAuthIdentity{Subject: "malformed-user", Account: "malformed-user"})
+	handler := fixture.consumer(t)
+	for i, raw := range []json.RawMessage{json.RawMessage(`{}`), json.RawMessage(`{"content":[{}]}`), json.RawMessage(`{"content":[{"type":"resource","resource":{"uri":"https://resource.example.test","text":"must not vanish"}}]}`)} {
+		replies <- raw
+		status, body := personalCall(handler, fixture, fixture.key, fmt.Sprintf("malformed-result-%d", i))
+		var response struct {
+			Status    mcp.Status `json:"status"`
+			AttemptID string     `json:"attempt_id"`
+		}
+		if json.Unmarshal([]byte(body), &response) != nil || status != http.StatusBadGateway || response.Status != mcp.StatusOutcomeUnknown {
+			t.Fatalf("invalid result became clean success: %d %s", status, body)
+		}
+		attempt := fixture.h.want(fixture.owner, "GET", "/api/v1/mcp-tool-calls/"+response.AttemptID, nil, nil, http.StatusOK)
+		var record mcp.ToolCall
+		if json.Unmarshal(mustJSON(attempt), &record) != nil || record.Status != mcp.StatusOutcomeUnknown {
+			t.Fatalf("invalid result lost durable dispatched outcome: %v", attempt)
+		}
 	}
 }

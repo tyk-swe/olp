@@ -76,11 +76,11 @@ func NewSessionStore(client Commander, namespace string) (*SessionStore, error) 
 }
 
 func (s *SessionStore) sessionKey(binding sessionBinding, id string) string {
-	return s.namespace + ":{" + binding.scope() + "}:session:" + id
+	return s.namespace + ":{" + binding.principal.capacityScope() + "}:session:" + binding.member(id)
 }
 
 func (s *SessionStore) indexKey(binding sessionBinding) string {
-	return s.namespace + ":{" + binding.scope() + "}:sessions"
+	return s.namespace + ":{" + binding.principal.capacityScope() + "}:sessions"
 }
 
 func (s *SessionStore) eval(ctx context.Context, script sessionScript, keys []string, args ...string) (any, error) {
@@ -107,7 +107,7 @@ func noSessionScript(err error) bool {
 
 func (s *SessionStore) createSession(ctx context.Context, record sessionRecord) (bool, error) {
 	args := []string{
-		record.id,
+		record.binding.member(record.id),
 		strconv.FormatInt(sessionIdleTimeout.Milliseconds(), 10),
 		strconv.Itoa(maxSessionsPerKey),
 		record.binding.installationID, record.binding.projectID, record.binding.scope(),
@@ -131,7 +131,7 @@ func (s *SessionStore) createSession(ctx context.Context, record sessionRecord) 
 func (s *SessionStore) accessSession(ctx context.Context, id string, binding sessionBinding) (sessionRecord, bool, error) {
 	value, err := s.eval(ctx, sessionTouchScript,
 		[]string{s.sessionKey(binding, id), s.indexKey(binding)},
-		id, strconv.FormatInt(sessionIdleTimeout.Milliseconds(), 10))
+		binding.member(id), strconv.FormatInt(sessionIdleTimeout.Milliseconds(), 10))
 	if err != nil {
 		return sessionRecord{}, false, err
 	}
@@ -175,7 +175,7 @@ func (s *SessionStore) setSessionCertification(ctx context.Context, id string, b
 
 func (s *SessionStore) deleteSession(ctx context.Context, id string, binding sessionBinding) (bool, error) {
 	value, err := s.eval(ctx, sessionDeleteScript,
-		[]string{s.sessionKey(binding, id), s.indexKey(binding)}, id)
+		[]string{s.sessionKey(binding, id), s.indexKey(binding)}, binding.member(id))
 	if err != nil {
 		return false, err
 	}

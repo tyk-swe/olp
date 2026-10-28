@@ -80,6 +80,7 @@ type Runtime interface {
 	Authenticate(secret string) (*access.Authority, error)
 	Release() *runtime.Release
 	AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error
+	AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error
 }
 
 type ReserveInput struct {
@@ -438,7 +439,7 @@ func (r resolvedToolset) listingFailure() *apiError {
 
 func (s *Server) driftScoped(authority access.Authority, resolved resolvedToolset) bool {
 	return len(resolved.drifted) > 0 && len(resolved.missing) == 0 &&
-		authority.AllowsResource("tools", resolved.id, *authority.ProjectID, s.now())
+		s.Runtime.AuthorizeMCPTool(authority, resolved.id, resolved.revisionID, *authority.ProjectID, "", "") == nil
 }
 
 func (s *Server) snapshot() (*runtime.Release, *routing.Snapshot, *apiError) {

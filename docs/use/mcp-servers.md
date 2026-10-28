@@ -145,7 +145,9 @@ at MCP 2025-03-26, 2025-06-18 or 2025-11-25. A session binds one toolset, chosen
 with the `toolset_id` query parameter when the key may use more than one, and
 stays bound to the installation, project, principal and pinned toolset and
 server revisions it initialized against. Sessions expire after 15 idle minutes
-and each key may hold at most 64 at once. Send the returned `Mcp-Session-Id`
+and each key may hold at most 64 at once. Verified end-user identity also
+binds session ownership and retained call results. End users sharing a workload
+principal share its session cap. Send the returned `Mcp-Session-Id`
 header, with the negotiated `MCP-Protocol-Version`, on later requests, and close
 the session with `DELETE /mcp`. Calls list and run only the pinned tools, over
 the same authorized and accounted path as `GET /v1/mcp/tools` and
@@ -417,3 +419,10 @@ surfaces, and covers catalog drift, isolated callers, concurrency, settlement,
 process termination and retained unknown outcomes. This evidence qualifies the
 implemented experimental contract, not a sandbox or arbitrary third-party
 executable.
+
+Tool results support text, image and audio content plus object-valued structured
+content. Other content variants and unsupported result fields are refused
+explicitly. A malformed or unsupported result after dispatch retains an
+`outcome_unknown` attempt and its provisional debit, because the tool may have
+completed even though its result could not be accepted. Empty content arrays
+and empty text are valid results.
