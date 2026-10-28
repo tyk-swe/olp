@@ -1,5 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { writable } from 'svelte/store';
+  import { pluginKeys } from './pluginKeys';
   import { errorMessage } from '$lib/api/http';
   import { formatBytes } from '$lib/format';
   import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
@@ -19,38 +21,61 @@
     type MCPExecutablePermission
   } from './api';
 
-  let { enabled, canManage }: { enabled: boolean; canManage: boolean } =
+  const { enabled, canManage }: { enabled: boolean; canManage: boolean } =
     $props();
   const files = createQuery(() => ({
-    queryKey: ['mcp-executables'],
+    queryKey: pluginKeys.mcpExecutables(),
     queryFn: ({ signal }) => listMCPExecutables(signal),
     enabled: enabled && canManage
   }));
-  let review = $state<MCPExecutablePermission | null>(null);
-  let acknowledged = $state(false);
-  let busy = $state(false);
-  let problem = $state('');
-  let reauthenticating = $state(false);
-  let singleSignOn = $state(false);
+  type State = Readonly<{
+    review: MCPExecutablePermission | null;
+    acknowledged: boolean;
+    busy: boolean;
+    problem: string;
+    refreshProblem: string;
+    notice: string;
+    reauthenticating: boolean;
+    singleSignOn: boolean;
+  }>;
+  const state = writable<State>({
+    review: null,
+    acknowledged: false,
+    busy: false,
+    problem: '',
+    refreshProblem: '',
+    notice: '',
+    reauthenticating: false,
+    singleSignOn: false
+  });
+  function patch(update: Partial<State>) {
+    state.update((current) => ({ ...current, ...update }));
+  }
 
   async function inspect(name: string) {
-    busy = true;
-    problem = '';
-    acknowledged = false;
+    patch({
+      busy: true,
+      problem: '',
+      refreshProblem: '',
+      notice: '',
+      acknowledged: false
+    });
     try {
-      review = await reviewMCPExecutable(name);
+      patch({ review: await reviewMCPExecutable(name) });
     } catch (cause) {
-      problem = errorMessage(cause);
+      patch({ problem: errorMessage(cause) });
     } finally {
-      busy = false;
+      patch({ busy: false });
     }
   }
 
   async function identity() {
     const identities = await listOidcIdentities();
-    singleSignOn = identities.oidc_reauthentication_available === true;
+    patch({
+      singleSignOn: identities.oidc_reauthentication_available === true
+    });
     if (identities.has_local_password) {
-      reauthenticating = true;
+      patch({ reauthenticating: true });
       return;
     }
     window.location.assign(
@@ -59,64 +84,81 @@
   }
 
   async function permit() {
-    if (!review || !acknowledged) return;
-    busy = true;
-    problem = '';
+    const selected = $state.review;
+    if (!selected || !$state.acknowledged) return;
+    patch({ busy: true, problem: '' });
     try {
-      review = await permitMCPExecutable(review);
-      acknowledged = false;
+      patch({
+        review: await permitMCPExecutable(selected),
+        acknowledged: false,
+        notice: ''
+      });
     } catch (cause) {
       if (needsReauthentication(cause)) {
         try {
           await identity();
         } catch (failure) {
-          problem = errorMessage(failure);
+          patch({ problem: errorMessage(failure) });
         }
-      } else problem = errorMessage(cause);
+      } else patch({ problem: errorMessage(cause) });
     } finally {
-      busy = false;
+      patch({ busy: false });
     }
   }
 
   async function confirm(password: string) {
-    busy = true;
-    problem = '';
+    patch({ busy: true, problem: '' });
     try {
       await reauthenticateWithPassword(password, 'plugin_permit');
-      reauthenticating = false;
+      patch({ reauthenticating: false });
       await permit();
     } catch (cause) {
-      problem = errorMessage(cause);
+      patch({ problem: errorMessage(cause) });
     } finally {
-      busy = false;
+      patch({ busy: false });
     }
   }
 
   async function singleSignOnIdentity() {
-    busy = true;
+    patch({ busy: true });
     try {
       window.location.assign(
         await beginIdentityReauthentication('plugin_permit')
       );
     } catch (cause) {
-      problem = errorMessage(cause);
+      patch({ problem: errorMessage(cause) });
     } finally {
-      busy = false;
+      patch({ busy: false });
+    }
+  }
+
+  async function refreshReview(name: string) {
+    patch({ busy: true, refreshProblem: '' });
+    try {
+      patch({ review: await reviewMCPExecutable(name) });
+    } catch (cause) {
+      patch({ refreshProblem: errorMessage(cause) });
+    } finally {
+      patch({ busy: false });
     }
   }
 
   async function revoke() {
-    if (!review) return;
-    busy = true;
-    problem = '';
+    const selected = $state.review;
+    if (!selected) return;
+    patch({ busy: true, problem: '', refreshProblem: '' });
     try {
-      await revokeMCPExecutable(review);
-      review = await reviewMCPExecutable(review.name);
+      await revokeMCPExecutable(selected);
     } catch (cause) {
-      problem = errorMessage(cause);
-    } finally {
-      busy = false;
+      patch({ problem: errorMessage(cause), busy: false });
+      return;
     }
+    patch({
+      review: { ...selected, permitted: false },
+      notice: 'MCP permission was revoked',
+      acknowledged: false
+    });
+    await refreshReview(selected.name);
   }
 </script>
 
@@ -140,7 +182,18 @@
         >Only an owner can review, permit or revoke executable digests</ReadOnlyNote
       >
     {:else}
-      {#if problem}<div role="alert" class="inline-problem">{problem}</div>{/if}
+      {#if $state.problem}<div role="alert" class="inline-problem">
+          {$state.problem}
+        </div>{/if}
+      {#if $state.notice}<p role="status">{$state.notice}</p>{/if}
+      {#if $state.refreshProblem}<div role="alert">
+          Status refresh failed. {$state.refreshProblem}<button
+            class="text-button"
+            disabled={$state.busy}
+            onclick={() => $state.review && refreshReview($state.review.name)}
+            >Retry status refresh</button
+          >
+        </div>{/if}
       {#if files.isPending}<p role="status">Loading installed executables</p>
       {:else if files.isError}<div role="alert" class="inline-problem">
           {errorMessage(files.error)}
@@ -167,7 +220,7 @@
                   ><td>{formatBytes(file.size_bytes)}</td><td
                     ><button
                       class="button button-secondary"
-                      disabled={busy}
+                      disabled={$state.busy}
                       onclick={() => inspect(file.name)}
                       >Review MCP executable</button
                     ></td
@@ -177,23 +230,27 @@
           </table>
         </div>
       {/if}
-      {#if review}
+      {#if $state.review}
         <section class="review">
-          <h3>Review {review.name}</h3>
+          <h3>Review {$state.review.name}</h3>
           <p>Metadata review does not start the executable</p>
-          <p><code>{review.digest}</code></p>
-          {#if review.permitted}<p role="status">
+          <p><code>{$state.review.digest}</code></p>
+          {#if $state.review.permitted}<p role="status">
               This digest is permitted for MCP execution
             </p>
             <button
               class="button button-secondary"
-              disabled={busy}
+              disabled={$state.busy}
               onclick={revoke}>Revoke MCP permission</button
             >
           {:else}
             <label
-              ><input type="checkbox" bind:checked={acknowledged} /> I understand
-              this executable runs unconfined with the gateway's privileges</label
+              ><input
+                type="checkbox"
+                checked={$state.acknowledged}
+                onchange={(event) =>
+                  patch({ acknowledged: event.currentTarget.checked })}
+              /> I understand this executable runs unconfined with the gateway's privileges</label
             >
             <p class="muted">
               Permission requires recent authentication. After single sign-on,
@@ -201,7 +258,7 @@
             </p>
             <button
               class="button button-primary"
-              disabled={busy || !acknowledged}
+              disabled={$state.busy || !$state.acknowledged}
               onclick={permit}>Permit MCP executable</button
             >
           {/if}
@@ -211,14 +268,14 @@
   {/if}
 </section>
 
-{#if reauthenticating}<ReauthenticateDialog
+{#if $state.reauthenticating}<ReauthenticateDialog
     title="Permit native MCP execution"
     description="Confirm your identity to permit this exact executable digest"
-    {busy}
-    error={problem}
-    onOidc={singleSignOn ? singleSignOnIdentity : undefined}
+    busy={$state.busy}
+    error={$state.problem}
+    onOidc={$state.singleSignOn ? singleSignOnIdentity : undefined}
     onConfirm={confirm}
-    onCancel={() => (reauthenticating = false)}
+    onCancel={() => patch({ reauthenticating: false })}
   />{/if}
 
 <style>

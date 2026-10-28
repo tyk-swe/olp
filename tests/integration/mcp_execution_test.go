@@ -27,6 +27,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -39,6 +40,41 @@ import (
 	"golang.org/x/oauth2"
 )
 
+type stdioRegistrationInput struct {
+	Name      string                  `json:"name"`
+	ProjectID string                  `json:"project_id"`
+	Transport routing.MCPTransport    `json:"transport"`
+	Stdio     routing.MCPStdioBinding `json:"stdio"`
+	Enabled   bool                    `json:"enabled"`
+	UnitPrice string                  `json:"unit_price"`
+}
+type stdioPermitInput struct {
+	Digest          string `json:"digest"`
+	AcknowledgeRisk bool   `json:"acknowledge_risk"`
+}
+type stdioReauthenticationInput struct {
+	CurrentPassword string `json:"current_password"`
+	Purpose         string `json:"purpose"`
+}
+type stdioPublicationInput struct {
+	ProjectID string                `json:"project_id"`
+	Name      string                `json:"name"`
+	Toolset   agentcontract.Toolset `json:"toolset"`
+}
+type stdioKeyInput struct {
+	Name            string   `json:"name"`
+	ProjectID       string   `json:"project_id"`
+	Scopes          []string `json:"scopes"`
+	AllowedToolsets []string `json:"allowed_toolsets"`
+	DailyCostLimit  string   `json:"daily_cost_limit,omitempty"`
+}
+type stdioServerUpdate struct {
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	MaxConcurrency int    `json:"max_concurrency,omitempty"`
+}
+
 func TestMCPOwnerPermitsInstalledStdioProcess(t *testing.T) {
 	disabled := newAccessHarness(t)
 	owner := disabled.owner()
@@ -49,15 +85,15 @@ func TestMCPOwnerPermitsInstalledStdioProcess(t *testing.T) {
 	reviewed := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/review", nil, nil, 200)
 	digest := mcpExecString(t, reviewed, "digest")
 	project := createProject(h, owner, "Installed tools")
-	registration := map[string]any{"name": "Installed MCP", "project_id": project, "transport": "stdio", "stdio": map[string]any{"executable": "stdio-tools", "digest": digest}, "enabled": true, "unit_price": "0"}
+	registration := stdioRegistrationInput{Name: "Installed MCP", ProjectID: project, Transport: routing.MCPStdio, Stdio: routing.MCPStdioBinding{Executable: "stdio-tools", Digest: digest}, Enabled: true, UnitPrice: "0"}
 	h.want(owner, "POST", "/api/v1/mcp-servers", registration, idem("stdio-unapproved"), 422)
-	request := map[string]any{"digest": digest, "acknowledge_risk": true}
+	request := stdioPermitInput{Digest: digest, AcknowledgeRisk: true}
 	operator := h.invite(owner, "stdio-operator@example.com", "operator")
 	h.want(operator, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, nil, 403)
 	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, nil, 428)
-	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", map[string]any{"digest": digest, "acknowledge_risk": false}, nil, 422)
-	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
-	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", map[string]any{"digest": strings.Repeat("0", 64), "acknowledge_risk": true}, nil, 409)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: digest, AcknowledgeRisk: false}, nil, 422)
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", stdioReauthenticationInput{CurrentPassword: accessPassword, Purpose: "plugin_permit"}, nil, 204)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: strings.Repeat("0", 64), AcknowledgeRisk: true}, nil, 409)
 	granted := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", request, idem("stdio-permit"), 201)
 	if granted["digest"] != digest || granted["permitted"] != true {
 		t.Fatalf("owner permission did not retain reviewed digest: %v", granted)
@@ -94,25 +130,25 @@ func newStdioFixture(t *testing.T) stdioFixture {
 	h := newUnconfinedHarness(t, base.Pool, base.DBURL, directory)
 	reviewed := h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/review", nil, nil, 200)
 	digest := mcpExecString(t, reviewed, "digest")
-	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
-	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", map[string]any{"digest": digest, "acknowledge_risk": true}, idem("stdio-fixture-permit"), 201)
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", stdioReauthenticationInput{CurrentPassword: accessPassword, Purpose: "plugin_permit"}, nil, 204)
+	h.want(owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: digest, AcknowledgeRisk: true}, idem("stdio-fixture-permit"), 201)
 	project := createProject(h, owner, "Native tool calls")
-	registered := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{"name": "Native tools", "project_id": project, "transport": "stdio", "stdio": map[string]any{"executable": "stdio-tools", "digest": digest}, "enabled": true, "unit_price": "0.25"}, idem("stdio-fixture-server"), 201)
+	registered := h.want(owner, "POST", "/api/v1/mcp-servers", stdioRegistrationInput{Name: "Native tools", ProjectID: project, Transport: routing.MCPStdio, Stdio: routing.MCPStdioBinding{Executable: "stdio-tools", Digest: digest}, Enabled: true, UnitPrice: "0.25"}, idem("stdio-fixture-server"), 201)
 	serverID := mcpExecString(t, registered, "id")
 	alias := agentcontract.ToolAlias(serverID, "echo")
 	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "echo", Alias: alias}
-	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Native calls", "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}, idem("stdio-fixture-toolset"), 201)
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", stdioPublicationInput{ProjectID: project, Name: "Native calls", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("stdio-fixture-toolset"), 201)
 	toolsetID := mcpExecString(t, toolset, "id")
 	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("stdio-fixture-publish")), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Native caller", "project_id": project, "scopes": []string{"tools"}, "allowed_toolsets": []string{toolsetID}, "daily_cost_limit": "5"}, idem("stdio-fixture-key"), 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", stdioKeyInput{Name: "Native caller", ProjectID: project, Scopes: []string{"tools"}, AllowedToolsets: []string{toolsetID}, DailyCostLimit: "5"}, idem("stdio-fixture-key"), 201)
 	client, prefix, _ := acctKeyspace(t)
-	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
-	if err != nil {
-		t.Fatal(err)
+	limiter, limiterErr := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if limiterErr != nil {
+		t.Fatal(limiterErr)
 	}
-	sessions, err := mcp.NewSessionStore(client, strings.TrimSuffix(prefix, ":")+":stdio")
-	if err != nil {
-		t.Fatal(err)
+	sessions, sessionErr := mcp.NewSessionStore(client, strings.TrimSuffix(prefix, ":")+":stdio")
+	if sessionErr != nil {
+		t.Fatal(sessionErr)
 	}
 	tier := plugins.NewUnconfined(directory, plugins.DefaultLimits, nil)
 	server := &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessions, Limiter: limiter, Executables: &mcpservers.Executables{Tier: tier, Query: h.Pool}, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}}
@@ -289,7 +325,7 @@ func TestMCPStdioRetainsAmbiguousOutcomesAndStopsProcesses(t *testing.T) {
 		}
 	}
 	current := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
-	f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, map[string]any{"name": current["name"], "enabled": true, "max_concurrency": 1}, withMatch(current, idem("stdio-concurrency")), 200)
+	f.h.want(f.owner, "PUT", "/api/v1/mcp-servers/"+f.serverID, stdioServerUpdate{Name: mcpExecString(t, current, "name"), Enabled: true, MaxConcurrency: 1}, withMatch(current, idem("stdio-concurrency")), 200)
 	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -355,6 +391,28 @@ awaitEffect:
 	}
 }
 
+func TestMCPStdioSettlesFinalResponseBeforeImmediateExit(t *testing.T) {
+	f := newStdioFixture(t)
+	reply := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-final", `{"query":"final"}`), "")
+	var response struct {
+		AttemptID string                   `json:"attempt_id"`
+		Content   []mcpservers.ToolContent `json:"content"`
+	}
+	if json.Unmarshal(reply.body, &response) != nil || reply.status != 200 || len(response.Content) != 1 {
+		t.Fatalf("flushed final result was lost: %d %s", reply.status, reply.body)
+	}
+	var echoed struct {
+		Query string `json:"query"`
+	}
+	if json.Unmarshal([]byte(response.Content[0].Text), &echoed) != nil || echoed.Query != "final" {
+		t.Fatalf("final result changed: %s", reply.body)
+	}
+	record := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls/"+response.AttemptID, nil, nil, 200)
+	if record["status"] != "succeeded" || record["debit_state"] != "settled" || !mcpAmountIsZero(t, record, "remaining_cost") || mcpAmount(t, record, "observed_charge").Cmp(big.NewRat(1, 4)) != 0 {
+		t.Fatalf("final response was treated as unknown exposure: %v", record)
+	}
+}
+
 func TestMCPStdioConfigurationKeepsNativeExecutionOperatorControlled(t *testing.T) {
 	f := newStdioFixture(t)
 	exported := mcpExecObject(t, f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, 200), "document")
@@ -363,12 +421,26 @@ func TestMCPStdioConfigurationKeepsNativeExecutionOperatorControlled(t *testing.
 	if entry["transport"] != "stdio" || binding["executable"] != "stdio-tools" || binding["digest"] != f.digest {
 		t.Fatalf("configuration lost approved executable binding: %v", entry)
 	}
-	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": exported}, idem("stdio-config"), 200)
+	encodedDocument, encodeErr := json.Marshal(exported)
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	var document configuration.Document
+	if decodeErr := json.Unmarshal(encodedDocument, &document); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", struct {
+		Document configuration.Document `json:"document"`
+	}{Document: document}, idem("stdio-config"), 200)
 	path := "/api/v1/mcp-servers/" + f.serverID
 	current := f.h.want(f.owner, "GET", path, nil, nil, 200)
-	f.h.want(f.owner, "PUT", path, map[string]any{"name": current["name"], "enabled": true, "endpoint": "https://invalid.example"}, withMatch(current, idem("stdio-http-override")), 422)
-	f.h.want(f.owner, "PUT", path, map[string]any{"name": current["name"], "enabled": true, "stdio": nil}, withMatch(current, idem("stdio-clear-binding")), 422)
-	updated := f.h.want(f.owner, "PUT", path, map[string]any{"name": current["name"], "enabled": true}, withMatch(current, idem("stdio-recertify")), 200)
+	f.h.want(f.owner, "PUT", path, stdioServerUpdate{Name: mcpExecString(t, current, "name"), Enabled: true, Endpoint: "https://invalid.example"}, withMatch(current, idem("stdio-http-override")), 422)
+	f.h.want(f.owner, "PUT", path, struct {
+		Name    string                   `json:"name"`
+		Enabled bool                     `json:"enabled"`
+		Stdio   *routing.MCPStdioBinding `json:"stdio"`
+	}{Name: mcpExecString(t, current, "name"), Enabled: true}, withMatch(current, idem("stdio-clear-binding")), 422)
+	updated := f.h.want(f.owner, "PUT", path, stdioServerUpdate{Name: mcpExecString(t, current, "name"), Enabled: true}, withMatch(current, idem("stdio-recertify")), 200)
 	revision := f.h.want(f.owner, "GET", path+"/revisions/"+mcpExecString(t, updated, "revision_id"), nil, nil, 200)
 	if mcpExecObject(t, revision, "stdio")["digest"] != f.digest {
 		t.Fatal("revision lost immutable executable binding")
@@ -387,8 +459,8 @@ func TestMCPStdioRechecksPermissionDigestAndCatalog(t *testing.T) {
 	if refused.status == 200 || !bytes.Equal(baseline, f.starts(t)) {
 		t.Fatalf("revoked native permission started a process: %s", refused.body)
 	}
-	f.h.want(f.owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
-	f.h.want(f.owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", map[string]any{"digest": f.digest, "acknowledge_risk": true}, idem("stdio-repermit"), 201)
+	f.h.want(f.owner, "POST", "/api/v1/profile/reauthenticate", stdioReauthenticationInput{CurrentPassword: accessPassword, Purpose: "plugin_permit"}, nil, 204)
+	f.h.want(f.owner, "POST", "/api/v1/mcp-executables/stdio-tools/permit", stdioPermitInput{Digest: f.digest, AcknowledgeRisk: true}, idem("stdio-repermit"), 201)
 	executable := filepath.Join(f.directory, "stdio-tools")
 	original, err := os.ReadFile(executable)
 	if err != nil {
@@ -423,7 +495,7 @@ func TestMCPStdioRechecksPermissionDigestAndCatalog(t *testing.T) {
 func TestMCPStdioKeepsConcurrentCallerResultsIsolated(t *testing.T) {
 	f := newStdioFixture(t)
 	server := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
-	key := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Second native caller", "project_id": server["project_id"], "scopes": []string{"tools"}, "allowed_toolsets": []string{f.toolsetID}}, idem("stdio-second-key"), 201)
+	key := f.h.want(f.owner, "POST", "/api/v1/api-keys", stdioKeyInput{Name: "Second native caller", ProjectID: mcpExecString(t, server, "project_id"), Scopes: []string{"tools"}, AllowedToolsets: []string{f.toolsetID}}, idem("stdio-second-key"), 201)
 	if err := f.h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -50,37 +50,38 @@ func (u *Unconfined) StartNative(ctx context.Context, name, digest string, timeo
 	}
 	defer copied.Close()
 	cmd.Stderr, cmd.WaitDelay = io.Discard, time.Second
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
+	stdinReader, stdin, stdinErr := os.Pipe()
+	if stdinErr != nil {
+		return nil, stdinErr
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+	stdout, stdoutWriter, stdoutErr := os.Pipe()
+	if stdoutErr != nil {
+		stdinReader.Close()
 		stdin.Close()
-		return nil, err
+		return nil, stdoutErr
 	}
-	if err := cmd.Start(); err != nil {
+	cmd.Stdin, cmd.Stdout = stdinReader, stdoutWriter
+	startErr := cmd.Start()
+	stdinReader.Close()
+	stdoutWriter.Close()
+	if startErr != nil {
 		stdin.Close()
 		stdout.Close()
-		return nil, err
+		return nil, startErr
 	}
 	operation, cancel := context.WithTimeout(ctx, timeout)
 	process := &NativeProcess{Stdin: stdin, Stdout: stdout, cmd: cmd, done: make(chan struct{}), cancel: cancel}
-	go process.reap()
-	go func() {
-		select {
-		case <-operation.Done():
-			process.Close()
-		case <-process.done:
-		}
-	}()
+	go process.reap(stdout)
+	go func() { <-operation.Done(); process.Close() }()
+
 	return process, nil
 }
 
-func (p *NativeProcess) reap() {
+func (p *NativeProcess) reap(stdout *os.File) {
 	_ = exited(p.cmd.Process.Pid)
 	p.mu.Lock()
 	kill(p.cmd.Process.Pid)
+	_ = stdout.SetReadDeadline(time.Now().Add(drainTime))
 	_ = p.cmd.Wait()
 	close(p.done)
 	p.mu.Unlock()

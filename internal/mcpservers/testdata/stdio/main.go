@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -28,8 +29,9 @@ func main() {
 		os.Exit(3)
 	}
 	toolName := fixtureToolName()
+	finalReply := &atomic.Bool{}
 	server := mcp.NewServer(&mcp.Implementation{Name: "installed-tools", Version: "1"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25"}})
-	mcp.AddTool(server, &mcp.Tool{Name: toolName}, func(_ context.Context, _ *mcp.CallToolRequest, arguments input) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: toolName}, func(_ context.Context, _ *mcp.CallToolRequest, arguments input) (*mcp.CallToolResult, *struct{}, error) {
 		if err := appendRecord("effects", "called\n"); err != nil {
 			return nil, nil, err
 		}
@@ -42,13 +44,16 @@ func main() {
 		if arguments.Query == "oversize" {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("x", 2<<20)}}}, nil, nil
 		}
+		if arguments.Query == "final" {
+			finalReply.Store(true)
+		}
 		encoded, err := json.Marshal(arguments)
 		if err != nil {
 			return nil, nil, err
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}, nil, nil
 	})
-	if err := server.Run(context.Background(), &mcp.IOTransport{Reader: os.Stdin, Writer: os.Stdout, MaxLineLength: 1 << 20}); err != nil {
+	if err := server.Run(context.Background(), &mcp.IOTransport{Reader: os.Stdin, Writer: finalOutput{File: os.Stdout, exit: finalReply}, MaxLineLength: 1 << 20}); err != nil {
 		os.Exit(1)
 	}
 }
@@ -59,8 +64,8 @@ func appendRecord(path, text string) error {
 		return err
 	}
 	defer file.Close()
-	_, err = file.WriteString(text)
-	return err
+	_, writeErr := file.WriteString(text)
+	return writeErr
 }
 
 func fixtureToolName() string {
@@ -68,4 +73,20 @@ func fixtureToolName() string {
 		return "echo_changed"
 	}
 	return "echo"
+}
+
+type finalOutput struct {
+	*os.File
+	exit *atomic.Bool
+}
+
+func (output finalOutput) Write(data []byte) (int, error) {
+	written, writeErr := output.File.Write(data)
+	var response struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if writeErr == nil && output.exit.Load() && json.Unmarshal(data, &response) == nil && len(response.Result) > 0 {
+		os.Exit(0)
+	}
+	return written, writeErr
 }
