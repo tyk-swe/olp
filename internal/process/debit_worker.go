@@ -7,11 +7,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *limits.Limiter, log *slog.Logger) {
 	store := &limits.DebitStore{Pool: pool, Limiter: limiter}
+	toolLedger := &mcp.DurableLedger{Pool: pool, Store: store}
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
 	for {
@@ -21,6 +23,12 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 			_, err = store.RecoverPrepared(pass, 256)
 		} else {
 			err = store.ReconcileDebits(pass)
+		}
+		if err == nil {
+			_, err = toolLedger.RecoverOrphanedDispatches(pass, time.Now().Add(-mcp.OrphanDispatchAge), 256)
+		}
+		if err == nil {
+			_, err = toolLedger.ExpireCallIdentities(pass, 256)
 		}
 		cancel()
 		outcome := usage.OutcomeSuccess

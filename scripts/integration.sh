@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mode=${1:-all}
-case "$mode" in all|shell|code) ;; *) echo 'usage: integration.sh [all|shell|code]' >&2; exit 2 ;; esac
+usage() {
+  echo 'usage: integration.sh [all|shell|code|LANE...], where LANE is qualification, a-f, g-m, n-z, smoke or browser' >&2
+  exit 2
+}
+lanes=("$@")
+case "${lanes[*]:-all}" in
+  all) lanes=(qualification a-f g-m n-z smoke browser) ;;
+  shell) lanes=(qualification a-f g-m n-z smoke) ;;
+  code) ;;
+  *)
+    for lane in "${lanes[@]}"; do
+      case "$lane" in qualification|a-f|g-m|n-z|smoke|browser) ;; *) usage ;; esac
+    done
+    ;;
+esac
 scratch=$(mktemp -d)
 export OLP_TEST_TLS_DIR="$scratch/tls"
 mkdir -p "$OLP_TEST_TLS_DIR"
@@ -66,7 +79,7 @@ if [[ -z ${OLP_CODECLI_ENV:-} ]]; then
   OLP_CODECLI_ENV=$(./scripts/code-mode-qualification.sh resolve)
 fi
 source "$OLP_CODECLI_ENV"
-if [[ "$mode" == code ]]; then
+if [[ ${lanes[*]} == code ]]; then
   go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
   ./scripts/code-mode-qualification.sh cli
   exit
@@ -77,35 +90,48 @@ restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
-# Keep the deliberate recovery/enrollment waits inside the package deadline.
-# These two cohorts and the complement below are disjoint and exhaustive.
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test[A-F]' -skip '^TestCode' ./tests/integration
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test[G-M]' -skip '^TestCode' ./tests/integration
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test($|[^A-M])' -skip '^TestCode' ./tests/integration
-./scripts/code-mode-qualification.sh cli
-go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage ./internal/process ./internal/runtime ./internal/cache
-# Test-only trusted registry additions run in their own process, so dynamic
-# fixture profiles cannot change the normal suite's fixed catalogue inventory.
-go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
-OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
-# Latest coding agents and pinned agent SDKs/frameworks against a scripted upstream.
-# It starts its own gateway and uses none of the services above.
-./tests/clients/run.sh
-if [[ "$mode" == shell ]]; then exit; fi
-export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
-# Browser OIDC uses a separate, explicitly test-only binary. Release builds
-# never allow loopback identity issuers.
-make build-go GO_BUILD_OUTPUT=.local/bin/olp-identity-test GO_BUILD_TAGS=oidctest
-for database in olp_packaged olp_vite olp_fleet_first olp_fleet_second; do
-  "${compose[@]}" exec -T postgres createdb -U olp "$database"
-done
-export OLP_CONSOLE_E2E_BIN="$PWD/.local/bin/olp-identity-test"
-export OLP_CONSOLE_E2E_FLEET_SECRET_DIR="$scratch/fleet-secrets"
-pnpm --dir console exec playwright test --config playwright.config.ts
+# Each selection keeps the deliberate recovery/enrollment waits inside the
+# package deadline. The four selections of ./tests/integration across the
+# qualification, a-f, g-m and n-z lanes are disjoint and exhaustive.
+process_tests() {
+  go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v "$@" ./tests/integration
+}
+for lane in "${lanes[@]}"; do
+  case "$lane" in
+    qualification)
+      process_tests -run '^TestCodeQualification'
+      ./scripts/code-mode-qualification.sh cli
+      # Latest coding agents and pinned agent SDKs/frameworks against a scripted
+      # upstream. It starts its own gateway and uses none of the services above.
+      ./tests/clients/run.sh
+      ;;
+    a-f) process_tests -run '^Test[A-F]' -skip '^TestCodeQualification' ;;
+    g-m) process_tests -run '^Test[G-M]' ;;
+    n-z)
+      process_tests -run '^Test($|[^A-M])'
+      go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage ./internal/process ./internal/runtime ./internal/cache
+      # Test-only trusted registry additions run in their own process, so dynamic
+      # fixture profiles cannot change the normal suite's fixed catalogue inventory.
+      go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
+      ;;
+    smoke) OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh ;;
+    browser) (
+      export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
+      # Browser OIDC uses a separate, explicitly test-only binary. Release builds
+      # never allow loopback identity issuers.
+      make build-go GO_BUILD_OUTPUT=.local/bin/olp-identity-test GO_BUILD_TAGS=oidctest
+      for database in olp_packaged olp_vite olp_fleet_first olp_fleet_second; do
+        "${compose[@]}" exec -T postgres createdb -U olp "$database"
+      done
+      export OLP_CONSOLE_E2E_BIN="$PWD/.local/bin/olp-identity-test"
+      export OLP_CONSOLE_E2E_FLEET_SECRET_DIR="$scratch/fleet-secrets"
+      pnpm --dir console exec playwright test --config playwright.config.ts
 
-export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
-export OLP_LOCAL_DIR="$scratch"
-OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
-export OLP_TEST_RUN_TOKEN
-OLP_CONSOLE_E2E_PACKAGED=true ./scripts/browser-integration.sh
+      export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
+      export OLP_LOCAL_DIR="$scratch"
+      OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
+      export OLP_TEST_RUN_TOKEN
+      OLP_CONSOLE_E2E_PACKAGED=true ./scripts/browser-integration.sh
+    ) ;;
+  esac
+done

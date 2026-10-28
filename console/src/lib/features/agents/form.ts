@@ -1,4 +1,114 @@
-import type { Draft, Kind, MCPServer, Publication, ToolPin } from './api';
+import type {
+  Draft,
+  Kind,
+  MCPServer,
+  MCPServerUpdate,
+  Publication,
+  ToolPin
+} from './api';
+
+export type ServerPricingForm = {
+  unitPrice: string;
+  toolPrices: Record<string, string>;
+  callsPerMinute: string;
+  maxConcurrency: string;
+  perKeyCallsPerMinute: string;
+  perKeyMaxConcurrency: string;
+};
+const pricePattern = /^[0-9]{1,12}(\.[0-9]{1,12})?$/;
+export function serverPricingForm(server: MCPServer): ServerPricingForm {
+  return {
+    unitPrice: server.unit_price ?? '',
+    toolPrices: { ...server.tool_prices },
+    callsPerMinute: String(server.calls_per_minute),
+    maxConcurrency: String(server.max_concurrency),
+    perKeyCallsPerMinute: String(server.per_key_calls_per_minute),
+    perKeyMaxConcurrency: String(server.per_key_max_concurrency)
+  };
+}
+export type ServerPricingResult =
+  { ok: true; input: MCPServerUpdate } | { ok: false; message: string };
+type LimitResult = { ok: true; value: number } | { ok: false; message: string };
+function pricingLimit(
+  raw: string,
+  ceiling: number,
+  label: string
+): LimitResult {
+  const value = Number(raw);
+  if (!/^[0-9]+$/.test(raw.trim()) || value < 1 || value > ceiling)
+    return {
+      ok: false,
+      message: `${label} must be a whole number from 1 to ${ceiling}.`
+    };
+  return { ok: true, value };
+}
+export function serverPricingInput(
+  server: MCPServer,
+  form: ServerPricingForm
+): ServerPricingResult {
+  const unitPrice = form.unitPrice.trim();
+  if (unitPrice !== '' && !pricePattern.test(unitPrice))
+    return {
+      ok: false,
+      message:
+        'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.'
+    };
+  const toolPrices: Record<string, string> = {};
+  for (const [name, raw] of Object.entries(form.toolPrices)) {
+    const price = raw.trim();
+    if (price === '') continue;
+    if (!server.catalog.tools.some((tool) => tool.name === name))
+      return {
+        ok: false,
+        message: `Price only certified tools. ${name} is not in the catalog.`
+      };
+    if (!pricePattern.test(price))
+      return {
+        ok: false,
+        message: `Use a non-negative decimal price for ${name}.`
+      };
+    toolPrices[name] = price;
+  }
+  const limits = {
+    calls_per_minute: pricingLimit(
+      form.callsPerMinute,
+      60000,
+      'Calls per minute'
+    ),
+    max_concurrency: pricingLimit(form.maxConcurrency, 1024, 'Max concurrency'),
+    per_key_calls_per_minute: pricingLimit(
+      form.perKeyCallsPerMinute,
+      60000,
+      'Per-key calls per minute'
+    ),
+    per_key_max_concurrency: pricingLimit(
+      form.perKeyMaxConcurrency,
+      1024,
+      'Per-key max concurrency'
+    )
+  };
+  for (const limit of Object.values(limits)) {
+    if (!limit.ok) return limit;
+  }
+  return {
+    ok: true,
+    input: {
+      name: server.name,
+      endpoint: server.endpoint,
+      enabled: server.enabled,
+      unit_price: unitPrice === '' ? null : unitPrice,
+      tool_prices: toolPrices,
+      calls_per_minute: (limits.calls_per_minute as { value: number }).value,
+      max_concurrency: (limits.max_concurrency as { value: number }).value,
+      per_key_calls_per_minute: (
+        limits.per_key_calls_per_minute as { value: number }
+      ).value,
+      per_key_max_concurrency: (
+        limits.per_key_max_concurrency as { value: number }
+      ).value
+    }
+  };
+}
 
 export type PublicationForm = {
   project: string;
@@ -55,16 +165,21 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
     };
   return d;
 }
+export type ToolPinResult =
+  { ok: true; pin: ToolPin } | { ok: false; message: string };
 export async function toolPin(
   server: MCPServer,
   name: string
-): Promise<ToolPin> {
+): Promise<ToolPinResult> {
   if (
     !server.enabled ||
     server.retired_at ||
     !server.catalog.tools.some((tool) => tool.name === name)
   )
-    throw new Error('Choose a tool from an enabled certified server.');
+    return {
+      ok: false,
+      message: 'Choose a tool from an enabled certified server.'
+    };
   const digest = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(name)
@@ -73,10 +188,13 @@ export async function toolPin(
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
   return {
-    server_id: server.id,
-    revision_id: server.revision_id,
-    catalog_digest: server.catalog.digest,
-    name,
-    alias: `t_${server.id.replaceAll('-', '')}_${suffix}`
+    ok: true,
+    pin: {
+      server_id: server.id,
+      revision_id: server.revision_id,
+      catalog_digest: server.catalog.digest,
+      name,
+      alias: `t_${server.id.replaceAll('-', '')}_${suffix}`
+    }
   };
 }

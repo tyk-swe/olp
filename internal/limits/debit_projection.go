@@ -42,6 +42,87 @@ func (s *DebitStore) SyncOwner(ctx context.Context, owner string) error {
 	return tx.Commit(ctx)
 }
 
+func (s *DebitStore) initializeFreshOwnerTx(ctx context.Context, tx pgx.Tx, owner DebitOwner) error {
+	now := time.Now()
+	switch owner.Kind {
+	case "aggregate":
+		if _, err := scanSnapshots(tx.QueryRow(ctx, aggregateSnapshotsSQL, now, owner.ID)); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrUninitializedCost
+			}
+			return err
+		}
+		return nil
+	case "end_user":
+		if _, err := scanSnapshots(tx.QueryRow(ctx, endUserSnapshotsSQL, now, owner.ID)); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrUninitializedCost
+			}
+			return err
+		}
+		return nil
+	case "supply":
+		w, err := CurrentBudgetWindows(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		for _, window := range []struct {
+			kind string
+			id   int64
+		}{{"day", w.DailyID}, {"week", w.WeeklyID}, {"month", w.MonthlyID}} {
+			if _, err = tx.Exec(ctx, `INSERT INTO olp.supply_cost_windows(owner_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete) SELECT $1,$2,$3,0,0,true WHERE EXISTS(SELECT 1 FROM olp.supply_budgets WHERE owner_id=$1) ON CONFLICT(owner_id,window_kind,window_id) DO NOTHING`, owner.ID, window.kind, window.id); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "key", "group":
+	default:
+		return ErrUninitializedCost
+	}
+	w, err := CurrentBudgetWindows(ctx, tx, now)
+	if err != nil {
+		return err
+	}
+	column := "api_key_id"
+	table := "olp.api_key_cost_windows"
+	idColumn := "api_key_id"
+	if owner.Kind == "group" {
+		column = "budget_group_id"
+		table = "olp.budget_group_cost_windows"
+		idColumn = "budget_group_id"
+	}
+	var hasFacts bool
+	start := w.DailyStart
+	if w.MonthlyStart.Before(start) {
+		start = w.MonthlyStart
+	}
+	if w.WeeklyStart.Before(start) {
+		start = w.WeeklyStart
+	}
+	end := w.DailyEnd
+	if w.MonthlyEnd.After(end) {
+		end = w.MonthlyEnd
+	}
+	if w.WeeklyEnd.After(end) {
+		end = w.WeeklyEnd
+	}
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.attempt_usage_facts WHERE `+column+`=$1 AND observed_at>=$2 AND observed_at<$3) OR EXISTS(SELECT 1 FROM olp.attempt_usage_hourly WHERE `+column+`=$1 AND budget_bucket>=$2 AND budget_bucket<$3)`, owner.ID, start, end).Scan(&hasFacts); err != nil {
+		return err
+	}
+	if hasFacts {
+		return ErrUninitializedCost
+	}
+	for _, window := range []struct {
+		kind string
+		id   int64
+	}{{"day", w.DailyID}, {"week", w.WeeklyID}, {"month", w.MonthlyID}} {
+		if _, err = tx.Exec(ctx, `INSERT INTO `+table+`(`+idColumn+`,window_kind,window_id,accrued,unpriced_attempts,charged,uncharged_attempts,weekly_complete) VALUES($1,$2,$3,0,0,0,0,true) ON CONFLICT(`+idColumn+`,window_kind,window_id) DO NOTHING`, owner.ID, window.kind, window.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *DebitStore) syncOwnerTx(ctx context.Context, tx pgx.Tx, owner string) error {
 	w, err := CurrentBudgetWindows(ctx, tx, time.Now())
 	if err != nil {

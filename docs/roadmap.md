@@ -21,8 +21,8 @@ are stable identifiers; independent work can proceed in parallel.
 | Guardrail integrations | Implemented RM2; live qualification tracked separately | Existing engine, credential and egress contracts |
 | Retained APIs and retrieval | Implemented RM5; service and live qualification tracked separately | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
-| Consumer MCP | RM7.1 direct Streamable HTTP execution | Implemented RM4 accounting and agent contracts, plus existing tool governance |
-| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | RM7.1 direct execution |
+| Consumer MCP | Implemented RM7; live provider and tenant qualification tracked separately | Implemented RM4 accounting and agent contracts, plus existing tool governance |
+| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | Implemented RM7.1 direct execution |
 | Cloud invoice imports | RM9.1 import contracts, then each cloud adapter | Existing importer and reconciliation machinery |
 
 The [architecture map](develop/architecture.md#contracts-and-feature-ownership)
@@ -40,7 +40,7 @@ identifies implementation boundaries and owners.
 | [RM4: Shared execution foundations](#rm4-shared-execution-foundations) | Done | Operation contracts, durable debits, recovery, settlement and agent contracts |
 | [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Done | Fine-tuning, vector stores, retrieval and retained resource families |
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Done | Additional OCR/search transports, realtime profiles and pass-through |
-| [RM7: Consumer MCP](#rm7-consumer-mcp) | Planned | Direct execution, per-user grants, HTTP+SSE and stdio |
+| [RM7: Consumer MCP](#rm7-consumer-mcp) | Done | Direct execution, per-user grants, HTTP+SSE and stdio |
 | [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
 | [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | AWS CUR, Google billing and Azure Cost Management imports |
 
@@ -199,27 +199,35 @@ resource families.
 
 ### RM7: Consumer MCP
 
-**Status: Planned.** **Owners:** MCP and access maintainers.
+**Status: Done.** **Owners:** MCP and access maintainers.
 **Dependencies:** RM4 durable accounting and agent contracts, plus existing
 guardrail argument/result execution.
 
-- [ ] **RM7.1 — Direct Streamable HTTP execution:** publish pinned toolsets,
+- [x] **RM7.1. Direct Streamable HTTP execution:** publish pinned toolsets,
   static credentials, bounded sessions and compiled schemas. Serve `/mcp` and
   JSON tool endpoints through one authorized call path with catalog-drift
   handling, argument/result policies, limits, priced attempts and durable
   dispatch state. Repeated call IDs must not repeat effects.
-- [ ] **RM7.2 — OAuth and per-user grants:** implement server/client/audience/
+  Local fixture coverage includes the official MCP Go SDK v1.8.0 reference
+  round trip and project-scoped, content-free execution history.
+- [x] **RM7.2. OAuth and per-user grants:** implemented server/client/audience/
   scope/project/user binding, single-flight refresh, expiry, revocation and
-  isolated credentials. Missing grants must refuse execution. Include the
-  inventory's `mcp_security`, `mcp_end_user_permission`, `mcp_jwt_signer` and
-  `agent_365` hooks only after server authority and caller identity are available.
-- [ ] **RM7.3 — Legacy HTTP+SSE:** implement the explicit `2024-11-05`
-  transport while preserving modern sessions' selected transport.
-- [ ] **RM7.4 — Experimental stdio:** implement operator-installed executable
-  dispatch with the same call, isolation and accounting limits as HTTP.
-  Executable configuration remains operator-controlled.
+  isolated credentials. Missing grants refuse execution. The inventory's
+  `mcp_security`, `mcp_end_user_permission`, `mcp_jwt_signer` and `agent_365`
+  hooks run only after live server authority and verified caller identity are
+  available. Entra OBO is fixture-qualified; live tenant qualification is
+  separate.
+- [x] **RM7.3. Legacy HTTP+SSE:** explicitly register and consume the
+  `2024-11-05` transport while preserving modern sessions' selected transport.
+  The pinned reference SDK fixture verifies registration, configuration,
+  list/call and durable settlement. Legacy GET and POST need connection affinity.
+- [x] **RM7.4. Experimental stdio:** operator-installed executables share the
+  call, isolation and accounting limits used by HTTP. Owner-approved digests,
+  caller override refusals and bounded process cleanup are fixture-qualified.
+  Executable configuration remains operator-controlled and unconfined.
 
-Implement RM7.1 first; RM7.2–RM7.4 can then proceed independently.
+All four slices share the authorized consumer execution path. Live provider
+and identity-tenant qualification remains separate from the fixture evidence.
 
 ### RM8: Agent workflows
 

@@ -23,6 +23,9 @@ this working tree, including uncommitted changes. Needs full git history.
   BENCH_TIME       -benchtime for every run (default: the go test default)
   BENCH_THRESHOLD  regression percentage that fails the gate (default 10)
   BENCH_FILTER     regexp selecting benchmark packages by import path
+  BENCH_SHARD      INDEX/TOTAL compares only one of TOTAL disjoint shards of the
+                   packages, balanced by their number of benchmarks, so that
+                   TOTAL machines can share the gate (default 1/1)
   BENCH_RUN        -bench regexp (default .)
   BENCH_SKIP       -skip regexp for benchmarks of the encoder itself, whose input
                    is chosen to be slow rather than to be what a request pays
@@ -57,6 +60,11 @@ fi
 [[ $threshold =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "BENCH_THRESHOLD must be a percentage" >&2; exit 2; }
 allow_removed=${BENCH_ALLOW_REMOVED:-0}
 [[ $allow_removed == 0 || $allow_removed == 1 ]] || { echo "BENCH_ALLOW_REMOVED must be 0 or 1" >&2; exit 2; }
+shard=${BENCH_SHARD:-1/1}
+[[ $shard =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] && (( BASH_REMATCH[1] <= BASH_REMATCH[2] )) ||
+  { echo "BENCH_SHARD must be INDEX/TOTAL with 1 <= INDEX <= TOTAL" >&2; exit 2; }
+shard_index=${BASH_REMATCH[1]}
+shard_total=${BASH_REMATCH[2]}
 
 # What the gate has to say goes to the job summary as well as the log, so that
 # a check that compared nothing is not a green mark with no explanation.
@@ -93,21 +101,27 @@ trap 'exit 143' TERM
 git worktree add --detach --quiet "$scratch/base" "$base"
 echo "bench-gate: base ${base:0:12} ($base_ref), head $(git rev-parse --short=12 HEAD) working tree, $count samples" >&2
 
-# Import paths of the internal packages that declare benchmarks, one per line.
-# tests/bench holds scenarios rather than microbenchmarks and is not under
-# internal/, so it is never listed.
+# Import paths of the internal packages that declare benchmarks, each with the
+# number it declares, one tab-separated pair per line. tests/bench holds
+# scenarios rather than microbenchmarks and is not under internal/, so it is
+# never listed.
 benchmark_packages() {
-  local package file listing
-  declare -A seen=()
+  local package file listing benchmarks
+  declare -A declared=()
   # A failing go list must fail the gate rather than look like no benchmarks.
   listing=$(cd -- "$1" && go list -f '{{range .TestGoFiles}}{{$.ImportPath}}{{"\t"}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestGoFiles}}{{$.ImportPath}}{{"\t"}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./internal/...)
   while IFS=$'\t' read -r package file; do
-    [[ -n $package && -z ${seen[$package]:-} ]] || continue
-    if grep -qE '^func Benchmark([^a-z]|\()' -- "$file"; then seen[$package]=1; echo "$package"; fi
-  done <<<"$listing" | { grep -E -- "${BENCH_FILTER:-.}" || true; } | LC_ALL=C sort
+    [[ -n $package ]] || continue
+    benchmarks=$(grep -cE '^func Benchmark([^a-z]|\()' -- "$file" || true)
+    if (( benchmarks > 0 )); then declared[$package]=$(( ${declared[$package]:-0} + benchmarks )); fi
+  done <<<"$listing"
+  for package in "${!declared[@]}"; do
+    if [[ $package =~ ${BENCH_FILTER:-.} ]]; then printf '%s\t%s\n' "$package" "${declared[$package]}"; fi
+  done | LC_ALL=C sort
 }
-benchmark_packages "$scratch/base" >"$scratch/base.packages"
-benchmark_packages . >"$scratch/head.packages"
+benchmark_packages "$scratch/base" | cut -f1 >"$scratch/base.packages"
+benchmark_packages . >"$scratch/head.benchmarks"
+cut -f1 "$scratch/head.benchmarks" >"$scratch/head.packages"
 mapfile -t packages < <(LC_ALL=C comm -12 "$scratch/base.packages" "$scratch/head.packages")
 mapfile -t removed < <(LC_ALL=C comm -23 "$scratch/base.packages" "$scratch/head.packages")
 mapfile -t added < <(LC_ALL=C comm -13 "$scratch/base.packages" "$scratch/head.packages")
@@ -126,47 +140,79 @@ if (( ${#packages[@]} == 0 )); then
   note "no package declares benchmarks at both the base and head, so nothing was compared"
   exit 0
 fi
-echo "bench-gate: ${#packages[@]} benchmark packages: ${packages[*]#github.com/*/*/}" >&2
 
-# One sample of the benchmarks that -bench selects in the packages, in a tree,
+# The packages of this shard. Every shard computes the same assignment, giving
+# each package, most benchmarks first, to the shard with the fewest so far.
+shard_packages() { # packages...
+  local package benchmarks lightest i
+  local -a load=()
+  for ((i = 0; i < shard_total; i++)); do load[i]=0; done
+  while IFS=$'\t' read -r package benchmarks; do
+    lightest=0
+    for ((i = 1; i < shard_total; i++)); do
+      if (( load[i] < load[lightest] )); then lightest=$i; fi
+    done
+    load[lightest]=$(( load[lightest] + benchmarks ))
+    if (( lightest + 1 == shard_index )); then echo "$package"; fi
+  done < <(awk -F'\t' 'NR == FNR { compared[$0]; next } $1 in compared' <(printf '%s\n' "$@") "$scratch/head.benchmarks" |
+    LC_ALL=C sort -t $'\t' -k2,2nr -k1,1)
+}
+mapfile -t packages < <(shard_packages "${packages[@]}")
+if (( ${#packages[@]} == 0 )); then
+  note "shard $shard has no benchmark package to compare"
+  exit 0
+fi
+echo "bench-gate: shard $shard, ${#packages[@]} benchmark packages: ${packages[*]#github.com/*/*/}" >&2
+
+declare -A test_dir=()
+build() { # base|head, tree
+  local side=$1 tree=$2 listing package dir
+  listing=$(cd -- "$tree" && go list -f '{{.ImportPath}}{{"\t"}}{{.Dir}}' "${packages[@]}")
+  while IFS=$'\t' read -r package dir; do
+    # Align functions to a page on both sides. A benchmark of a code layout
+    # the linker happens to emit is noise the comparison should not gate on;
+    # with entries 4096-byte aligned, an instruction's address modulo a page
+    # depends only on its offset inside its function, so identical code lands
+    # on identical fetch lines, branch-predictor entries and uop-cache sets —
+    # inner loops included — whatever text the change adds before it.
+    (cd -- "$tree" && go test -c -vet=off -ldflags=-funcalign=4096 -o "$scratch/bin/$side/${package//\//_}.test" "$package")
+    test_dir[$side/$package]=$dir
+  done <<<"$listing"
+}
+build base "$scratch/base"
+build head .
+
+# One sample of the benchmarks that -bench selects in the packages, at a side,
 # appended to a file. Packages run one at a time, so that benchmarks never
 # compete for CPUs.
-measure() { # tree, output, -bench pattern, packages...
-  local tree=$1 output=$2 pattern=$3
+measure() { # base|head, output, -bench pattern, packages...
+  local side=$1 output=$2 pattern=$3 package
   shift 3
-  # Align functions to a page on both sides. A benchmark of a code layout
-  # the linker happens to emit is noise the comparison should not gate on;
-  # with entries 4096-byte aligned, an instruction's address modulo a page
-  # depends only on its offset inside its function, so identical code lands
-  # on identical fetch lines, branch-predictor entries and uop-cache sets —
-  # inner loops included — whatever text the change adds before it.
-  local flags=(-bench "$pattern" -benchmem -count=1 -ldflags=-funcalign=4096)
-  [[ -z ${BENCH_TIME:-} ]] || flags+=(-benchtime "$BENCH_TIME")
-  [[ -z $skip ]] || flags+=(-skip "$skip")
-  if ! (cd -- "$tree" && go test -p 1 -vet=off -run '^$' "${flags[@]}" "$@") >"$scratch/stdout" 2>"$scratch/stderr"; then
-    cat "$scratch/stdout" "$scratch/stderr" >&2
-    echo "bench-gate: benchmarks failed in $tree" >&2
-    exit 1
-  fi
-  # Keep only what benchstat reads, so test logging cannot become configuration.
-  { grep -E '^(goos|goarch|pkg|cpu): |^Benchmark' "$scratch/stdout" || true; } >>"$output"
+  local flags=(-test.run '^$' -test.bench "$pattern" -test.benchmem -test.count=1 -test.timeout=10m)
+  [[ -z ${BENCH_TIME:-} ]] || flags+=(-test.benchtime "$BENCH_TIME")
+  [[ -z $skip ]] || flags+=(-test.skip "$skip")
+  for package; do
+    if ! (cd -- "${test_dir[$side/$package]}" && "$scratch/bin/$side/${package//\//_}.test" "${flags[@]}") >"$scratch/stdout" 2>"$scratch/stderr"; then
+      cat "$scratch/stdout" "$scratch/stderr" >&2
+      echo "bench-gate: benchmarks of $package failed at the $side" >&2
+      exit 1
+    fi
+    # Keep only what benchstat reads, so test logging cannot become configuration.
+    { grep -E '^(goos|goarch|pkg|cpu): |^Benchmark' "$scratch/stdout" || true; } >>"$output"
+  done
 }
 
-# Compile both sides up front, so build time stays out of the first sample.
-for tree in "$scratch/base" .; do
-  (cd -- "$tree" && go test -p 2 -vet=off -run '^$' -bench '^$' -count=1 -ldflags=-funcalign=4096 "${packages[@]}" >/dev/null)
-done
 : >"$out/old.txt"
 : >"$out/new.txt"
 for ((sample = 1; sample <= count; sample++)); do
   # Alternate which side goes first, so neither always benefits from a cooler or
   # warmer machine.
   if (( sample % 2 )); then
-    measure "$scratch/base" "$out/old.txt" "$bench" "${packages[@]}"
-    measure . "$out/new.txt" "$bench" "${packages[@]}"
+    measure base "$out/old.txt" "$bench" "${packages[@]}"
+    measure head "$out/new.txt" "$bench" "${packages[@]}"
   else
-    measure . "$out/new.txt" "$bench" "${packages[@]}"
-    measure "$scratch/base" "$out/old.txt" "$bench" "${packages[@]}"
+    measure head "$out/new.txt" "$bench" "${packages[@]}"
+    measure base "$out/old.txt" "$bench" "${packages[@]}"
   fi
   echo "bench-gate: sample $sample/$count" >&2
 done
@@ -195,11 +241,11 @@ for ((sample = 1; sample <= confirm; sample++)); do
   for line in "${flagged[@]}"; do
     IFS=$'\t' read -r package pattern <<<"$line"
     if (( sample % 2 )); then
-      measure "$scratch/base" "$out/old-again.txt" "$pattern" "$package"
-      measure . "$out/new-again.txt" "$pattern" "$package"
+      measure base "$out/old-again.txt" "$pattern" "$package"
+      measure head "$out/new-again.txt" "$pattern" "$package"
     else
-      measure . "$out/new-again.txt" "$pattern" "$package"
-      measure "$scratch/base" "$out/old-again.txt" "$pattern" "$package"
+      measure head "$out/new-again.txt" "$pattern" "$package"
+      measure base "$out/old-again.txt" "$pattern" "$package"
     fi
   done
   echo "bench-gate: sample $sample/$confirm of the second measurement" >&2

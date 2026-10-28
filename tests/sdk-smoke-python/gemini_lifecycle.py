@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from importlib.metadata import version
 
 from google import genai
 from google.genai import types
@@ -80,4 +81,4 @@ async def live():
 
 
 asyncio.run(asyncio.wait_for(live(), timeout=8))
-print(json.dumps({'interaction': 'two-turn/stream/get/cancel/delete', 'live': 'audio/interruption', 'versions': 'google-genai==2.22.0'}))
+print(json.dumps({'interaction': 'two-turn/stream/get/cancel/delete', 'live': 'audio/interruption', 'versions': f"google-genai=={version('google-genai')}"}))

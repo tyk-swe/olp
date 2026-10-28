@@ -1,12 +1,64 @@
 package runtime
 
 import (
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
+
+func TestConsumerKeyAuthenticationRequiresCurrentExactCredential(t *testing.T) {
+	now := time.Now()
+	expired, active := now.Add(-time.Minute), now.Add(time.Minute)
+	issuer := "workload-issuer"
+	auth := secrets.NewAuthKey(make([]byte, 32), "installation")
+	secret := "olp_lookup_secret"
+	principal := access.Authority{ID: "key", LookupID: "lookup", Policy: access.KeyPolicy{Scopes: []string{"tools"}}}
+	for _, test := range []struct {
+		name      string
+		presented string
+		loaded    bool
+		readAt    time.Time
+		expiresAt *time.Time
+		issuerID  *string
+		want      error
+	}{
+		{name: "active", presented: secret, loaded: true, readAt: now, expiresAt: &active},
+		{name: "unloaded", presented: secret, readAt: now, want: ErrStaleAuthority},
+		{name: "stale", presented: secret, loaded: true, readAt: now.Add(-AuthorityStaleAfter - time.Minute), want: ErrStaleAuthority},
+		{name: "missing secret", presented: "olp_lookup", loaded: true, readAt: now, want: ErrInvalidKey},
+		{name: "unknown lookup", presented: "olp_other_secret", loaded: true, readAt: now, want: ErrInvalidKey},
+		{name: "changed secret", presented: secret + "changed", loaded: true, readAt: now, want: ErrInvalidKey},
+		{name: "additional delimiter", presented: secret + "_suffix", loaded: true, readAt: now, want: ErrInvalidKey},
+		{name: "expired", presented: secret, loaded: true, readAt: now, expiresAt: &expired, want: ErrInvalidKey},
+		{name: "workload identity", presented: secret, loaded: true, readAt: now, issuerID: &issuer, want: ErrInvalidKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			captured := access.Authority{ID: principal.ID, LookupID: principal.LookupID, Policy: principal.Policy, WorkloadIssuerID: test.issuerID}
+			manager := Manager{auth: auth, authority: authorityState{
+				loaded: test.loaded, readAt: test.readAt,
+				keys: map[string]*keyRecord{"lookup": {authority: captured, digest: auth.Digest(secrets.APIKeyDigest, secret), expiresAt: test.expiresAt}},
+			}}
+			got, err := manager.Authenticate(test.presented)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("authentication error = %v, want %v", err, test.want)
+			}
+			if test.want != nil {
+				if got != nil {
+					t.Fatal("refused authentication returned authority")
+				}
+				return
+			}
+			if got == nil || got.ID != principal.ID || !slices.Contains(got.Policy.Scopes, "tools") {
+				t.Fatalf("authentication lost the consumer authority: %+v", got)
+			}
+		})
+	}
+}
 
 func TestAgentLiveAuthority(t *testing.T) {
 	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -738,22 +739,33 @@ func TestWebRTCInputTranscriptionRefusedAndObservedWorkUncertain(t *testing.T) {
 
 func TestWebRTCClientCancellationDuringCreationHangsUpSession(t *testing.T) {
 	mock := newWebRTCMock("slow")
+	release := sync.OnceFunc(func() { close(mock.release) })
+	defer release()
 	h := webrtcHarness(t, mock, true)
+	gatewayCanceled := make(chan struct{})
+	observer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stop := context.AfterFunc(r.Context(), func() { close(gatewayCanceled) })
+		defer stop()
+		h.server.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(observer.Close)
 	body, contentType := webrtcCreateBody(t, `{"type":"realtime","model":"`+routeSlug+`"}`)
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
+	defer cancel()
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/realtime/calls", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, observer.URL+"/v1/realtime/calls", bytes.NewReader(body))
 		if err != nil {
+			done <- err
 			return
 		}
 		req.Header.Set("Authorization", "Bearer "+fullKey)
 		req.Header.Set("Content-Type", contentType)
 		resp, err := http.DefaultClient.Do(req)
-		if err == nil && resp != nil && resp.Body != nil {
+		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
+		done <- err
 	}()
 	select {
 	case <-mock.createSeen:
@@ -761,13 +773,25 @@ func TestWebRTCClientCancellationDuringCreationHangsUpSession(t *testing.T) {
 		t.Fatal("provider creation never started")
 	}
 	cancel()
-	close(mock.release)
+	select {
+	case <-gatewayCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("gateway did not observe client cancellation")
+	}
+	release()
 	select {
 	case <-mock.hangupSeen:
 	case <-time.After(3 * time.Second):
 		t.Fatal("abandoned creation left the provider session established")
 	}
-	<-done
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("client request did not end through cancellation: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("canceled client request did not finish")
+	}
 	_ = sessionEnvelope(t, waitEnvelopes(t, h, 1))
 	if got := h.gateway.webrtcSessionCount(); got != 0 {
 		t.Fatalf("orphaned sessions retained: %d", got)
