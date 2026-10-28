@@ -53,7 +53,7 @@ of the gateway's module and runtime inventory.
 
 | SDK | Module | Pinned version | Qualification |
 | --- | --- | --- | --- |
-| OpenAI Go | `github.com/openai/openai-go/v3` | v3.74.0 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
+| OpenAI Go | `github.com/openai/openai-go/v3` | v3.85.1 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
 | Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
 | Google Gen AI Go | `google.golang.org/genai` | v1.73.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
 
@@ -117,12 +117,6 @@ Generate mounted-key setup with [`olp client-env`](../operate/automation.md#conf
 It supports Codex, Claude Code and Gemini CLI, all four framework families and explicit
 JavaScript, Python and Go constructors for the official SDKs. Generated
 configuration runs against the same pinned libraries in client qualification.
-
-Anthropic's Python SDK 2.x and JavaScript SDK 1.x default to an API revision
-that OLP has not qualified. Set `anthropic-version` to `2023-06-01` in the
-client's default headers. Use `default_headers={"anthropic-version": "2023-06-01"}`
-in Python or `defaultHeaders: { "anthropic-version": "2023-06-01" }` in
-JavaScript. The generated SDK constructors set this header for you.
 
 ### Claude Code
 
