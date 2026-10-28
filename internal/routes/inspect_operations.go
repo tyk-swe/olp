@@ -70,7 +70,7 @@ func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.R
 	accept := func(provider routing.Provider, target routing.Target) error {
 		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
-		template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, Policy: route.ContentPolicy})
+		template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, Policy: route.ContentPolicy, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 		if err != nil {
 			return safeInspectionError(err)
 		}

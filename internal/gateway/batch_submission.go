@@ -261,7 +261,7 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 		fact.CardRevisionID = &fact.cardRev.ID
 	}
 	accountingID := x.request.accountingID()
-	event := accountingEvent(Envelope{
+	event, err := accountingEvent(Envelope{
 		RequestID: accountingID, AccountingID: accountingID, KeyID: x.keyID,
 		EndUserDigest: x.endUserDigest, Origin: usage.OriginBatchSettlement, ParentRequestID: accountingID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
@@ -270,6 +270,9 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
 		StartedAt: now, CompletedAt: now, Attempts: []AttemptFact{fact},
 	})
+	if err != nil {
+		return nil, err
+	}
 	if event == nil {
 		return nil, errors.New("batch usage event is unavailable")
 	}

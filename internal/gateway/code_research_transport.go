@@ -5,7 +5,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -25,11 +24,7 @@ func researchOriginAllowed(r *http.Request) bool {
 	if len(values) == 0 {
 		return true
 	}
-	if len(values) != 1 {
-		return false
-	}
-	u, err := url.Parse(values[0])
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host == r.Host && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+	return len(values) == 1 && sameOrigin(r, values[0])
 }
 
 // copyResearchResponse reports whether a valid InitializeResult reached the
