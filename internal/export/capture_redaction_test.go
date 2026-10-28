@@ -38,9 +38,17 @@ func TestCaptureMalformedCallMetadataCannotBypassArgumentDecoding(t *testing.T) 
 			if !c.Finish(CaptureIdentity{ProjectID: "project", Mode: "unary", Outcome: "failure"}, time.Now()) {
 				t.Fatal("inspectable arguments dropped")
 			}
-			raw := string((<-m.queue).record)
-			if strings.Contains(raw, "0063") || strings.Contains(raw, "secret") || !strings.Contains(raw, "[REMOVED]") {
-				t.Fatalf("malformed metadata bypassed argument decoding: %s", raw)
+			var event struct {
+				Data struct {
+					Input json.RawMessage `json:"input"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal((<-m.queue).record, &event); err != nil {
+				t.Fatal(err)
+			}
+			input := string(event.Data.Input)
+			if strings.Contains(input, "0063") || strings.Contains(input, "secret") || !strings.Contains(input, "[REMOVED]") {
+				t.Fatalf("malformed metadata bypassed argument decoding: %s", input)
 			}
 		}
 	}
