@@ -116,6 +116,7 @@ type keyRecord struct {
 }
 
 type authorityState struct {
+	mcpTools                  map[string]mcpToolAuthority
 	agentPrincipals           map[string]access.Authority
 	agentResources            map[string]agentResourceAuthority
 	workloadIssuers           map[string]workloadIssuer
@@ -497,6 +498,9 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		state.agentPrincipals[record.authority.ID] = record.authority
 	}
 	if state.agentResources, err = loadAgentResourceAuthority(ctx, tx); err != nil {
+		return err
+	}
+	if state.mcpTools, err = loadMCPToolAuthority(ctx, tx); err != nil {
 		return err
 	}
 	m.mu.Lock()

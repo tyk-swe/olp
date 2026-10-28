@@ -23,6 +23,17 @@ func EndUserProjectID(projectID, digest string) string {
 
 func EndUserLookup(accountID string) string { return "eu_" + strings.ReplaceAll(accountID, "-", "") }
 
+func EnsureEndUserAccounts(ctx context.Context, tx pgx.Tx, keyID string, projectID *string, digest string) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.end_user_accounts (id,api_key_id,project_id,end_user_digest) VALUES ($1,$2,NULL,$3) ON CONFLICT (id) DO NOTHING`, EndUserKeyID(keyID, digest), keyID, digest); err != nil {
+		return err
+	}
+	if projectID == nil {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO olp.end_user_accounts (id,api_key_id,project_id,end_user_digest) VALUES ($1,NULL,$2,$3) ON CONFLICT (id) DO NOTHING`, EndUserProjectID(*projectID, digest), *projectID, digest)
+	return err
+}
+
 // The same decimal delta and window rules apply to all cost owners.
 var addEndUserCostDeltaSQL = costDeltaSQL(costOwnerEndUser)
 

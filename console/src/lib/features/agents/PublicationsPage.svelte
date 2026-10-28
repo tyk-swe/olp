@@ -16,6 +16,7 @@
     publish,
     retire,
     savePublication,
+    saveServer,
     setLabel,
     type Draft,
     type Kind,
@@ -23,7 +24,14 @@
     type Publication,
     type Revision
   } from './api';
-  import { publicationForm, publicationInput, toolPin } from './form';
+  import {
+    publicationForm,
+    publicationInput,
+    serverPricingForm,
+    serverPricingInput,
+    toolPin,
+    type ServerPricingForm
+  } from './form';
 
   const access = useRole();
   const client = useQueryClient();
@@ -39,6 +47,7 @@
   let removeCredential = $state(false);
   let serverID = $state('');
   let server = $state<MCPServer | null>(null);
+  let pricing = $state<ServerPricingForm | null>(null);
   let revisionID = $state('');
   let inspected = $state<Revision | null>(null);
   let confirmRetire = $state(false);
@@ -51,6 +60,7 @@
     form = publicationForm();
     inspected = null;
     server = null;
+    pricing = null;
     editor = false;
     busy = false;
     error = '';
@@ -70,6 +80,9 @@
     enabled: kind === 'toolsets'
   }));
   const canManage = $derived(access.allows('POST /api/v1/toolsets'));
+  const canPrice = $derived(
+    access.allows('PUT /api/v1/mcp-servers/{server_id}')
+  );
   const canTrust = $derived(
     access.user?.operations.includes('access') && access.globalScope
   );
@@ -88,6 +101,7 @@
     current = null;
     inspected = null;
     server = null;
+    pricing = null;
     serverID = '';
     error = '';
     confirmRetire = false;
@@ -114,16 +128,61 @@
   }
   async function chooseServer() {
     server = null;
+    pricing = null;
     const selected = serverID;
     const version = epoch;
     const isCurrent = captureOwner();
     if (!selected) return;
     try {
       const value = await getServer(selected);
-      if (isCurrent() && version === epoch && selected === serverID)
+      if (isCurrent() && version === epoch && selected === serverID) {
         server = value;
+        pricing = serverPricingForm(value);
+      }
     } catch (cause) {
       if (isCurrent() && version === epoch) error = errorMessage(cause);
+    }
+  }
+  async function savePricing() {
+    if (!server || !pricing) return;
+    const version = epoch;
+    const isCurrent = captureOwner();
+    const observed = server;
+    const draft = pricing;
+    busy = true;
+    error = '';
+    notice = '';
+    try {
+      const pricingResult = serverPricingInput(observed, draft);
+      if (!pricingResult.ok) {
+        error = pricingResult.message;
+        return;
+      }
+      const input = pricingResult.input;
+      const result = await intent.submit(
+        { action: 'server-pricing', observed, input },
+        async (submission, requestId) =>
+          saveServer(submission.observed, submission.input, requestId)
+      );
+      if (!isCurrent() || version !== epoch) return;
+      server = result;
+      pricing = serverPricingForm(result);
+      serverID = result.id;
+      notice =
+        'Server pricing and limits saved. Republish toolsets to pin new prices, and limits apply to the server now.';
+      try {
+        await client.invalidateQueries(
+          { queryKey: ['agent-publications', 'servers'] },
+          { throwOnError: true }
+        );
+      } catch (cause) {
+        if (isCurrent() && version === epoch)
+          error = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
+      }
+    } catch (cause) {
+      if (isCurrent() && version === epoch) error = errorMessage(cause);
+    } finally {
+      if (isCurrent() && version === epoch) busy = false;
     }
   }
   async function addTool(name: string) {
@@ -131,7 +190,12 @@
     const version = epoch;
     const isCurrent = captureOwner();
     try {
-      const pin = await toolPin(server, name);
+      const pinned = await toolPin(server, name);
+      if (!pinned.ok) {
+        if (isCurrent() && version === epoch) error = pinned.message;
+        return;
+      }
+      const pin = pinned.pin;
       if (
         isCurrent() &&
         version === epoch &&
@@ -233,8 +297,8 @@
   <p class="eyebrow">Execution foundations</p>
   <h1>Agent publications</h1>
   <p>
-    Review project-owned toolsets, agent contracts, and prompts. These
-    publications do not enable tool calls or agent execution.
+    Publish toolsets for authorized tool calls, and review project-owned agent
+    contracts and prompts.
   </p>
 </header>
 <nav aria-label="Publication kind">
@@ -304,6 +368,7 @@
             disabled={!!current}
             onchange={() => {
               server = null;
+              pricing = null;
               serverID = '';
               form.tools = [];
             }}
@@ -326,7 +391,11 @@
                 >{/each}</select
             ></label
           >
-          {#if server}<p>Catalog <code>{server.catalog.digest}</code></p>
+          {#if server}<p>
+              Transport <code>{server.transport}</code>, MCP
+              <code>{server.catalog.protocol_version}</code>
+            </p>
+            <p>Catalog <code>{server.catalog.digest}</code></p>
             {#each server.catalog.tools as tool (tool.name)}<button
                 type="button"
                 onclick={() => addTool(tool.name)}
@@ -351,6 +420,57 @@
             Each selected tool pins its certified server revision; catalog drift
             revokes its live authority.
           </p>
+          {#if server && pricing}
+            <fieldset>
+              <legend>Tool pricing and limits</legend>
+              <label
+                >Server unit price (blank unpriced, 0 free) <input
+                  bind:value={pricing.unitPrice}
+                  inputmode="decimal"
+                /></label
+              >
+              {#each server.catalog.tools as tool (tool.name)}
+                <label
+                  >{tool.name} unit price
+                  <input
+                    bind:value={pricing.toolPrices[tool.name]}
+                    inputmode="decimal"
+                  /></label
+                >
+              {/each}
+              <label
+                >Server calls per minute <input
+                  bind:value={pricing.callsPerMinute}
+                  inputmode="numeric"
+                /></label
+              ><label
+                >Server max concurrency <input
+                  bind:value={pricing.maxConcurrency}
+                  inputmode="numeric"
+                /></label
+              ><label
+                >Per-key calls per minute <input
+                  bind:value={pricing.perKeyCallsPerMinute}
+                  inputmode="numeric"
+                /></label
+              ><label
+                >Per-key max concurrency <input
+                  bind:value={pricing.perKeyMaxConcurrency}
+                  inputmode="numeric"
+                /></label
+              >
+              <button
+                type="button"
+                disabled={busy || !canPrice}
+                onclick={() => void savePricing()}>Save pricing</button
+              >
+              <p>
+                Prices are in the installation pricing currency and pin with the
+                certified server revision. Saving recertifies the server, so
+                republish toolsets to pin the new revision.
+              </p>
+            </fieldset>
+          {/if}
         {:else if kind === 'prompts'}
           <label
             >Template <textarea

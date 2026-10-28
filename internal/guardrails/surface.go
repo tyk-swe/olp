@@ -3,6 +3,8 @@ package guardrails
 import (
 	"bytes"
 	"encoding/json"
+	"iter"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -19,6 +21,107 @@ type Surface struct {
 type surfaceSlot struct {
 	pointer string
 	rawJSON bool
+}
+
+type JSONSurface struct {
+	document oif.Document
+	slots    []surfaceSlot
+	name     string
+	output   bool
+}
+
+func ToolJSONSurface(document oif.Document, name string, output bool) *JSONSurface {
+	return &JSONSurface{document: document, slots: slices.Collect(jsonSlots(document.Root(), "")), name: name, output: output}
+}
+
+func jsonSlots(value oif.Value, pointer string) iter.Seq[surfaceSlot] {
+	return func(yield func(surfaceSlot) bool) {
+		for index, item := range value.Elements() {
+			for slot := range jsonSlots(item, oif.Pointer(pointer, strconv.Itoa(index))) {
+				if !yield(slot) {
+					return
+				}
+			}
+		}
+		for _, member := range value.Members() {
+			for slot := range jsonSlots(member.Value, oif.Pointer(pointer, member.Name)) {
+				if !yield(slot) {
+					return
+				}
+			}
+		}
+		if len(value.Elements()) == 0 && len(value.Members()) == 0 {
+			yield(surfaceSlot{pointer: pointer, rawJSON: value.Kind() != oif.String})
+		}
+	}
+}
+
+func (s *JSONSurface) Segments() []Segment {
+	return slices.Collect(func(yield func(Segment) bool) {
+		for index, slot := range s.slots {
+			value, _ := s.document.Lookup(slot.pointer)
+			text, isText := value.Text()
+			if !isText {
+				if !yield(s.segment(index, value.Raw())) {
+					return
+				}
+				continue
+			}
+			if !yield(s.segment(index, text)) {
+				return
+			}
+		}
+	})
+}
+
+func (s *JSONSurface) segment(index int, text string) Segment {
+	if s.output {
+		return Segment{ID: "json" + strconv.Itoa(index), Text: text, Kind: "tool_result", ToolName: s.name, Untrusted: true, toolJSON: s}
+	}
+	return Segment{ID: "json" + strconv.Itoa(index), Text: text, Kind: "tool_call", ToolName: s.name, toolJSON: s}
+}
+
+func (s *JSONSurface) Apply(segments []Segment) (oif.Document, error) {
+	surface := Surface{document: s.document, slots: s.slots, Segments: s.Segments()}
+	projected := slices.Collect(func(yield func(Segment) bool) {
+		for _, segment := range segments {
+			if segment.toolJSON == s && !yield(segment) {
+				return
+			}
+		}
+	})
+	return surface.Apply(projected)
+}
+
+func jsonToolSegments(segments []Segment) ([]Segment, error) {
+	if !slices.ContainsFunc(segments, func(segment Segment) bool { return segment.toolJSON != nil }) {
+		return segments, nil
+	}
+	for _, segment := range segments {
+		if segment.toolJSON == nil || segment.ID != "json0" {
+			continue
+		}
+		if _, err := segment.toolJSON.Apply(segments); err != nil {
+			return nil, err
+		}
+	}
+	return slices.Collect(func(yield func(Segment) bool) {
+		for _, segment := range segments {
+			if segment.toolJSON == nil {
+				if !yield(segment) {
+					return
+				}
+				continue
+			}
+			if segment.ID != "json0" {
+				continue
+			}
+			document, _ := segment.toolJSON.Apply(segments)
+			if !yield(segment.withText(document.Raw())) {
+				return
+			}
+		}
+	}), nil
 }
 
 func NativeSurface(document oif.Document, output bool) (*Surface, error) {

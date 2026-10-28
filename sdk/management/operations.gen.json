@@ -4031,7 +4031,6 @@
             "name",
             "project",
             "transport",
-            "endpoint",
             "enabled",
             "catalog_digest"
           ],
@@ -4049,7 +4048,9 @@
             "transport": {
               "type": "string",
               "enum": [
-                "streamable_http"
+                "streamable_http",
+                "sse",
+                "stdio"
               ]
             },
             "endpoint": {
@@ -4067,8 +4068,175 @@
             "credential_ref": {
               "type": "string",
               "description": "Logical destination sealed bearer binding; never source credential bytes."
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "stdio": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MCPStdioBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
             }
           }
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "minLength": 0
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
+        "MCPStdioBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executable",
+            "digest"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -4139,6 +4307,7 @@
                 "organization",
                 "project",
                 "route",
+                "toolset",
                 "api-key"
               ]
             },
@@ -6629,7 +6798,7 @@
     "method": "POST",
     "read_only": false,
     "path": "/api/v1/guardrail-attachments",
-    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write.",
     "scopes": [
       [
         "configure"
@@ -6690,6 +6859,7 @@
                 "organization",
                 "project",
                 "route",
+                "toolset",
                 "api-key"
               ]
             },
@@ -7044,17 +7214,201 @@
             "transport": {
               "type": "string",
               "enum": [
-                "streamable_http"
+                "streamable_http",
+                "sse",
+                "stdio"
               ]
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "stdio": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MCPStdioBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
+            },
+            "delegation_private_key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
             }
           },
           "required": [
             "name",
-            "endpoint",
             "enabled",
             "project_id",
             "transport"
           ]
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "minLength": 0
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
+        "MCPStdioBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executable",
+            "digest"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -12754,7 +13108,7 @@
     "method": "DELETE",
     "read_only": false,
     "path": "/api/v1/guardrail-attachments/{attachment_id}",
-    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write.",
     "scopes": [
       [
         "configure"
@@ -15607,6 +15961,53 @@
           "required": [
             "server_id",
             "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_mcp_tool_call",
+    "group": "mcp-servers",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/mcp-tool-calls/{call_id}",
+    "description": "get mcp tool call",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "call_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "call_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "call_id"
           ]
         }
       },
@@ -19146,6 +19547,88 @@
               "maximum": 200,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_mcp_tool_calls",
+    "group": "mcp-servers",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/mcp-tool-calls",
+    "description": "list mcp tool calls",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "toolset_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "api_key_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "toolset_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
@@ -26170,7 +26653,6 @@
             "name",
             "project",
             "transport",
-            "endpoint",
             "enabled",
             "catalog_digest"
           ],
@@ -26188,7 +26670,9 @@
             "transport": {
               "type": "string",
               "enum": [
-                "streamable_http"
+                "streamable_http",
+                "sse",
+                "stdio"
               ]
             },
             "endpoint": {
@@ -26206,8 +26690,175 @@
             "credential_ref": {
               "type": "string",
               "description": "Logical destination sealed bearer binding; never source credential bytes."
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "stdio": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MCPStdioBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
             }
           }
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "minLength": 0
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
+        "MCPStdioBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executable",
+            "digest"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         },
         "ConfigurationGuardrailPolicyEntry": {
           "type": "object",
@@ -26278,6 +26929,7 @@
                 "organization",
                 "project",
                 "route",
+                "toolset",
                 "api-key"
               ]
             },
@@ -32781,6 +33433,102 @@
     }
   },
   {
+    "name": "resolve_mcp_tool_call",
+    "group": "mcp-servers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/mcp-tool-calls/{call_id}/resolve",
+    "description": "resolve mcp tool call",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "call_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "call_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "call_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/MCPToolCallResolveRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "MCPToolCallResolveRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "settled",
+                "not_accepted"
+              ]
+            },
+            "evidence_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "observed_cost": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "description": "Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+            },
+            "observed_charge": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "description": "Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+            }
+          },
+          "required": [
+            "outcome",
+            "evidence_digest"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "restore_provider_as_draft",
     "group": "providers",
     "method": "POST",
@@ -38805,13 +39553,167 @@
               "minLength": 1,
               "maxLength": 4096,
               "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+              "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+            },
+            "tool_prices": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+              },
+              "maxProperties": 128,
+              "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+            },
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+            },
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+            },
+            "per_key_calls_per_minute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+            },
+            "per_key_max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+            },
+            "oauth": {
+              "$ref": "#/$defs/MCPOAuthConfiguration"
+            },
+            "delegation": {
+              "$ref": "#/$defs/MCPDelegationConfiguration"
+            },
+            "delegation_private_key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192,
+              "writeOnly": true,
+              "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
             }
           },
           "required": [
             "name",
-            "endpoint",
             "enabled"
           ]
+        },
+        "MCPOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "minLength": 0
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
+        "MCPDelegationConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "issuer",
+            "audience"
+          ],
+          "additionalProperties": false
         }
       }
     }

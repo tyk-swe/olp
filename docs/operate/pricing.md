@@ -96,6 +96,15 @@ one.
 positive invocation count and no configured fee makes the attempt unpriced;
 zero-count tools are ignored.
 
+Consumer MCP tool calls price differently from provider-side tool fees. Each
+registered server revision pins one operator unit price per dispatched call,
+with optional per-tool overrides. That single price is both the settled cost
+and the settled consumer charge, because tools carry no separate rate card, so
+cost-basis and charge-basis budgets measure the same amount for a tool call.
+An explicit zero price is known free, and a missing price stays unpriced and
+refuses dispatch under any enforced budget ceiling. See the MCP server
+registration guide for the full contract.
+
 Usage is marked `batch` by batch-result settlement. Retained training, storage,
 cache and container evidence use their explicit units and preserve the original
 acceptance pricing, discounts, rate card and tariff-window instant.

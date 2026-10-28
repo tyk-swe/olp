@@ -1,0 +1,82 @@
+{
+  "standardCall": {
+    "status": 200,
+    "body": {
+      "attempt_id": "01a180fa-7dd9-7637-bb8f-87d7ed26d456",
+      "content": [
+        {
+          "type": "text",
+          "text": "A governed tool call"
+        }
+      ],
+      "dispatch_id": "01a180fa-7dd9-762f-a30c-d813dc898bbf",
+      "is_error": false,
+      "name": "t_01a180f020c17135a1f1f86c5bc49ba0_092c79e8f80e559e404bcf660c48f352",
+      "structured_content": {
+        "message": "A governed tool call"
+      },
+      "toolset_id": "01a180f0-a60c-76b7-8bd1-60aa5e3475c8",
+      "toolset_revision_id": "01a180fa-6df8-7134-8d28-6224c396fa32"
+    }
+  },
+  "missingGrant": {
+    "status": 403,
+    "body": {
+      "error": {
+        "code": "user_grant_required",
+        "message": "Enroll a usable personal grant before calling this tool.",
+        "type": "permission_error"
+      }
+    }
+  },
+  "personalCall": {
+    "status": 200,
+    "body": {
+      "attempt_id": "01a180fa-94b8-79b2-a1dd-061071e15a25",
+      "content": [
+        {
+          "type": "text",
+          "text": "Personal access is active"
+        }
+      ],
+      "dispatch_id": "01a180fa-94b8-79ae-b717-5220ce196f46",
+      "is_error": false,
+      "name": "t_01a180f1a4fa7490b08a48d9ae204890_092c79e8f80e559e404bcf660c48f352",
+      "structured_content": {
+        "message": "Personal access is active"
+      },
+      "toolset_id": "01a180f1-a506-7822-9ea6-24db90b9e516",
+      "toolset_revision_id": "01a180f1-a50c-7503-ab61-d89b5f1c6f3d"
+    }
+  },
+  "stdioCall": {
+    "status": 200,
+    "body": {
+      "attempt_id": "01a180fa-97df-7d07-8af5-aab9475c281e",
+      "content": [
+        {
+          "type": "text",
+          "text": "An approved stdio tool call"
+        }
+      ],
+      "dispatch_id": "01a180fa-97df-7d03-af5d-037531129258",
+      "is_error": false,
+      "name": "t_01a180f30053708096cc87e6993ca659_092c79e8f80e559e404bcf660c48f352",
+      "structured_content": {
+        "message": "An approved stdio tool call"
+      },
+      "toolset_id": "01a180f3-0062-7974-988b-c3bd73976486",
+      "toolset_revision_id": "01a180f3-006a-75ea-bd20-b0952019c6ce"
+    }
+  },
+  "disabledCall": {
+    "status": 404,
+    "body": {
+      "error": {
+        "code": "toolset_not_found",
+        "message": "The toolset does not exist or this key may not use it.",
+        "type": "invalid_request_error"
+      }
+    }
+  }
+}

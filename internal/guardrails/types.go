@@ -74,7 +74,7 @@ type Attachment struct {
 	Order            int    `json:"order"`
 }
 
-type Boundary struct{ OrganizationID, ProjectID, RouteID, KeyID string }
+type Boundary struct{ OrganizationID, ProjectID, RouteID, ToolsetID, KeyID string }
 
 type Segment struct {
 	ID        string `json:"id"`
@@ -83,6 +83,15 @@ type Segment struct {
 	Kind      string `json:"kind,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
 	Untrusted bool   `json:"untrusted,omitempty"`
+	toolJSON  *JSONSurface
+}
+
+func (s Segment) Restore(masks *Masking) Segment {
+	return s.withText(masks.Restore(s.Text))
+}
+
+func (s Segment) withText(text string) Segment {
+	return Segment{ID: s.ID, Role: s.Role, Text: text, Kind: s.Kind, ToolName: s.ToolName, Untrusted: s.Untrusted, toolJSON: s.toolJSON}
 }
 
 type Evaluation struct {
