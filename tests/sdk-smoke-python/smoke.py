@@ -81,6 +81,7 @@ def anthropic_client(client_api_key: str = api_key) -> anthropic.Anthropic:
     return anthropic.Anthropic(
         api_key=client_api_key,
         base_url=f"{origin}/anthropic",
+        default_headers={"anthropic-version": "2023-06-01"},
         max_retries=0,
         timeout=5.0,
     )
