@@ -14,7 +14,7 @@
     "@google/gemini-cli": "0.64.0",
     "@langchain/anthropic": "1.5.13",
     "@langchain/core": "1.2.20",
-    "@langchain/google-genai": "2.3.2",
+    "@langchain/google-genai": "2.3.4",
     "@langchain/openai": "1.6.3",
     "@llamaindex/anthropic": "0.3.27",
     "@llamaindex/core": "0.6.23",

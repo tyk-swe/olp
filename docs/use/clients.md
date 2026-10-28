@@ -38,7 +38,7 @@ The three coding clients use `latest`; other versions below remain exact pins.
 | LangChain core | `@langchain/core` | 1.2.20 | Messages, tools, tool-call chunk assembly and `withStructuredOutput` |
 | LangChain OpenAI provider | `@langchain/openai` | 1.6.3 | `ChatOpenAI` over Chat Completions and Responses, and `OpenAIEmbeddings` |
 | LangChain Anthropic provider | `@langchain/anthropic` | 1.5.13 | `ChatAnthropic`, prompt caching, extended thinking replayed with its signature |
-| LangChain Google provider | `@langchain/google-genai` | 2.3.2 | `ChatGoogleGenerativeAI` and `GoogleGenerativeAIEmbeddings` on a strict route |
+| LangChain Google provider | `@langchain/google-genai` | 2.3.4 | `ChatGoogleGenerativeAI` and `GoogleGenerativeAIEmbeddings` on a strict route |
 | LlamaIndex.TS | `llamaindex` | 0.12.1 | Tool definitions and message helpers |
 | LlamaIndex.TS core | `@llamaindex/core` | 0.6.23 | Message and tool types, pinned to one copy by a pnpm override |
 | LlamaIndex.TS environment | `@llamaindex/env` | 0.1.31 | Runtime support; sends no requests |

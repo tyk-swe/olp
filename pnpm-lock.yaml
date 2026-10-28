@@ -117,8 +117,8 @@ importers:
         specifier: 1.2.20
         version: 1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0)
       '@langchain/google-genai':
-        specifier: 2.3.2
-        version: 2.3.2(@langchain/core@1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))
+        specifier: 2.3.4
+        version: 2.3.4(@langchain/core@1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))
       '@langchain/openai':
         specifier: 1.6.3
         version: 1.6.3(@langchain/core@1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))(undici@8.12.2)(ws@8.22.0)
@@ -796,11 +796,11 @@ packages:
     resolution: {integrity: sha512-0Nzh4/2On0MWFWbWRK7tDdMmSmD2Z/gt9+XoEQMPrV74Fpdf8r6grqEZNW6BkeqwY+KwKn+aFhatm4sK/yLldQ==}
     engines: {node: '>=20'}
 
-  '@langchain/google-genai@2.3.2':
-    resolution: {integrity: sha512-wiiHx3aBJmWJcKmYs/4xZo5KNRICYjdbwegtmH8ega7liYFKBY6e1F4ocMNL+ylApaRIYeO54ceAHNbKmRVHeQ==}
+  '@langchain/google-genai@2.3.4':
+    resolution: {integrity: sha512-Hq7lEtiQd5KiPquGjwKwzGg/JgbqSQia7CINLjJKoQ4FtolRuxj/mYDql0XZIMTAZJD93eeOk9wo3klEgueMYQ==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@langchain/core': ^1.2.11
+      '@langchain/core': ^1.2.19
 
   '@langchain/langgraph-checkpoint@1.2.0':
     resolution: {integrity: sha512-a9F1tO/bKGS4AlLR0FVa859oImD0iQiQLAAPkP66Nnp7a5dXPgys2IpzdJQ9slKiVznsSAFjxxNCmM25dBOvWA==}
@@ -3614,7 +3614,7 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/google-genai@2.3.2(@langchain/core@1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))':
+  '@langchain/google-genai@2.3.4(@langchain/core@1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))':
     dependencies:
       '@google/generative-ai': 0.24.1
       '@langchain/core': 1.2.20(@opentelemetry/api@1.9.1)(openai@7.34.0(undici@8.12.2)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0)
