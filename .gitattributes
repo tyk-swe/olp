@@ -10,3 +10,4 @@ docs/assets/screenshots/*.png -diff
 console/tests/e2e/*-snapshots/*.png -diff
 internal/operations/tokenization/estimate/ranks/*.bin binary linguist-generated=true
 tests/fixtures/tokens/*.json linguist-generated=true
+.agents/skills/** linguist-vendored=true

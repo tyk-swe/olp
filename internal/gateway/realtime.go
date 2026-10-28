@@ -310,8 +310,8 @@ func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []by
 // realtimeUsage is the usage object of a terminal realtime response,
 // including the modality shares a multimodal session reports.
 type realtimeUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens  *int64 `json:"input_tokens"`
+	OutputTokens *int64 `json:"output_tokens"`
 	InputDetails *struct {
 		CachedTokens  *int64 `json:"cached_tokens"`
 		AudioTokens   *int64 `json:"audio_tokens"`
@@ -375,10 +375,21 @@ func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
 		return false
 	}
 	event.Response.Usage = new(realtimeUsage)
-	if event.Response.Usage.InputTokens, valid = realtimeIntField(usageValue, "input_tokens"); !valid {
+	counter := func(name string) (*int64, bool) {
+		value, present := realtimeMember(usageValue, name)
+		if !present || value.Kind() == oif.Null {
+			return nil, true
+		}
+		count, valid := realtimeIntField(usageValue, name)
+		if !valid {
+			return nil, false
+		}
+		return &count, true
+	}
+	if event.Response.Usage.InputTokens, valid = counter("input_tokens"); !valid {
 		return false
 	}
-	if event.Response.Usage.OutputTokens, valid = realtimeIntField(usageValue, "output_tokens"); !valid {
+	if event.Response.Usage.OutputTokens, valid = counter("output_tokens"); !valid {
 		return false
 	}
 	details, present := realtimeMember(usageValue, "input_token_details")
@@ -515,18 +526,24 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 			}
 		}
 	}
-	if event.Type != "response.done" || event.Response == nil || event.Response.Usage == nil {
+	if event.Type != "response.done" {
+		return nil
+	}
+	if event.Response == nil || event.Response.Usage == nil {
+		s.unknown = true
 		return nil
 	}
 	u := event.Response.Usage
-	if u.InputTokens < 0 || u.OutputTokens < 0 {
+	if u.InputTokens == nil || u.OutputTokens == nil || *u.InputTokens < 0 || *u.OutputTokens < 0 {
+		s.unknown = true
 		return nil
 	}
-	out := &wire.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+	out := &wire.Usage{InputTokens: *u.InputTokens, OutputTokens: *u.OutputTokens}
 	if u.InputDetails != nil {
 		if u.InputDetails.CachedTokens != nil {
 			cached := *u.InputDetails.CachedTokens
-			if cached < 0 || cached > u.InputTokens {
+			if cached < 0 || cached > *u.InputTokens {
+				s.unknown = true
 				return nil
 			}
 			out.CachedInputTokens = &cached
@@ -558,7 +575,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.release(r.Context())
 
-	if origin := r.Header.Get("Origin"); origin != "" && !slices.Contains(s.cfg.CORSAllowedOrigins, origin) {
+	if !s.browserOriginAllowed(r) {
 		fail(permissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
 		return
 	}
@@ -879,6 +896,7 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: nativeError}))
 	}
 	fact.Class = "success"
+	fact.Status = http.StatusOK
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamAccepted
 	}

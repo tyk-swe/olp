@@ -227,7 +227,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			return err
 		}
 		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity,
-			Cache: route.Cache, PromptCache: route.PromptCache, CallerCostExempt: route.CallerCostExempt, MaxBodyBytes: route.MaxBodyBytes, Fallbacks: route.Fallbacks, Selectors: route.Selectors, Retry: route.Retry, Affinity: route.Affinity, Budget: route.Budget}
+			Cache: route.Cache, PromptCache: route.PromptCache, CallerCostExempt: route.CallerCostExempt, ProviderFetchedDocuments: route.ProviderFetchedDocuments, MaxBodyBytes: route.MaxBodyBytes, Fallbacks: route.Fallbacks, Selectors: route.Selectors, Retry: route.Retry, Affinity: route.Affinity, Budget: route.Budget, Passthrough: route.Passthrough}
 		for _, t := range route.Targets {
 			providerID := providerIDs[strings.ToLower(t.Provider)]
 			input.Targets = append(input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow})

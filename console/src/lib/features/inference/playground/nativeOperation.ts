@@ -34,12 +34,17 @@ export const nativeOperationDialects = {
     'bedrock-count-tokens',
     'tei-tokenize'
   ],
-  ocr: ['mistral-ocr'],
+  ocr: [
+    'mistral-ocr',
+    'azure-document-intelligence-ocr',
+    'vertex-document-processing-ocr'
+  ],
   search: [
     'perplexity-search',
     'tavily-search',
     'exa-search',
-    'parallel-search'
+    'parallel-search',
+    'brave-search'
   ]
 } as const;
 
@@ -65,7 +70,8 @@ const bodyModelDialects = new Set([
   'openai-moderation',
   'openai-input-tokens',
   'anthropic-count-tokens',
-  'mistral-ocr'
+  'mistral-ocr',
+  'azure-document-intelligence-ocr'
 ]);
 
 // Search dialects carry the route in a header or the native path, never a
@@ -153,7 +159,7 @@ export async function runNativeOperation(
         ? dialect === 'systemone'
           ? '/v1/systemone'
           : '/v1/decisions'
-        : operation === 'ocr'
+        : operation === 'ocr' && dialect === 'mistral-ocr'
           ? '/v1/ocr'
           : dialect === 'perplexity-search'
             ? '/v1/search'
