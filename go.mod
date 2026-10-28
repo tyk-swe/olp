@@ -30,7 +30,7 @@ require (
 	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/scim2/filter-parser/v2 v2.3.1
-	github.com/shopspring/decimal v1.5.0
+	github.com/shopspring/decimal v1.6.0
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/valkey-io/valkey-glide/go/v2 v2.5.3
 	go.opentelemetry.io/otel v1.47.0
