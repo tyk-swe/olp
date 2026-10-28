@@ -145,9 +145,9 @@ test('FOCUS dataset pages preserve order, totals and sink isolation through retr
   );
   await expect(newerButton).toBeEnabled();
   await page.route(path, (route) => {
-    expect(new URL(route.request().url()).searchParams.get('cursor')).toBe(
-      cursor
-    );
+    const query = new URL(route.request().url()).searchParams;
+    if (!query.has('cursor')) return route.fallback();
+    expect(query.get('cursor')).toBe(cursor);
     return route.fulfill({
       headers: { 'Cache-Control': 'no-store' },
       json: { items: [older], next_cursor: null }
