@@ -138,14 +138,15 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 		condition, err := s.expression(x.ValueFilter, alias+".value", depth+1, slices.Concat(scope, pathParts(x.AttributePath)))
 		return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", err
 	case *filter.AttributeExpression:
+		nullComparison := s.Schema != "" && x.CompareValue == nil && (x.Operator == filter.EQ || x.Operator == filter.NE)
+		if nullComparison && !s.definedAttribute(x.AttributePath, scope) {
+			return "FALSE", nil
+		}
 		s.sequence++
 		alias := fmt.Sprintf("scim_value_%d", s.sequence)
 		v := alias + ".value"
 		source := "jsonb_path_query(" + base + "," + s.bind(jsonPath(x.AttributePath)) + "::jsonpath) " + alias + "(value)"
-		if s.Schema != "" && x.CompareValue == nil && (x.Operator == filter.EQ || x.Operator == filter.NE) {
-			if !s.definedAttribute(x.AttributePath, scope) {
-				return "FALSE", nil
-			}
+		if nullComparison {
 			assigned := "EXISTS(SELECT 1 FROM " + source + " WHERE " + v + " NOT IN ('null'::jsonb,'\"\"'::jsonb,'[]'::jsonb,'{}'::jsonb))"
 			if x.Operator == filter.EQ {
 				return "NOT " + assigned, nil

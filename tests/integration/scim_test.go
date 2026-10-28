@@ -165,19 +165,24 @@ func TestSCIMNullFiltersMatchUnassignedDefinedAttributes(t *testing.T) {
 	for _, kind := range []string{"Users", "Groups"} {
 		t.Run(kind, func(t *testing.T) {
 			schema := map[string]string{"Users": scim.UserSchema, "Groups": scim.GroupSchema}[kind]
-			bodies := []map[string]any{
-				{"schemas": []string{schema}, "displayName": "Omitted", "userName": "null-omitted@example.com"},
-				{"schemas": []string{schema}, "displayName": "Null", "userName": "null-explicit@example.com", "externalId": nil},
-				{"schemas": []string{schema}, "displayName": "Assigned", "userName": "null-assigned@example.com", "externalId": "assigned"},
+
+			create := func(name string, externalID json.RawMessage) string {
+				username := func() string {
+					if kind == "Groups" {
+						return ""
+					}
+					return name + "@example.com"
+				}()
+				body := struct {
+					Schemas     []string        `json:"schemas"`
+					UserName    string          `json:"userName,omitempty"`
+					DisplayName string          `json:"displayName"`
+					ExternalID  json.RawMessage `json:"externalId,omitempty"`
+				}{[]string{schema}, username, name, externalID}
+				return scimCall(t, h, token, "POST", "/scim/v2/"+kind, body, "", 201)["id"].(string)
 			}
-			ids := make([]string, len(bodies))
-			for i, body := range bodies {
-				if kind == "Groups" {
-					delete(body, "userName")
-				}
-				created := scimCall(t, h, token, "POST", "/scim/v2/"+kind, body, "", 201)
-				ids[i] = created["id"].(string)
-			}
+			ids := []string{create("Omitted", nil), create("Null", json.RawMessage(`null`)), create("Assigned", json.RawMessage(`"assigned"`))}
+
 			for _, method := range []string{"GET", "POST"} {
 				for _, tc := range []struct {
 					filter string
@@ -193,13 +198,15 @@ func TestSCIMNullFiltersMatchUnassignedDefinedAttributes(t *testing.T) {
 					{map[string]string{"Users": scim.GroupSchema, "Groups": scim.UserSchema}[kind] + ":externalId eq null", nil},
 				} {
 					filter := fmt.Sprintf(`(id eq "%s" or id eq "%s" or id eq "%s") and (%s)`, ids[0], ids[1], ids[2], tc.filter)
-					path := "/scim/v2/" + kind + "?filter=" + url.QueryEscape(filter)
-					var body any
-					if method == "POST" {
-						path = "/scim/v2/" + kind + "/.search"
-						body = map[string]any{"schemas": []string{scim.SearchSchema}, "filter": filter}
-					}
-					result := scimCall(t, h, token, method, path, body, "", 200)
+
+					request := map[string]struct {
+						path string
+						body any
+					}{
+						"GET":  {"/scim/v2/" + kind + "?filter=" + url.QueryEscape(filter), nil},
+						"POST": {"/scim/v2/" + kind + "/.search", map[string]any{"schemas": []string{scim.SearchSchema}, "filter": filter}},
+					}[method]
+					result := scimCall(t, h, token, method, request.path, request.body, "", 200)
 					resources := result["Resources"].([]any)
 					if len(resources) != len(tc.want) {
 						t.Fatalf("%s %s: %v", method, tc.filter, result)
