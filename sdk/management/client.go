@@ -108,10 +108,11 @@ func (operation Operation) Request(ctx context.Context, args Arguments) (*http.R
 	}
 	if args.IfMatch != "" {
 		etag := args.IfMatch
-		if !strings.HasPrefix(etag, "\"") {
-			etag = "\"" + etag + "\""
+		if strings.HasPrefix(etag, "\"") || strings.HasPrefix(etag, `W/"`) {
+			req.Header.Set("If-Match", etag)
+		} else {
+			req.Header.Set("If-Match", "\""+etag+"\"")
 		}
-		req.Header.Set("If-Match", etag)
 	}
 	if args.IdempotencyKey != "" {
 		req.Header.Set("Idempotency-Key", args.IdempotencyKey)
