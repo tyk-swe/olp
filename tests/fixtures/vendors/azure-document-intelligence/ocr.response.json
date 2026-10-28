@@ -1,0 +1,27 @@
+{
+  "status": "succeeded",
+  "createdDateTime": "2026-10-27T00:00:00Z",
+  "lastUpdatedDateTime": "2026-10-27T00:00:01Z",
+  "analyzeResult": {
+    "apiVersion": "2024-11-30",
+    "modelId": "prebuilt-layout",
+    "stringIndexType": "utf16CodeUnit",
+    "contentFormat": "markdown",
+    "content": "# Report\n\nFirst page.",
+    "pages": [
+      {
+        "pageNumber": 1,
+        "angle": 0,
+        "width": 8.5,
+        "height": 11,
+        "unit": "inch",
+        "spans": [
+          {
+            "offset": 0,
+            "length": 21
+          }
+        ]
+      }
+    ]
+  }
+}

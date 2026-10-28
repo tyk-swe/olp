@@ -10,7 +10,10 @@ import (
 
 func TestCommitmentPinDoesNotInventPricingPin(t *testing.T) {
 	event := Envelope{Operation: "generation", Attempts: []AttemptFact{{StartedAt: time.Now(), CommitmentPinned: true, Commitment: &routing.Commitment{ID: "schedule", Amount: "10", Period: "day"}}}}
-	attempt := accountingAttempt(event, 0)
+	attempt, err := accountingAttempt(event, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var policy struct {
 		CommitmentPinned bool `json:"commitment_pinned"`
 		PricingPinned    bool `json:"pricing_pinned"`

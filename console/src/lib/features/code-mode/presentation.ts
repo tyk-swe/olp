@@ -18,7 +18,10 @@ export type CodeEditing =
 const adapterLabels: Record<string, string> = {
   codex: 'Codex',
   opencode_go: 'OpenCode Go',
-  zai_coding: 'GLM Coding Plan'
+  zai_coding: 'GLM Coding Plan',
+  minimax_plan: 'MiniMax M Plan',
+  kimi_code: 'Kimi Code',
+  qwen_token_plan: 'Qwen Token Plan'
 };
 
 /** The subscription family an account or a published route serves. */

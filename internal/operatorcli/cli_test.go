@@ -133,3 +133,23 @@ func TestClientEnvironmentKeepsKeyValuesOutOfOutputAndQuotesPaths(t *testing.T) 
 		}
 	}
 }
+
+func TestGeneratedSCIMCommandPreservesWeakETag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/scim/v2/Users/user" || r.Header.Get("If-Match") != `W/"current"` {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			w.Write([]byte(`{"type":"https://openllmproxy.dev/problems/invalid_version"}`))
+			return
+		}
+		w.Write([]byte(`{"id":"user"}`))
+	}))
+	defer server.Close()
+	runner, _ := testRunner(t, server)
+	body := filepath.Join(t.TempDir(), "patch.json")
+	if err := os.WriteFile(body, []byte(`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"displayName","value":"Updated"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(t.Context(), []string{"api", "scim_users_patch", "user", "--body-file", body, "--if-match", `W/"current"`}); err != nil {
+		t.Fatalf("SCIM conditional patch: %v", err)
+	}
+}

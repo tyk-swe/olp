@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestDurableResolutionEvidenceIdentity(t *testing.T) {
@@ -29,6 +31,31 @@ func TestDurableResolutionEvidenceIdentity(t *testing.T) {
 }
 
 const debitTestID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
+
+func TestHasUnknownDebitRejectsNonCanonicalKeyBeforeQuery(t *testing.T) {
+	store := &DebitStore{}
+	for _, id := range []string{"", "not-a-uuid", strings.ToUpper(debitTestID), "00000000-0000-0000-0000-000000000000", debitTestID + " "} {
+		held, err := store.HasUnknownDebit(t.Context(), id, time.Hour)
+		if held || !errors.Is(err, ErrDebitConflict) {
+			t.Fatalf("non-canonical key %q was answered instead of refused: %v %v", id, held, err)
+		}
+	}
+}
+
+func TestHasUnknownDebitSurfacesLedgerFailureInsteadOfClearingExposure(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://olp:olp@127.0.0.1:1/olp?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	store := &DebitStore{Pool: pool}
+	held, err := store.HasUnknownDebit(ctx, debitTestID, time.Hour)
+	if held || err == nil {
+		t.Fatalf("an unreadable ledger cleared the key's exposure: %v %v", held, err)
+	}
+}
 
 func TestDurableSettlementRequiresEveryOwnerBasis(t *testing.T) {
 	owners := []DebitOwner{{ID: debitTestID, Kind: "key", Basis: BasisCost}, {ID: debitTestID, Kind: "key", Basis: BasisCharge}, {ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608", Kind: "supply", Basis: BasisCost}, {ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608", Kind: "supply", Basis: BasisCharge}}

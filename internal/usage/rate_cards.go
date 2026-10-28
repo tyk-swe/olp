@@ -237,6 +237,14 @@ func CreateCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup st
 	if err != nil {
 		return CardRevision{}, err
 	}
+	if len(normalized) > 0 {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(pricingLockID)); err != nil {
+			return CardRevision{}, fmt.Errorf("lock pricing currency: %w", err)
+		}
+		if err := reserveCurrency(ctx, tx, currency); err != nil {
+			return CardRevision{}, err
+		}
+	}
 	return createCardRevision(ctx, tx, actor, cardID, normalizedMarkup, effectiveAt, normalized)
 }
 
@@ -335,8 +343,9 @@ func loadCardRevisionSummariesByCards(ctx context.Context, q access.Queryer, car
 	rows, err := q.Query(ctx, cardRevisionColumns+
 		` WHERE r.rate_card_id = ANY($1::uuid[])
 		  AND (r.revision=(SELECT MAX(revision) FROM olp.rate_card_revisions WHERE rate_card_id=r.rate_card_id)
-		   OR r.revision=(SELECT MAX(revision) FROM olp.rate_card_revisions
-		                  WHERE rate_card_id=r.rate_card_id AND effective_at <= now()))
+		   OR r.id=(SELECT id FROM olp.rate_card_revisions
+		            WHERE rate_card_id=r.rate_card_id AND effective_at <= now()
+		            ORDER BY effective_at DESC, revision DESC LIMIT 1))
 		  ORDER BY r.rate_card_id, r.revision DESC`, cardIDs)
 	if err != nil {
 		return nil, err

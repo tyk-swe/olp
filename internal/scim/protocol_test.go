@@ -1,8 +1,11 @@
 package scim
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/scim2/filter-parser/v2"
 )
 
 func TestFilterBindsEveryCallerValueAndBoundsComplexity(t *testing.T) {
@@ -16,7 +19,7 @@ func TestFilterBindsEveryCallerValueAndBoundsComplexity(t *testing.T) {
 			t.Fatal("caller text reached SQL", sql)
 		}
 	}
-	for _, raw := range []string{strings.Repeat("(", 17) + `active pr` + strings.Repeat(")", 17), strings.Repeat("x", 4097), `active gt true`, `userName =~ "x"`} {
+	for _, raw := range []string{strings.Repeat("(", 17) + `active pr` + strings.Repeat(")", 17), strings.Repeat("x", 4097), `emails[` + strings.Repeat(`type eq "work" or `, 32) + `value pr]`, `active gt true`, `userName =~ "x"`} {
 		if _, err := (&SQLFilter{}).Compile(raw, "document"); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
@@ -49,5 +52,70 @@ func TestMultivalueProjectionAndPatch(t *testing.T) {
 	}
 	if current["emails"].([]any)[0].(map[string]any)["type"] != "home" {
 		t.Fatal("mutated original")
+	}
+}
+
+func TestNullAttributeMembershipRespectsResourceSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		schema     string
+		expression string
+		scope      []string
+		defined    bool
+	}{
+		{"common-user", UserSchema, "externalId eq null", nil, true},
+		{"common-group", GroupSchema, "externalId eq null", nil, true},
+		{"user-subattribute", UserSchema, "name.givenName eq null", nil, true},
+		{"user-attribute-on-group", GroupSchema, "userName eq null", nil, false},
+		{"group-attribute", GroupSchema, "members eq null", nil, true},
+		{"group-attribute-on-user", UserSchema, "members eq null", nil, false},
+		{"unknown-user-attribute", UserSchema, "undeclared eq null", nil, false},
+		{"unknown-group-attribute", GroupSchema, "undeclared eq null", nil, false},
+		{"qualified-user", UserSchema, UserSchema + ":externalId eq null", nil, true},
+		{"wrong-core-schema", UserSchema, GroupSchema + ":externalId eq null", nil, false},
+		{"user-extension", UserSchema, UserExtension + ":role eq null", nil, true},
+		{"user-access-scope", UserSchema, UserExtension + ":accessScope eq null", nil, true},
+		{"group-extension-role", GroupSchema, GroupExtension + ":role eq null", nil, true},
+		{"group-access-scope", GroupSchema, GroupExtension + ":accessScope eq null", nil, true},
+		{"group-projects", GroupSchema, GroupExtension + ":projects eq null", nil, true},
+		{"group-extension", GroupSchema, GroupExtension + ":projects.value eq null", nil, true},
+		{"group-project-role", GroupSchema, GroupExtension + ":projects.role eq null", nil, true},
+		{"wrong-extension", UserSchema, GroupExtension + ":projects.value eq null", nil, false},
+		{"value-path-child", UserSchema, "primary eq null", []string{"emails"}, true},
+		{"unknown-value-path-child", UserSchema, "undeclared eq null", []string{"emails"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := ParseFilter(tc.expression)
+			if err != nil {
+				t.Fatal(err)
+			}
+			comparison, ok := parsed.(*filter.AttributeExpression)
+			if !ok {
+				t.Fatalf("expected attribute comparison, got %T", parsed)
+			}
+			compiler := &SQLFilter{Schema: tc.schema}
+			if got := compiler.definedAttribute(comparison.AttributePath, tc.scope); got != tc.defined {
+				t.Fatalf("%s defined=%v, want %v", tc.expression, got, tc.defined)
+			}
+		})
+	}
+}
+
+func TestSchemaFiltersPreserveValuesAndRejectInvalidNullComparisons(t *testing.T) {
+	for _, schema := range []string{"", UserSchema} {
+		for _, value := range []string{"O'Reilly", "x' OR true --"} {
+			compiler := SQLFilter{Schema: schema}
+			if _, err := compiler.Compile(`externalId eq "`+value+`"`, "document"); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(compiler.Args, any(value)) {
+				t.Fatalf("filter lost comparison value %q", value)
+			}
+		}
+		for _, operator := range []string{"gt", "ge", "lt", "le", "co", "sw", "ew"} {
+			if _, err := (&SQLFilter{Schema: schema}).Compile("externalId "+operator+" null", "document"); err == nil {
+				t.Fatalf("accepted invalid null comparison %s", operator)
+			}
+		}
 	}
 }

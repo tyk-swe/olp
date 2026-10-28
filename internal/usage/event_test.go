@@ -337,6 +337,22 @@ func marshalForTest(t *testing.T, value any) []byte {
 	return encoded
 }
 
+func TestDecodeAcceptsPassthroughOperation(t *testing.T) {
+	event := metadataEvent()
+	event.Operation = "passthrough"
+	payload, err := Encode(event)
+	if err != nil {
+		t.Fatalf("encode passthrough: %v", err)
+	}
+	decoded, err := Decode(payload)
+	if err != nil || decoded.Operation != "passthrough" {
+		t.Fatalf("decode passthrough: event=%v err=%v", decoded, err)
+	}
+	if !validOperation("passthrough") {
+		t.Fatal("pricing vocabulary rejects passthrough")
+	}
+}
+
 func TestDecodeAcceptsRetainedOperations(t *testing.T) {
 	for _, operation := range []string{"fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval", "skill", "context_cache"} {
 		event := metadataEvent()
