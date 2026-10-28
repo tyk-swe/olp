@@ -3367,6 +3367,48 @@ func (e MCPGrantIdentityKind) Valid() bool {
 	}
 }
 
+// Defines values for MCPIdentityDecisionHook.
+const (
+	McpEndUserPermission MCPIdentityDecisionHook = "mcp_end_user_permission"
+	McpJwtSigner         MCPIdentityDecisionHook = "mcp_jwt_signer"
+	McpSecurity          MCPIdentityDecisionHook = "mcp_security"
+)
+
+// Valid indicates whether the value is a known member of the MCPIdentityDecisionHook enum.
+func (e MCPIdentityDecisionHook) Valid() bool {
+	switch e {
+	case McpEndUserPermission:
+		return true
+	case McpJwtSigner:
+		return true
+	case McpSecurity:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPIdentityDecisionOutcome.
+const (
+	MCPIdentityDecisionOutcomeDenied        MCPIdentityDecisionOutcome = "denied"
+	MCPIdentityDecisionOutcomeNotConfigured MCPIdentityDecisionOutcome = "not_configured"
+	MCPIdentityDecisionOutcomePassed        MCPIdentityDecisionOutcome = "passed"
+)
+
+// Valid indicates whether the value is a known member of the MCPIdentityDecisionOutcome enum.
+func (e MCPIdentityDecisionOutcome) Valid() bool {
+	switch e {
+	case MCPIdentityDecisionOutcomeDenied:
+		return true
+	case MCPIdentityDecisionOutcomeNotConfigured:
+		return true
+	case MCPIdentityDecisionOutcomePassed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
 	N20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
@@ -7774,9 +7816,10 @@ type ConfigurationMCPServer struct {
 	CatalogDigest string `json:"catalog_digest"`
 
 	// CredentialRef Logical destination sealed bearer binding; never source credential bytes.
-	CredentialRef *string `json:"credential_ref,omitempty"`
-	Enabled       bool    `json:"enabled"`
-	Endpoint      *string `json:"endpoint,omitempty"`
+	CredentialRef *string                                       `json:"credential_ref,omitempty"`
+	Delegation    nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
+	Enabled       bool                                          `json:"enabled"`
+	Endpoint      *string                                       `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
@@ -8506,9 +8549,13 @@ type CreateMCPServerRequest struct {
 	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
 
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
-	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Enabled    bool                      `json:"enabled"`
-	Endpoint   *string                   `json:"endpoint,omitempty"`
+	Credential nullable.Nullable[string]                     `json:"credential,omitempty"`
+	Delegation nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
+
+	// DelegationPrivateKey PKCS8 Ed25519 private signing key. Omit to retain the existing local key.
+	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
+	Enabled              bool                      `json:"enabled"`
+	Endpoint             *string                   `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`
@@ -9580,6 +9627,12 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// MCPDelegationConfiguration defines model for MCPDelegationConfiguration.
+type MCPDelegationConfiguration struct {
+	Audience string `json:"audience"`
+	Issuer   string `json:"issuer"`
+}
+
 // MCPExecutableFile defines model for MCPExecutableFile.
 type MCPExecutableFile struct {
 	Digest    string `json:"digest"`
@@ -9679,6 +9732,18 @@ type MCPGrantIdentity struct {
 // MCPGrantIdentityKind defines model for MCPGrantIdentity.Kind.
 type MCPGrantIdentityKind string
 
+// MCPIdentityDecision defines model for MCPIdentityDecision.
+type MCPIdentityDecision struct {
+	Hook    MCPIdentityDecisionHook    `json:"hook"`
+	Outcome MCPIdentityDecisionOutcome `json:"outcome"`
+}
+
+// MCPIdentityDecisionHook defines model for MCPIdentityDecision.Hook.
+type MCPIdentityDecisionHook string
+
+// MCPIdentityDecisionOutcome defines model for MCPIdentityDecision.Outcome.
+type MCPIdentityDecisionOutcome string
+
 // MCPOAuthConfiguration Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
 type MCPOAuthConfiguration struct {
 	Audience                    string   `json:"audience"`
@@ -9715,14 +9780,15 @@ type MCPServerListResponse struct {
 // MCPServerResponse defines model for MCPServerResponse.
 type MCPServerResponse struct {
 	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
-	CallsPerMinute int                  `json:"calls_per_minute"`
-	Catalog        MCPRegisteredCatalog `json:"catalog"`
-	CertifiedAt    time.Time            `json:"certified_at"`
-	Enabled        bool                 `json:"enabled"`
-	Endpoint       string               `json:"endpoint"`
-	Etag           openapi_types.UUID   `json:"etag"`
-	HasCredential  bool                 `json:"has_credential"`
-	Id             openapi_types.UUID   `json:"id"`
+	CallsPerMinute int                                           `json:"calls_per_minute"`
+	Catalog        MCPRegisteredCatalog                          `json:"catalog"`
+	CertifiedAt    time.Time                                     `json:"certified_at"`
+	Delegation     nullable.Nullable[MCPDelegationConfiguration] `json:"delegation"`
+	Enabled        bool                                          `json:"enabled"`
+	Endpoint       string                                        `json:"endpoint"`
+	Etag           openapi_types.UUID                            `json:"etag"`
+	HasCredential  bool                                          `json:"has_credential"`
+	Id             openapi_types.UUID                            `json:"id"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency int    `json:"max_concurrency"`
@@ -9756,11 +9822,12 @@ type MCPServerResponseTransport string
 // MCPServerRevisionResponse defines model for MCPServerRevisionResponse.
 type MCPServerRevisionResponse struct {
 	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
-	CallsPerMinute int                  `json:"calls_per_minute"`
-	Catalog        MCPRegisteredCatalog `json:"catalog"`
-	CertifiedAt    time.Time            `json:"certified_at"`
-	Endpoint       string               `json:"endpoint"`
-	Id             openapi_types.UUID   `json:"id"`
+	CallsPerMinute int                                           `json:"calls_per_minute"`
+	Catalog        MCPRegisteredCatalog                          `json:"catalog"`
+	CertifiedAt    time.Time                                     `json:"certified_at"`
+	Delegation     nullable.Nullable[MCPDelegationConfiguration] `json:"delegation"`
+	Endpoint       string                                        `json:"endpoint"`
+	Id             openapi_types.UUID                            `json:"id"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency int `json:"max_concurrency"`
@@ -9787,13 +9854,14 @@ type MCPServerRevisionResponse struct {
 // MCPServerSummary defines model for MCPServerSummary.
 type MCPServerSummary struct {
 	// CallsPerMinute Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits.
-	CallsPerMinute int                `json:"calls_per_minute"`
-	CertifiedAt    time.Time          `json:"certified_at"`
-	Enabled        bool               `json:"enabled"`
-	Endpoint       string             `json:"endpoint"`
-	Etag           openapi_types.UUID `json:"etag"`
-	HasCredential  bool               `json:"has_credential"`
-	Id             openapi_types.UUID `json:"id"`
+	CallsPerMinute int                                           `json:"calls_per_minute"`
+	CertifiedAt    time.Time                                     `json:"certified_at"`
+	Delegation     nullable.Nullable[MCPDelegationConfiguration] `json:"delegation"`
+	Enabled        bool                                          `json:"enabled"`
+	Endpoint       string                                        `json:"endpoint"`
+	Etag           openapi_types.UUID                            `json:"etag"`
+	HasCredential  bool                                          `json:"has_credential"`
+	Id             openapi_types.UUID                            `json:"id"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency int    `json:"max_concurrency"`
@@ -9866,6 +9934,7 @@ type MCPToolCallResponse struct {
 	DispatchId         openapi_types.UUID            `json:"dispatch_id"`
 	GuardrailDecisions []GuardrailEvidence           `json:"guardrail_decisions"`
 	Id                 openapi_types.UUID            `json:"id"`
+	IdentityDecisions  []MCPIdentityDecision         `json:"identity_decisions"`
 	InputDigest        string                        `json:"input_digest"`
 	IsError            bool                          `json:"is_error"`
 	ObservedCharge     string                        `json:"observed_charge"`
@@ -14330,9 +14399,13 @@ type UpdateMCPServerRequest struct {
 	CallsPerMinute *int `json:"calls_per_minute,omitempty"`
 
 	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
-	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Enabled    bool                      `json:"enabled"`
-	Endpoint   *string                   `json:"endpoint,omitempty"`
+	Credential nullable.Nullable[string]                     `json:"credential,omitempty"`
+	Delegation nullable.Nullable[MCPDelegationConfiguration] `json:"delegation,omitempty"`
+
+	// DelegationPrivateKey PKCS8 Ed25519 private signing key. Omit to retain the existing local key.
+	DelegationPrivateKey nullable.Nullable[string] `json:"delegation_private_key,omitempty"`
+	Enabled              bool                      `json:"enabled"`
+	Endpoint             *string                   `json:"endpoint,omitempty"`
 
 	// MaxConcurrency Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits.
 	MaxConcurrency *int   `json:"max_concurrency,omitempty"`

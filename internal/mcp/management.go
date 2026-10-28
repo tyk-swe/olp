@@ -20,6 +20,7 @@ type Management struct {
 }
 
 type ToolCall struct {
+	IdentityDecisions  []IdentityDecision    `json:"identity_decisions"`
 	ID                 string                `json:"id"`
 	DispatchID         string                `json:"dispatch_id"`
 	APIKeyID           string                `json:"api_key_id"`
@@ -50,7 +51,7 @@ type ToolCall struct {
 	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions"`
 }
 
-const toolCallColumns = "c.id::text,c.dispatch_id::text,c.api_key_id::text,c.project_id::text,c.toolset_id::text,c.toolset_revision_id::text,c.server_id::text,c.server_revision_id::text,c.tool_alias,c.input_digest,c.result_digest,c.status,c.is_error,c.started_at,c.completed_at,c.created_at,c.call_digest,d.state,d.cost_bound::text,d.charge_bound::text,d.observed_cost::text,d.observed_charge::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text,c.unit_price::text,c.pricing_state,c.currency,c.guardrail_decisions"
+const toolCallColumns = "c.id::text,c.dispatch_id::text,c.api_key_id::text,c.project_id::text,c.toolset_id::text,c.toolset_revision_id::text,c.server_id::text,c.server_revision_id::text,c.tool_alias,c.input_digest,c.result_digest,c.status,c.is_error,c.started_at,c.completed_at,c.created_at,c.call_digest,d.state,d.cost_bound::text,d.charge_bound::text,d.observed_cost::text,d.observed_charge::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text,c.unit_price::text,c.pricing_state,c.currency,c.guardrail_decisions,c.identity_decisions"
 
 const toolCallFrom = " FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id"
 
@@ -60,7 +61,7 @@ type toolCallRow interface {
 
 func scanToolCall(row toolCallRow) (ToolCall, error) {
 	var call ToolCall
-	err := row.Scan(&call.ID, &call.DispatchID, &call.APIKeyID, &call.ProjectID, &call.ToolsetID, &call.ToolsetRevisionID, &call.ServerID, &call.ServerRevisionID, &call.ToolAlias, &call.InputDigest, &call.ResultDigest, &call.Status, &call.IsError, &call.StartedAt, &call.CompletedAt, &call.CreatedAt, &call.CallDigest, &call.DebitState, &call.CostBound, &call.ChargeBound, &call.ObservedCost, &call.ObservedCharge, &call.RemainingCost, &call.RemainingCharge, &call.UnitPrice, &call.PricingState, &call.Currency, &call.GuardrailDecisions)
+	err := row.Scan(&call.ID, &call.DispatchID, &call.APIKeyID, &call.ProjectID, &call.ToolsetID, &call.ToolsetRevisionID, &call.ServerID, &call.ServerRevisionID, &call.ToolAlias, &call.InputDigest, &call.ResultDigest, &call.Status, &call.IsError, &call.StartedAt, &call.CompletedAt, &call.CreatedAt, &call.CallDigest, &call.DebitState, &call.CostBound, &call.ChargeBound, &call.ObservedCost, &call.ObservedCharge, &call.RemainingCost, &call.RemainingCharge, &call.UnitPrice, &call.PricingState, &call.Currency, &call.GuardrailDecisions, &call.IdentityDecisions)
 	if call.GuardrailDecisions == nil {
 		call.GuardrailDecisions = []guardrails.Evidence{}
 	}

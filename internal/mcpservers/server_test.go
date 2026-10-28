@@ -77,7 +77,7 @@ func TestValidateRefusesMalformedToolPricingAndLimits(t *testing.T) {
 
 func TestDefinitionCarriesEffectivePricingAndLimits(t *testing.T) {
 	in := pricingInput()
-	next := definitionFromInput(in, nil)
+	next := definitionFromInput(in, nil, nil)
 	if next.UnitPrice != nil {
 		t.Fatalf("unpriced input gained a price: %v", *next.UnitPrice)
 	}
@@ -92,7 +92,7 @@ func TestDefinitionCarriesEffectivePricingAndLimits(t *testing.T) {
 	in.UnitPrice = &price
 	in.ToolPrices = map[string]string{"lookup": "0.5"}
 	in.CallsPerMinute = &rate
-	next = definitionFromInput(in, nil)
+	next = definitionFromInput(in, nil, nil)
 	if next.UnitPrice == nil || *next.UnitPrice != price || next.ToolPrices["lookup"] != "0.5" || next.CallsPerMinute != rate {
 		t.Fatalf("configured pricing was not carried: %+v", next)
 	}
@@ -134,24 +134,24 @@ func TestMergeAbsentPricingAndLimitsPreservesAndClears(t *testing.T) {
 	if err := absent.UnmarshalJSON([]byte(`{"name":"x","endpoint":"http://127.0.0.1/mcp","enabled":true}`)); err != nil {
 		t.Fatal(err)
 	}
-	mergeAbsentPricingAndLimits(&absent, previous)
-	if absent.UnitPrice == nil || *absent.UnitPrice != price || absent.ToolPrices["lookup"] != "0.5" ||
-		absent.CallsPerMinute == nil || *absent.CallsPerMinute != 120 || absent.PerKeyMaxConcurrency == nil || *absent.PerKeyMaxConcurrency != 2 {
-		t.Fatalf("absent fields did not preserve current pricing and limits: %+v", absent)
+	mergedAbsent := mergeAbsentPricingAndLimits(absent, previous)
+	if mergedAbsent.UnitPrice == nil || *mergedAbsent.UnitPrice != price || mergedAbsent.ToolPrices["lookup"] != "0.5" ||
+		mergedAbsent.CallsPerMinute == nil || *mergedAbsent.CallsPerMinute != 120 || mergedAbsent.PerKeyMaxConcurrency == nil || *mergedAbsent.PerKeyMaxConcurrency != 2 {
+		t.Fatalf("absent fields did not preserve current pricing and limits: %+v", mergedAbsent)
 	}
 	var cleared Input
 	if err := cleared.UnmarshalJSON([]byte(`{"name":"x","endpoint":"http://127.0.0.1/mcp","enabled":true,"unit_price":null,"calls_per_minute":null}`)); err != nil {
 		t.Fatal(err)
 	}
-	mergeAbsentPricingAndLimits(&cleared, previous)
-	if cleared.UnitPrice != nil {
-		t.Fatalf("null unit price did not clear the price: %+v", cleared)
+	mergedCleared := mergeAbsentPricingAndLimits(cleared, previous)
+	if mergedCleared.UnitPrice != nil {
+		t.Fatalf("null unit price did not clear the price: %+v", mergedCleared)
 	}
-	if cleared.CallsPerMinute == nil || *cleared.CallsPerMinute != routing.DefaultToolCallsPerMinute {
-		t.Fatalf("null limit did not reset to the default: %+v", cleared)
+	if mergedCleared.CallsPerMinute == nil || *mergedCleared.CallsPerMinute != routing.DefaultToolCallsPerMinute {
+		t.Fatalf("null limit did not reset to the default: %+v", mergedCleared)
 	}
-	if cleared.MaxConcurrency == nil || *cleared.MaxConcurrency != 4 {
-		t.Fatalf("absent limit beside explicit nulls was not preserved: %+v", cleared)
+	if mergedCleared.MaxConcurrency == nil || *mergedCleared.MaxConcurrency != 4 {
+		t.Fatalf("absent limit beside explicit nulls was not preserved: %+v", mergedCleared)
 	}
 }
 

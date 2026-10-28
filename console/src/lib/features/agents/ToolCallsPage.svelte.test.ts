@@ -41,6 +41,11 @@ it('keeps unresolved exposure separate from observed spend and refreshes settlem
     unit_price: '0.25',
     pricing_state: 'priced',
     currency: 'USD',
+    identity_decisions: [
+      { hook: 'mcp_security', outcome: 'passed' },
+      { hook: 'mcp_end_user_permission', outcome: 'passed' },
+      { hook: 'mcp_jwt_signer', outcome: 'passed' }
+    ],
     guardrail_decisions: []
   };
   vi.mocked(projectsApi.listProjects).mockResolvedValue([]);
@@ -69,6 +74,9 @@ it('keeps unresolved exposure separate from observed spend and refreshes settlem
       host.querySelector('[aria-label="Observed cost and charge"]')?.textContent
     ).toBe('0 / 0');
     expect(host.textContent).toContain('outcome unknown');
+    expect(host.textContent).toContain('mcp_security: passed');
+    expect(host.textContent).toContain('mcp_end_user_permission: passed');
+    expect(host.textContent).toContain('mcp_jwt_signer: passed');
   });
   vi.mocked(api.listToolCalls).mockResolvedValue({
     items: [

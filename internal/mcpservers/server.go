@@ -24,6 +24,8 @@ type Server struct {
 	Egress      *egress.Policy
 }
 type Definition struct {
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
+	DelegationKeyID      *string                  `json:"-"`
 	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
 	OAuth                *routing.MCPOAuth        `json:"oauth"`
 	ID                   string                   `json:"id"`
@@ -48,6 +50,8 @@ type Definition struct {
 	CredentialID         *string                  `json:"-"`
 }
 type Input struct {
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
+	DelegationPrivateKey *string                  `json:"delegation_private_key,omitempty"`
 	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
 	OAuth                *routing.MCPOAuth        `json:"oauth"`
 	present              map[string]bool          `json:"-"`
@@ -65,12 +69,12 @@ type Input struct {
 	PerKeyMaxConcurrency *int64                   `json:"per_key_max_concurrency"`
 }
 
-const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.stdio"
+const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.stdio,v.delegation,s.delegation_key_id::text"
 const joined = " FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id"
 
 func scan(row pgx.Row) (*Definition, error) {
 	d := &Definition{Catalog: &Catalog{}}
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth, &d.Stdio)
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth, &d.Stdio, &d.Delegation, &d.DelegationKeyID)
 	d.HasCredential = d.CredentialID != nil
 	if d.ToolPrices == nil {
 		d.ToolPrices = map[string]string{}
@@ -116,9 +120,9 @@ func cloneToolPrices(values map[string]string) map[string]string {
 	return out
 }
 
-func definitionFromInput(in Input, catalog *Catalog) *Definition {
+func definitionFromInput(in Input, catalog *Catalog, signingKeyID *string) *Definition {
 	return &Definition{
-		OAuth: in.OAuth.Clone(), Stdio: in.Stdio.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
+		DelegationKeyID: signingKeyID, Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), Stdio: in.Stdio.Clone(), Name: in.Name, Transport: in.Transport, Endpoint: in.Endpoint, Enabled: *in.Enabled, Catalog: catalog,
 		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute:       routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -188,6 +192,7 @@ func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) 
 }
 
 type revisionResponse struct {
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
 	Stdio                *routing.MCPStdioBinding `json:"stdio"`
 	OAuth                *routing.MCPOAuth        `json:"oauth"`
 	ID                   string                   `json:"id"`
@@ -226,18 +231,22 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	var certified time.Time
 	var unitPrice *string
 	var oauth *routing.MCPOAuth
+	var delegation *routing.MCPDelegation
 	var stdio *routing.MCPStdioBinding
 	toolPrices := map[string]string{}
-	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices,oauth,stdio FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices, &oauth, &stdio)
+	err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices,oauth,stdio,delegation FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices, &oauth, &stdio, &delegation)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if toolPrices == nil {
 		toolPrices = map[string]string{}
 	}
-	return access.Detail(revisionResponse{Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
+	return access.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
 }
 func Validate(in *Input, policy *egress.Policy) error {
+	if err := validateDelegation(in); err != nil {
+		return err
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	if err := access.ValidText("name", in.Name, 100); err != nil {
 		return err
@@ -384,30 +393,42 @@ func definitionTransport(in Input, previous *Definition) routing.MCPTransport {
 	return routing.MCPTransport(in.Transport)
 }
 
-func mergeAbsentPricingAndLimits(in *Input, previous *Definition) {
-	if !in.Present("oauth") {
-		in.OAuth = previous.OAuth.Clone()
+func inheritedInputField[T any](in Input, field string, supplied, current T) T {
+	if in.Present(field) {
+		return supplied
 	}
-	if !in.Present("unit_price") {
-		in.UnitPrice = clonePrice(previous.UnitPrice)
-	}
-	if !in.Present("tool_prices") {
-		in.ToolPrices = cloneToolPrices(previous.ToolPrices)
-	}
-	merge := func(field string, value **int64, current, fallback int64) {
-		switch {
-		case !in.Present(field):
-			preserved := current
-			*value = &preserved
-		case *value == nil:
-			reset := fallback
-			*value = &reset
+	return current
+}
+
+func mergeAbsentPricingAndLimits(in Input, previous *Definition) Input {
+	limit := func(field string, value *int64, current, fallback int64) *int64 {
+		if !in.Present(field) {
+			return &current
 		}
+		if value == nil {
+			return &fallback
+		}
+		return value
 	}
-	merge("calls_per_minute", &in.CallsPerMinute, previous.CallsPerMinute, routing.DefaultToolCallsPerMinute)
-	merge("max_concurrency", &in.MaxConcurrency, previous.MaxConcurrency, routing.DefaultToolMaxConcurrency)
-	merge("per_key_calls_per_minute", &in.PerKeyCallsPerMinute, previous.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute)
-	merge("per_key_max_concurrency", &in.PerKeyMaxConcurrency, previous.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency)
+	return Input{
+		Delegation:           inheritedInputField(in, "delegation", in.Delegation, previous.Delegation).Clone(),
+		OAuth:                inheritedInputField(in, "oauth", in.OAuth, previous.OAuth).Clone(),
+		UnitPrice:            clonePrice(inheritedInputField(in, "unit_price", in.UnitPrice, previous.UnitPrice)),
+		ToolPrices:           cloneToolPrices(inheritedInputField(in, "tool_prices", in.ToolPrices, previous.ToolPrices)),
+		CallsPerMinute:       limit("calls_per_minute", in.CallsPerMinute, previous.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		MaxConcurrency:       limit("max_concurrency", in.MaxConcurrency, previous.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		PerKeyCallsPerMinute: limit("per_key_calls_per_minute", in.PerKeyCallsPerMinute, previous.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		PerKeyMaxConcurrency: limit("per_key_max_concurrency", in.PerKeyMaxConcurrency, previous.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
+		DelegationPrivateKey: in.DelegationPrivateKey,
+		Stdio:                in.Stdio,
+		present:              in.present,
+		ProjectID:            in.ProjectID,
+		Name:                 in.Name,
+		Transport:            in.Transport,
+		Endpoint:             in.Endpoint,
+		Enabled:              in.Enabled,
+		Credential:           in.Credential,
+	}
 }
 
 func samePrice(a, b *string) bool {
@@ -424,7 +445,7 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 	if in.Name != previous.Name || in.Endpoint != previous.Endpoint || *in.Enabled != previous.Enabled {
 		return false
 	}
-	if !reflect.DeepEqual(in.OAuth, previous.OAuth) || len(in.Credential) != 0 || !samePrice(in.UnitPrice, previous.UnitPrice) {
+	if !reflect.DeepEqual(in.Delegation, previous.Delegation) || in.DelegationPrivateKey != nil || !reflect.DeepEqual(in.OAuth, previous.OAuth) || len(in.Credential) != 0 || !samePrice(in.UnitPrice, previous.UnitPrice) {
 		return false
 	}
 	if len(in.ToolPrices) != len(previous.ToolPrices) {
@@ -444,18 +465,23 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 }
 
 func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bool) (access.Reply, error) {
-	var in Input
+	var decoded Input
 	if !retire {
-		if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
+		if err := access.DecodeUnique(r, &decoded, 64<<10); err != nil {
 			return access.Reply{}, err
 		}
+	}
+	in := func() Input {
+		if !retire && id != "" {
+			if current, loadErr := Load(r.Context(), s.Access.Pool, id, false); loadErr == nil {
+				return mergeAbsentPricingAndLimits(decoded, current)
+			}
+		}
+		return decoded
+	}()
+	if !retire {
 		if err := Validate(&in, s.Egress); err != nil {
 			return access.Reply{}, err
-		}
-		if id != "" {
-			if current, loadErr := Load(r.Context(), s.Access.Pool, id, false); loadErr == nil {
-				mergeAbsentPricingAndLimits(&in, current)
-			}
 		}
 	}
 	previous, replayed, err := s.preflight(r, in, id)
@@ -546,9 +572,13 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		}
 	} else if retire {
 		action = "mcp_server.retire"
-		_, err = tx.Exec(r.Context(), "UPDATE olp.mcp_servers SET enabled=false,retired_at=now(),credential_id=NULL,etag=$2 WHERE id=$1", id, etag)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.mcp_servers SET enabled=false,retired_at=now(),credential_id=NULL,delegation_key_id=NULL,etag=$2 WHERE id=$1", id, etag)
 	} else {
-		next := definitionFromInput(in, catalog)
+		signingID, signingErr := s.saveDelegationKey(r.Context(), tx, in, current)
+		if signingErr != nil {
+			return access.Reply{}, signingErr
+		}
+		next := definitionFromInput(in, catalog, signingID)
 		next.ID = id
 		if current == nil {
 			next.ProjectID = *in.ProjectID
@@ -584,6 +614,11 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	if current != nil && current.CredentialID != nil && (retire || len(in.Credential) != 0) {
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.CredentialID, secrets.MCPCredential); err != nil {
 			return access.Reply{}, err
+		}
+	}
+	if current != nil && current.DelegationKeyID != nil && (retire || in.Delegation == nil || in.DelegationPrivateKey != nil) {
+		if _, keyErr := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *current.DelegationKeyID, secrets.MCPDelegationSigning); keyErr != nil {
+			return access.Reply{}, keyErr
 		}
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "mcp_server", id, "success"); err != nil {

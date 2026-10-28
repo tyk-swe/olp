@@ -338,11 +338,11 @@ func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Res
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'guardrail_blocked',false,$12,$13,$14::numeric,$15,$16,$17)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions,identity_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'guardrail_blocked',false,$12,$13,$14::numeric,$15,$16,$17,$18)`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence)); err != nil {
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions)); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -354,12 +354,12 @@ func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Res
 }
 
 func insertAttemptTx(ctx context.Context, tx pgx.Tx, reservation *Reservation, evidence AttemptEvidence) error {
-	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::numeric,$18,$19,$20) ON CONFLICT(dispatch_id) DO UPDATE SET result_digest=EXCLUDED.result_digest,status=EXCLUDED.status,is_error=EXCLUDED.is_error,completed_at=EXCLUDED.completed_at,guardrail_decisions=EXCLUDED.guardrail_decisions WHERE mcp_tool_calls.status='dispatched'`,
+	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions,identity_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::numeric,$18,$19,$20,$21) ON CONFLICT(dispatch_id) DO UPDATE SET result_digest=EXCLUDED.result_digest,status=EXCLUDED.status,is_error=EXCLUDED.is_error,completed_at=EXCLUDED.completed_at,guardrail_decisions=EXCLUDED.guardrail_decisions,identity_decisions=CASE WHEN jsonb_array_length(EXCLUDED.identity_decisions)=0 THEN mcp_tool_calls.identity_decisions ELSE EXCLUDED.identity_decisions END WHERE mcp_tool_calls.status='dispatched'`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.ResultDigest, string(evidence.Status), evidence.IsError,
 		evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence))
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions))
 	return err
 }
 
