@@ -17,6 +17,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 var ErrTransport = errors.New("upstream MCP transport failed")
@@ -27,7 +28,7 @@ func SupportedProtocols() []string { return slices.Clone(protocols) }
 type TransportOptions struct {
 	ClientName string
 	Timeout    time.Duration
-	Transport  string
+	Transport  routing.MCPTransport
 }
 
 type ListedTool struct {

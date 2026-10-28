@@ -11,9 +11,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
-const LegacyProtocol = "2024-11-05"
+const LegacyProtocol = routing.MCPLegacyProtocol
 
 type legacyTransport struct {
 	connection sdkmcp.Connection
@@ -50,14 +51,14 @@ func (t legacyRoundTripper) CloseIdleConnections() {
 	}
 }
 
-func requestedTransportProtocol(transport string) string {
+func requestedTransportProtocol(transport routing.MCPTransport) string {
 	if transport == "sse" {
 		return LegacyProtocol
 	}
 	return protocols[0]
 }
 
-func transportProtocolAllowed(transport, protocol string) bool {
+func transportProtocolAllowed(transport routing.MCPTransport, protocol string) bool {
 	if transport == "sse" {
 		return protocol == LegacyProtocol
 	}

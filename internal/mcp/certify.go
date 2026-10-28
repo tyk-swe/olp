@@ -74,7 +74,7 @@ func (s *Server) certifyServer(ctx context.Context, tool routing.MCPToolsetTool)
 	if credential != nil {
 		defer clear(credential)
 	}
-	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-certifier", Timeout: initializeCertifyTimeout})
+	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-certifier", Timeout: initializeCertifyTimeout, Transport: tool.Transport})
 	if err != nil {
 		return certificationInvalid
 	}

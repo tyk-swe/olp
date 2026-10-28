@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,7 +21,130 @@ import (
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
+
+type legacyConsumer struct {
+	client   *http.Client
+	endpoint string
+	session  string
+	scanner  *bufio.Scanner
+}
+
+func legacyData(t *testing.T, scanner *bufio.Scanner) string {
+	t.Helper()
+	for scanner.Scan() {
+		if value, ok := strings.CutPrefix(scanner.Text(), "data: "); ok {
+			return value
+		}
+	}
+	t.Fatalf("legacy stream ended before its next event: %v", scanner.Err())
+	return ""
+}
+
+func openLegacyConsumer(t *testing.T, server *Server) legacyConsumer {
+	t.Helper()
+	mux := http.NewServeMux()
+	server.Register(mux)
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/mcp/sse?toolset_id="+testToolset, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-key")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = response.Body.Close() })
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("legacy SSE open returned %d with %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	scanner := bufio.NewScanner(response.Body)
+	endpoint, err := request.URL.Parse(legacyData(t, scanner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return legacyConsumer{client: http.DefaultClient, endpoint: endpoint.String(), session: endpoint.Query().Get("session_id"), scanner: scanner}
+}
+
+func (c legacyConsumer) post(t *testing.T, body string) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, c.endpoint, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-key")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(response.Body)
+		t.Fatalf("legacy POST returned %d: %s", response.StatusCode, raw)
+	}
+}
+
+func (c legacyConsumer) receive(t *testing.T) rpcResponse {
+	t.Helper()
+	var body map[string]any
+	raw := legacyData(t, c.scanner)
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatal(err)
+	}
+	return rpcResponse{status: http.StatusOK, body: body, raw: raw}
+}
+
+func TestLegacyHTTPUsesSharedExecutionAndRefusesModernSessionMixing(t *testing.T) {
+	server, fx, ledger, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	legacy := openLegacyConsumer(t, server)
+	legacy.post(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
+	if rejected := legacy.receive(t); rejected.body["error"] == nil {
+		t.Fatal("legacy endpoint silently negotiated a modern protocol")
+	}
+	legacy.post(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}`)
+	if protocol := rpcResult(t, legacy.receive(t))["protocolVersion"]; protocol != "2024-11-05" {
+		t.Fatalf("legacy initialization negotiated %v", protocol)
+	}
+	legacy.post(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	legacy.post(t, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if tools, ok := rpcResult(t, legacy.receive(t))["tools"].([]any); !ok || len(tools) != 1 {
+		t.Fatalf("legacy listing did not return the pinned tool: %v", tools)
+	}
+	const arguments = `{ "query" : "hel\u006co" }`
+	legacy.post(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"`+alias()+`","arguments":`+arguments+`,"_meta":{"olp.call_id":"legacy-unit-call"}}}`)
+	if result := rpcResult(t, legacy.receive(t)); result["isError"] == true || fx.calls.Load() != 1 || len(ledger.evidence) != 1 || ledger.evidence[0].Status != StatusSucceeded {
+		t.Fatalf("legacy call did not execute and settle once: %v calls=%d", result, fx.calls.Load())
+	}
+	if ledger.reserved[0].InputDigest != hex.EncodeToString(testAuthKey().Digest(secrets.ToolInputDigest, arguments)) {
+		t.Fatal("legacy transport changed the argument bytes used for call identity")
+	}
+	modern := rpcRequest(t, server, "test-key", legacy.session, "2024-11-05", "/mcp", `{"jsonrpc":"2.0","id":4,"method":"tools/list"}`)
+	if modern.status != http.StatusBadRequest {
+		t.Fatalf("modern endpoint accepted a legacy session: %d %v", modern.status, modern.body)
+	}
+	modernID := openSession(t, server, "test-key", latestProtocol())
+	rejected := rpcRequest(t, server, "test-key", "", "", "/mcp/messages?session_id="+modernID, `{"jsonrpc":"2.0","id":5,"method":"tools/list"}`)
+	if rejected.status != http.StatusBadRequest {
+		t.Fatalf("legacy endpoint accepted a modern session: %d %v", rejected.status, rejected.body)
+	}
+	other, _, _, _, _ := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	other.Sessions = server.Sessions
+	absent := rpcRequest(t, other, "test-key", "", "", "/mcp/messages?session_id="+legacy.session, `{"jsonrpc":"2.0","id":5,"method":"tools/list"}`)
+	if absent.status != http.StatusNotFound {
+		t.Fatalf("another replica accepted a request without its live stream: %d %v", absent.status, absent.body)
+	}
+	rt.revoked.Store(true)
+	legacy.post(t, sessionCallBody(6, "legacy-revoked-call", "hello"))
+	if response := legacy.receive(t); response.body["error"] == nil || fx.calls.Load() != 1 {
+		t.Fatalf("legacy call ignored current authority: %v calls=%d", response.body, fx.calls.Load())
+	}
+}
 
 func latestProtocol() string { return mcpservers.SupportedProtocols()[0] }
 
