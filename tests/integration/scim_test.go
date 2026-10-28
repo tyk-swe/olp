@@ -226,6 +226,63 @@ func TestSCIMNullFiltersMatchUnassignedDefinedAttributes(t *testing.T) {
 	}
 }
 
+func TestSCIMValuePathCoreSchemaQualification(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	type email struct {
+		Value string `json:"value"`
+		Type  string `json:"type,omitempty"`
+	}
+	create := func(name, emailType string) string {
+		body := struct {
+			Schemas  []string `json:"schemas"`
+			UserName string   `json:"userName"`
+			Emails   []email  `json:"emails"`
+		}{[]string{scim.UserSchema}, name + "@example.com", []email{{name + "@example.com", emailType}}}
+		return scimCall(t, h, token, "POST", "/scim/v2/Users", body, "", 201)["id"].(string)
+	}
+	ids := []string{create("missing-type", ""), create("assigned-type", "work")}
+	for _, method := range []string{"GET", "POST"} {
+		for _, prefix := range []string{"", scim.UserSchema + ":", scim.GroupSchema + ":"} {
+			for _, tc := range []struct {
+				predicate string
+				want      []string
+			}{
+				{"type eq null", ids[:1]},
+				{"type ne null", ids[1:]},
+				{`type eq "work"`, ids[1:]},
+				{"undeclared eq null", nil},
+			} {
+				filter := fmt.Sprintf(`(id eq "%s" or id eq "%s") and %semails[%s]`, ids[0], ids[1], prefix, tc.predicate)
+				request := map[string]struct {
+					path string
+					body any
+				}{
+					"GET":  {"/scim/v2/Users?filter=" + url.QueryEscape(filter), nil},
+					"POST": {"/scim/v2/Users/.search", map[string]any{"schemas": []string{scim.SearchSchema}, "filter": filter}},
+				}[method]
+				if prefix == scim.GroupSchema+":" {
+					result := scimCall(t, h, token, method, request.path, request.body, "", 400)
+					if result["scimType"] != "invalidFilter" {
+						t.Fatalf("%s %s: %v", method, filter, result)
+					}
+					continue
+				}
+				result := scimCall(t, h, token, method, request.path, request.body, "", 200)
+				resources := result["Resources"].([]any)
+				if result["totalResults"] != float64(len(tc.want)) || len(resources) != len(tc.want) {
+					t.Fatalf("%s %s: %v", method, filter, result)
+				}
+				for _, resource := range resources {
+					if !slices.Contains(tc.want, resource.(map[string]any)["id"].(string)) {
+						t.Fatalf("%s matched wrong resource: %v", filter, resource)
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestSCIMSDKConditionalWriteRoundTrip(t *testing.T) {
 	h := newAccessHarness(t)
 	token := scimToken(h, h.owner(), []string{"access"})
