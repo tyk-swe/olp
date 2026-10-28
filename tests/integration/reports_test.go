@@ -449,7 +449,14 @@ func TestExplicitCardPricesReserveInstallationCurrency(t *testing.T) {
 	for _, ordinaryFirst := range []bool{false, true} {
 		t.Run(fmt.Sprint("ordinary-first-", ordinaryFirst), func(t *testing.T) {
 			f := repSetup(t)
-			ordinary := repPrice("openai", "currency-model", "generation")
+
+			price := func(model, currency string) usage.Price {
+				return usage.Price{ProviderKind: "openai", Model: model, Operation: "generation", Currency: currency, InputPerMillion: acctPtr("1.500000"), OutputPerMillion: acctPtr("3.000000")}
+			}
+			ordinary := price("currency-model", map[bool]string{false: "USD", true: "EUR"}[ordinaryFirst])
+			publish := func(price usage.Price, key string, want int) map[string]any {
+				return f.h.want(f.Owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": []usage.Price{price}}, idem(key), want)
+			}
 			if ordinaryFirst {
 				ordinary["currency"] = "EUR"
 			}
@@ -463,19 +470,17 @@ func TestExplicitCardPricesReserveInstallationCurrency(t *testing.T) {
 			explicit := map[string]any{"provider_kind": "openai", "model": "currency-model", "operation": "generation", "input_per_million": "1", "output_per_million": "1"}
 			revision := f.h.want(f.Owner, "POST", "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{"markup": "1", "prices": []any{explicit}}, idem("currency-card-revision"), 201)
 			currency := revision["prices"].([]any)[0].(map[string]any)["currency"].(string)
-			if !ordinaryFirst {
-				publish(ordinary, "ordinary-after-card", 201)
-			}
-			same := repPrice("openai", "same-currency-model", "generation")
-			same["currency"] = currency
-			publish(same, "same-currency", 201)
-			foreign := repPrice("openai", "conflicting-model", "generation")
-			foreign["currency"] = map[string]string{"USD": "EUR", "EUR": "USD"}[currency]
+			f.exec("UPDATE olp.rate_card_revisions SET effective_at=$2 WHERE id=$1::uuid", revision["id"], f.Base)
+			foreign := price("conflicting-model", map[string]string{"USD": "EUR", "EUR": "USD"}[currency])
 			before := f.count("SELECT count(*) FROM olp.pricing_revisions")
 			publish(foreign, "conflicting-currency", 422)
 			if after := f.count("SELECT count(*) FROM olp.pricing_revisions"); after != before {
 				t.Fatalf("conflicting revision stored: %d -> %d", before, after)
 			}
+			if !ordinaryFirst {
+				publish(ordinary, "ordinary-after-card", 201)
+			}
+			publish(price("same-currency-model", currency), "same-currency", 201)
 			quote := f.h.want(f.Owner, "POST", "/api/v1/pricing/quote", map[string]any{"provider_id": f.P1, "model": "currency-model", "operation": "generation", "usage": map[string]any{"input_tokens": 1000000, "output_tokens": 0}}, nil, 200)
 			if quote["currency"] != currency {
 				t.Fatalf("card currency %s differs from quote %v", currency, quote)
@@ -501,11 +506,10 @@ func TestMarkupOnlyCardLeavesCurrencyUnreserved(t *testing.T) {
 	f := repSetup(t)
 	card := f.h.want(f.Owner, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "installation"}}, idem("markup-card"), 201)
 	f.h.want(f.Owner, "POST", "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{"markup": "2"}, idem("markup-only"), 201)
-	price := repPrice("openai", "markup-model", "generation")
-	price["currency"] = "EUR"
+	price := usage.Price{ProviderKind: "openai", Model: "markup-model", Operation: "generation", Currency: "EUR", InputPerMillion: acctPtr("1.500000"), OutputPerMillion: acctPtr("3.000000")}
 	f.h.want(f.Owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": []any{price}}, idem("first-eur"), 201)
 	quote := f.h.want(f.Owner, "POST", "/api/v1/pricing/quote", map[string]any{"provider_id": f.P1, "model": "markup-model", "operation": "generation", "usage": map[string]any{"input_tokens": 1000000}}, nil, 200)
-	if quote["currency"] != price["currency"] {
+	if quote["currency"] != price.Currency {
 		t.Fatalf("markup-only card reserved another currency: %v", quote)
 	}
 }
