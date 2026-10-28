@@ -608,6 +608,7 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 		session            string
 		callResult         json.RawMessage
 		responseBytes      int
+		eventBytes         int
 		sse                bool
 		multiline          bool
 		discovery          bool
@@ -627,6 +628,8 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 		{name: "SSE result overflow", notificationStatus: 202, responseBytes: (1 << 20) + 1, sse: true},
 		{name: "JSON multiple content blocks", notificationStatus: 202, callResult: multiline, valid: true},
 		{name: "SSE multiline result", notificationStatus: 202, callResult: multiline, sse: true, multiline: true, valid: true},
+		{name: "discovery SSE event bound", notificationStatus: 202, eventBytes: 128 << 10, sse: true, multiline: true, discovery: true, valid: true},
+		{name: "discovery SSE event overflow", notificationStatus: 202, eventBytes: (128 << 10) + 1, sse: true, multiline: true, discovery: true},
 		{name: "discovery retains SSE bound", notificationStatus: 202, callResult: json.RawMessage(`{"tools":[{"name":"lookup","description":"` + strings.Repeat("x", 256<<10) + `","inputSchema":{"type":"object"}}]}`), sse: true, discovery: true},
 		{name: "missing content", notificationStatus: 202, callResult: json.RawMessage(`{}`)},
 		{name: "null result", notificationStatus: 202, callResult: json.RawMessage(`null`)},
@@ -666,6 +669,15 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 					return "", ""
 				}()
 				result := func() json.RawMessage {
+					if tc.eventBytes > 0 {
+						schema := json.RawMessage(`{"type":"object","description":"` + strings.Repeat("x", 63<<10) + `"}`)
+						catalog := func(description string) json.RawMessage {
+							encoded, _ := json.Marshal(ToolList{Tools: []ListedTool{{Name: "lookup", InputSchema: schema}, {Name: "lookup-extra", Description: description, InputSchema: schema}}})
+							return encoded
+						}
+						empty, _ := json.Marshal(transportBoundaryReply{Version: "2.0", ID: request.ID, Result: catalog("")})
+						return catalog(strings.Repeat("x", tc.eventBytes-len(empty)-2))
+					}
 					if tc.responseBytes == 0 {
 						return tc.callResult
 					}
@@ -682,7 +694,7 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 				}
 				body := func() string {
 					if tc.multiline {
-						return strings.ReplaceAll(string(encoded), "},{", "},\ndata: {")
+						return strings.ReplaceAll(strings.ReplaceAll(string(encoded), "},{", "},\ndata: {"), `,"result":`, ",\ndata: \"result\":")
 					}
 					return string(encoded)
 				}()
@@ -703,8 +715,12 @@ func TestTransportChecksNotificationStatusSessionAndResultBounds(t *testing.T) {
 			}
 			defer transport.Close(t.Context())
 			if tc.discovery {
-				if _, err := transport.ListTools(t.Context(), ""); err == nil {
-					t.Fatal("oversized discovery event accepted")
+				listed, err := transport.CertifyCatalog(t.Context())
+				if (err == nil) != tc.valid {
+					t.Fatalf("discovery accepted=%v, expected %v: %v", err == nil, tc.valid, err)
+				}
+				if tc.valid && (len(listed.Tools) != 2 || listed.Tools[0].Name != "lookup") {
+					t.Fatal("boundary discovery lost its tool")
 				}
 				return
 			}
