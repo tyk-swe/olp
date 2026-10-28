@@ -732,6 +732,7 @@ func TestMCPPersonalOAuthDeviceApprovalDenialAndPolling(t *testing.T) {
 func TestMCPPersonalOAuthRefreshSerializesAndKeepsIndividualsSeparate(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
 	var refreshes atomic.Int64
 	f := newPersonalOAuthFixtureWithHook(t, func(r *http.Request) {
 		if r.ParseForm() != nil || r.Form.Get("grant_type") != "refresh_token" {
@@ -744,6 +745,7 @@ func TestMCPPersonalOAuthRefreshSerializesAndKeepsIndividualsSeparate(t *testing
 		}
 		<-release
 	})
+	t.Cleanup(resume)
 	firstID := f.claim(t)
 	f.completePKCE(t, firstID, testutil.OAuthIdentity{Subject: "first", Account: "first-account"})
 	server := f.h.want(f.owner, "GET", "/api/v1/mcp-servers/"+f.serverID, nil, nil, 200)
@@ -800,7 +802,7 @@ func TestMCPPersonalOAuthRefreshSerializesAndKeepsIndividualsSeparate(t *testing
 	}
 	_ = tx.Rollback(t.Context())
 	assertPersonalCall(t, handler, f, second, "during-refresh-second", http.StatusOK, "second-account")
-	close(release)
+	resume()
 	for range 4 {
 		select {
 		case result := <-results:
