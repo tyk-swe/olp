@@ -2,27 +2,68 @@ name: Set up qualification tools
 description: Install stable toolchains and native prerequisites, console dependencies and PostgreSQL client.
 inputs:
   services:
-    description: Install the PostgreSQL client and Chromium needed by integration suites.
+    description: Install the PostgreSQL client, Python and Codex sandbox needed by integration suites.
     default: "true"
+  browser:
+    description: With services, also install Chromium for the browser suites.
+    default: "true"
+  node-modules:
+    description: Install the pnpm workspace.
+    default: "true"
+  save-go-cache:
+    description: Save the shared Go cache when the job succeeds on a push to main. Exactly one job sets this.
+    default: "false"
 runs:
   using: composite
   steps:
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      id: go
       with:
         go-version: stable
-    - shell: bash
+        cache: false
+    - id: go-cache
+      shell: bash
+      env:
+        GO_VERSION: ${{ steps.go.outputs.go-version }}
+        GO_SUM: ${{ hashFiles('**/go.sum') }}
+        SAVE: ${{ inputs.save-go-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential ca-certificates
-        go mod download
-    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        prefix="go-$ImageOS-$RUNNER_ARCH-$GO_VERSION-"
+        {
+          echo "prefix=$prefix"
+          echo "key=$prefix$ImageVersion-$GO_SUM"
+          echo "save=$SAVE"
+        } >> "$GITHUB_OUTPUT"
+    - if: steps.go-cache.outputs.save == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+          ~/.cache/staticcheck
+        key: ${{ steps.go-cache.outputs.key }}
+        restore-keys: ${{ steps.go-cache.outputs.prefix }}
+    - if: steps.go-cache.outputs.save != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+          ~/.cache/staticcheck
+        key: ${{ steps.go-cache.outputs.key }}
+        restore-keys: ${{ steps.go-cache.outputs.prefix }}
+    - shell: bash
+      run: go mod download
+    - if: inputs.node-modules == 'true'
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       with:
         version: '>=10.26.0'
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version-file: .nvmrc
-        cache: pnpm
-    - shell: bash
+        cache: ${{ inputs.node-modules == 'true' && 'pnpm' || '' }}
+    - if: inputs.node-modules == 'true'
+      shell: bash
       run: pnpm install --frozen-lockfile
     - if: inputs.services == 'true'
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -40,7 +81,9 @@ runs:
         sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
         sudo apt-get install -y postgresql-client-18 bubblewrap ripgrep
         echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
-        pnpm --dir console exec playwright install --with-deps chromium
+    - if: inputs.services == 'true' && inputs.browser == 'true'
+      shell: bash
+      run: pnpm --dir console exec playwright install --with-deps chromium
     - if: inputs.services == 'true'
       shell: bash
       run: |
