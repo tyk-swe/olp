@@ -192,7 +192,7 @@ func (f stdioFixture) debitCount(t *testing.T) int {
 
 func TestMCPStdioCallsPreserveArgumentsAndRefuseTransportOverrides(t *testing.T) {
 	f := newStdioFixture(t)
-	arguments := `{ "query" : "hel\u006co", "command":"ordinary", "path":"ordinary", "environment":"ordinary", "working_directory":"ordinary" }`
+	arguments := `{ "query" : "hel\u006co", "command":"ordinary", "path":"ordinary", "env":"ordinary", "cwd":"ordinary", "environment":"ordinary", "working_directory":"ordinary" }`
 	success := f.request(t, "/v1/mcp/tools/call", f.callBody("stdio-json", arguments), "")
 	var call struct {
 		AttemptID string                   `json:"attempt_id"`
@@ -205,10 +205,12 @@ func TestMCPStdioCallsPreserveArgumentsAndRefuseTransportOverrides(t *testing.T)
 		Query            string `json:"query"`
 		Command          string `json:"command"`
 		Path             string `json:"path"`
+		Env              string `json:"env"`
+		Cwd              string `json:"cwd"`
 		Environment      string `json:"environment"`
 		WorkingDirectory string `json:"working_directory"`
 	}
-	if json.Unmarshal([]byte(call.Content[0].Text), &echoed) != nil || echoed.Query != "hello" || echoed.Command != "ordinary" || echoed.Path != "ordinary" || echoed.Environment != "ordinary" || echoed.WorkingDirectory != "ordinary" {
+	if json.Unmarshal([]byte(call.Content[0].Text), &echoed) != nil || echoed.Query != "hello" || echoed.Command != "ordinary" || echoed.Path != "ordinary" || echoed.Env != "ordinary" || echoed.Cwd != "ordinary" || echoed.Environment != "ordinary" || echoed.WorkingDirectory != "ordinary" {
 		t.Fatalf("schema-defined arguments were changed: %+v", echoed)
 	}
 	record := f.h.want(f.owner, "GET", "/api/v1/mcp-tool-calls/"+call.AttemptID, nil, nil, 200)
@@ -234,6 +236,15 @@ func TestMCPStdioCallsPreserveArgumentsAndRefuseTransportOverrides(t *testing.T)
 			if json.Unmarshal(rpcResponse.body, &refused) != nil || len(refused.Error) == 0 {
 				t.Fatalf("MCP accepted transport override: %s", rpcResponse.body)
 			}
+			outerBody := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call",%q:"caller-selected","params":{"name":%q,"arguments":{"query":"ignored"},"_meta":{"olp.call_id":%q}}}`, field, f.alias, "outer-override-"+field))
+			outer := f.request(t, "/mcp", outerBody, session)
+			var outerError struct {
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(outer.body, &outerError) != nil || len(outerError.Error) == 0 {
+				t.Fatalf("MCP envelope accepted transport override: %s", outer.body)
+			}
+
 		})
 	}
 	if !bytes.Equal(starts, f.starts(t)) || debits != f.debitCount(t) {

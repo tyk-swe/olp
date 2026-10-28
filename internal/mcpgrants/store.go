@@ -10,11 +10,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type Store struct {
+	Egress       *egress.Policy
 	Pool         *pgxpool.Pool
 	Keys         *secrets.KeyRing
 	Auth         *secrets.AuthKey
@@ -61,22 +63,8 @@ func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool ro
 	if _, err := liveBinding(ctx, s.Pool, expected); err != nil {
 		return nil, err
 	}
-	var tokenID string
-	queryErr := s.Pool.QueryRow(ctx, `SELECT access_secret_id::text FROM olp.mcp_user_grants WHERE binding_digest=$1 AND revoked_at IS NULL AND expires_at>now() AND access_secret_id IS NOT NULL`, expected.Digest()).Scan(&tokenID)
-	if errors.Is(queryErr, pgx.ErrNoRows) {
-		return nil, ErrRequired
-	}
-	if queryErr != nil {
-		return nil, queryErr
-	}
-	credential, err := s.Keys.Read(ctx, s.Pool, s.Installation, tokenID, secrets.MCPGrantAccess)
-	if err != nil {
-		return nil, err
-	}
-	if len(credential) == 0 {
-		return nil, ErrRequired
-	}
-	return credential, nil
+	return s.resolveGrant(ctx, expected)
+
 }
 
 func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) (Handoff, error) {

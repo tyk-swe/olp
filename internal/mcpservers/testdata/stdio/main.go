@@ -14,6 +14,8 @@ type input struct {
 	Query            string `json:"query"`
 	Command          string `json:"command,omitempty"`
 	Path             string `json:"path,omitempty"`
+	Env              string `json:"env,omitempty"`
+	Cwd              string `json:"cwd,omitempty"`
 	Environment      string `json:"environment,omitempty"`
 	WorkingDirectory string `json:"working_directory,omitempty"`
 }

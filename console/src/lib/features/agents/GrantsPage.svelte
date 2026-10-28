@@ -11,6 +11,10 @@
   import { agentKeys } from './agentKeys';
   import {
     claimMCPGrant,
+    authorizeMCPGrant,
+    completeMCPGrant,
+    pollMCPGrant,
+    type MCPGrantAuthorization,
     getServer,
     listMCPGrants,
     listServers,
@@ -35,6 +39,9 @@
     fields: Fields;
     enrollmentID: string;
     handoffToken: string;
+    callbackCode: string;
+    callbackState: string;
+    authorization: MCPGrantAuthorization | undefined;
     enrollmentURL: string;
     busy: boolean;
     message: string;
@@ -54,6 +61,9 @@
     },
     enrollmentID: '',
     handoffToken: '',
+    callbackCode: '',
+    callbackState: '',
+    authorization: undefined,
     enrollmentURL: '',
     busy: false,
     message: '',
@@ -90,6 +100,9 @@
     patch({
       enrollmentID: id,
       handoffToken: token,
+      callbackCode: '',
+      callbackState: '',
+      authorization: undefined,
       enrollmentURL: '',
       error: '',
       message: '',
@@ -101,7 +114,21 @@
       window.location.pathname + window.location.search
     );
   }
-  onMount(() => consumeEnrollment(window.location.hash.slice(1)));
+  onMount(() => {
+    const callback = new URL(window.location.href);
+    const code = callback.searchParams.get('code');
+    const callbackState = callback.searchParams.get('state');
+    if (code && callbackState) {
+      patch({
+        enrollmentID: callbackState.split('.')[0] ?? '',
+        callbackCode: code,
+        callbackState
+      });
+      window.history.replaceState(null, '', window.location.pathname);
+      return;
+    }
+    consumeEnrollment(window.location.hash.slice(1));
+  });
 
   async function loadServer(requested: string) {
     const owner = captureOwner();
@@ -195,7 +222,10 @@
     const observed = $state;
     if (!observed.server || observed.busy) return;
     const owner = captureOwner();
-    const active = () => owner() && $state.selection === observed.selection;
+    const active = () =>
+      owner() &&
+      $state.selection === observed.selection &&
+      $state.enrollmentID === observed.enrollmentID;
     patch({ busy: true, error: '', enrollmentURL: '' });
     try {
       const result = await startMCPGrant(
@@ -215,20 +245,83 @@
     if (!observed.enrollmentID || !observed.handoffToken || observed.busy)
       return;
     const owner = captureOwner();
-    const active = () => owner() && $state.selection === observed.selection;
+    const active = () =>
+      owner() &&
+      $state.selection === observed.selection &&
+      $state.enrollmentID === observed.enrollmentID;
     patch({ busy: true, error: '' });
     try {
-      await claimMCPGrant(observed.enrollmentID, observed.handoffToken);
+      const claimed = await claimMCPGrant(
+        observed.enrollmentID,
+        observed.handoffToken
+      );
       if (!active() || $state.handoffToken !== observed.handoffToken) return;
       patch({
         handoffToken: '',
-        enrollmentID: '',
+        enrollmentID: claimed.enrollment.id,
         message: 'Enrollment claimed. Authorization is pending'
       });
       await refresh(agentKeys.grants(), active);
     } catch (cause) {
       if (active() && $state.handoffToken === observed.handoffToken)
         patch({ error: errorMessage(cause) });
+    } finally {
+      if (active()) patch({ busy: false });
+    }
+  }
+
+  async function authorize(flow: 'authorization_code' | 'device_code') {
+    const observed = $state;
+    if (observed.busy) return;
+    const owner = captureOwner();
+    const active = () =>
+      owner() &&
+      $state.selection === observed.selection &&
+      $state.enrollmentID === observed.enrollmentID;
+    patch({ busy: true, error: '', message: '' });
+    try {
+      const authorization = await authorizeMCPGrant(
+        observed.enrollmentID,
+        flow
+      );
+      if (active()) patch({ authorization });
+    } catch (cause) {
+      if (active()) patch({ error: errorMessage(cause) });
+    } finally {
+      if (active()) patch({ busy: false });
+    }
+  }
+
+  async function finish(poll: boolean) {
+    const observed = $state;
+    if (observed.busy) return;
+    const owner = captureOwner();
+    const active = () =>
+      owner() &&
+      $state.selection === observed.selection &&
+      $state.enrollmentID === observed.enrollmentID;
+    patch({ busy: true, error: '', message: '' });
+    try {
+      const authorization = poll
+        ? await pollMCPGrant(observed.enrollmentID)
+        : await completeMCPGrant(
+            observed.enrollmentID,
+            observed.callbackCode,
+            observed.callbackState
+          );
+      if (!active()) return;
+      patch({
+        authorization: { ...observed.authorization, ...authorization },
+        callbackCode: '',
+        callbackState: '',
+        message:
+          authorization.state === 'active'
+            ? 'Personal authorization is active'
+            : `Personal authorization is ${authorization.state}`
+      });
+      await refresh(agentKeys.grants(), active);
+    } catch (cause) {
+      if (active()) patch({ error: errorMessage(cause) });
     } finally {
       if (active()) patch({ busy: false });
     }
@@ -272,6 +365,41 @@
     >
   </section>
 {/if}
+{#if $state.enrollmentID && !$state.handoffToken && $state.authorization?.state !== 'active'}
+  <section>
+    <h2>Authorize personal access</h2>
+    {#if $state.callbackCode}
+      <button disabled={$state.busy} onclick={() => finish(false)}
+        >Complete authorization</button
+      >
+    {:else if $state.authorization?.device}
+      <p>
+        Enter {$state.authorization.device.user_code} at
+        <a
+          href={$state.authorization.device.verification_url}
+          target="_blank"
+          rel="noreferrer">the authorization page</a
+        >
+      </p>
+      <p>Check again after {$state.authorization.device.interval} seconds</p>
+      <button disabled={$state.busy} onclick={() => finish(true)}
+        >Check device approval</button
+      >
+    {:else if $state.authorization?.authorization_url}
+      <a href={$state.authorization.authorization_url}>Sign in upstream</a>
+    {:else}
+      <button
+        disabled={$state.busy}
+        onclick={() => authorize('authorization_code')}
+        >Authorize in browser</button
+      >
+      <button disabled={$state.busy} onclick={() => authorize('device_code')}
+        >Use device authorization</button
+      >
+    {/if}
+  </section>
+{/if}
+
 {#if canManage}
   <section>
     <h2>Server authorization</h2>

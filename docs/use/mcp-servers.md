@@ -290,9 +290,13 @@ A server with personal OAuth requires an unexpired, unrevoked grant for the exac
 
 A project manager can start key-bound enrollment with `POST /api/v1/mcp-servers/{server_id}/grant-enrollments` and an `api_key_id`. Only that signed-in member can claim the returned link. For a project end user, an authenticated workload caller with a verified end-user claim can request a link with `POST /v1/mcp/servers/{server_id}/grant-enrollments` and a `toolset_id`. The server must belong to that caller's authorized toolset. A header label cannot create this link or select another individual's grant.
 
-Enrollment links expire after ten minutes and can be claimed once. The console removes the secret from the address bar when it opens the link, keeps it only in transient page state until submission to the authenticated claim endpoint, and clears it after a successful claim. The console shows pending, active, expired and revoked standing without access or refresh tokens. A grant holder or project manager can revoke an active grant.
+Enrollment links expire after ten minutes and can be claimed once. The console removes the secret from the address bar when it opens the link, keeps it only in transient page state until submission to the authenticated claim endpoint, and clears it after a successful claim. The console shows pending, active, expired, denied, failed and revoked standing without access or refresh tokens. A grant holder or project manager can revoke an active grant.
 
-Provider authorization exchange, device approval and automatic refresh remain planned. Newly claimed enrollments therefore stay pending and cannot authorize tool execution yet.
+After claiming an enrollment, choose browser authorization or device authorization. Browser authorization uses PKCE S256 and a one-use state value. The callback returns to Personal tool grants, removes the code and state from the address bar, and lets the signed-in member complete the exchange. Device authorization shows the provider verification URL and user code. Check approval after the displayed polling interval. Pending and slow-down responses preserve the enrollment, while denial and expiry appear in standing.
+
+Access tokens, refresh tokens, PKCE verifiers and device codes are sealed separately from public metadata. An expired access token is refreshed once per grant under a distributed lock before dispatch. Token HTTP requests run outside database mutation transactions. Concurrent callers reuse the completed refresh, and an abandoned or failed rotating-token attempt refuses further use until re-enrollment. No device or token HTTP exchange follows redirects. Per-call upstream connections and consumer sessions remain bound to their individual.
+
+The PKCE, device, refresh and isolation behavior is exercised against the repository OAuth fixture. Live identity-provider qualification is separate.
 
 ## Experimental stdio executables
 

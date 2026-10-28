@@ -48,7 +48,7 @@ func TestDeviceAuthorizationsMustFitOLPsBounds(t *testing.T) {
 	}
 	lasting := valid()
 	lasting.ExpiresIn, lasting.Interval = 1<<62, 10
-	if err := e.authorizeDevice(manifest, lasting); err != nil || e.interval != 10*time.Second || time.Until(e.ExpiresAt) > maxDeviceTTL {
+	if err := e.authorizeDevice(manifest, lasting); err != nil || e.interval != 10*time.Second || time.Until(e.ExpiresAt) > MaxDeviceTTL {
 		t.Fatalf("a long-lived device authorization: %v, expires %v", err, e.ExpiresAt)
 	}
 	for name, mutate := range map[string]func(*abi.DeviceAuthorization){

@@ -230,3 +230,42 @@ export const revokeMCPGrant = async (grantID: string) =>
       params: { path: { grant_id: grantID } }
     })
   );
+
+export type MCPGrantAuthorization =
+  components['schemas']['MCPGrantAuthorization'];
+export async function authorizeMCPGrant(
+  enrollmentID: string,
+  flow: 'authorization_code' | 'device_code'
+) {
+  return unwrap(
+    await apiClient.POST(
+      '/api/v1/mcp-grant-enrollments/{enrollment_id}/authorize',
+      {
+        params: { path: { enrollment_id: enrollmentID } },
+        body: { flow }
+      }
+    )
+  );
+}
+export async function completeMCPGrant(
+  enrollmentID: string,
+  code: string,
+  state: string
+) {
+  return unwrap(
+    await apiClient.POST(
+      '/api/v1/mcp-grant-enrollments/{enrollment_id}/complete',
+      {
+        params: { path: { enrollment_id: enrollmentID } },
+        body: { code, state }
+      }
+    )
+  );
+}
+export async function pollMCPGrant(enrollmentID: string) {
+  return unwrap(
+    await apiClient.POST('/api/v1/mcp-grant-enrollments/{enrollment_id}/poll', {
+      params: { path: { enrollment_id: enrollmentID } }
+    })
+  );
+}

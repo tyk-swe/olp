@@ -392,7 +392,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 					return err
 				}
 			}
-			toolServer := &mcp.Server{Executables: &mcpservers.Executables{Tier: unconfined, Query: pool}, Grants: &mcpgrants.Store{Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Log: log, Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			toolServer := &mcp.Server{Executables: &mcpservers.Executables{Tier: unconfined, Query: pool}, Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Log: log, Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
 			}, Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
 				return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
