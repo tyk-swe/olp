@@ -51,6 +51,24 @@ func (t legacyRoundTripper) CloseIdleConnections() {
 	}
 }
 
+func openHTTPTransport(ctx context.Context, policy *egress.Policy, endpoint *url.URL, credential string, opts TransportOptions) (*http.Client, *legacyTransport, error) {
+	base := policy.Client(opts.Timeout)
+	if opts.Transport != routing.MCPLegacySSE {
+		return base, nil, nil
+	}
+	client := &http.Client{
+		Transport:     legacyRoundTripper{base: base.Transport, policy: policy, origin: endpoint, credential: credential},
+		Timeout:       opts.Timeout,
+		CheckRedirect: base.CheckRedirect,
+	}
+	connection, err := (&sdkmcp.SSEClientTransport{Endpoint: endpoint.String(), HTTPClient: client, MaxEventSize: 1 << 20}).Connect(ctx)
+	if err != nil {
+		client.CloseIdleConnections()
+		return nil, nil, ErrTransport
+	}
+	return client, &legacyTransport{connection: connection, gate: make(chan struct{}, 1)}, nil
+}
+
 func requestedTransportProtocol(transport routing.MCPTransport) string {
 	if transport == "sse" {
 		return LegacyProtocol

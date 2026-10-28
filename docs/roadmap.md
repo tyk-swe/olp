@@ -215,8 +215,10 @@ guardrail argument/result execution.
   isolated credentials. Missing grants must refuse execution. Include the
   inventory's `mcp_security`, `mcp_end_user_permission`, `mcp_jwt_signer` and
   `agent_365` hooks only after server authority and caller identity are available.
-- [ ] **RM7.3 — Legacy HTTP+SSE:** implement the explicit `2024-11-05`
-  transport while preserving modern sessions' selected transport.
+- [x] **RM7.3. Legacy HTTP+SSE:** explicitly register and consume the
+  `2024-11-05` transport while preserving modern sessions' selected transport.
+  The pinned reference SDK fixture verifies registration, configuration,
+  list/call and durable settlement. Legacy GET and POST need connection affinity.
 - [ ] **RM7.4 — Experimental stdio:** implement operator-installed executable
   dispatch with the same call, isolation and accounting limits as HTTP.
   Executable configuration remains operator-controlled.

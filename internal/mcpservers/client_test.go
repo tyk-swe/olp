@@ -98,6 +98,29 @@ func TestLegacyTransportRequiresExplicitSelectionAndPinsProtocol(t *testing.T) {
 	}
 }
 
+func TestLegacyTransportTimeoutBoundsStalledHandshake(t *testing.T) {
+	disconnected := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return
+		}
+		<-r.Context().Done()
+		close(disconnected)
+	}))
+	defer upstream.Close()
+	transport, err := DialTransport(t.Context(), fixturePolicy(), upstream.URL, nil, TransportOptions{ClientName: "bounded-legacy", Timeout: 50 * time.Millisecond, Transport: "sse"})
+	if transport != nil || err != ErrTransport {
+		t.Fatalf("stalled legacy handshake did not refuse: %v %v", transport, err)
+	}
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("stalled legacy stream remained open after its transport timeout")
+	}
+}
+
 func TestLegacyTransportRefusesUndeclaredPostDestination(t *testing.T) {
 	var foreignCalls atomic.Int64
 	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

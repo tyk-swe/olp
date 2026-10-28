@@ -81,6 +81,11 @@ func (s *Server) serveLegacyGET(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeLegacyEvent(w http.ResponseWriter, event string, body []byte) error {
+	controller := http.NewResponseController(w)
+	if err := controller.SetWriteDeadline(time.Now().Add(defaultCallTimeout)); err != nil {
+		return err
+	}
+	defer controller.SetWriteDeadline(time.Time{})
 	lines := bytes.ReplaceAll(bytes.TrimSpace(body), []byte("\n"), []byte("\ndata: "))
 	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, lines); err != nil {
 		return err
@@ -102,7 +107,9 @@ func (s *Server) serveLegacyPOST(w http.ResponseWriter, r *http.Request) {
 		writeRPCFailure(w, nil, failureRPC(failure.status, rpcServerError, failure))
 		return
 	}
-	request := r.Clone(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), defaultCallTimeout)
+	defer cancel()
+	request := r.Clone(ctx)
 	request.Header.Set("Mcp-Session-Id", r.URL.Query().Get("session_id"))
 	record, _, refused := s.requireSession(request.Context(), request, authority, sessionLegacy)
 	if refused != nil {
@@ -126,7 +133,7 @@ func (s *Server) serveLegacyPOST(w http.ResponseWriter, r *http.Request) {
 	default:
 	}
 	request.Header.Set("Accept", "application/json, text/event-stream")
-	s.serveSessionHTTP(legacyResponse{ctx: r.Context(), stream: stream}, request, sessionLegacy)
+	s.serveSessionHTTP(legacyResponse{ctx: ctx, stream: stream}, request, sessionLegacy)
 	w.WriteHeader(http.StatusAccepted)
 }
 

@@ -3285,6 +3285,7 @@ func (e KeyExpiringEventReason) Valid() bool {
 
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
+	N20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
 	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
 	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
 	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
@@ -3293,6 +3294,8 @@ const (
 // Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
 func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 	switch e {
+	case N20241105:
+		return true
 	case N20250326:
 		return true
 	case N20250618:

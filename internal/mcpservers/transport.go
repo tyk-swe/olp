@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -107,19 +106,14 @@ func DialTransport(ctx context.Context, policy *egress.Policy, endpoint string, 
 	if err != nil {
 		return nil, ErrTransport
 	}
-	c := &Transport{client: policy.Client(opts.Timeout), endpoint: u.String(), token: string(credential)}
-	if opts.Transport != "" && opts.Transport != "streamable_http" && opts.Transport != "sse" {
+	if !opts.Transport.OrDefault().Valid() {
 		return nil, ErrTransport
 	}
-	if opts.Transport == "sse" {
-		client := c.client
-		client.Transport = legacyRoundTripper{base: client.Transport, policy: policy, origin: u, credential: string(credential)}
-		connection, connectErr := (&sdkmcp.SSEClientTransport{Endpoint: u.String(), HTTPClient: client, MaxEventSize: 1 << 20}).Connect(ctx)
-		if connectErr != nil {
-			return nil, ErrTransport
-		}
-		c.legacy = &legacyTransport{connection: connection, gate: make(chan struct{}, 1)}
+	client, legacy, wireErr := openHTTPTransport(ctx, policy, u, string(credential), opts)
+	if wireErr != nil {
+		return nil, wireErr
 	}
+	c := &Transport{client: client, endpoint: u.String(), token: string(credential), legacy: legacy}
 	c.nextID.Store(1)
 	var init struct {
 		Protocol     string `json:"protocolVersion"`

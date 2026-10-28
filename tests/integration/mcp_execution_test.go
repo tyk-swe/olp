@@ -24,11 +24,55 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"golang.org/x/oauth2"
 )
 
 func TestMCPReferenceServerRoundTrip(t *testing.T) {
+	mcpReferenceRoundTrip(t, routing.MCPStreamableHTTP, "2025-11-25")
+}
+
+func TestMCPLegacyReferenceServerRoundTrip(t *testing.T) {
+	mcpReferenceRoundTrip(t, routing.MCPLegacySSE, "2024-11-05")
+}
+
+func referenceServerHandler(kind routing.MCPTransport, server *mcpsdk.Server) http.Handler {
+	if kind == routing.MCPLegacySSE {
+		return mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return server }, nil)
+	}
+	return mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{JSONResponse: true})
+}
+
+func referenceClientTransport(kind routing.MCPTransport, endpoint, toolset string, client *http.Client) mcpsdk.Transport {
+	if kind == routing.MCPLegacySSE {
+		return &mcpsdk.SSEClientTransport{Endpoint: endpoint + "/mcp/sse?toolset_id=" + toolset, HTTPClient: client, MaxEventSize: 1 << 20}
+	}
+	return &mcpsdk.StreamableClientTransport{Endpoint: endpoint + "/mcp?toolset_id=" + toolset, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true}
+}
+
+func revalidateReferenceServer(t *testing.T, h *accessHarness, owner *browser, transport routing.MCPTransport, created map[string]any) map[string]any {
+	t.Helper()
+	if transport != routing.MCPLegacySSE {
+		return created
+	}
+	exported := mcpExecObject(t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200), "document")
+	entry := mcpExecItem(t, mcpExecItems(t, exported, "mcp_servers"), 0, exported)
+	if entry["transport"] != string(transport) {
+		t.Fatalf("portable configuration lost the registered transport: %v", entry)
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": exported}, idem("legacy-config-round-trip"), 200)
+	path := "/api/v1/mcp-servers/" + mcpExecString(t, created, "id")
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PUT", path, map[string]any{"name": current["name"], "endpoint": current["endpoint"], "enabled": true, "transport": "streamable_http"}, withMatch(current, idem("legacy-immutable-transport")), 422)
+	updated := h.want(owner, "PUT", path, map[string]any{"name": current["name"], "endpoint": current["endpoint"], "enabled": true}, withMatch(current, idem("legacy-recertify")), 200)
+	if updated["transport"] != string(transport) || mcpExecObject(t, updated, "catalog")["protocol_version"] != "2024-11-05" {
+		t.Fatalf("recertification changed the immutable legacy binding: %v", updated)
+	}
+	return updated
+}
+
+func mcpReferenceRoundTrip(t *testing.T, transport routing.MCPTransport, protocol string) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "Reference MCP tools")
@@ -36,17 +80,18 @@ func TestMCPReferenceServerRoundTrip(t *testing.T) {
 		Query string `json:"query"`
 	}
 	var dispatches atomic.Int64
-	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "reference-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25"}})
+	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "reference-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: []string{protocol}})
 	mcpsdk.AddTool(reference, &mcpsdk.Tool{Name: "echo", Description: "Return the supplied text"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input arguments) (*mcpsdk.CallToolResult, any, error) {
 		dispatches.Add(1)
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: input.Query}}}, nil, nil
 	})
-	upstream := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return reference }, &mcpsdk.StreamableHTTPOptions{JSONResponse: true}))
+	upstream := httptest.NewServer(referenceServerHandler(transport, reference))
 	defer upstream.Close()
-	registered := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
-		"name": "Reference MCP server", "project_id": project, "transport": "streamable_http",
+	created := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{
+		"name": "Reference MCP server", "project_id": project, "transport": transport,
 		"endpoint": upstream.URL, "enabled": true, "unit_price": "0", "per_key_calls_per_minute": 20, "per_key_max_concurrency": 4,
 	}, idem("mcp-reference-server"), 201)
+	registered := revalidateReferenceServer(t, h, owner, transport, created)
 	serverID := mcpExecString(t, registered, "id")
 	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "echo", Alias: agentcontract.ToolAlias(serverID, "echo")}
 	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{
@@ -108,9 +153,7 @@ func TestMCPReferenceServerRoundTrip(t *testing.T) {
 		t.Fatalf("discovery disagreed with the explicit price or tighter key policy: %+v", capability)
 	}
 	sdkClient := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "reference-caller", Version: "1"}, nil)
-	session, connectErr := sdkClient.Connect(t.Context(), &mcpsdk.StreamableClientTransport{
-		Endpoint: consumer.URL + "/mcp?toolset_id=" + toolsetID, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true,
-	}, &mcpsdk.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	session, connectErr := sdkClient.Connect(t.Context(), referenceClientTransport(transport, consumer.URL, toolsetID, client), &mcpsdk.ClientSessionOptions{ProtocolVersion: protocol})
 	if connectErr != nil {
 		t.Fatal(connectErr)
 	}

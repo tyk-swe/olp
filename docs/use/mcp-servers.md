@@ -6,9 +6,9 @@ Reads require management `read` and project visibility; mutations require
 `configure` and project-change authority. Installation-wide configuration
 promotion retains those checks. Up to 128 active registrations are permitted.
 
-Create requires a project UUID, name, `transport: streamable_http`, endpoint and
-explicit enabled flag. PUT replaces editable metadata with an observed If-Match;
-project and transport are immutable. Every mutation requires Idempotency-Key.
+Create requires a project UUID, name, an explicit `streamable_http` or `sse`
+transport, endpoint and enabled flag. PUT replaces editable metadata with an
+observed If-Match; project and transport are immutable. Every mutation requires Idempotency-Key.
 On PUT, omitting `unit_price`, `tool_prices` or a rate and concurrency limit
 keeps the current value, `unit_price: null` removes the price, and a null limit
 resets that limit to its default.
@@ -29,10 +29,14 @@ validation and every connection use provider egress policy, with redirects
 refused. Workload identity and wrapped master rings operate through the ordinary
 installation secret lifecycle. No credential is embedded in an endpoint URL.
 
-Certification supports MCP versions 2025-03-26, 2025-06-18 and 2025-11-25, JSON or
-SSE responses on Streamable HTTP, negotiated session headers and bounded session
-cleanup. Discovery admits at most 16 pages, 128 uniquely named tools and one MiB
-of metadata. Individual descriptions/schemas and JSON depth/node counts are
+Streamable HTTP certification supports MCP versions 2025-03-26, 2025-06-18 and
+2025-11-25, JSON or SSE responses, negotiated session headers and bounded session
+cleanup. Explicit `sse` registration uses legacy HTTP+SSE at exactly 2024-11-05.
+Its initial GET advertises a POST endpoint on the same origin. Session query
+parameters are allowed, but every destination still passes egress validation
+before credentials attach and redirects are refused. Modern certification never
+falls back to legacy. Discovery admits at most 16 pages, 128 uniquely named
+tools and one MiB of metadata. Individual descriptions/schemas and JSON depth/node counts are
 bounded. Input schemas must be object schemas and compile without remote schema
 retrieval; missing lists, duplicate names, cursor cycles and invalid schemas
 refuse certification. Tool order and schema member order are canonicalized for
@@ -101,6 +105,37 @@ shared authority freshness boundary. Existing attempt records and settlement
 history remain readable to authorized project operators. A pending unknown
 outcome keeps its reservation until the existing resolution operation records
 evidence, even after execution is disabled.
+
+## Calling published tools over legacy HTTP+SSE
+
+Legacy clients explicitly open `GET /mcp/sse?toolset_id=<id>` with the same tools
+credential used for JSON calls. The stream first emits an `endpoint` event with
+the session-specific `/mcp/messages?session_id=<id>` POST path. Send JSON-RPC
+messages to that path using the same credential. POST accepts messages with HTTP
+202 and responses arrive as `message` events on the open stream. Initialization
+must request MCP 2024-11-05. The modern `/mcp` endpoint retains its own protocol
+selection and neither endpoint adopts a session from the other transport.
+
+Consumer and upstream transport choices are independent. Both consumer transports
+resolve the same registered server, pinned catalog and toolset, then use the
+same authority, schema, guardrail, price, limit, call-identity and durable-debit
+checks. A legacy upstream must be explicitly registered with `transport` set to
+`sse`. Changing its transport requires a new registration. The publication
+console displays the registered transport and certified protocol alongside the
+catalog.
+
+Legacy GET and subsequent POST requests need connection affinity to the same
+gateway process. Shared session metadata does not relay tool bodies between
+replicas. A POST reaching a process without its live stream refuses before
+dispatch. Closing the stream deletes its session, and reconnecting requires a
+new session. Sessions retain the same fifteen-minute idle timeout and per-key
+cap as Streamable HTTP. Stalled upstream handshakes, slow response delivery and
+calls are bounded by the existing operation timeout.
+
+A dropped stream does not undo an admitted call or make it safe to repeat an
+effect. The existing durable attempt, call identifier and outcome-resolution
+rules still apply. Disabling the registered server stops new calls while
+retained attempt and settlement history remains readable.
 
 ## Calling published tools over Streamable HTTP
 
