@@ -28,16 +28,20 @@ import (
 )
 
 const (
-	testProject  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50701"
-	testServerID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50702"
-	testServerRv = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50703"
-	testToolset  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50704"
-	testRevision = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50705"
-	testOtherTS  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50706"
-	testOtherRv  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50707"
-	testCredID   = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50708"
-	testKeyID    = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50709"
-	testGenID    = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50710"
+	testProject   = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50701"
+	testServerID  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50702"
+	testServerRv  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50703"
+	testToolset   = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50704"
+	testRevision  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50705"
+	testOtherTS   = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50706"
+	testOtherRv   = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50707"
+	testCredID    = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50708"
+	testKeyID     = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50709"
+	testGenID     = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50710"
+	testServer2   = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50713"
+	testServer2R  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50714"
+	testServerRv2 = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50715"
+	testRevision2 = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50716"
 )
 
 type timeline struct {
@@ -75,6 +79,9 @@ type fakeRuntime struct {
 	release        *runtime.Release
 	failAuthzOn    int
 	authzCalls     atomic.Int32
+	live           map[string]string
+	revoked        atomic.Bool
+	stale          atomic.Bool
 }
 
 func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
@@ -93,10 +100,19 @@ func (f *fakeRuntime) AuthorizeAgentResource(a access.Authority, scope, id, revi
 	if int(f.authzCalls.Add(1)) == f.failAuthzOn {
 		return access.Forbidden()
 	}
+	if f.stale.Load() {
+		return runtime.ErrStaleAuthority
+	}
+	if f.revoked.Load() {
+		return access.Forbidden()
+	}
 	if !a.AllowsResource(scope, id, project, time.Now()) {
 		return access.Forbidden()
 	}
-	live := map[string]string{testToolset: testRevision, testOtherTS: testOtherRv}
+	live := f.live
+	if live == nil {
+		live = map[string]string{testToolset: testRevision, testOtherTS: testOtherRv}
+	}
 	if live[id] != revision || project != testProject {
 		return access.Forbidden()
 	}
@@ -641,5 +657,69 @@ func TestCallToolUnliveDriftedToolsetReportsDriftOnlyToAllowlistedCallers(t *tes
 	}
 	if otherFixture.calls.Load() != 0 {
 		t.Fatalf("foreign drifted call dispatched: calls=%d", otherFixture.calls.Load())
+	}
+}
+
+func republishedSnapshot(t *testing.T, endpoint string) *routing.Snapshot {
+	t.Helper()
+	snapshot := testSnapshot(t, endpoint)
+	snapshot.MCPServers[0].RevisionID = testServerRv2
+	for index, revision := range snapshot.AgentPublications {
+		if revision.ID != testRevision {
+			continue
+		}
+		revision.Definition.Toolset.Tools[0].RevisionID = testServerRv2
+		revision.Digest = agentcontract.DraftDigest(revision.Definition)
+		revision.ID = testRevision2
+		snapshot.AgentPublications[index] = revision
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func TestRepublishedRevisionUnblocksOnlyItsOwnToolset(t *testing.T) {
+	server, fx, _, _, rt := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset, testOtherTS}), "")
+	drifted := driftedSnapshot(t, fx.server.URL)
+	second := drifted.MCPServers[0]
+	second.ID, second.RevisionID = testServer2, testServer2R
+	second.Digest = strings.Repeat("a", 64)
+	if catalog, err := mcpservers.Certify(t.Context(), testEgress(), fx.server.URL, []byte("static-token")); err == nil {
+		second.Digest = catalog.Digest
+	}
+	for index, revision := range drifted.AgentPublications {
+		if revision.ID != testOtherRv {
+			continue
+		}
+		revision.Definition.Toolset.Tools[0].ServerID = testServer2
+		revision.Definition.Toolset.Tools[0].RevisionID = testServer2R
+		revision.Definition.Toolset.Tools[0].CatalogDigest = second.Digest
+		revision.Definition.Toolset.Tools[0].Alias = agentcontract.ToolAlias(testServer2, "lookup")
+		revision.Digest = agentcontract.DraftDigest(revision.Definition)
+		drifted.AgentPublications[index] = revision
+	}
+	drifted.MCPServers = append(drifted.MCPServers, second)
+	if err := drifted.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: drifted}
+
+	status, body := request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testOtherTS+`","name":"`+agentcontract.ToolAlias(testServer2, "lookup")+`","arguments":{"query":"x"}}`)
+	if status != http.StatusOK || fx.calls.Load() != 1 {
+		t.Fatalf("unrelated toolset was disturbed by drift elsewhere: %d %v", status, body)
+	}
+	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusConflict || jsonErrorCode(t, body) != "tool_definition_changed" || fx.calls.Load() != 1 {
+		t.Fatalf("drifted toolset dispatched beside a healthy one: %d %v calls=%d", status, body, fx.calls.Load())
+	}
+
+	rt.release = &runtime.Release{ID: testGenID, Snapshot: testSnapshot(t, fx.server.URL)}
+	status, body = request(t, server, http.MethodPost, "/v1/mcp/tools/call",
+		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","arguments":{"query":"x"}}`)
+	if status != http.StatusOK || fx.calls.Load() != 2 {
+		t.Fatalf("reviewed catalog stayed blocked after re-publish: %d %v calls=%d", status, body, fx.calls.Load())
 	}
 }
