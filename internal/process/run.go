@@ -390,6 +390,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 					continue
 				}
 				debits := &limits.DebitStore{Pool: pool, Limiter: limiter}
+				server.Debits = gateway.DurableSessionDebits(debits)
 				server.Admission.PendingCostAccountingReady = debits.CheckOwnerAccounting
 				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 				server.Admission.CostAccountingReady = func(ctx context.Context) error {

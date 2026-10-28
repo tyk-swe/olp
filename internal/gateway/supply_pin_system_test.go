@@ -110,7 +110,10 @@ func TestIntegrationBedrockRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 				case "admitted":
 					calls, wantStatus, wantCost = 1, http.StatusOK, "0.000023"
 					assertEndUserEnvelope(t, h.sink.last(t), (endUserRuntime{h.rt}).EndUserDigest(nil, "bedrock-user"), "bedrock-user")
-					event := accountingEvent(h.sink.last(t))
+					event, err := accountingEvent(h.sink.last(t))
+					if err != nil {
+						t.Fatal(err)
+					}
 					if event == nil || len(event.Attempts) != 1 || event.Attempts[0].Routing == nil || !slices.Equal(event.Attempts[0].Routing.Budgets, owners) {
 						t.Fatalf("Bedrock accounting lost supply budget owners: %+v", event)
 					}

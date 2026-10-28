@@ -108,7 +108,7 @@ dialects must be transformed; a strict route preserves the native invocation.
 Code mode is a separate contract: a `/code/<slug>` base URL, native model names
 and a subscription account behind the route. Codex, Claude Code and OpenCode
 take the configuration its management API generates for routes over Codex,
-OpenCode Go and GLM Coding Plan accounts, which one route may mix; see
+OpenCode Go and coding-plan accounts, which one route may mix; see
 [code mode](code-mode.md#client-configuration).
 The shared resolution policy and evidence for that are in the
 [code-mode qualification](../develop/qualification.md), not in the tables below.

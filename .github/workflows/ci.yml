@@ -32,6 +32,33 @@ jobs:
           name: management-contract
           path: openapi/management.json
           if-no-files-found: error
+  ratchet:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          services: false
+      - run: make test-ratchet RATCHET_BASE="origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      - run: make test-coverage-gate RATCHET_BASE="origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      - run: make api
+      - run: make test-mutation-go test-mutation-console RATCHET_BASE="origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutation-reports
+          path: .local/mutation-go/*.json
+          if-no-files-found: ignore
   integration:
     # Ubuntu 26.04: its distribution bubblewrap carries the AppArmor profile the
     # official Codex sandbox needs under the unprivileged-userns restriction;

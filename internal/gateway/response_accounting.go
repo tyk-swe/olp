@@ -60,7 +60,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map
 		facts = append(facts, copyFact)
 	}
 	now := s.now()
-	ev := accountingEvent(Envelope{
+	ev, err := accountingEvent(Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
@@ -70,7 +70,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map
 		Duration: now.Sub(x.request.startedAt),
 		Attempts: facts,
 	})
-	if ev == nil {
+	if err != nil || ev == nil {
 		return false
 	}
 	ev.HTTPOutcomePending = true

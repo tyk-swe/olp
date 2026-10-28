@@ -1,0 +1,15 @@
+{
+  "transport": "wss://api.x.ai/v1/realtime?model=<model>",
+  "client": [
+    { "type": "session.update", "session": { "type": "realtime", "voice": "eve" } },
+    { "type": "input_audio_buffer.append", "audio": "<base64>" },
+    { "type": "input_audio_buffer.commit" },
+    { "type": "response.create" }
+  ],
+  "server": [
+    { "type": "session.created", "session": { "id": "sess_example" } },
+    { "type": "conversation.created", "conversation": { "id": "conv_example" } },
+    { "type": "response.done", "response": { "id": "resp_example", "usage": { "input_tokens": 11, "output_tokens": 7, "total_tokens": 18 } } },
+    { "type": "error", "error": { "message": "example" } }
+  ]
+}

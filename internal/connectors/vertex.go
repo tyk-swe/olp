@@ -15,8 +15,12 @@ func (c Config) vertexDestination(u *url.URL) bool {
 	if cloudTestDestination(u) {
 		return true
 	}
-	expected, err := url.Parse(DefaultEndpoint("vertex_ai", c.CloudRegion, c.CloudProject))
-	return (c.Network == nil || c.Network.TrustRootsPEM == "") && err == nil &&
-		cloudIdentifier.MatchString(c.CloudRegion) && u.Scheme == "https" && u.User == nil && u.Opaque == "" &&
+	expectedRaw := DefaultEndpoint("vertex_ai", c.CloudRegion, c.CloudProject)
+	if c.Hosting() == "google-document-ai" {
+		expectedRaw = DefaultProfileEndpoint("vertex_ai", "vertex-document-processing-ocr", c.CloudRegion, c.CloudProject)
+	}
+	expected, err := url.Parse(expectedRaw)
+	return (c.Network == nil || c.Network.TrustRootsPEM == "") && err == nil && expected.Hostname() != "" &&
+		cloudIdentifier.MatchString(c.CloudRegion) && (u.Scheme == "https" || u.Scheme == "wss") && u.User == nil && u.Opaque == "" &&
 		strings.EqualFold(u.Hostname(), expected.Hostname()) && (u.Port() == "" || u.Port() == "443")
 }

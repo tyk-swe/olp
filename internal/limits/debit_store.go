@@ -85,7 +85,7 @@ func (s *DebitStore) PrepareTx(ctx context.Context, tx pgx.Tx, i DebitIntent, ow
 		return "", ErrDebitConflict
 	}
 	var authorized bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.api_keys WHERE id=$1 AND project_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND EXISTS(SELECT 1 FROM olp.pricing_currency WHERE btrim(currency)=$3))`, i.APIKeyID, i.ProjectID, i.Currency).Scan(&authorized); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.api_keys WHERE id=$1 AND project_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')=$3)`, i.APIKeyID, i.ProjectID, i.Currency).Scan(&authorized); err != nil {
 		return "", err
 	}
 	if !authorized {
@@ -227,6 +227,18 @@ func MarkDispatchedTx(ctx context.Context, tx pgx.Tx, id, claim string) error {
 	return nil
 }
 
+func (s *DebitStore) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDispatch time.Duration) (bool, error) {
+	if !canonicalID(apiKeyID) {
+		return false, ErrDebitConflict
+	}
+	if maxDispatch <= 0 {
+		maxDispatch = time.Hour
+	}
+	var held bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND NOT f.usage_complete)))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
+	return held, err
+}
+
 func (s *DebitStore) MarkUnknown(ctx context.Context, id, claim string) error {
 	tag, err := s.Pool.Exec(ctx, `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND claim_id=$2 AND state IN ('dispatched','outcome_unknown')`, id, claim)
 	if err == nil && tag.RowsAffected() != 1 {
@@ -326,7 +338,7 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []C
 		return ErrDebitState
 	}
 	var persisted bool
-	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL)) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.charge_status='not_billable' OR f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.charge_status='not_billable' OR (f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL))) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
 		return err
 	}
 	if !persisted {

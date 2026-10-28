@@ -28,6 +28,7 @@ type call struct {
 	currentCommitments   *routing.Snapshot
 	cache                *responseCacheCall
 	cacheRateLease       *limits.Lease
+	sessionDebit         *sessionDebit
 	evaluatorGuardrailID string
 	unary                *unaryCall
 	semanticHeaders      http.Header

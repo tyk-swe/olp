@@ -2510,6 +2510,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "expose_upstream_models": {
             "type": "boolean",
             "description": "Explicitly disclose upstream model names in route catalogs."
@@ -2528,6 +2532,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
               },
               {
                 "type": "null"
@@ -2946,6 +2961,15 @@
               "maxLength": 1024
             },
             "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+          },
+          "document_uri_prefixes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
           }
         },
         "type": "object"
@@ -3885,6 +3909,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "cache": {
             "oneOf": [
               {
@@ -3899,6 +3927,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
               },
               {
                 "type": "null"
@@ -10157,6 +10196,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "cache": {
             "oneOf": [
               {
@@ -10171,6 +10214,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
               },
               {
                 "type": "null"
@@ -11185,6 +11239,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "cache": {
             "oneOf": [
               {
@@ -11204,6 +11262,25 @@
                 "type": "null"
               }
             ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certification": {
+            "description": "Whether the route's serving tuples are certified. Pass-through routes always read uncertified.",
+            "enum": [
+              "certified",
+              "uncertified"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -11225,7 +11302,9 @@
           "selectors",
           "retry",
           "affinity",
-          "budget"
+          "budget",
+          "passthrough",
+          "certification"
         ],
         "type": "object"
       },
@@ -11279,6 +11358,10 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route. Requires caller credentials on every target and equal policy on fallback/selector routes. Preserve usage and prices, rates and concurrency, but exclude caller attempts from USD budget admission and accrual. Probes/classifiers retain their own accounting policy."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
           }
         },
         "required": [
@@ -11566,6 +11649,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "cache": {
             "oneOf": [
               {
@@ -11585,6 +11672,25 @@
                 "type": "null"
               }
             ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certification": {
+            "description": "Whether the route's serving tuples are certified. Pass-through routes always read uncertified.",
+            "enum": [
+              "certified",
+              "uncertified"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -11606,7 +11712,9 @@
           "selectors",
           "retry",
           "affinity",
-          "budget"
+          "budget",
+          "passthrough",
+          "certification"
         ],
         "type": "object"
       },
@@ -13186,7 +13294,8 @@
           "unary",
           "streaming",
           "async",
-          "realtime"
+          "realtime",
+          "webrtc"
         ],
         "type": "string"
       },
@@ -15056,10 +15165,13 @@
           "openai-decisions",
           "systemone",
           "mistral-ocr",
+          "azure-document-intelligence-ocr",
+          "vertex-document-processing-ocr",
           "perplexity-search",
           "tavily-search",
           "exa-search",
-          "parallel-search"
+          "parallel-search",
+          "brave-search"
         ],
         "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
       },
@@ -15285,11 +15397,14 @@
             ]
           },
           "adapter": {
-            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
+            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
             "enum": [
               "codex",
               "opencode_go",
               "zai_coding",
+              "minimax_plan",
+              "kimi_code",
+              "qwen_token_plan",
               null
             ],
             "type": [
@@ -15888,7 +16003,10 @@
               "enum": [
                 "codex",
                 "opencode_go",
-                "zai_coding"
+                "zai_coding",
+                "minimax_plan",
+                "kimi_code",
+                "qwen_token_plan"
               ],
               "type": "string"
             },
@@ -16292,12 +16410,15 @@
         "description": "Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.",
         "properties": {
           "adapters": {
-            "description": "The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.",
+            "description": "The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.",
             "items": {
               "enum": [
                 "codex",
                 "opencode_go",
-                "zai_coding"
+                "zai_coding",
+                "minimax_plan",
+                "kimi_code",
+                "qwen_token_plan"
               ],
               "type": "string"
             },
@@ -17600,6 +17721,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "cache": {
             "oneOf": [
               {
@@ -17619,6 +17744,25 @@
                 "type": "null"
               }
             ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certification": {
+            "description": "Whether the route's serving tuples are certified. Pass-through routes always read uncertified.",
+            "enum": [
+              "certified",
+              "uncertified"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -17626,7 +17770,9 @@
           "selectors",
           "retry",
           "affinity",
-          "budget"
+          "budget",
+          "passthrough",
+          "certification"
         ],
         "type": "object"
       },
@@ -21794,6 +21940,10 @@
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
           },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
           "cache": {
             "oneOf": [
               {
@@ -21808,6 +21958,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughConfig"
               },
               {
                 "type": "null"
@@ -26962,6 +27123,73 @@
           "ancestors",
           "metered"
         ]
+      },
+      "PassthroughConfig": {
+        "additionalProperties": false,
+        "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+        "properties": {
+          "dialect": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+          },
+          "methods": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "GET",
+                "HEAD",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE"
+              ]
+            }
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "query": {
+            "type": "array",
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "headers": {
+            "type": "array",
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "acknowledge_opaque_unmetered": {
+            "type": "boolean",
+            "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+          }
+        },
+        "required": [
+          "dialect",
+          "methods",
+          "paths",
+          "acknowledge_opaque_unmetered"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {

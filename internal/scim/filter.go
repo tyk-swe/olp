@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,6 +86,7 @@ func jsonPath(p filter.AttributePath) string {
 }
 
 type SQLFilter struct {
+	Schema   string
 	Args     []any
 	sequence int
 }
@@ -104,20 +106,20 @@ func (s *SQLFilter) Compile(raw, base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.expression(e, base, 0)
+	return s.expression(e, base, 0, nil)
 }
 
-func (s *SQLFilter) expression(e filter.Expression, base string, depth int) (string, error) {
+func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scope []string) (string, error) {
 	if depth > 32 {
 		return "", Fail(400, "invalidFilter", "The filter is too complex.")
 	}
 	switch x := e.(type) {
 	case *filter.LogicalExpression:
-		a, err := s.expression(x.Left, base, depth+1)
+		a, err := s.expression(x.Left, base, depth+1, scope)
 		if err != nil {
 			return "", err
 		}
-		b, err := s.expression(x.Right, base, depth+1)
+		b, err := s.expression(x.Right, base, depth+1, scope)
 		if err != nil {
 			return "", err
 		}
@@ -127,19 +129,30 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int) (str
 		}
 		return "(" + a + " " + op + " " + b + ")", nil
 	case *filter.NotExpression:
-		a, err := s.expression(x.Expression, base, depth+1)
+		a, err := s.expression(x.Expression, base, depth+1, scope)
 		return "(NOT (" + a + "))", err
 	case *filter.ValuePath:
 		s.sequence++
 		alias := fmt.Sprintf("scim_value_%d", s.sequence)
 		source := "jsonb_path_query(" + base + "," + s.bind(jsonPath(x.AttributePath)) + "::jsonpath) " + alias + "(value)"
-		condition, err := s.expression(x.ValueFilter, alias+".value", depth+1)
+		condition, err := s.expression(x.ValueFilter, alias+".value", depth+1, slices.Concat(scope, pathParts(x.AttributePath)))
 		return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", err
 	case *filter.AttributeExpression:
+		nullComparison := s.Schema != "" && x.CompareValue == nil && (x.Operator == filter.EQ || x.Operator == filter.NE)
+		if nullComparison && !s.definedAttribute(x.AttributePath, scope) {
+			return "FALSE", nil
+		}
 		s.sequence++
 		alias := fmt.Sprintf("scim_value_%d", s.sequence)
 		v := alias + ".value"
 		source := "jsonb_path_query(" + base + "," + s.bind(jsonPath(x.AttributePath)) + "::jsonpath) " + alias + "(value)"
+		if nullComparison {
+			assigned := "EXISTS(SELECT 1 FROM " + source + " WHERE " + v + " NOT IN ('null'::jsonb,'\"\"'::jsonb,'[]'::jsonb,'{}'::jsonb))"
+			if x.Operator == filter.EQ {
+				return "NOT " + assigned, nil
+			}
+			return assigned, nil
+		}
 		condition, err := s.compare(x, v)
 		if err != nil {
 			return "", err
@@ -147,6 +160,34 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int) (str
 		return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", nil
 	}
 	return "", Fail(400, "invalidFilter", "Unsupported filter expression.")
+}
+
+func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) bool {
+	if path.URIPrefix != nil && (strings.EqualFold(*path.URIPrefix, UserSchema) || strings.EqualFold(*path.URIPrefix, GroupSchema)) && !strings.EqualFold(*path.URIPrefix, s.Schema) {
+		return false
+	}
+	parts := slices.Concat(scope, pathParts(path))
+	name := strings.Join(parts, ".")
+	switch name {
+	case "schemas", "id", "externalId", "meta", "meta.resourceType", "meta.created", "meta.lastModified", "meta.location", "meta.version":
+		return true
+	}
+	if s.Schema == UserSchema {
+		switch name {
+		case "userName", "displayName", "active", "name", "name.formatted", "name.familyName", "name.givenName", "name.middleName", "name.honorificPrefix", "name.honorificSuffix",
+			"emails", "emails.value", "emails.type", "emails.primary", "groups", "groups.value", "groups.display", "groups.type", "groups.$ref", "roles", "roles.value", "roles.primary",
+			UserExtension + ".role", UserExtension + ".accessScope":
+			return true
+		}
+	}
+	if s.Schema == GroupSchema {
+		switch name {
+		case "displayName", "members", "members.value", "members.display", "members.type", "members.$ref",
+			GroupExtension + ".role", GroupExtension + ".accessScope", GroupExtension + ".projects", GroupExtension + ".projects.value", GroupExtension + ".projects.role":
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SQLFilter) compare(e *filter.AttributeExpression, v string) (string, error) {

@@ -1,0 +1,24 @@
+{
+  "vendor": "brave",
+  "documentation_url": "https://api-dashboard.search.brave.com/api-reference/web/search/get",
+  "reviewed_at": "2026-10-27",
+  "notes": "Built from the published Brave Web Search API reference (GET /res/v1/web/search, X-Subscription-Token header). The request fixture is the gateway native document, which lowers to bounded query parameters (q, count, offset, freshness, result_filter=web, text_decorations=false) with no JSON body. The response and the 422 error are schema-built. These are offline contract fixtures, not live-provider qualification.",
+  "endpoints": {
+    "search": "https://api.search.brave.com/res/v1/web/search"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "search": {
+      "request": "search.request.json",
+      "file": "search.response.json",
+      "basis": "schema"
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 422,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}

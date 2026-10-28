@@ -484,7 +484,7 @@ var knownOperations = map[string]struct{}{
 	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {}, "translation": {},
 	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
 	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
-	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {}, "guardrail": {}, "agent_resource": {},
+	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {}, "guardrail": {}, "agent_resource": {}, "passthrough": {},
 	"fine_tuning": {}, "vector_store": {}, "retrieval": {}, "conversation": {}, "container": {}, "eval": {}, "skill": {}, "context_cache": {},
 }
 

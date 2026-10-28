@@ -13,7 +13,7 @@ import (
 type Select func([]any, filter.Expression) ([]int, error)
 
 func (s *SQLFilter) Expression(e filter.Expression, base string) (string, error) {
-	return s.expression(e, base, 0)
+	return s.expression(e, base, 0, nil)
 }
 
 func Patch(current, body Document, group bool, selectValues Select) (Document, error) {
