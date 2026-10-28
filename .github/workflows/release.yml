@@ -11,6 +11,9 @@ defaults:
 jobs:
   qualification:
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
   candidate-build:
     needs: qualification
     strategy:

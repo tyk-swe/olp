@@ -181,14 +181,20 @@ Vite runs shell hydration and focused setup/login, cookie, CSRF mutation,
 protected deep-link and unary/streaming inference proxy checks. Failure-path
 restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
-Code-mode process tests run with a separate 25-minute suite deadline. The
-remaining process tests retain their 30-minute deadline in three disjoint groups:
-names starting `TestA` through `TestF`, `TestG` through `TestM`, and every other
-test name. All exclude `TestCode`, which runs in the first phase. The four
-selections cover the complete package, with the same build tags and race
-detection. Separating the two alphabetic cohorts leaves room for intentional
-recovery, enrollment and certification waits without extending operation or
-package deadlines.
+Process tests run in four disjoint selections, each with a 30-minute deadline:
+names starting `TestCodeQualification`, the other names starting `TestA` through
+`TestF`, `TestG` through `TestM`, and every other test name. The four selections
+cover the complete package, with the same build tags and race detection.
+Separating the cohorts leaves room for intentional recovery, enrollment and
+certification waits without extending operation or package deadlines.
+
+The runner groups its suites into lanes. `qualification`, `a-f`, `g-m` and
+`n-z` hold the four process selections along with direct CLI qualification,
+client qualification, internal service tests and the extension test, `smoke`
+holds the JavaScript SDK smoke and `browser` the Chromium journeys and
+replacement recovery. `./scripts/integration.sh LANE...` provisions the services
+once and runs only those lanes, and `shell` runs every lane except `browser`. CI
+runs the lanes as parallel jobs.
 
 Service-dependent Go tests live in `tests/integration/` or beside feature code
 and require the `integration` build tag. Internal service tests use the

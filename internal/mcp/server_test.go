@@ -292,6 +292,8 @@ func newFixture(t *testing.T, tl *timeline, mode string) *fixture {
 				content = []any{map[string]any{"type": "text", "text": "echo:" + string(params.Arguments)}}
 			case "secret_result":
 				content = []any{map[string]any{"type": "text", "text": "the private result"}}
+			case "large_result":
+				content = []any{map[string]any{"type": "text", "text": strings.Repeat("x", 256<<10)}}
 			case "image_result":
 				content = []any{map[string]any{"type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}}
 			}
@@ -1014,7 +1016,8 @@ func TestCallToolRequiresCallerCallID(t *testing.T) {
 
 func TestCallToolExactRepeatReturnsRetainedResultWithoutReexecuting(t *testing.T) {
 	authority := testAuthority([]string{"tools"}, []string{testToolset})
-	server, fx, ledger, _, _ := newTestServer(t, authority, "")
+	server, fx, ledger, _, _ := newTestServer(t, authority, "large_result")
+	fx.notify.Store(true)
 	status, first := request(t, server, http.MethodPost, "/v1/mcp/tools/call", jsonCallBody("order-42", "secret-argument"))
 	if status != http.StatusOK || fx.calls.Load() != 1 {
 		t.Fatalf("first call did not execute once: status=%d body=%v calls=%d", status, first, fx.calls.Load())
@@ -1034,11 +1037,14 @@ func TestCallToolExactRepeatReturnsRetainedResultWithoutReexecuting(t *testing.T
 	}
 	firstText, _ := firstContent[0].(map[string]any)
 	secondText, _ := secondContent[0].(map[string]any)
-	if firstText["text"] != secondText["text"] {
+	if firstText["text"] != strings.Repeat("x", 256<<10) || firstText["text"] != secondText["text"] {
 		t.Fatalf("exact repeat returned a different result: first=%v second=%v", first, second)
 	}
 	if len(ledger.reserved) != 1 || len(ledger.evidence) != 1 {
 		t.Fatalf("exact repeat reserved or settled a second debit: reserved=%d evidence=%d", len(ledger.reserved), len(ledger.evidence))
+	}
+	if ledger.evidence[0].Status != StatusSucceeded {
+		t.Fatalf("large SSE result did not settle successfully: %+v", ledger.evidence[0])
 	}
 	reserved := ledger.reserved[0]
 	if reserved.CallDigest == "order-42" || reserved.CallDigest != server.callDigest(*authority, "order-42") {
