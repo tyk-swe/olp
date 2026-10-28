@@ -239,8 +239,9 @@ func (c *Transport) call(ctx context.Context, id int, method string, params any,
 	if media != "text/event-stream" {
 		return ErrTransport
 	}
+	eventLimit := sseEventLimit(method)
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4096), 128<<10)
+	scanner.Buffer(make([]byte, 4096), eventLimit)
 	var data []byte
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -260,11 +261,18 @@ func (c *Transport) call(ctx context.Context, id int, method string, params any,
 			}
 			data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
 		}
-		if len(data) > 128<<10 || reader.N == 0 {
+		if len(data) > eventLimit || reader.N == 0 {
 			return ErrTransport
 		}
 	}
 	return ErrTransport
+}
+
+func sseEventLimit(method string) int {
+	if method == "tools/call" {
+		return 1 << 20
+	}
+	return 128 << 10
 }
 
 func decodeResult(raw []byte, id int, out any) error {
