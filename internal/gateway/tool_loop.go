@@ -10,7 +10,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -42,6 +41,7 @@ type workflowCall struct {
 	calls         int
 	finalFrames   []byte
 	responseItems []responseMCPItem
+	responseMCP   bool
 }
 
 func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
@@ -96,8 +96,8 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		return invalidRequest("invalid_request", "The route tools could not be added to the request.", nil)
 	}
 	x.generation.parsed = parsed
-	x.workflow = &workflowCall{token: token, tools: tools}
-	if x.family == wire.Responses && x.route.ResponsesMCPItems {
+	x.workflow = &workflowCall{token: token, tools: tools, responseMCP: x.family == wire.Responses && x.route.ResponsesMCPItems}
+	if x.workflow.responseMCP {
 		x.workflow.responseItems = responseMCPListings(x.generation.toolsets, tools)
 	}
 	return nil
@@ -238,6 +238,10 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			}
 		}
 		out := s.executeModelStep(ctx, x, x.generation.parsed)
+		if out.err == nil && out.completion != nil && x.workflow.responseMCP && !x.responseMCPContractCertified() {
+			x.workflow.responseMCP = false
+			x.workflow.responseItems = nil
+		}
 		if out.err == nil && out.completion != nil && x.generation.parsed.Stream {
 			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes), x.named().Slug)
 			if err != nil {
@@ -383,8 +387,12 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		if err != nil {
 			return nil, workflowError(err)
 		}
-		if x.family == wire.Responses && x.route.ResponsesMCPItems {
-			x.workflow.responseItems = append(x.workflow.responseItems, responseMCPItem{Type: "mcp_call", ID: "mcp_" + uuid.NewString(), ServerLabel: x.workflow.tools[index].ToolsetID, Name: call.Name, Arguments: call.Arguments, Output: string(result), Status: "completed"})
+		if x.workflow.responseMCP {
+			item, err := responseMCPCall(x.workflow.tools[index], call, result)
+			if err != nil {
+				return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The tool returned an invalid response.")
+			}
+			x.workflow.responseItems = append(x.workflow.responseItems, item)
 		}
 		if x.family != wire.Chat {
 			results = append(results, protocols.WorkflowResult{CallID: call.ID, Content: string(result)})

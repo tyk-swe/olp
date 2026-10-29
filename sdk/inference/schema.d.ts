@@ -461,6 +461,11 @@ export interface components {
             arguments: string;
             output?: string;
             status?: string;
+            error?: {
+                /** @enum {string} */
+                type: "mcp_tool_execution_error";
+                content: unknown;
+            };
         };
         ResponsesWorkflowResponse: {
             output?: (components["schemas"]["ResponsesMCPListTools"] | components["schemas"]["ResponsesMCPCall"] | {

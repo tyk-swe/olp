@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -20,6 +21,23 @@ type responseMCPTool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
+type responseMCPError struct {
+	Type    string          `json:"type"`
+	Content json.RawMessage `json:"content"`
+}
+
+func (x *call) responseMCPContractCertified() bool {
+	if len(x.facts) == 0 {
+		return false
+	}
+	provider, ok := x.snapshot().Providers[x.facts[len(x.facts)-1].ProviderID]
+	if !ok || provider.Plugin != nil {
+		return false
+	}
+	profile, err := connectors.LookupProfile(provider.ProfileID, provider.ProfileRevision)
+	return err == nil && profile.ID == "openai-responses" && profile.Revision == connectors.ProfileRevision && provider.Kind == profile.Kind
+}
+
 type responseMCPItem struct {
 	Type        string             `json:"type"`
 	ID          string             `json:"id"`
@@ -29,6 +47,21 @@ type responseMCPItem struct {
 	Arguments   string             `json:"arguments,omitempty"`
 	Output      string             `json:"output,omitempty"`
 	Status      string             `json:"status,omitempty"`
+	Error       *responseMCPError  `json:"error,omitempty"`
+}
+
+func responseMCPCall(tool WorkflowTool, call wire.ToolCall, result json.RawMessage) (responseMCPItem, error) {
+	var outcome struct {
+		IsError bool            `json:"isError"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(result, &outcome); err != nil {
+		return responseMCPItem{}, err
+	}
+	if outcome.IsError {
+		return responseMCPItem{Type: "mcp_call", ID: "mcp_" + uuid.NewString(), ServerLabel: tool.ToolsetID, Name: call.Name, Arguments: call.Arguments, Status: "failed", Error: &responseMCPError{Type: "mcp_tool_execution_error", Content: outcome.Content}}, nil
+	}
+	return responseMCPItem{Type: "mcp_call", ID: "mcp_" + uuid.NewString(), ServerLabel: tool.ToolsetID, Name: call.Name, Arguments: call.Arguments, Output: string(result), Status: "completed"}, nil
 }
 
 func responseMCPListings(toolsets []string, tools []WorkflowTool) []responseMCPItem {
@@ -90,6 +123,26 @@ type responseMCPStreamEvent struct {
 	Item           responseMCPItem `json:"item"`
 }
 
+func responseMCPFrameChanges(source oif.Document, kind string, sequence, offset int, terminal []byte) ([]oif.Change, error) {
+	base := []oif.Change{{Pointer: "/sequence_number", Value: strconv.Itoa(sequence), Origin: oif.ExplicitTransform, Reason: "gateway MCP output"}}
+	index, ok := source.Root().Lookup("output_index")
+	if !ok {
+		return slices.Concat(base, responseMCPTerminalChange(kind, terminal)), nil
+	}
+	value, err := strconv.Atoi(index.Raw())
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(base, []oif.Change{{Pointer: "/output_index", Value: strconv.Itoa(value + offset), Origin: oif.ExplicitTransform, Reason: "gateway MCP output"}}, responseMCPTerminalChange(kind, terminal)), nil
+}
+
+func responseMCPTerminalChange(kind string, terminal []byte) []oif.Change {
+	if kind != "response.completed" && kind != "response.incomplete" {
+		return nil
+	}
+	return []oif.Change{{Pointer: "/response", Value: string(terminal), Origin: oif.ExplicitTransform, Reason: "gateway MCP output"}}
+}
+
 func projectResponseMCPFrames(raw []byte, items []responseMCPItem, maxEvent int, maxBytes int64) ([]byte, error) {
 	final, err := openai.Aggregate(wire.Responses, bytes.NewReader(raw), maxEvent, int(maxBytes))
 	if err != nil {
@@ -99,6 +152,7 @@ func projectResponseMCPFrames(raw []byte, items []responseMCPItem, maxEvent int,
 	if err != nil {
 		return nil, err
 	}
+	// The decoder emits frames incrementally, so the buffer and sequence persist across callbacks.
 	var out bytes.Buffer
 	sequence, injected := 0, false
 	write := func(frame sse.Frame) error {
@@ -143,16 +197,9 @@ func projectResponseMCPFrames(raw []byte, items []responseMCPItem, maxEvent int,
 				return err
 			}
 		}
-		changes := []oif.Change{{Pointer: "/sequence_number", Value: strconv.Itoa(sequence), Origin: oif.ExplicitTransform, Reason: "gateway MCP output"}}
-		if index, ok := source.Root().Lookup("output_index"); ok {
-			value, err := strconv.Atoi(index.Raw())
-			if err != nil {
-				return err
-			}
-			changes = append(changes, oif.Change{Pointer: "/output_index", Value: strconv.Itoa(value + len(items)), Origin: oif.ExplicitTransform, Reason: "gateway MCP output"})
-		}
-		if kind == "response.completed" || kind == "response.incomplete" {
-			changes = append(changes, oif.Change{Pointer: "/response", Value: string(terminal), Origin: oif.ExplicitTransform, Reason: "gateway MCP output"})
+		changes, err := responseMCPFrameChanges(source, kind, sequence, len(items), terminal)
+		if err != nil {
+			return err
 		}
 		updated, err := oif.Apply(source, changes)
 		if err != nil {

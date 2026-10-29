@@ -198,6 +198,21 @@ func (e PromptLabelReferenceLabel) Valid() bool {
 	}
 }
 
+// Defines values for ResponsesMCPCallErrorType.
+const (
+	McpToolExecutionError ResponsesMCPCallErrorType = "mcp_tool_execution_error"
+)
+
+// Valid indicates whether the value is a known member of the ResponsesMCPCallErrorType enum.
+func (e ResponsesMCPCallErrorType) Valid() bool {
+	switch e {
+	case McpToolExecutionError:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResponsesMCPCallType.
 const (
 	McpCall ResponsesMCPCallType = "mcp_call"
@@ -541,7 +556,11 @@ type PublishedPromptReference struct {
 
 // ResponsesMCPCall defines model for ResponsesMCPCall.
 type ResponsesMCPCall struct {
-	Arguments   string               `json:"arguments"`
+	Arguments string `json:"arguments"`
+	Error     *struct {
+		Content interface{}               `json:"content"`
+		Type    ResponsesMCPCallErrorType `json:"type"`
+	} `json:"error,omitempty"`
 	Id          string               `json:"id"`
 	Name        string               `json:"name"`
 	Output      *string              `json:"output,omitempty"`
@@ -549,6 +568,9 @@ type ResponsesMCPCall struct {
 	Status      *string              `json:"status,omitempty"`
 	Type        ResponsesMCPCallType `json:"type"`
 }
+
+// ResponsesMCPCallErrorType defines model for ResponsesMCPCall.Error.Type.
+type ResponsesMCPCallErrorType string
 
 // ResponsesMCPCallType defines model for ResponsesMCPCall.Type.
 type ResponsesMCPCallType string

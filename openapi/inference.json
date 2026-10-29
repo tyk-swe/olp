@@ -1781,6 +1781,14 @@
           },
           "status": {
             "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": ["type", "content"],
+            "properties": {
+              "type": { "type": "string", "enum": ["mcp_tool_execution_error"] },
+              "content": {}
+            }
           }
         }
       },
