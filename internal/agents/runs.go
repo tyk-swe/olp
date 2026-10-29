@@ -11,6 +11,11 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+func PrincipalDigest(key *secrets.AuthKey, a access.Authority) []byte {
+	principal, _ := json.Marshal(struct{ Key, Project, Workload string }{a.ID, *a.ProjectID, a.WorkloadDigest})
+	return key.Digest(secrets.AgentPrincipalDigest, string(principal))
+}
+
 // StartRunTx deduplicates a correlation record. It grants no permission to
 // resend a step and does not itself reserve or charge money.
 func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.Authority, id, scope, resource, revision string) error {
@@ -23,8 +28,7 @@ func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.A
 	} else if scope != "tools" {
 		return limits.ErrDebitAuthority
 	}
-	principal, _ := json.Marshal(struct{ Key, Project, Workload string }{a.ID, *a.ProjectID, a.WorkloadDigest})
-	digest := key.Digest(secrets.AgentPrincipalDigest, string(principal))
+	digest := PrincipalDigest(key, a)
 	var allowed bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id JOIN olp.api_keys k ON k.id=$4 WHERE p.id=$1 AND v.id=$2 AND p.project_id=$3 AND p.kind=$5 AND k.project_id=$3 AND NOT p.retired AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()))`, resource, revision, *a.ProjectID, a.ID, kind).Scan(&allowed); err != nil {
 		return err

@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/v1/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export OTLP traces
+         * @description Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+         */
+        post: operations["exportTraces"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chat/completions": {
         parameters: {
             query?: never;
@@ -418,6 +438,95 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    exportTraces: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Content-Encoding"?: "identity" | "gzip";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-protobuf": string;
+            };
+        };
+        responses: {
+            /** @description Trace batch accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description Invalid protobuf, span or batch size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The credential is invalid, expired or revoked */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The caller lacks trace scope or project access */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The trace batch exceeds one MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The content type or encoding is unsupported */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The trace or caller rate limit is exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description Trace storage or limits are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+        };
+    };
     createChatCompletionWithPrompt: {
         parameters: {
             query?: never;

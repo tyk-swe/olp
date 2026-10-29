@@ -317,6 +317,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
+			gw.Traces = &gateway.TraceDeps{Pool: pool, Limiter: limiter, Auth: auth}
 			gw.Batches = batches.NewStore(pool)
 			gw.Cache = responseCache
 			gw.Business = business

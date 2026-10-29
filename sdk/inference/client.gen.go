@@ -222,6 +222,24 @@ func (e ResponsesPromptLabelReferenceLabel) Valid() bool {
 	}
 }
 
+// Defines values for ExportTracesParamsContentEncoding.
+const (
+	Gzip     ExportTracesParamsContentEncoding = "gzip"
+	Identity ExportTracesParamsContentEncoding = "identity"
+)
+
+// Valid indicates whether the value is a known member of the ExportTracesParamsContentEncoding enum.
+func (e ExportTracesParamsContentEncoding) Valid() bool {
+	switch e {
+	case Gzip:
+		return true
+	case Identity:
+		return true
+	default:
+		return false
+	}
+}
+
 // A2AAgentCard defines model for A2AAgentCard.
 type A2AAgentCard struct {
 	Capabilities       map[string]interface{} `json:"capabilities"`
@@ -586,6 +604,14 @@ type CreateResponseWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
 	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
 }
+
+// ExportTracesParams defines parameters for ExportTraces.
+type ExportTracesParams struct {
+	ContentEncoding *ExportTracesParamsContentEncoding `json:"Content-Encoding,omitempty"`
+}
+
+// ExportTracesParamsContentEncoding defines parameters for ExportTraces.
+type ExportTracesParamsContentEncoding string
 
 // CallA2AAgentJSONRequestBody defines body for CallA2AAgent for application/json ContentType.
 type CallA2AAgentJSONRequestBody = A2ARequest
@@ -2166,6 +2192,15 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
 	CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportTracesWithBody Export OTLP traces
+	//
+	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+	ExportTracesWithBody(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // CallA2AAgentWithBody Send a message to or read, cancel, and subscribe to a task from a published A2A agent
@@ -2441,6 +2476,25 @@ func (c *Client) CreateResponseWithPromptWithBody(ctx context.Context, params *C
 // Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
 func (c *Client) CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateResponseWithPromptRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportTracesWithBody Export OTLP traces
+//
+// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+func (c *Client) ExportTracesWithBody(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportTracesRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2887,6 +2941,50 @@ func NewCreateResponseWithPromptRequestWithBody(server string, params *CreateRes
 	return req, nil
 }
 
+// NewExportTracesRequestWithBody constructs an http.Request for the ExportTraces method, with any body, and a specified content type
+func NewExportTracesRequestWithBody(server string, params *ExportTracesParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/traces")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.ContentEncoding != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Content-Encoding", *params.ContentEncoding, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Content-Encoding", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -3065,6 +3163,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
 	CreateResponseWithPromptWithResponse(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateResponseWithPromptResponse, error)
+
+	// ExportTracesWithBodyWithResponse Export OTLP traces
+	//
+	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+	ExportTracesWithBodyWithResponse(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error)
 }
 
 type CallA2AAgentResponse struct {
@@ -3668,6 +3775,40 @@ func (r CreateResponseWithPromptResponse) ContentType() string {
 	return ""
 }
 
+type ExportTracesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportTracesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportTracesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportTracesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportTracesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // CallA2AAgentWithBodyWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
 // Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
@@ -3891,6 +4032,21 @@ func (c *ClientWithResponses) CreateResponseWithPromptWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseCreateResponseWithPromptResponse(rsp)
+}
+
+// ExportTracesWithBodyWithResponse Export OTLP traces
+//
+// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+func (c *ClientWithResponses) ExportTracesWithBodyWithResponse(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error) {
+	rsp, err := c.ExportTracesWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportTracesResponse(rsp)
 }
 
 // ParseCallA2AAgentResponse parses an HTTP response from a CallA2AAgentWithResponse call
@@ -4411,6 +4567,22 @@ func ParseCreateResponseWithPromptResponse(rsp *http.Response) (*CreateResponseW
 	case rsp.StatusCode == 200:
 		// Content-type (text/event-stream) unsupported
 
+	}
+
+	return response, nil
+}
+
+// ParseExportTracesResponse parses an HTTP response from a ExportTracesWithResponse call
+func ParseExportTracesResponse(rsp *http.Response) (*ExportTracesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportTracesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil
