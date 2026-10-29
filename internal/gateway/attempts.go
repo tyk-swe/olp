@@ -25,11 +25,11 @@ type attemptAdapter[Result any] struct {
 func (a attemptAdapter[Result]) dispatchWithAuthority(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
 	if x.authority.TaskCapability != nil {
 		admitter, ok := s.Runtime.(interface {
-			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string) error
+			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error
 		})
 		var err error
 		if ok {
-			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID)
+			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID, x.request.accountingID())
 		}
 		if !ok || err != nil {
 			var result Result

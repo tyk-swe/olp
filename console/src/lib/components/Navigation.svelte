@@ -61,6 +61,18 @@
           route: 'GET /api/v1/agent-runs'
         },
         {
+          label: 'A2A tasks',
+          href: resolve('/a2a-tasks'),
+          icon: 'route',
+          route: 'GET /api/v1/a2a-tasks'
+        },
+        {
+          label: 'Delegations',
+          href: resolve('/delegations'),
+          icon: 'route',
+          route: 'GET /api/v1/agent-delegations'
+        },
+        {
           label: 'Tool calls',
           href: resolve('/tool-calls'),
           icon: 'route',

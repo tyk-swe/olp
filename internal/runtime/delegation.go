@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"slices"
 	"time"
@@ -280,12 +279,11 @@ func (m *Manager) AuthorizeDelegatedAgentTask(ctx context.Context, digest, keyID
 }
 
 func (m *Manager) delegationPair(project, key, agent string, member *string) (string, string) {
-	if member == nil {
-		pair, _ := json.Marshal([3]string{project, key, agent})
-		return hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), ""
+	pair := attribution.DelegationPair(m.auth, project, key, agent, member)
+	if member != nil {
+		return pair, *member
 	}
-	pair, _ := json.Marshal([4]string{project, "member", *member, agent})
-	return hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), *member
+	return pair, ""
 }
 
 func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, project string) error {

@@ -63,13 +63,16 @@ func TestManagementAuthorizationGoldenMatrix(t *testing.T) {
 	}
 }
 
-func TestRunManagementRequiresReadScope(t *testing.T) {
+func TestOperatorViewsRequireReadScope(t *testing.T) {
 	requirements, err := ContractRequirements()
 	if err != nil {
 		t.Fatal(err)
 	}
 	caller := Principal{Kind: "machine", AllProjects: true, creatorRole: RoleOwner, scopes: 1 << Configure}
 	for _, pattern := range []string{
+		"GET /api/v1/a2a-tasks",
+		"GET /api/v1/a2a-tasks/{task_id}",
+		"GET /api/v1/agent-delegations",
 		"GET /api/v1/agent-runs",
 		"GET /api/v1/agent-runs/{run_id}",
 		"GET /api/v1/agent-runs/{run_id}/spans",

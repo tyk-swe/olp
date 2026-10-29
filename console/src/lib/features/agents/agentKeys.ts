@@ -6,6 +6,11 @@ export const agentKeys = {
   run: (runID: string) => ['agent-run', runID] as const,
   runSpans: (runID: string, cursor?: string) =>
     ['agent-run-spans', runID, cursor ?? ''] as const,
+  tasks: (project: string, cursor?: string) =>
+    ['a2a-tasks', project, cursor ?? ''] as const,
+  task: (taskID: string) => ['a2a-task', taskID] as const,
+  delegations: (project: string, cursor?: string) =>
+    ['agent-delegations', project, cursor ?? ''] as const,
   toolCalls: (project: string, key: string, cursor?: string) =>
     ['mcp-tool-calls', project, key, cursor ?? ''] as const
 };

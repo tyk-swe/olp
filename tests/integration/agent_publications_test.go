@@ -51,6 +51,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
+	"github.com/tyk-swe/olp/internal/usage"
 	inferencesdk "github.com/tyk-swe/olp/sdk/inference"
 )
 
@@ -650,6 +651,16 @@ type a2aTestParams struct {
 
 type a2aContentTypeWriter struct{ http.ResponseWriter }
 
+type taskAccountingSink struct {
+	*captureSink
+	persist *gateway.PersistingSink
+}
+
+func (s *taskAccountingSink) Terminal(e gateway.Envelope) {
+	s.captureSink.Terminal(e)
+	s.persist.Terminal(e)
+}
+
 func (w a2aContentTypeWriter) WriteHeader(status int) {
 	if w.Header().Get("Content-Type") == "text/event-stream" {
 		w.Header().Set("Content-Type", "Text/Event-Stream; charset=utf-8")
@@ -698,7 +709,26 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 		toolCalls.Add(1)
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: input.Query}}}, nil, nil
 	})
-	toolUpstream := httptest.NewServer(referenceServerHandler(routing.MCPStreamableHTTP, reference))
+	var failToolCalls atomic.Bool
+	referenceHandler := referenceServerHandler(routing.MCPStreamableHTTP, reference)
+	toolUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failToolCalls.Load() && r.Method == http.MethodPost {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var request struct {
+				Method string `json:"method"`
+			}
+			if json.Unmarshal(body, &request) == nil && request.Method == "tools/call" {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+		referenceHandler.ServeHTTP(w, r)
+	}))
 	defer toolUpstream.Close()
 	registered := h.want(owner, http.MethodPost, "/api/v1/mcp-servers", map[string]any{"name": "Callback tools", "project_id": project, "transport": "streamable_http", "endpoint": toolUpstream.URL, "enabled": true, "unit_price": "0.10"}, idem("callback-tools-server"), http.StatusCreated)
 	serverID := registered["id"].(string)
@@ -758,17 +788,13 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 		agentHandler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(upstream.Close)
-	var user string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
-		t.Fatal(err)
-	}
-	pricing := acctID(t)
-	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	pricingRevision := h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": "azure_openai", "provider_id": model["id"], "model": "unused-fixture-model", "operation": "generation", "currency": "USD", "input_per_million": "0", "output_per_million": "0"}}}, idem("callback-pricing"), http.StatusCreated)
+	pricing := mcpExecString(t, pricingRevision, "id")
 	digest := sha256.Sum256(cardFor(upstream.URL + "/rpc"))
-	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{"project_id": project, "name": "callback agent", "agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{toolsetRevision}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "max_task_continuations": 8}}, idem("callback-agent"), http.StatusCreated)
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{"project_id": project, "name": "callback agent", "agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{toolsetRevision}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0", "max_task_continuations": 10}}, idem("callback-agent"), http.StatusCreated)
 	agent := created["id"].(string)
 	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("callback-publish")), http.StatusOK)
-	keyRecord := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "callback owner", "project_id": project, "scopes": []string{"agents", "inference", "tools"}, "allowed_agents": []string{agent}, "allowed_routes": []string{"callback-chat", "callback-unpinned"}, "allowed_toolsets": []string{toolsetID, foreignToolsetID}, "requests_per_minute": 10, "end_user_source": "header", "end_user_policy": map[string]any{"defaults": map[string]any{"requests_per_minute": 10}}}, idem("callback-owner"), http.StatusCreated)
+	keyRecord := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "callback owner", "project_id": project, "scopes": []string{"agents", "inference", "tools"}, "allowed_agents": []string{agent}, "allowed_routes": []string{"callback-chat", "callback-unpinned"}, "allowed_toolsets": []string{toolsetID, foreignToolsetID}, "requests_per_minute": 100, "end_user_source": "header", "end_user_policy": map[string]any{"defaults": map[string]any{"requests_per_minute": 100}}}, idem("callback-owner"), http.StatusCreated)
 	key := keyRecord["secret"].(string)
 	client, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
@@ -783,7 +809,10 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	toolGateway := httptest.NewServer(toolMux)
 	defer toolGateway.Close()
 	sink := &captureSink{}
-	h.Gateway.Sink = sink
+	h.Gateway.Sink = &taskAccountingSink{captureSink: sink, persist: &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		return err
+	}}}
 	h.refresh()
 	initialCalls := provider.chatCalls.Load()
 	initialResponses := provider.responseCalls.Load()
@@ -819,6 +848,40 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 		t.Fatalf("task owner callback returned %d: %s", status, <-callbackBody)
 	}
 	<-callbackBody
+	taskList := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks?project_id="+project, nil, nil, http.StatusOK)
+	tasks := mcpExecItems(t, taskList, "items")
+	if len(tasks) != 1 {
+		t.Fatalf("expected the submitted task: %v", taskList)
+	}
+	visibleTask := mcpExecItem(t, tasks, 0, taskList)
+	taskID := mcpExecString(t, visibleTask, "id")
+	initialDetail := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+	fees := mcpExecItems(t, initialDetail, "remote_fees")
+	if visibleTask["state"] != "active" || visibleTask["callback_attempts"] != float64(1) || len(fees) != 1 || !limits.AmountEqual(mcpExecString(t, mcpExecItem(t, fees, 0, initialDetail), "observed_cost"), "0") {
+		t.Fatalf("task did not report its initial callback and remote fee: %v", visibleTask)
+	}
+	for _, private := range []string{capability, key, "original-user", "forged-callback-user", "hello"} {
+		if strings.Contains(fmt.Sprint(taskList, initialDetail), private) {
+			t.Fatal("task view exposed private content or credentials")
+		}
+	}
+	otherProject := createProject(h, owner, "Other task project")
+	viewer := h.invite(owner, "task-viewer@example.com", "viewer")
+	viewerSession := h.want(viewer, http.MethodGet, "/api/v1/sessions/current", nil, nil, http.StatusOK)
+	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
+	viewerRecord := h.want(owner, http.MethodGet, "/api/v1/users/"+viewerID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), http.StatusOK)
+	addMember(h, owner, otherProject, viewerID, "viewer")
+	assignedViewer := login(h, "task-viewer@example.com")
+	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks?project_id="+project, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusNotFound)
+	if filtered := h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("project viewer could see another project's tasks: %v", filtered)
+	}
+	addMember(h, owner, project, viewerID, "viewer")
+	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusNotFound)
 	callback := func(token, model string) int {
 		t.Helper()
 		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}]}`, model)
@@ -835,6 +898,7 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		_, _ = io.Copy(io.Discard, response.Body)
 		response.Body.Close()
 		return response.StatusCode
 	}
@@ -845,7 +909,7 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if status := callback(capability, "callback-chat"); status != http.StatusTooManyRequests {
 		t.Fatalf("owner budget did not refuse callback: %d", status)
 	}
-	h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 10}, withMatch(currentKey, idem("callback-limit-restore")), http.StatusOK)
+	h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 100}, withMatch(currentKey, idem("callback-limit-restore")), http.StatusOK)
 	h.refresh()
 	for _, token := range []string{"", "olpt_foreign"} {
 		if status := callback(token, "callback-chat"); status != http.StatusUnauthorized {
@@ -888,6 +952,66 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if status := callTool(capability, toolsetID, "permitted"); status != http.StatusOK {
 		t.Fatalf("repeated tool callback returned %d", status)
 	}
+	callbackDetail := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+	callbackTools := mcpExecItems(t, callbackDetail, "callback_tools")
+	if len(callbackTools) != 1 {
+		t.Fatalf("task should show one paid tool callback: %v", callbackDetail)
+	}
+	callbackTool := mcpExecItem(t, callbackTools, 0, callbackDetail)
+	if callbackTool["pricing_state"] != "priced" || !limits.AmountEqual(mcpExecString(t, callbackTool, "observed_cost"), "0.10") {
+		t.Fatalf("task lost settled tool callback cost: %v", callbackTool)
+	}
+	failToolCalls.Store(true)
+	if status := callTool(capability, toolsetID, "uncertain"); status != http.StatusBadGateway {
+		t.Fatalf("uncertain tool callback returned %d", status)
+	}
+	failToolCalls.Store(false)
+	unknownDetail := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+	unknownTools := mcpExecItems(t, unknownDetail, "callback_tools")
+	if len(unknownTools) != 2 {
+		t.Fatalf("task should show settled and uncertain tool callbacks: %v", unknownDetail)
+	}
+	unknownTool := mcpExecItem(t, unknownTools, 1, unknownDetail)
+	if unknownTool["state"] != "outcome_unknown" || !limits.AmountEqual(mcpExecString(t, unknownTool, "observed_cost"), "0") || !limits.AmountEqual(mcpExecString(t, unknownTool, "remaining_cost"), "0.10") || !limits.AmountEqual(mcpExecString(t, unknownTool, "remaining_charge"), "0.10") {
+		t.Fatalf("task lost the uncertain tool callback exposure: %v", unknownTool)
+	}
+	callbackModels := mcpExecItems(t, callbackDetail, "callback_models")
+	if len(callbackModels) != 1 {
+		t.Fatalf("task should show its model callback accounting: %v", callbackDetail)
+	}
+	callbackModel := mcpExecItem(t, callbackModels, 0, callbackDetail)
+	if callbackModel["state"] != "unpriced" || callbackModel["observed_cost"] != nil || callbackModel["observed_charge"] != nil {
+		t.Fatalf("unpriced model callback should not look free: %v", callbackModel)
+	}
+	for _, private := range []string{capability, key, "original-user", "forged-callback-user", "hello"} {
+		if strings.Contains(fmt.Sprint(callbackDetail), private) {
+			t.Fatal("callback accounting exposed private content or credentials")
+		}
+	}
+	setCallbackPrice := func(label, amount string) {
+		t.Helper()
+		revision := h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": "azure_openai", "provider_id": model["id"], "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": amount, "output_per_million": amount}}}, idem(label), http.StatusCreated)
+		revisionID := mcpExecString(t, revision, "id")
+		eventually(t, "callback pricing in routing inputs", 30*time.Second, func() bool {
+			h.refresh()
+			price := h.Runtime.RoutingInputs().Price("azure_openai", mcpExecString(t, model, "id"), "", vendorModel, "generation", time.Now())
+			return price != nil && price.RevisionID == revisionID
+		})
+	}
+	setCallbackPrice("callback-paid-pricing", "1000000")
+	if status := callback(capability, "callback-chat"); status != http.StatusOK {
+		t.Fatalf("priced model callback returned %d", status)
+	}
+	callbackDetail = h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+	callbackModels = mcpExecItems(t, callbackDetail, "callback_models")
+	if len(callbackModels) != 2 {
+		t.Fatalf("task should show unpriced and paid model callbacks: %v", callbackDetail)
+	}
+	paidCallback := mcpExecItem(t, callbackModels, 1, callbackDetail)
+	if paidCallback["state"] != "priced" || !limits.AmountEqual(mcpExecString(t, paidCallback, "observed_cost"), "2") || !limits.AmountEqual(mcpExecString(t, paidCallback, "observed_charge"), "2") {
+		t.Fatalf("task lost the paid model callback: %v", paidCallback)
+	}
+	setCallbackPrice("callback-free-pricing", "0")
 	responseBody := strings.NewReader(`{"model":"callback-chat","input":"hello"}`)
 	responseRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/v1/responses", responseBody)
 	if err != nil {
@@ -904,6 +1028,15 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	response.Body.Close()
 	if err != nil || response.StatusCode != http.StatusOK {
 		t.Fatalf("Responses callback returned %d: %s (%v)", response.StatusCode, responseBytes, err)
+	}
+	callbackDetail = h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+	callbackModels = mcpExecItems(t, callbackDetail, "callback_models")
+	if len(callbackModels) != 3 {
+		t.Fatalf("task should show unpriced, paid and free model callbacks: %v", callbackDetail)
+	}
+	freeCallback := mcpExecItem(t, callbackModels, 2, callbackDetail)
+	if freeCallback["state"] != "free" || !limits.AmountEqual(mcpExecString(t, freeCallback, "observed_cost"), "0") || !limits.AmountEqual(mcpExecString(t, freeCallback, "observed_charge"), "0") {
+		t.Fatalf("task lost the explicitly free model callback: %v", freeCallback)
 	}
 	nativeCalls := []struct{ path, body string }{
 		{"/anthropic/v1/messages", `{"model":"callback-chat","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`},
@@ -954,8 +1087,8 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if got := toolCalls.Load(); got != 1 {
 		t.Fatalf("tool received %d callbacks, want 1", got)
 	}
-	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 7 {
-		t.Fatalf("provider received %d attempts, want 7", got)
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 8 {
+		t.Fatalf("provider received %d attempts, want 8", got)
 	}
 	var successful, attempts int
 	surfaces := make(map[string]int)
@@ -969,8 +1102,8 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 			surfaces[event.Surface]++
 		}
 	}
-	if successful != 6 || attempts != 7 {
-		t.Fatalf("got %d successful callback records with %d attempts, want 6 and 7", successful, attempts)
+	if successful != 7 || attempts != 8 {
+		t.Fatalf("got %d successful callback records with %d attempts, want 7 and 8", successful, attempts)
 	}
 	if surfaces["anthropic"] != 1 || surfaces["gemini"] != 2 {
 		t.Fatalf("native callback accounting records = %v", surfaces)
@@ -982,8 +1115,12 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits d ON d.id=r.dispatch_id WHERE d.kind='tool') FROM olp.execution_debits WHERE kind='tool' AND state='settled' AND api_key_id=$1`, keyRecord["id"]).Scan(&settled, &results); err != nil || settled != 1 || results != 1 {
 		t.Fatalf("tool accounting: settled=%d results=%d error=%v", settled, results, err)
 	}
-	for _, state := range []string{"completed", "outcome_unknown"} {
+	for _, state := range []string{"completed", "failed", "canceled", "outcome_unknown"} {
 		acctExec(t, h.Pool, `UPDATE olp.a2a_tasks SET state=$1`, state)
+		task := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
+		if task["state"] != state || task["callback_attempts"] != float64(10) {
+			t.Fatalf("task lost its state or admitted callback count: %v", task)
+		}
 		if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized {
 			t.Fatalf("%s task callback returned %d", state, status)
 		}
@@ -1000,7 +1137,7 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized && status != http.StatusForbidden {
 		t.Fatalf("revoked owner callback returned %d", status)
 	}
-	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 7 {
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 8 {
 		t.Fatalf("refused callbacks reached provider, total %d", got)
 	}
 }

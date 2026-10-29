@@ -131,6 +131,27 @@ export const getRun = async (runID: string) =>
     })
   );
 
+export const listTasks = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/a2a-tasks', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const getTask = async (taskID: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/a2a-tasks/{task_id}', {
+      params: { path: { task_id: taskID } }
+    })
+  );
+
+export const listDelegations = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/agent-delegations', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
 export const listRunSpans = async (runID: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/agent-runs/{run_id}/spans', {
