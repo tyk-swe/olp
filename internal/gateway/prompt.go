@@ -38,6 +38,10 @@ func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel
 	return parsed, nil
 }
 
+func geminiPromptFamily(family wire.Format) bool {
+	return family == wire.Gemini || family == wire.GeminiStream
+}
+
 func promptReference(doc oif.Document, family wire.Format) (oif.Value, string, string, bool) {
 	if family == wire.Responses {
 		ref, ok := doc.Root().Lookup("prompt")
@@ -49,14 +53,14 @@ func promptReference(doc oif.Document, family wire.Format) (oif.Value, string, s
 		return ref, "prompt", "input", true
 	}
 	ref, ok := doc.Root().Lookup("olp_prompt")
-	if family == wire.Gemini || family == wire.GeminiStream {
+	if geminiPromptFamily(family) {
 		return ref, "olp_prompt", "contents", ok
 	}
 	return ref, "olp_prompt", "messages", ok
 }
 
 func promptRoute(doc oif.Document, family wire.Format, pathModel string) (string, *Error) {
-	if family == wire.Gemini || family == wire.GeminiStream {
+	if geminiPromptFamily(family) {
 		return pathModel, nil
 	}
 	model, ok := doc.Root().Lookup("model")
@@ -84,14 +88,14 @@ func promptInputFields(family wire.Format, input string) []string {
 	case wire.Anthropic:
 		return []string{input, "system"}
 	case wire.Gemini, wire.GeminiStream:
-		return []string{input, "systemInstruction"}
+		return []string{input, "systemInstruction", "system_instruction"}
 	default:
 		return []string{input}
 	}
 }
 
 func promptMessages(family wire.Format, rendered string) ([]byte, error) {
-	if family == wire.Gemini || family == wire.GeminiStream {
+	if geminiPromptFamily(family) {
 		type part struct {
 			Text string `json:"text"`
 		}

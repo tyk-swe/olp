@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -40,6 +41,62 @@ func publishedPromptHarness(t *testing.T) (*harness, string, string) {
 		Labels: []string{"production"}, Definition: draft, Digest: agentcontract.DraftDigest(draft),
 	}}
 	return h, publicationID, revisionID
+}
+
+func promptTestProviders(providers map[string]routing.Provider, kind, profileID, profileRevision string) map[string]routing.Provider {
+	return maps.Collect(func(yield func(string, routing.Provider) bool) {
+		for id, provider := range providers {
+			model := provider.Capabilities[0].Model
+			if !yield(id, routing.Provider{
+				ID: provider.ID, Name: provider.Name, Kind: kind, Enabled: provider.Enabled,
+				ActiveCredential: provider.ActiveCredential, RevisionID: provider.RevisionID,
+				Endpoint: provider.Endpoint, AuthMode: provider.AuthMode, Slots: provider.Slots,
+				ProfileID: profileID, ProfileRevision: profileRevision,
+				Capabilities: []routing.Capability{
+					{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"},
+					{Model: model, Operation: "generation", Surface: "openai", Mode: "streaming"},
+					{Model: model, Operation: "generation", Surface: "responses", Mode: "unary"},
+					{Model: model, Operation: "generation", Surface: "responses", Mode: "streaming"},
+					{Model: model, Operation: "generation", Surface: "anthropic", Mode: "unary"},
+					{Model: model, Operation: "generation", Surface: "anthropic", Mode: "streaming"},
+					{Model: model, Operation: "generation", Surface: "gemini", Mode: "unary"},
+					{Model: model, Operation: "generation", Surface: "gemini", Mode: "streaming"},
+				},
+			}) {
+				return
+			}
+		}
+	})
+}
+
+func promptTestRoute(route routing.Route, fidelity routing.RouteFidelity, behavior routing.Behavior) routing.Route {
+	return routing.Route{
+		ID: route.ID, Slug: route.Slug, Operations: route.Operations, OverallTimeout: route.OverallTimeout,
+		MaxAttempts: route.MaxAttempts, Targets: route.Targets, RoutingID: route.RoutingID,
+		RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: route.PublishedAt,
+		Policy: route.Policy, ProjectID: route.ProjectID, ContentPolicy: route.ContentPolicy,
+		Fidelity: fidelity, Behavior: behavior,
+	}
+}
+
+func promptRefusalObserver() (http.HandlerFunc, <-chan struct{}) {
+	dispatched := make(chan struct{}, 1)
+	return func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case dispatched <- struct{}{}:
+		default:
+		}
+		completion(modelA, "unexpected")(w, r)
+	}, dispatched
+}
+
+func assertPromptNotDispatched(t *testing.T, dispatched <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-dispatched:
+		t.Fatal("refused prompt reached the upstream")
+	default:
+	}
 }
 
 func TestChatPublishedPromptRendersBeforeDispatch(t *testing.T) {
@@ -447,11 +504,7 @@ func TestNativePublishedPromptRendersBeforeDispatch(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, publicationID, revisionID := publishedPromptHarness(t)
-			for id, provider := range h.rt.release.Snapshot.Providers {
-				provider.Kind = "openai"
-				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"})
-				h.rt.release.Snapshot.Providers[id] = provider
-			}
+			h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, "openai", "", "")
 			upstreamBody := make(chan []byte, 1)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
@@ -498,12 +551,7 @@ func TestPublishedPromptUsesNativeProviderMessages(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, publicationID, revisionID := publishedPromptHarness(t)
-			for id, provider := range h.rt.release.Snapshot.Providers {
-				provider.Kind, provider.ProfileID = tc.name, tc.profile
-				provider.ProfileRevision = connectors.ProfileRevision
-				provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"}}
-				h.rt.release.Snapshot.Providers[id] = provider
-			}
+			h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, tc.name, tc.profile, connectors.ProfileRevision)
 			upstreamBody := make(chan []byte, 1)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
@@ -597,9 +645,14 @@ func TestPublishedPromptRefusesConflictsAcrossSurfaces(t *testing.T) {
 		{name: "anthropic system", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"system":"other"}`},
 		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"contents":[{"role":"user","parts":[{"text":"other"}]}]}`},
 		{name: "gemini system", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"systemInstruction":{"parts":[{"text":"other"}]}}`},
+		{name: "gemini system snake case", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"system_instruction":{"parts":[{"text":"other"}]}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, publicationID, _ := publishedPromptHarness(t)
+			h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, "openai", "", "")
+			upstream, dispatched := promptRefusalObserver()
+			h.mock.set("a", upstream)
+			h.mock.set("b", upstream)
 			request := fmt.Sprintf(tc.body+tc.extra, publicationID)
 			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
 			defer response.Body.Close()
@@ -610,6 +663,7 @@ func TestPublishedPromptRefusesConflictsAcrossSurfaces(t *testing.T) {
 			if len(h.sink.last(t).Attempts) != 0 {
 				t.Fatal("conflicting input dispatched an attempt")
 			}
+			assertPromptNotDispatched(t, dispatched)
 		})
 	}
 }
@@ -635,10 +689,15 @@ func TestPublishedPromptEnforcesVariablesAndRoutePolicyAcrossSurfaces(t *testing
 		} {
 			t.Run(tc.name+"/"+scenario.name, func(t *testing.T) {
 				h, publicationID, _ := publishedPromptHarness(t)
+				h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, "openai", "", "")
+				upstream, dispatched := promptRefusalObserver()
+				h.mock.set("a", upstream)
+				h.mock.set("b", upstream)
 				if scenario.strict {
 					route := h.rt.release.Snapshot.Routes[routeSlug]
-					route.Fidelity.Mode = routing.FidelityStrict
-					h.rt.release.Snapshot.Routes[routeSlug] = route
+					h.rt.release.Snapshot.Routes = map[string]routing.Route{
+						routeSlug: promptTestRoute(route, routing.RouteFidelity{Mode: routing.FidelityStrict}, route.Behavior),
+					}
 				}
 				request := fmt.Sprintf(tc.body, publicationID, scenario.variables)
 				response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
@@ -650,6 +709,7 @@ func TestPublishedPromptEnforcesVariablesAndRoutePolicyAcrossSurfaces(t *testing
 				if len(h.sink.last(t).Attempts) != 0 {
 					t.Fatal("invalid prompt dispatched an attempt")
 				}
+				assertPromptNotDispatched(t, dispatched)
 			})
 		}
 	}
@@ -667,6 +727,9 @@ func TestPublishedPromptAppliesInputGuardrailsAcrossSurfaces(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, publicationID, _ := publishedPromptHarness(t)
+			upstream, dispatched := promptRefusalObserver()
+			h.mock.set("a", upstream)
+			h.mock.set("b", upstream)
 			snapshot := h.rt.release.Snapshot
 			route := snapshot.Routes[routeSlug]
 			projectID := *route.ProjectID
@@ -678,11 +741,7 @@ func TestPublishedPromptAppliesInputGuardrailsAcrossSurfaces(t *testing.T) {
 			if err := snapshot.Compile(); err != nil {
 				t.Fatal(err)
 			}
-			for id, provider := range snapshot.Providers {
-				provider.Kind = "openai"
-				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"})
-				snapshot.Providers[id] = provider
-			}
+			snapshot.Providers = promptTestProviders(snapshot.Providers, "openai", "", "")
 			request := fmt.Sprintf(tc.body, publicationID)
 			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
 			defer response.Body.Close()
@@ -693,6 +752,7 @@ func TestPublishedPromptAppliesInputGuardrailsAcrossSurfaces(t *testing.T) {
 			if len(h.sink.last(t).Attempts) != 0 {
 				t.Fatal("guardrail-blocked prompt dispatched an attempt")
 			}
+			assertPromptNotDispatched(t, dispatched)
 		})
 	}
 }
@@ -709,19 +769,21 @@ func TestPublishedPromptRespectsRenderedInputLimitAcrossSurfaces(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, publicationID, _ := publishedPromptHarness(t)
-			draft := h.rt.release.Snapshot.AgentPublications[0].Definition
-			draft.Prompt.Template = strings.Repeat("long text ", 200) + "{{name}}"
-			h.rt.release.Snapshot.AgentPublications[0].Definition = draft
-			h.rt.release.Snapshot.AgentPublications[0].Digest = agentcontract.DraftDigest(draft)
-			for id, provider := range h.rt.release.Snapshot.Providers {
-				provider.Kind = "openai"
-				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"})
-				h.rt.release.Snapshot.Providers[id] = provider
-			}
-			for name, route := range h.rt.release.Snapshot.Routes {
-				limit := int64(1024)
-				route.MaxBodyBytes = &limit
-				h.rt.release.Snapshot.Routes[name] = route
+			upstream, dispatched := promptRefusalObserver()
+			h.mock.set("a", upstream)
+			h.mock.set("b", upstream)
+			publication := h.rt.release.Snapshot.AgentPublications[0]
+			draft := agentcontract.Draft{ProjectID: publication.ProjectID, Name: publication.Definition.Name,
+				Prompt: &prompts.Definition{Template: strings.Repeat("long text ", 200) + "{{name}}", Variables: []string{"name"}}}
+			h.rt.release.Snapshot.AgentPublications = []agentcontract.Revision{{
+				ID: publication.ID, PublicationID: publication.PublicationID, ProjectID: publication.ProjectID,
+				Kind: publication.Kind, Labels: publication.Labels, Definition: draft, Digest: agentcontract.DraftDigest(draft),
+			}}
+			h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, "openai", "", "")
+			route := h.rt.release.Snapshot.Routes[routeSlug]
+			limit := int64(1024)
+			h.rt.release.Snapshot.Routes = map[string]routing.Route{
+				routeSlug: promptTestRoute(route, route.Fidelity, routing.Behavior{MaxBodyBytes: &limit}),
 			}
 			if err := h.rt.release.Snapshot.Compile(); err != nil {
 				t.Fatal(err)
@@ -735,27 +797,26 @@ func TestPublishedPromptRespectsRenderedInputLimitAcrossSurfaces(t *testing.T) {
 			if attempts := h.sink.last(t).Attempts; len(attempts) != 0 {
 				t.Fatalf("refusal dispatched an attempt: %#v", attempts)
 			}
+			assertPromptNotDispatched(t, dispatched)
 		})
 	}
 }
 
 func TestPublishedPromptStreamsAcrossSurfaces(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		path string
-		body string
+		name      string
+		path      string
+		body      string
+		firstText string
+		lastText  string
 	}{
-		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","stream":true,"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}}`},
-		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"stream":true,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`},
-		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":streamGenerateContent?alt=sse", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`},
+		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","stream":true,"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}}`, firstText: "streamed answer", lastText: "streamed answer"},
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"stream":true,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`, firstText: "word 0", lastText: "word 63"},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":streamGenerateContent?alt=sse", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`, firstText: "word 0", lastText: "word 63"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, publicationID, revisionID := publishedPromptHarness(t)
-			for id, provider := range h.rt.release.Snapshot.Providers {
-				provider.Kind = "openai"
-				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "streaming"})
-				h.rt.release.Snapshot.Providers[id] = provider
-			}
+			h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, "openai", "", "")
 			upstreamBody := make(chan []byte, 1)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
@@ -773,7 +834,7 @@ func TestPublishedPromptStreamsAcrossSurfaces(t *testing.T) {
 			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
 			defer response.Body.Close()
 			body, _ := io.ReadAll(response.Body)
-			if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "data:") {
+			if response.StatusCode != http.StatusOK || !strings.Contains(string(body), tc.firstText) || !strings.Contains(string(body), tc.lastText) {
 				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
 			}
 			if upstream := string(<-upstreamBody); !strings.Contains(upstream, "Hello Ada") || strings.Contains(upstream, "olp_prompt") || strings.Contains(upstream, `"prompt":`) {

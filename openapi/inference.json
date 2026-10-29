@@ -1309,6 +1309,11 @@
               "required": [
                 "systemInstruction"
               ]
+            },
+            {
+              "required": [
+                "system_instruction"
+              ]
             }
           ]
         }
