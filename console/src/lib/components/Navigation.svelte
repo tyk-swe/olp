@@ -333,6 +333,11 @@
               class:active={isActive(item.href)}
               href={item.href}
               aria-current={isActive(item.href) ? 'page' : undefined}
+              onfocus={(event) =>
+                event.currentTarget.scrollIntoView({
+                  block: 'nearest',
+                  inline: 'nearest'
+                })}
               onclick={onNavigate}>{item.label}</a
             >
           </li>
@@ -417,6 +422,10 @@
     text-transform: uppercase;
   }
 
+  .subnav a {
+    padding-inline: 0.4375rem;
+  }
+
   .bar a::after,
   .subnav a::after {
     content: '';
@@ -435,6 +444,7 @@
     display: flex;
     min-height: 3rem;
     align-items: center;
+    overflow-x: auto;
     border-top: 1px solid var(--border-hairline);
   }
 

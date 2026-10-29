@@ -4,5 +4,7 @@
 </script>
 
 {#key page.params.investigationId}
-  <InvestigationDetailPage investigationID={page.params.investigationId ?? ''} />
+  <InvestigationDetailPage
+    investigationID={page.params.investigationId ?? ''}
+  />
 {/key}

@@ -641,11 +641,14 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     path: info.outputPath('investigation-selected-span-detail.png')
   });
   const normalSpans = page.getByRole('region', { name: 'Linked spans' });
-  await expect(normalSpans.getByText(oldSpan.span_id)).toHaveCount(0);
+  const oldSpanCell = normalSpans
+    .getByRole('cell')
+    .getByText(oldSpan.span_id, { exact: true });
+  await expect(oldSpanCell).toHaveCount(0);
   await normalSpans.getByRole('button', { name: 'Older' }).click();
-  await expect(normalSpans.getByText(oldSpan.span_id)).toBeVisible();
+  await expect(oldSpanCell).toBeVisible();
   await normalSpans.getByRole('button', { name: 'Newest' }).click();
-  await expect(normalSpans.getByText(oldSpan.span_id)).toHaveCount(0);
+  await expect(oldSpanCell).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({
     path: info.outputPath('investigation-selected-span.png'),
