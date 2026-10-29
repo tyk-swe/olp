@@ -25,6 +25,7 @@ BEGIN
  PERFORM olp.enqueue_export('trace_spans', NEW.id, NEW.project_id, COALESCE(route_slug, ''), '', NEW.received_at,
   jsonb_build_object('id', NEW.id, 'project_id', NEW.project_id,
    'trace_id', encode(NEW.trace_id, 'hex'), 'span_id', encode(NEW.span_id, 'hex'),
+   'parent_span_id', encode(NEW.parent_span_id, 'hex'),
    'run_id', NEW.run_id, 'attempt_id', NEW.attempt_id, 'started_nanos', NEW.started_nanos,
    'ended_nanos', NEW.ended_nanos, 'category', NEW.category, 'status', NEW.status,
    'attributes', NEW.attributes, 'evidence_origin', 'client_asserted'));

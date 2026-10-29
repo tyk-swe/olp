@@ -3052,3 +3052,303 @@ func TestPlaygroundRendersPublishedPromptLikeInference(t *testing.T) {
 		}
 	})
 }
+
+func TestRunEvidenceDeliveryRechecksCreatorAndSource(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Run evidence")
+	creator := h.invite(owner, "run-evidence@example.test", "developer")
+	creatorID := mcpExecString(t, h.want(creator, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK), "id")
+	creatorRecord := h.want(owner, http.MethodGet, "/api/v1/users/"+creatorID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, "/api/v1/users/"+creatorID, map[string]any{"access_scope": "assigned"}, etagHeader(creatorRecord), http.StatusOK)
+	addMember(h, owner, project, creatorID, "manager")
+	h.want(creator, http.MethodPost, "/api/v1/sessions", map[string]any{"email": "run-evidence@example.test", "password": accessPassword}, nil, http.StatusCreated)
+
+	observabilityReceiver, observabilityEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	managedReceiver, managedEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(creator, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "Run evidence", "type": "https", "project_id": project, "destination": observabilityEndpoint.URL, "enabled": true, "streams": []string{"runs"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
+	h.want(creator, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Managed run evidence", "type": "https", "project_id": project, "destination": managedEndpoint.URL, "enabled": true, "streams": []string{"runs"}}, idem(uuid.NewString()), http.StatusCreated)
+	var toolCalls atomic.Int64
+	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "evidence-session")
+			result = map[string]any{"protocolVersion": request.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}}}
+		case "tools/call":
+			toolCalls.Add(1)
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "private tool result"}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer toolServer.Close()
+	registered := h.want(owner, http.MethodPost, "/api/v1/mcp-servers", map[string]any{"name": "Evidence tools", "project_id": project, "transport": "streamable_http", "endpoint": toolServer.URL, "enabled": true, "unit_price": "0.25"}, idem("evidence-tools"), http.StatusCreated)
+	serverID := mcpExecString(t, registered, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup"), Classification: "read_only"}
+	toolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Evidence toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("evidence-toolset"), http.StatusCreated)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("evidence-publish")), http.StatusOK)
+	var modelCalls atomic.Int64
+	var callIDs atomic.Int64
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+			writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": vendorModel}}})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			writeResponsesFixture(w, vendorModel, "done", false)
+			return
+		}
+		var input map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&input) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		name := ""
+		if len(input["tool_choice"]) > 0 {
+			name = "olp_certification_probe"
+		} else if len(input["tools"]) > 0 {
+			modelCalls.Add(1)
+			if !strings.Contains(string(input["messages"]), `"role":"tool"`) {
+				name = tool.Alias
+			}
+		}
+		message := map[string]any{"role": "assistant", "content": "done"}
+		finish := "stop"
+		if name != "" {
+			finish = "tool_calls"
+			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": fmt.Sprintf("evidence-call-%d", callIDs.Add(1)), "type": "function", "function": map[string]any{"name": name, "arguments": `{"query":"private argument"}`}}}}
+		}
+		writeJSON(w, map[string]any{"id": "chatcmpl-evidence", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+	}))
+	defer vendor.Close()
+	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "budget": map[string]any{"daily_cost_limit": "10000000"}},
+		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
+	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Run evidence caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "max_concurrency": 1}, idem("run-evidence-key"), http.StatusCreated)
+	secret := mcpExecString(t, key, "secret")
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter.UseDurableDebits(h.Pool)
+	debits := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
+	h.Gateway.Debits = gateway.DurableSessionDebits(debits)
+	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Keys: h.Server.Keys, Installation: h.Server.Installation, Debits: debits}
+	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: debits, Auth: h.AuthKey}, Guardrails: func(ctx context.Context, evaluation mcp.GuardrailEvaluation) (guardrails.Result, error) {
+		return h.Gateway.EvaluateToolGuardrails(ctx, evaluation.Authority, evaluation.Release, evaluation.Engine, evaluation.RequestID, evaluation.Phase, evaluation.Segments, evaluation.Masks)
+	}}
+	emitter := usage.NewEmitter(32)
+	defer emitter.Close()
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter}
+	h.refresh()
+	leader, err := limits.TryAcquireLeader(t.Context(), h.Pool)
+	if err != nil || leader == nil {
+		t.Fatalf("acquire cost reconciliation leader: %v", err)
+	}
+	if _, err := leader.Reconcile(t.Context(), limiter, time.Now()); err != nil {
+		leader.Close(t.Context())
+		t.Fatalf("reconcile workflow cost caps: %v", err)
+	}
+	leader.Close(t.Context())
+	seen := map[string]bool{}
+	start := func(t *testing.T) string {
+		t.Helper()
+		beforeModels, beforeTools := modelCalls.Load(), toolCalls.Load()
+		status, response, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "private prompt"}}, "max_tokens": 100})
+		if status != http.StatusOK || !strings.Contains(fmt.Sprint(response), "done") || modelCalls.Load()-beforeModels != 2 || toolCalls.Load()-beforeTools != 1 {
+			t.Fatalf("gateway workflow: status=%d response=%v models=%d tools=%d", status, response, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+		}
+		runs := h.want(owner, http.MethodGet, "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusOK)
+		var id string
+		for _, item := range mcpExecItems(t, runs, "items") {
+			candidate := mcpExecString(t, item.(map[string]any), "id")
+			if !seen[candidate] {
+				if id != "" {
+					t.Fatalf("gateway produced multiple unseen runs: %v", runs)
+				}
+				id = candidate
+			}
+		}
+		if id == "" {
+			t.Fatalf("gateway run missing from public run list: %v", runs)
+		}
+		seen[id] = true
+		detail := h.want(owner, http.MethodGet, "/api/v1/agent-runs/"+id, nil, nil, http.StatusOK)
+		steps := mcpExecItems(t, detail, "steps")
+		if len(steps) != 3 {
+			t.Fatalf("gateway workflow did not persist three steps: %v", detail)
+		}
+		for i, kind := range []string{"model", "tool", "model"} {
+			step := steps[i].(map[string]any)
+			if step["kind"] != kind || step["state"] != "settled" {
+				t.Fatalf("gateway workflow step %d: %v", i, step)
+			}
+		}
+		return id
+	}
+	observabilityWorker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	managedWorker := &sinks.Worker{Pool: h.Pool, Egress: loopbackPolicy()}
+	deliver := func(t *testing.T) {
+		t.Helper()
+		if err := observabilityWorker.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := managedWorker.Deliver(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertCreator := func(t *testing.T, active, authorized, member bool) {
+		t.Helper()
+		var gotActive, gotAuthorized, gotMember bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT u.active,u.oidc_authorized,EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.user_id=u.id AND m.project_id=$2) FROM olp.users u WHERE u.id=$1`, creatorID, project).Scan(&gotActive, &gotAuthorized, &gotMember); err != nil {
+			t.Fatal(err)
+		}
+		if gotActive != active || gotAuthorized != authorized || gotMember != member {
+			t.Fatalf("creator state active=%t authorized=%t member=%t", gotActive, gotAuthorized, gotMember)
+		}
+	}
+	for _, scenario := range []string{"project membership", "disabled creator", "withdrawn OIDC authorization", "expired retention", "deleted source"} {
+		t.Run(scenario, func(t *testing.T) {
+			beforeObservability := len(observabilityReceiver.received())
+			beforeManaged := len(managedReceiver.received())
+			assertCreator(t, true, true, true)
+			allowed := start(t)
+			deliver(t)
+			for _, sink := range []struct {
+				name     string
+				receiver *exportReceiver
+				count    int
+				idField  string
+			}{
+				{"observability", observabilityReceiver, beforeObservability, "run_id"},
+				{"managed", managedReceiver, beforeManaged, "id"},
+			} {
+				got := sink.receiver.received()
+				if len(got) != sink.count+1 {
+					t.Fatalf("%s positive control delivered %d records, expected %d", sink.name, len(got), sink.count+1)
+				}
+				data, ok := got[sink.count]["data"].(map[string]any)
+				if !ok || data[sink.idField] != allowed || data["project_id"] != project || data["evidence_origin"] != "gateway_observed" {
+					t.Fatalf("%s positive control has incorrect metadata: %v", sink.name, got[sink.count])
+				}
+				payload, err := json.Marshal(got[sink.count])
+				if err != nil {
+					t.Fatal(err)
+				}
+				validateWebhookBody(t, sink.name+".runs", payload)
+			}
+			denied := start(t)
+			switch scenario {
+			case "project membership":
+				h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+creatorID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+				assertCreator(t, true, true, false)
+			case "disabled creator":
+				current := h.want(owner, http.MethodGet, "/api/v1/users/"+creatorID, nil, nil, http.StatusOK)
+				h.want(owner, http.MethodPatch, "/api/v1/users/"+creatorID, map[string]any{"active": false}, etagHeader(current), http.StatusOK)
+				assertCreator(t, false, true, true)
+			case "withdrawn OIDC authorization":
+				if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.users SET oidc_authorized=false WHERE id=$1`, creatorID); err != nil {
+					t.Fatal(err)
+				}
+				assertCreator(t, true, false, true)
+			case "expired retention":
+				if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by) VALUES('retention.requests_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, creatorID); err != nil {
+					t.Fatal(err)
+				}
+				tx, err := h.Pool.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(t.Context())
+				if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.agent_runs DISABLE TRIGGER agent_runs_immutable`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE olp.agent_runs SET created_at=now()-interval '2 days' WHERE id=$1`, denied); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.agent_runs ENABLE TRIGGER agent_runs_immutable`); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Commit(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				assertCreator(t, true, true, true)
+			case "deleted source":
+				tx, err := h.Pool.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(t.Context())
+				immutable := []string{"mcp_tool_calls", "execution_debit_owners", "execution_debit_results", "execution_debit_result_resolutions"}
+				for _, table := range immutable {
+					if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.`+table+` DISABLE TRIGGER USER`); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, table := range []string{"mcp_call_identities", "mcp_tool_calls", "execution_debit_result_resolutions", "execution_debit_results", "execution_debit_owners"} {
+					if _, err := tx.Exec(t.Context(), `DELETE FROM olp.`+table+` WHERE dispatch_id IN (SELECT id FROM olp.execution_debits WHERE run_id=$1)`, denied); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, query := range []string{`DELETE FROM olp.agent_steps WHERE run_id=$1`, `DELETE FROM olp.execution_debits WHERE run_id=$1`, `DELETE FROM olp.agent_runs WHERE id=$1`} {
+					if _, err := tx.Exec(t.Context(), query, denied); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, table := range immutable {
+					if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.`+table+` ENABLE TRIGGER USER`); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := tx.Commit(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				assertCreator(t, true, true, true)
+			}
+			deliver(t)
+			if observed, managed := len(observabilityReceiver.received()), len(managedReceiver.received()); observed != beforeObservability+1 || managed != beforeManaged+1 {
+				t.Fatalf("evidence delivered after %s: observability=%d managed=%d", scenario, observed-beforeObservability-1, managed-beforeManaged-1)
+			}
+			switch scenario {
+			case "project membership":
+				addMember(h, owner, project, creatorID, "manager")
+			case "disabled creator":
+				current := h.want(owner, http.MethodGet, "/api/v1/users/"+creatorID, nil, nil, http.StatusOK)
+				h.want(owner, http.MethodPatch, "/api/v1/users/"+creatorID, map[string]any{"active": true}, etagHeader(current), http.StatusOK)
+			case "withdrawn OIDC authorization":
+				if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.users SET oidc_authorized=true WHERE id=$1`, creatorID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}

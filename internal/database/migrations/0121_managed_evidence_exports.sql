@@ -23,6 +23,7 @@ BEGIN
   body := jsonb_build_object('evidence_origin','client_asserted','id',NEW.id,
    'project_id',NEW.project_id,'api_key_id',NEW.api_key_id,
    'trace_id',encode(NEW.trace_id,'hex'),'span_id',encode(NEW.span_id,'hex'),
+   'parent_span_id',encode(NEW.parent_span_id,'hex'),
    'run_id',NEW.run_id,'attempt_id',NEW.attempt_id,'started_nanos',NEW.started_nanos::text,
    'ended_nanos',NEW.ended_nanos::text,'category',NEW.category,'status',NEW.status,
    'attributes',NEW.attributes,'received_at',NEW.received_at);

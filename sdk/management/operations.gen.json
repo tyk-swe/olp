@@ -7016,7 +7016,7 @@
     "method": "POST",
     "read_only": false,
     "path": "/api/v1/observability/sinks",
-    "description": "create export sink",
+    "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes.",
     "scopes": [
       [
         "keys"

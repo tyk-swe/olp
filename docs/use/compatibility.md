@@ -68,6 +68,10 @@ different value. Gateway request and attempt spans set the
 `olp.evidence_origin` attribute to `gateway_observed`. The existing request
 `origin` continues to describe the invocation source.
 
+Span exports retain the nullable `parent_span_id` as a hexadecimal identifier.
+The management [OpenAPI contract](../../openapi/management.json) describes
+the observability and managed `runs` and `trace_spans` webhook envelopes.
+
 Run and span exports contain metadata only. They do not include prompt, tool,
 message or artifact contents, and they do not change billing. Before delivery,
 the sink creator must still have access to the source project and the source

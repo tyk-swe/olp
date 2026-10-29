@@ -123,8 +123,11 @@ func TestGlobalEvidenceSinksRecheckEachSourceProject(t *testing.T) {
 	if _, err := managedWorker.Deliver(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, receiver := range []*exportReceiver{observabilityReceiver, managedReceiver} {
-		got := receiver.received()
+	for _, sink := range []struct {
+		name     string
+		receiver *exportReceiver
+	}{{"observability", observabilityReceiver}, {"managed", managedReceiver}} {
+		got := sink.receiver.received()
 		if len(got) != 1 {
 			t.Fatalf("expected one authorized global delivery, got %d", len(got))
 		}
@@ -132,6 +135,11 @@ func TestGlobalEvidenceSinksRecheckEachSourceProject(t *testing.T) {
 		if !ok || data["project_id"] != project || data["evidence_origin"] != "client_asserted" {
 			t.Fatalf("global sink delivered the wrong evidence: %v", got[0])
 		}
+		payload, err := json.Marshal(got[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		validateWebhookBody(t, sink.name+".trace_spans", payload)
 	}
 	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+creatorID, nil, projectEtag(h, owner, project), http.StatusNoContent)
 	if status, body := postTrace(h, mcpExecString(t, key, "secret"), tracePayload(t, traceBatch(span(3)))); status != http.StatusOK {
@@ -162,7 +170,7 @@ func TestTraceEvidenceExportPreservesOriginProjectAndPrivacy(t *testing.T) {
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	span := &tracepb.Span{TraceId: bytes.Repeat([]byte{1}, 16), SpanId: bytes.Repeat([]byte{2}, 8), Name: "private-span-content", Attributes: []*commonpb.KeyValue{traceText("olp.evidence_origin", "gateway_observed"), traceText("gen_ai.prompt", "private-prompt-content")}}
+	span := &tracepb.Span{TraceId: bytes.Repeat([]byte{1}, 16), SpanId: bytes.Repeat([]byte{2}, 8), ParentSpanId: bytes.Repeat([]byte{3}, 8), Name: "private-span-content", Attributes: []*commonpb.KeyValue{traceText("olp.evidence_origin", "gateway_observed"), traceText("gen_ai.prompt", "private-prompt-content")}}
 	for _, writer := range []string{key["secret"].(string), otherKey["secret"].(string)} {
 		if status, body := postTrace(h, writer, tracePayload(t, traceBatch(span))); status != http.StatusOK {
 			t.Fatalf("trace upload status %d: %s", status, body)
@@ -180,8 +188,13 @@ func TestTraceEvidenceExportPreservesOriginProjectAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	validateWebhookBody(t, "observability.trace_spans", payload)
 	if !bytes.Contains(payload, []byte(project)) || !bytes.Contains(payload, []byte("client_asserted")) || bytes.Contains(payload, []byte("gateway_observed")) || bytes.Contains(payload, []byte("private-")) {
 		t.Fatalf("trace evidence provenance, scope or privacy mismatch: %s", payload)
+	}
+	data := envelopes[0]["data"].(map[string]any)
+	if data["parent_span_id"] != "0303030303030303" {
+		t.Fatalf("trace evidence omitted its parent span: %v", data)
 	}
 	expired := &tracepb.Span{TraceId: bytes.Repeat([]byte{1}, 16), SpanId: bytes.Repeat([]byte{5}, 8)}
 	if status, body := postTrace(h, key["secret"].(string), tracePayload(t, traceBatch(expired))); status != http.StatusOK {

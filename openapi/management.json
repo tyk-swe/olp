@@ -30173,6 +30173,501 @@
           "remaining_cost",
           "remaining_charge"
         ]
+      },
+      "ObservabilityRunEvidence": {
+        "type": "object",
+        "description": "Gateway-observed run metadata exported by an observability sink.",
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "agent_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "gateway_observed"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "project_id",
+          "route_revision_id",
+          "agent_revision_id",
+          "created_at",
+          "evidence_origin"
+        ]
+      },
+      "ObservabilityTraceSpanEvidence": {
+        "type": "object",
+        "description": "Client-asserted trace span metadata exported by an observability sink.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "span_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ended_nanos": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embeddings",
+              "text_completion",
+              "execute_tool",
+              "invoke_agent",
+              "create_agent",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gen_ai.usage.input_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "gen_ai.usage.output_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "http.response.status_code": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "client_asserted"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "run_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "attributes",
+          "evidence_origin"
+        ]
+      },
+      "ManagedRunEvidence": {
+        "type": "object",
+        "description": "Gateway-observed run metadata exported by a managed sink.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "gateway_observed"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "created_at",
+          "evidence_origin"
+        ]
+      },
+      "ManagedTraceSpanEvidence": {
+        "type": "object",
+        "description": "Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "span_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "ended_nanos": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embeddings",
+              "text_completion",
+              "execute_tool",
+              "invoke_agent",
+              "create_agent",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gen_ai.usage.input_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "gen_ai.usage.output_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "http.response.status_code": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "client_asserted"
+            ]
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "run_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "attributes",
+          "evidence_origin",
+          "api_key_id",
+          "received_at"
+        ]
+      },
+      "ObservabilityRunEvidenceEvent": {
+        "type": "object",
+        "description": "Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "runs"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservabilityRunEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "event_id",
+          "stream",
+          "source_id",
+          "project_id",
+          "route",
+          "outcome",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ObservabilityTraceSpanEvidenceEvent": {
+        "type": "object",
+        "description": "Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "trace_spans"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservabilityTraceSpanEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "event_id",
+          "stream",
+          "source_id",
+          "project_id",
+          "route",
+          "outcome",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ManagedRunEvidenceEvent": {
+        "type": "object",
+        "description": "Managed sink evidence envelope.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "runs"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ManagedRunEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "id",
+          "stream",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ManagedTraceSpanEvidenceEvent": {
+        "type": "object",
+        "description": "Managed sink evidence envelope.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "trace_spans"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ManagedTraceSpanEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "id",
+          "stream",
+          "occurred_at",
+          "data"
+        ]
       }
     },
     "securitySchemes": {
@@ -59339,7 +59834,7 @@
           "export-sinks"
         ],
         "summary": "create sink",
-        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit. The managed.runs and managed.trace_spans webhooks describe the corresponding evidence envelopes.",
         "security": [
           {
             "csrfToken": [],
@@ -61178,7 +61673,8 @@
         ],
         "tags": [
           "observability"
-        ]
+        ],
+        "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes."
       }
     },
     "/api/v1/observability/sinks/{export_sink_id}": {
@@ -69044,6 +69540,102 @@
         "tags": [
           "notifications"
         ]
+      }
+    },
+    "observability.runs": {
+      "post": {
+        "summary": "Observability run evidence",
+        "operationId": "observability_run_evidence_webhook",
+        "tags": [
+          "observability"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservabilityRunEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "observability.trace_spans": {
+      "post": {
+        "summary": "Observability trace span evidence",
+        "operationId": "observability_trace_span_evidence_webhook",
+        "tags": [
+          "observability"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservabilityTraceSpanEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "managed.runs": {
+      "post": {
+        "summary": "Managed sink run evidence",
+        "operationId": "managed_run_evidence_webhook",
+        "tags": [
+          "export-sinks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedRunEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "managed.trace_spans": {
+      "post": {
+        "summary": "Managed sink trace span evidence",
+        "operationId": "managed_trace_span_evidence_webhook",
+        "tags": [
+          "export-sinks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedTraceSpanEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
       }
     }
   }

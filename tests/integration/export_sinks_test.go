@@ -72,7 +72,7 @@ func TestManagedEvidenceDeliveryRechecksAuthorityAndRetention(t *testing.T) {
 	keyID := mcpExecString(t, key, "id")
 	worker := &sinks.Worker{Pool: h.Pool, Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}}
 	span := func(id byte) *tracepb.Span {
-		return &tracepb.Span{TraceId: bytes.Repeat([]byte{id}, 16), SpanId: bytes.Repeat([]byte{id}, 8), Name: "private-span-content", Attributes: []*commonpb.KeyValue{traceText("gen_ai.prompt", "private-prompt-content"), traceText("olp.evidence_origin", "gateway_observed")}}
+		return &tracepb.Span{TraceId: bytes.Repeat([]byte{id}, 16), SpanId: bytes.Repeat([]byte{id}, 8), ParentSpanId: bytes.Repeat([]byte{3}, 8), Name: "private-span-content", Attributes: []*commonpb.KeyValue{traceText("gen_ai.prompt", "private-prompt-content"), traceText("olp.evidence_origin", "gateway_observed")}}
 	}
 	if status, body := postTrace(h, writer, tracePayload(t, traceBatch(span(1)))); status != http.StatusOK {
 		t.Fatalf("first trace upload: %d %s", status, body)
@@ -82,17 +82,19 @@ func TestManagedEvidenceDeliveryRechecksAuthorityAndRetention(t *testing.T) {
 	}
 	select {
 	case payload := <-received:
+		validateWebhookBody(t, "managed.trace_spans", payload)
 		var event struct {
 			Stream string `json:"stream"`
 			Data   struct {
 				ProjectID string `json:"project_id"`
 				Origin    string `json:"evidence_origin"`
+				ParentID  string `json:"parent_span_id"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(payload, &event); err != nil {
 			t.Fatal(err)
 		}
-		if event.Stream != "trace_spans" || event.Data.ProjectID != project || event.Data.Origin != "client_asserted" {
+		if event.Stream != "trace_spans" || event.Data.ProjectID != project || event.Data.Origin != "client_asserted" || event.Data.ParentID != "0303030303030303" {
 			t.Fatalf("unexpected trace evidence metadata: %+v", event)
 		}
 		if bytes.Contains(payload, []byte("private-")) || bytes.Contains(payload, []byte(writer)) {
