@@ -216,10 +216,10 @@ var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage)
 ) grouped)`
 
 var DelegationPairBudgetSQL = budgetReportSQL(budgetOwnership{
-	usageProjectSQL("f") + "=p.id AND f.delegation_pair_digest=$2",
-	usageProjectSQL("h") + "=p.id AND h.delegation_pair_digest=$2",
-	"EXISTS(SELECT 1 FROM olp.execution_debit_owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.owner_id WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND a.project_id=p.id AND a.attribution_key='delegation_pair' AND a.attribution_value=$2)",
-}, "COALESCE(p.attribution_budgets->'delegation_pair'->$2->>'cost_basis','cost')")
+	usageProjectSQL("f") + "=p.id AND f.delegation_pair_digest=pair.digest",
+	usageProjectSQL("h") + "=p.id AND h.delegation_pair_digest=pair.digest",
+	"EXISTS(SELECT 1 FROM olp.execution_debit_owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.owner_id WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND a.project_id=p.id AND a.attribution_key='delegation_pair' AND a.attribution_value=pair.digest)",
+}, "COALESCE(p.attribution_budgets->'delegation_pair'->pair.digest->>'cost_basis','cost')")
 
 // Organization ownership is immutable once assigned, so live and retained spend
 // retain the same boundary when aggregate policies change.

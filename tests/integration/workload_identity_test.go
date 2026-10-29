@@ -1654,6 +1654,33 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 	}) {
 		t.Fatalf("delegation view lost revocation or the member pair's unconfigured spend: %v", delegations)
 	}
+	if len(items) != 3 {
+		t.Fatalf("expected the original, renewed and member delegations: %v", delegations)
+	}
+	for index := range items {
+		item := mcpExecItem(t, items, index, delegations)
+		if item["member_id"] == nil && (mcpExecObject(t, mcpExecObject(t, item, "budget"), "daily")["accrued"] != pairAccrued || mcpExecObject(t, item, "budget_policy")["daily_cost_limit"] != "1000") {
+			t.Fatalf("renewed delegations lost their shared pair budget: %v", item)
+		}
+	}
+	pagePath := "/api/v1/agent-delegations?project_id=" + project + "&limit=1"
+	firstPage := f.h.want(f.owner, http.MethodGet, pagePath, nil, nil, http.StatusOK)
+	secondPage := f.h.want(f.owner, http.MethodGet, pagePath+"&cursor="+mcpExecString(t, firstPage, "next_cursor"), nil, nil, http.StatusOK)
+	thirdPage := f.h.want(f.owner, http.MethodGet, pagePath+"&cursor="+mcpExecString(t, secondPage, "next_cursor"), nil, nil, http.StatusOK)
+	for index, page := range []map[string]any{firstPage, secondPage, thirdPage} {
+		pageItems := mcpExecItems(t, page, "items")
+		if len(pageItems) != 1 {
+			t.Fatalf("delegation page did not contain one item: %v", page)
+		}
+		item := mcpExecItem(t, pageItems, 0, page)
+		expected := mcpExecItem(t, items, index, delegations)
+		if item["id"] != expected["id"] || item["member_id"] != expected["member_id"] || mcpExecObject(t, mcpExecObject(t, item, "budget"), "daily")["accrued"] != mcpExecObject(t, mcpExecObject(t, expected, "budget"), "daily")["accrued"] {
+			t.Fatalf("delegation pagination changed order or pair spend: %v", page)
+		}
+	}
+	if thirdPage["next_cursor"] != nil {
+		t.Fatalf("last delegation page has a next cursor: %v", thirdPage)
+	}
 	var attemptAgent, attemptMember, attemptPair, stored string
 	if err := f.h.Pool.QueryRow(t.Context(), `SELECT agent_principal_id::text,member_principal_id::text,delegation_pair_digest FROM olp.mcp_tool_calls WHERE id=$1`, memberOutcome.AttemptID).Scan(&attemptAgent, &attemptMember, &attemptPair); err != nil {
 		t.Fatal(err)

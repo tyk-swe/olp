@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -34,19 +35,26 @@ type delegationRow struct {
 	ProjectRole          *string `db:"project_role"`
 }
 
+func projectRole(role *string) string {
+	if role == nil {
+		return ""
+	}
+	return *role
+}
+
+func (r delegationRow) memberAuthorized() bool {
+	if r.MemberActive == nil || !*r.MemberActive || r.MemberOIDCAuthorized == nil || !*r.MemberOIDCAuthorized || r.MemberRole == nil || r.MemberScope == nil {
+		return false
+	}
+	principal := access.Principal{User: access.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole(r.ProjectRole)}}
+	return principal.Authorize(access.Keys) == nil && principal.Project(&r.ProjectID, access.Change) == nil
+}
+
 func (r delegationRow) record() DelegationRecord {
 	if r.MemberID == nil {
 		return r.DelegationRecord
 	}
-	authorized := false
-	if r.MemberActive != nil && *r.MemberActive && r.MemberOIDCAuthorized != nil && *r.MemberOIDCAuthorized && r.MemberRole != nil && r.MemberScope != nil {
-		projectRole := ""
-		if r.ProjectRole != nil {
-			projectRole = *r.ProjectRole
-		}
-		principal := access.Principal{User: access.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole}}
-		authorized = principal.Authorize(access.Keys) == nil && principal.Project(&r.ProjectID, access.Change) == nil
-	}
+	authorized := r.memberAuthorized()
 	return DelegationRecord{ID: r.ID, ProjectID: r.ProjectID, APIKeyID: r.APIKeyID, AgentID: r.AgentID, MemberID: r.MemberID, ConsentPending: r.ConsentPending, ExpiresAt: r.ExpiresAt, ConsumedAt: r.ConsumedAt, RevokedAt: r.RevokedAt, APIKeyRevokedAt: r.APIKeyRevokedAt, AgentRevokedAt: r.AgentRevokedAt, MemberAuthorized: &authorized}
 }
 
@@ -70,16 +78,28 @@ type DelegationView struct {
 	Budget       PairBudget           `json:"budget"`
 }
 
+type delegationPairRecord struct {
+	Record    DelegationRecord `json:"-"`
+	ProjectID string           `json:"project_id"`
+	Digest    string           `json:"digest"`
+}
+
+type delegationPairBudget struct {
+	Ordinal int                  `db:"ordinal"`
+	Policy  *access.BudgetPolicy `db:"policy"`
+	Usage   *PairBudget          `db:"usage"`
+}
+
 func (s *Server) listDelegations(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
-	if err != nil {
-		return access.Reply{}, err
+	page, pageErr := access.Page(r)
+	if pageErr != nil {
+		return access.Reply{}, pageErr
 	}
-	project, err := projectFilter(r, p)
-	if err != nil {
-		return access.Reply{}, err
+	project, projectErr := projectFilter(r, p)
+	if projectErr != nil {
+		return access.Reply{}, projectErr
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
+	rows, queryErr := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
  d.agent_id::text AS agent_id,d.consenting_user_id::text AS member_id,(d.consent_digest IS NOT NULL) AS consent_pending,
  d.expires_at,d.consumed_at,d.revoked_at,k.revoked_at AS api_key_revoked_at,a.revoked_at AS agent_revoked_at,
  u.active AS member_active,u.oidc_authorized AS member_oidc_authorized,u.role AS member_role,u.access_scope AS member_scope,m.role AS project_role
@@ -87,59 +107,59 @@ func (s *Server) listDelegations(r *http.Request, p access.Principal) (access.Re
  LEFT JOIN olp.users u ON u.id=d.consenting_user_id LEFT JOIN olp.effective_project_members m ON m.user_id=u.id AND m.project_id=d.project_id
  WHERE d.id<$1 AND ($2 OR d.project_id=ANY($3::uuid[])) AND ($4='' OR d.project_id=NULLIF($4,'')::uuid)
  ORDER BY d.id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
-	if err != nil {
-		return access.Reply{}, err
+	if queryErr != nil {
+		return access.Reply{}, queryErr
 	}
-	rowsData, err := pgx.CollectRows(rows, pgx.RowToStructByName[delegationRow])
-	if err != nil {
-		return access.Reply{}, err
-	}
-	records := make([]DelegationRecord, 0, len(rowsData))
-	for _, row := range rowsData {
-		records = append(records, row.record())
-	}
-	type pairKey struct{ project, digest string }
-	type pairBudget struct {
-		policy *access.BudgetPolicy
-		usage  PairBudget
-	}
-	batch := &pgx.Batch{}
-	keys := make([]pairKey, 0, len(records))
-	indices := make(map[pairKey]int, len(records))
-	for i, record := range records {
-		if i >= page.Limit {
-			break
+	records, collectErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (delegationPairRecord, error) {
+		data, dataErr := pgx.RowToStructByName[delegationRow](row)
+		if dataErr != nil {
+			return delegationPairRecord{}, dataErr
 		}
-		key := pairKey{record.ProjectID, attribution.DelegationPair(s.Access.Auth, record.ProjectID, record.APIKeyID, record.AgentID, record.MemberID)}
-		if _, ok := indices[key]; !ok {
-			indices[key] = len(keys)
-			keys = append(keys, key)
-			batch.Queue(`SELECT p.attribution_budgets->'delegation_pair'->$2, `+limits.DelegationPairBudgetSQL+` FROM olp.projects p WHERE p.id=$1`, key.project, key.digest)
-		}
+		return delegationPairRecord{
+			Record: data.record(), ProjectID: data.ProjectID,
+			Digest: attribution.DelegationPair(s.Access.Auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
+		}, nil
+	})
+	if collectErr != nil {
+		return access.Reply{}, collectErr
 	}
-	pairs := make([]pairBudget, 0, len(keys))
-	if len(keys) > 0 {
-		results := s.Access.Pool.SendBatch(r.Context(), batch)
-		for range keys {
-			var result pairBudget
-			if err := results.QueryRow().Scan(&result.policy, &result.usage); err != nil {
-				_ = results.Close()
-				return access.Reply{}, err
+	if len(records) == 0 {
+		return access.ListReplyBy([]DelegationView{}, page, func(item DelegationView) string { return item.ID }), nil
+	}
+	pairInput, marshalErr := json.Marshal(records)
+	if marshalErr != nil {
+		return access.Reply{}, marshalErr
+	}
+	budgetRows, budgetQueryErr := s.Access.Pool.Query(r.Context(), `WITH entries AS MATERIALIZED (
+ SELECT ordinality::int AS ordinal,(value->>'project_id')::uuid AS project_id,value->>'digest' AS digest
+ FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY
+), pairs AS MATERIALIZED (
+ SELECT DISTINCT project_id,digest FROM entries WHERE ordinal<=$2
+), budgets AS MATERIALIZED (
+ SELECT pair.project_id,pair.digest,p.attribution_budgets->'delegation_pair'->pair.digest AS policy,`+limits.DelegationPairBudgetSQL+` AS usage
+ FROM pairs pair JOIN olp.projects p ON p.id=pair.project_id
+)
+ SELECT entries.ordinal,budgets.policy,budgets.usage
+ FROM entries LEFT JOIN budgets ON budgets.project_id=entries.project_id AND budgets.digest=entries.digest
+ ORDER BY entries.ordinal`, pairInput, page.Limit)
+	if budgetQueryErr != nil {
+		return access.Reply{}, budgetQueryErr
+	}
+	items, budgetCollectErr := pgx.CollectRows(budgetRows, func(row pgx.CollectableRow) (DelegationView, error) {
+		budget, dataErr := pgx.RowToStructByName[delegationPairBudget](row)
+		if dataErr != nil {
+			return DelegationView{}, dataErr
+		}
+		if budget.Usage == nil {
+			if budget.Ordinal <= page.Limit {
+				return DelegationView{}, pgx.ErrNoRows
 			}
-			pairs = append(pairs, result)
+			return DelegationView{DelegationRecord: records[budget.Ordinal-1].Record}, nil
 		}
-		if err := results.Close(); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	items := make([]DelegationView, 0, len(records))
-	for _, record := range records {
-		key := pairKey{record.ProjectID, attribution.DelegationPair(s.Access.Auth, record.ProjectID, record.APIKeyID, record.AgentID, record.MemberID)}
-		var result pairBudget
-		if index, ok := indices[key]; ok {
-			result = pairs[index]
-		}
-		items = append(items, DelegationView{DelegationRecord: record, BudgetPolicy: result.policy, Budget: result.usage})
+		return DelegationView{DelegationRecord: records[budget.Ordinal-1].Record, BudgetPolicy: budget.Policy, Budget: *budget.Usage}, nil
+	})
+	if budgetCollectErr != nil {
+		return access.Reply{}, budgetCollectErr
 	}
 	return access.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
 }
