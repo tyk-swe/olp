@@ -10,17 +10,21 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -32,6 +36,197 @@ import (
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
+
+func TestA2A03AgentSendAndGet(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "A2A 0.3")
+	agent := a2av0.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
+		return func(yield func(protocol.Event, error) bool) {
+			if yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
+				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateCompleted, nil), nil)
+			}
+		}
+	})))
+	cardFor := func(endpoint string) []byte {
+		t.Helper()
+		producer := a2av0.NewStaticAgentCardProducer(&protocol.AgentCard{
+			Name: "Reference agent", Description: "Test agent", Version: "1",
+			Capabilities:        protocol.AgentCapabilities{Streaming: true},
+			SupportedInterfaces: []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: a2av0.Version}},
+			DefaultInputModes:   []string{"text"}, DefaultOutputModes: []string{"text"}, Skills: []protocol.AgentSkill{},
+		})
+		card, err := producer.(a2asrv.AgentCardJSONProducer).CardJSON(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	var dispatched atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rpc" {
+			dispatched.Add(1)
+			agent.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	card := cardFor(upstream.URL + "/rpc")
+	digest := sha256.Sum256(card)
+	var user string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	pricing := acctID(t)
+	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	mismatched := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "wrong protocol",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
+	}, idem("a2a-03-mismatch-create"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+mismatched["id"].(string)+"/publish", nil, withMatch(mismatched, idem("a2a-03-mismatch-publish")), http.StatusUnprocessableEntity)
+	for _, invalid := range []struct{ name, from, to string }{
+		{name: "binding", from: "JSONRPC", to: "GRPC"},
+		{name: "version", from: "0.3", to: "0.2"},
+		{name: "undeclared-version", from: `"protocolVersion": "0.3"`, to: `"protocolVersion": ""`},
+	} {
+		badCard := func(endpoint string) []byte {
+			original := cardFor(endpoint)
+			if !bytes.Contains(original, []byte(invalid.from)) {
+				t.Fatalf("invalid %s card did not change its declaration", invalid.name)
+			}
+			return bytes.ReplaceAll(original, []byte(invalid.from), []byte(invalid.to))
+		}
+		badUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write(badCard("http://" + r.Host + "/rpc"))
+		}))
+		t.Cleanup(badUpstream.Close)
+		badDigest := sha256.Sum256(badCard(badUpstream.URL + "/rpc"))
+		bad := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+			"project_id": project, "name": "invalid " + invalid.name,
+			"agent": map[string]any{"protocol": "a2a-0.3.0", "endpoint": badUpstream.URL + "/rpc", "card_digest": hex.EncodeToString(badDigest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
+		}, idem("a2a-03-invalid-"+invalid.name), http.StatusCreated)
+		h.want(owner, http.MethodPost, "/api/v1/agents/"+bad["id"].(string)+"/publish", nil, withMatch(bad, idem("a2a-03-invalid-publish-"+invalid.name)), http.StatusUnprocessableEntity)
+	}
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "0.3 reference",
+		"agent": map[string]any{"protocol": "a2a-0.3.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
+	}, idem("a2a-03-create"), http.StatusCreated)
+	agentID := created["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(created, idem("a2a-03-publish")), http.StatusOK)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "A2A caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agentID}}, idem("a2a-03-key"), http.StatusCreated)["secret"].(string)
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.A2A.Ledger = &a2a.Ledger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	cardRequest, err := http.NewRequest(http.MethodGet, h.HTTP.URL+"/a2a/"+agentID+"/.well-known/agent-card.json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cardRequest.Header.Set("Authorization", "Bearer "+key)
+	cardResponse, err := http.DefaultClient.Do(cardRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cardResponse.Body.Close()
+	cardBody, err := io.ReadAll(cardResponse.Body)
+	if err != nil || cardResponse.StatusCode != http.StatusOK {
+		t.Fatalf("0.3 card: status %d, %v", cardResponse.StatusCode, err)
+	}
+	publicCard, err := a2av0.NewAgentCardParser()(cardBody)
+	if err != nil || len(publicCard.SupportedInterfaces) != 1 || publicCard.SupportedInterfaces[0].URL != h.HTTP.URL+"/a2a/"+agentID || publicCard.SupportedInterfaces[0].ProtocolBinding != protocol.TransportProtocolJSONRPC || publicCard.SupportedInterfaces[0].ProtocolVersion != a2av0.Version {
+		t.Fatalf("0.3 card interface: %+v, %v", publicCard, err)
+	}
+	security, ok := publicCard.SecuritySchemes["olp"].(protocol.HTTPAuthSecurityScheme)
+	if !ok || security.Scheme != "Bearer" || len(publicCard.SecurityRequirements) != 1 {
+		t.Fatalf("0.3 card authentication: %+v", publicCard.SecuritySchemes)
+	}
+	for _, invalid := range []struct {
+		version, contentType, method, params string
+		status, errorCode                    int
+	}{
+		{version: "1.0", contentType: "application/json", method: "SendMessage", params: "{}", status: http.StatusBadRequest},
+		{version: "0.2", contentType: "application/json", method: "message/send", params: "{}", status: http.StatusBadRequest},
+		{version: "0.3", contentType: "application/grpc", method: "message/send", params: "{}", status: http.StatusUnsupportedMediaType},
+		{version: "0.3", contentType: "application/json", method: "SendMessage", params: "{}", status: http.StatusOK, errorCode: -32601},
+		{version: "0.3", contentType: "application/json", method: "message/send", params: "[]", status: http.StatusOK, errorCode: -32602},
+	} {
+		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":%q,"params":%s}`, invalid.method, invalid.params)
+		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agentID, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+key)
+		request.Header.Set("Content-Type", invalid.contentType)
+		request.Header.Set("A2A-Version", invalid.version)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != invalid.status {
+			t.Fatalf("invalid version or binding returned %d, want %d", response.StatusCode, invalid.status)
+		}
+		if invalid.status == http.StatusOK {
+			var failure struct {
+				Error *struct {
+					Code int `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&failure); err != nil || failure.Error == nil || failure.Error.Code != invalid.errorCode {
+				t.Fatalf("invalid request returned the wrong error: %+v, %v", failure, err)
+			}
+		}
+		response.Body.Close()
+		if dispatched.Load() != 0 {
+			t.Fatal("invalid version or binding reached the upstream")
+		}
+	}
+	transport := a2av0.NewJSONRPCTransport(a2av0.JSONRPCTransportConfig{URL: h.HTTP.URL + "/a2a/" + agentID, Client: http.DefaultClient})
+	defer transport.Destroy()
+	params := a2aclient.ServiceParams{"Authorization": []string{"Bearer " + key}}
+	result, err := transport.SendMessage(t.Context(), params, &protocol.SendMessageRequest{Message: protocol.NewMessage(protocol.MessageRoleUser, protocol.NewTextPart("hello"))})
+	if err != nil {
+		t.Fatalf("0.3 send: %v", err)
+	}
+	task, ok := result.(*protocol.Task)
+	if !ok || task.ID == "" {
+		t.Fatalf("send did not return an owned task: %+v", result)
+	}
+	read, err := transport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: task.ID})
+	if err != nil || read.ID != task.ID || read.Status.State != protocol.TaskStateCompleted {
+		t.Fatalf("0.3 get task: %+v, %v", read, err)
+	}
+	events := slices.Collect(func(yield func(protocol.Event) bool) {
+		for event, err := range transport.SendStreamingMessage(t.Context(), params, &protocol.SendMessageRequest{Message: protocol.NewMessage(protocol.MessageRoleUser, protocol.NewTextPart("streamed message"))}) {
+			if err != nil {
+				t.Fatalf("0.3 stream: %v", err)
+			}
+			if !yield(event) {
+				return
+			}
+		}
+	})
+	if len(events) < 2 {
+		t.Fatalf("0.3 stream omitted task updates: %+v", events)
+	}
+	streamedTask, ok := events[0].(*protocol.Task)
+	if !ok || streamedTask.ID == "" {
+		t.Fatalf("0.3 stream omitted public task: %+v", events[0])
+	}
+	streamedResult, err := transport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: streamedTask.ID})
+	if err != nil || streamedResult.ID != streamedTask.ID || streamedResult.Status.State != protocol.TaskStateCompleted {
+		t.Fatalf("0.3 stream task read: %+v, %v", streamedResult, err)
+	}
+}
 
 func TestAgentPublicationsManagementAndConfiguration(t *testing.T) {
 	h := newAccessHarness(t)
@@ -439,6 +634,28 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	for _, version := range []string{"", "0.3"} {
+		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agent, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"message/send","params":{}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+key)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("A2A-Version", version)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("legacy call to 1.0 agent returned %d", response.StatusCode)
+		}
+		select {
+		case <-upstreamIDs:
+			t.Fatal("legacy call reached 1.0 upstream")
+		default:
+		}
+	}
 	getCard := func(secret, agentID string) int {
 		t.Helper()
 		request, err := http.NewRequest(http.MethodGet, h.HTTP.URL+"/a2a/"+agentID+"/.well-known/agent-card.json", nil)
@@ -522,6 +739,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		}
 		request.Header.Set("Authorization", "Bearer "+secret)
 		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("A2A-Version", "1.0")
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
@@ -541,6 +759,8 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalidIDRequest.Header.Set("Authorization", "Bearer "+key)
+	invalidIDRequest.Header.Set("Content-Type", "application/json")
+	invalidIDRequest.Header.Set("A2A-Version", "1.0")
 	invalidIDResponse, err := http.DefaultClient.Do(invalidIDRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -667,6 +887,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		}
 		request.Header.Set("Authorization", "Bearer "+secret)
 		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("A2A-Version", "1.0")
 		request.Header.Set("Accept", "text/event-stream")
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
@@ -882,16 +1103,25 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	}
 	<-upstreamIDs
 	pinnedStream.Body.Close()
+	replacement := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(replacement.Close)
+	replacementDigest := sha256.Sum256(cardFor(replacement.URL + "/rpc"))
 	updated := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
-		"project_id": project, "name": "fixture",
-		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": strings.Repeat("a", 64), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.50"},
+		"project_id": project, "name": "fixture", "credential": nil,
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": replacement.URL + "/rpc", "card_digest": hex.EncodeToString(replacementDigest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.50"},
 	}, withMatch(published, idem("a2a-update")), http.StatusOK)
 	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(updated, idem("a2a-republish")), http.StatusOK)
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if getCard(key, agent) != http.StatusBadGateway {
-		t.Fatal("new revision did not enforce its card digest")
+	if getCard(key, agent) != http.StatusOK {
+		t.Fatal("new revision did not serve its pinned card")
 	}
 	pinnedSubscription := streamRequest(key, "SubscribeToTask", a2aTestParams{ID: pinnedTask.ID})
 	defer pinnedSubscription.Body.Close()

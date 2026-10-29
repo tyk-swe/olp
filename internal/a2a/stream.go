@@ -138,7 +138,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	streamHeaders(w)
-	if !writeStreamEvent(w, request.ID, first, publicID) {
+	if !writeStreamEvent(w, request.ID, first, publicID, prepared.Revision.Definition.Agent.Protocol) {
 		return
 	}
 	s.forwardStream(w, r, authority, prepared.Revision, request.ID, string(info.TaskID), info.ContextID, publicID, next)
@@ -208,7 +208,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority acc
 		return
 	}
 	streamHeaders(w)
-	if !writeStreamEvent(w, request.ID, first, owned.ID) {
+	if !writeStreamEvent(w, request.ID, first, owned.ID, pinned.Definition.Agent.Protocol) {
 		return
 	}
 	s.forwardStream(w, r, authority, pinned, request.ID, owned.UpstreamID, owned.ContextID, owned.ID, next)
@@ -242,7 +242,7 @@ func (s *Server) forwardStream(w http.ResponseWriter, r *http.Request, authority
 			writeStreamFailure(w, id, "Authorization revoked")
 			return
 		}
-		if !writeStreamEvent(w, id, event, publicID) {
+		if !writeStreamEvent(w, id, event, publicID, revision.Definition.Agent.Protocol) {
 			return
 		}
 	}
@@ -260,9 +260,9 @@ func streamError(err error) string {
 	return "Internal error"
 }
 
-func writeStreamEvent(w http.ResponseWriter, id json.RawMessage, event protocol.Event, publicID string) bool {
+func writeStreamEvent(w http.ResponseWriter, id json.RawMessage, event protocol.Event, publicID, version string) bool {
 	public := publicStreamEvent(event, publicID)
-	result, err := json.Marshal(protocol.StreamResponse{Event: public})
+	result, err := marshalEvent(version, public)
 	if err != nil || public == nil {
 		writeStreamFailure(w, id, "Invalid upstream stream")
 		return false

@@ -18,15 +18,45 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2AAgentCardPreferredTransport.
+const (
+	A2AAgentCardPreferredTransportJSONRPC A2AAgentCardPreferredTransport = "JSONRPC"
+)
+
+// Valid indicates whether the value is a known member of the A2AAgentCardPreferredTransport enum.
+func (e A2AAgentCardPreferredTransport) Valid() bool {
+	switch e {
+	case A2AAgentCardPreferredTransportJSONRPC:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2AAgentCardProtocolVersion.
+const (
+	A2AAgentCardProtocolVersionN03 A2AAgentCardProtocolVersion = "0.3"
+)
+
+// Valid indicates whether the value is a known member of the A2AAgentCardProtocolVersion enum.
+func (e A2AAgentCardProtocolVersion) Valid() bool {
+	switch e {
+	case A2AAgentCardProtocolVersionN03:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for A2AAgentCardSupportedInterfacesProtocolBinding.
 const (
-	JSONRPC A2AAgentCardSupportedInterfacesProtocolBinding = "JSONRPC"
+	A2AAgentCardSupportedInterfacesProtocolBindingJSONRPC A2AAgentCardSupportedInterfacesProtocolBinding = "JSONRPC"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolBinding enum.
 func (e A2AAgentCardSupportedInterfacesProtocolBinding) Valid() bool {
 	switch e {
-	case JSONRPC:
+	case A2AAgentCardSupportedInterfacesProtocolBindingJSONRPC:
 		return true
 	default:
 		return false
@@ -35,13 +65,16 @@ func (e A2AAgentCardSupportedInterfacesProtocolBinding) Valid() bool {
 
 // Defines values for A2AAgentCardSupportedInterfacesProtocolVersion.
 const (
-	N10 A2AAgentCardSupportedInterfacesProtocolVersion = "1.0"
+	A2AAgentCardSupportedInterfacesProtocolVersionN03 A2AAgentCardSupportedInterfacesProtocolVersion = "0.3"
+	A2AAgentCardSupportedInterfacesProtocolVersionN10 A2AAgentCardSupportedInterfacesProtocolVersion = "1.0"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolVersion enum.
 func (e A2AAgentCardSupportedInterfacesProtocolVersion) Valid() bool {
 	switch e {
-	case N10:
+	case A2AAgentCardSupportedInterfacesProtocolVersionN03:
+		return true
+	case A2AAgentCardSupportedInterfacesProtocolVersionN10:
 		return true
 	default:
 		return false
@@ -66,9 +99,13 @@ func (e A2ARequestJsonrpc) Valid() bool {
 // Defines values for A2ARequestMethod.
 const (
 	GetTask              A2ARequestMethod = "GetTask"
+	Messagesend          A2ARequestMethod = "message/send"
+	Messagestream        A2ARequestMethod = "message/stream"
 	SendMessage          A2ARequestMethod = "SendMessage"
 	SendStreamingMessage A2ARequestMethod = "SendStreamingMessage"
 	SubscribeToTask      A2ARequestMethod = "SubscribeToTask"
+	Tasksget             A2ARequestMethod = "tasks/get"
+	Tasksresubscribe     A2ARequestMethod = "tasks/resubscribe"
 )
 
 // Valid indicates whether the value is a known member of the A2ARequestMethod enum.
@@ -76,11 +113,19 @@ func (e A2ARequestMethod) Valid() bool {
 	switch e {
 	case GetTask:
 		return true
+	case Messagesend:
+		return true
+	case Messagestream:
+		return true
 	case SendMessage:
 		return true
 	case SendStreamingMessage:
 		return true
 	case SubscribeToTask:
+		return true
+	case Tasksget:
+		return true
+	case Tasksresubscribe:
 		return true
 	default:
 		return false
@@ -168,13 +213,46 @@ func (e ResponsesPromptLabelReferenceLabel) Valid() bool {
 	}
 }
 
+// Defines values for CallA2AAgentParamsA2AVersion.
+const (
+	CallA2AAgentParamsA2AVersionN03  CallA2AAgentParamsA2AVersion = "0.3"
+	CallA2AAgentParamsA2AVersionN030 CallA2AAgentParamsA2AVersion = "0.3.0"
+	CallA2AAgentParamsA2AVersionN10  CallA2AAgentParamsA2AVersion = "1.0"
+	CallA2AAgentParamsA2AVersionN100 CallA2AAgentParamsA2AVersion = "1.0.0"
+)
+
+// Valid indicates whether the value is a known member of the CallA2AAgentParamsA2AVersion enum.
+func (e CallA2AAgentParamsA2AVersion) Valid() bool {
+	switch e {
+	case CallA2AAgentParamsA2AVersionN03:
+		return true
+	case CallA2AAgentParamsA2AVersionN030:
+		return true
+	case CallA2AAgentParamsA2AVersionN10:
+		return true
+	case CallA2AAgentParamsA2AVersionN100:
+		return true
+	default:
+		return false
+	}
+}
+
 // A2AAgentCard defines model for A2AAgentCard.
 type A2AAgentCard struct {
-	Capabilities         map[string]interface{}    `json:"capabilities"`
-	DefaultInputModes    *[]string                 `json:"defaultInputModes,omitempty"`
-	DefaultOutputModes   *[]string                 `json:"defaultOutputModes,omitempty"`
-	Description          *string                   `json:"description,omitempty"`
-	Name                 string                    `json:"name"`
+	Capabilities       map[string]interface{} `json:"capabilities"`
+	DefaultInputModes  *[]string              `json:"defaultInputModes,omitempty"`
+	DefaultOutputModes *[]string              `json:"defaultOutputModes,omitempty"`
+	Description        *string                `json:"description,omitempty"`
+	Name               string                 `json:"name"`
+
+	// PreferredTransport Preferred binding for A2A 0.3 clients
+	PreferredTransport *A2AAgentCardPreferredTransport `json:"preferredTransport,omitempty"`
+
+	// ProtocolVersion Protocol version for A2A 0.3 clients
+	ProtocolVersion *A2AAgentCardProtocolVersion `json:"protocolVersion,omitempty"`
+
+	// Security Bearer authentication requirements for A2A 0.3 clients
+	Security             *[]map[string]interface{} `json:"security,omitempty"`
 	SecurityRequirements []map[string]interface{}  `json:"securityRequirements"`
 	SecuritySchemes      map[string]interface{}    `json:"securitySchemes"`
 	Skills               *[]map[string]interface{} `json:"skills,omitempty"`
@@ -183,8 +261,17 @@ type A2AAgentCard struct {
 		ProtocolVersion A2AAgentCardSupportedInterfacesProtocolVersion `json:"protocolVersion"`
 		Url             string                                         `json:"url"`
 	} `json:"supportedInterfaces"`
-	Version string `json:"version"`
+
+	// Url Preferred JSON-RPC endpoint for A2A 0.3 clients
+	Url     *string `json:"url,omitempty"`
+	Version string  `json:"version"`
 }
+
+// A2AAgentCardPreferredTransport Preferred binding for A2A 0.3 clients
+type A2AAgentCardPreferredTransport string
+
+// A2AAgentCardProtocolVersion Protocol version for A2A 0.3 clients
+type A2AAgentCardProtocolVersion string
 
 // A2AAgentCardSupportedInterfacesProtocolBinding defines model for A2AAgentCard.SupportedInterfaces.ProtocolBinding.
 type A2AAgentCardSupportedInterfacesProtocolBinding string
@@ -198,7 +285,7 @@ type A2ARequest struct {
 	Jsonrpc A2ARequestJsonrpc `json:"jsonrpc"`
 	Method  A2ARequestMethod  `json:"method"`
 
-	// Params A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported.
+	// Params Parameters for the selected A2A version and method. Task references must use an OLP task ID; push notifications and tenant selection are not supported.
 	Params map[string]interface{} `json:"params"`
 }
 
@@ -228,7 +315,7 @@ type A2AResponse struct {
 	Id      *A2AResponse_Id    `json:"id"`
 	Jsonrpc A2AResponseJsonrpc `json:"jsonrpc"`
 
-	// Result A2A 1.0 task or message result with OLP task IDs.
+	// Result A task or message result in the published A2A version with OLP task IDs.
 	Result *map[string]interface{} `json:"result,omitempty"`
 }
 
@@ -429,6 +516,15 @@ type ResponsesPromptRevisionReference struct {
 type ResponsesPublishedPromptReference struct {
 	union json.RawMessage
 }
+
+// CallA2AAgentParams defines parameters for CallA2AAgent.
+type CallA2AAgentParams struct {
+	// A2AVersion Must match the published agent protocol. Omission selects A2A 0.3 for legacy clients.
+	A2AVersion *CallA2AAgentParamsA2AVersion `json:"A2A-Version,omitempty"`
+}
+
+// CallA2AAgentParamsA2AVersion defines parameters for CallA2AAgent.
+type CallA2AAgentParamsA2AVersion string
 
 // CreateAnthropicMessageWithPromptParams defines parameters for CreateAnthropicMessageWithPrompt.
 type CreateAnthropicMessageWithPromptParams struct {
@@ -1515,21 +1611,21 @@ type ClientInterface interface {
 
 	// CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgent(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CallA2AAgent(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetA2AAgentCard Discover a published A2A agent
 	//
@@ -1649,13 +1745,13 @@ type ClientInterface interface {
 
 // CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCallA2AAgentRequestWithBody(c.Server, agent, contentType, body)
+func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallA2AAgentRequestWithBody(c.Server, agent, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1668,13 +1764,13 @@ func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.U
 
 // CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCallA2AAgentRequest(c.Server, agent, body)
+func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallA2AAgentRequest(c.Server, agent, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1931,18 +2027,18 @@ func (c *Client) CreateResponseWithPrompt(ctx context.Context, params *CreateRes
 }
 
 // NewCallA2AAgentRequest calls the generic CallA2AAgent builder with application/json body
-func NewCallA2AAgentRequest(server string, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody) (*http.Request, error) {
+func NewCallA2AAgentRequest(server string, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCallA2AAgentRequestWithBody(server, agent, "application/json", bodyReader)
+	return NewCallA2AAgentRequestWithBody(server, agent, params, "application/json", bodyReader)
 }
 
 // NewCallA2AAgentRequestWithBody constructs an http.Request for the CallA2AAgent method, with any body, and a specified content type
-func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -1973,6 +2069,21 @@ func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, con
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.A2AVersion != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "A2A-Version", *params.A2AVersion, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("A2A-Version", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -2412,21 +2523,21 @@ type ClientWithResponsesInterface interface {
 
 	// CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
+	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
 
 	// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
+	CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
 
 	// GetA2AAgentCardWithResponse Discover a published A2A agent
 	//
@@ -3149,13 +3260,13 @@ func (r CreateResponseWithPromptResponse) ContentType() string {
 
 // CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
-	rsp, err := c.CallA2AAgentWithBody(ctx, agent, contentType, body, reqEditors...)
+func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
+	rsp, err := c.CallA2AAgentWithBody(ctx, agent, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -3164,13 +3275,13 @@ func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Conte
 
 // CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *ClientWithResponses) CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
-	rsp, err := c.CallA2AAgent(ctx, agent, body, reqEditors...)
+func (c *ClientWithResponses) CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
+	rsp, err := c.CallA2AAgent(ctx, agent, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -3400,6 +3511,9 @@ func ParseCallA2AAgentResponse(rsp *http.Response) (*CallA2AAgentResponse, error
 		break // No content-type
 
 	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 415:
 		break // No content-type
 
 	case rsp.StatusCode == 502:

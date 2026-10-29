@@ -179,7 +179,7 @@
       "post": {
         "operationId": "callA2AAgent",
         "summary": "Send a message to or read and subscribe to a task from a published A2A agent",
-        "description": "Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.",
+        "description": "Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.",
         "parameters": [
           {
             "name": "agent",
@@ -190,6 +190,21 @@
               "format": "uuid"
             },
             "description": "Published agent identifier"
+          },
+          {
+            "name": "A2A-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0.3",
+                "0.3.0",
+                "1.0",
+                "1.0.0"
+              ]
+            },
+            "description": "Must match the published agent protocol. Omission selects A2A 0.3 for legacy clients."
           }
         ],
         "security": [
@@ -225,13 +240,16 @@
             }
           },
           "400": {
-            "description": "The JSON-RPC request is invalid"
+            "description": "The A2A version does not match the published protocol or the request is invalid"
           },
           "401": {
             "description": "The bearer credential is invalid"
           },
           "404": {
             "description": "The agent is unavailable to this principal"
+          },
+          "415": {
+            "description": "The requested binding is not JSON-RPC over HTTP"
           },
           "502": {
             "description": "The agent card or upstream request failed"
@@ -987,13 +1005,17 @@
               "SendMessage",
               "SendStreamingMessage",
               "GetTask",
-              "SubscribeToTask"
+              "SubscribeToTask",
+              "message/send",
+              "message/stream",
+              "tasks/get",
+              "tasks/resubscribe"
             ]
           },
           "params": {
             "type": "object",
             "additionalProperties": true,
-            "description": "A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported."
+            "description": "Parameters for the selected A2A version and method. Task references must use an OLP task ID; push notifications and tenant selection are not supported."
           }
         }
       },
@@ -1024,7 +1046,7 @@
           "result": {
             "type": "object",
             "additionalProperties": true,
-            "description": "A2A 1.0 task or message result with OLP task IDs."
+            "description": "A task or message result in the published A2A version with OLP task IDs."
           },
           "error": {
             "type": "object",
@@ -1086,7 +1108,8 @@
                 "protocolVersion": {
                   "type": "string",
                   "enum": [
-                    "1.0"
+                    "1.0",
+                    "0.3"
                   ]
                 }
               }
@@ -1125,6 +1148,33 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Preferred JSON-RPC endpoint for A2A 0.3 clients"
+          },
+          "preferredTransport": {
+            "type": "string",
+            "enum": [
+              "JSONRPC"
+            ],
+            "description": "Preferred binding for A2A 0.3 clients"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "enum": [
+              "0.3"
+            ],
+            "description": "Protocol version for A2A 0.3 clients"
+          },
+          "security": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Bearer authentication requirements for A2A 0.3 clients"
           }
         }
       },
