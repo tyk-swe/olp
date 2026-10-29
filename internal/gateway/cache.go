@@ -218,6 +218,9 @@ func cacheAuthority(a access.Authority, rates, tokens, budgets bool) access.Auth
 		}
 		return p
 	}
+	if a.DelegationAgentLimits != nil {
+		a.DelegationAgentLimits = &access.DelegationAgentLimits{ID: a.DelegationAgentLimits.ID, LookupID: a.DelegationAgentLimits.LookupID, Limits: filter(a.DelegationAgentLimits.Limits)}
+	}
 	if !rates {
 		a.Policy.RequestsPerMinute = nil
 		a.Policy.MaxConcurrency = nil

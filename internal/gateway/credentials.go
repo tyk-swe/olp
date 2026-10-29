@@ -105,7 +105,11 @@ func consumerFailure(failure *consumerauth.Failure) *Error {
 }
 
 func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+	authenticator, problem := s.consumerAuthenticator(r, token, scope)
+	if problem != nil {
+		return access.Authority{}, problem
+	}
+	authority, failure := consumerauth.Authenticate(authenticator, r, token, scope, s.cfg.TrustedProxies, s.now())
 	if failure != nil {
 		return access.Authority{}, consumerFailure(failure)
 	}
@@ -149,4 +153,15 @@ func (x *call) dropQueryKey() *Error {
 	}
 	delete(x.semanticQuery, "key")
 	return nil
+}
+
+func (s *Server) consumerAuthenticator(r *http.Request, token, scope string) (consumerauth.Authenticator, *Error) {
+	if !strings.HasPrefix(token, "olpd_") {
+		return s.Runtime, nil
+	}
+	delegate, ok := s.Runtime.(delegationRuntime)
+	if !ok || scope != "inference" {
+		return nil, authenticationError("invalid_api_key", "Incorrect API key provided.")
+	}
+	return delegationAuthenticator{runtime: delegate, context: r.Context(), assertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity"))}, nil
 }

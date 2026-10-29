@@ -221,6 +221,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 		s.RegisterCode(mux)
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
+	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
@@ -240,12 +241,13 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	guardrailMetadata bool
-	cacheDirectives   string
-	callerCredential  *callerCredential
-	body              *measuredBody
-	id                string
-	durableID         string
+	delegationAssertion string
+	guardrailMetadata   bool
+	cacheDirectives     string
+	callerCredential    *callerCredential
+	body                *measuredBody
+	id                  string
+	durableID           string
 	// minted records that this gateway chose the request id. A caller may name
 	// its own, and nothing stops two callers from naming the same one.
 	minted    bool
@@ -293,7 +295,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
 		r.Body = measured
 	}
-	return request{cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
+	return request{delegationAssertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")), cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 func sameOrigin(r *http.Request, origin string) bool {
@@ -331,7 +333,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, Idempotency-Key, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length, X-Goog-Upload-Header-Content-Type, X-Goog-Upload-Offset, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, X-OLP-Cache, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Guardrails, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, Idempotency-Key, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length, X-Goog-Upload-Header-Content-Type, X-Goog-Upload-Offset, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, X-OLP-Cache, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Guardrails, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-OLP-Delegating-Key, X-OLP-Agent-Identity, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -17,6 +17,8 @@ func semanticHeaders(header http.Header) http.Header {
 	out.Del("X-Olp-Cache")
 	out.Del("X-Olp-End-User")
 	out.Del("X-Olp-Attribution")
+	out.Del("X-Olp-Agent-Identity")
+	out.Del("X-Olp-Delegating-Key")
 	out.Del(callerCredentialHeader)
 	if values := out.Values("Anthropic-Beta"); len(values) > 1 {
 		out.Set("Anthropic-Beta", strings.Join(values, ","))

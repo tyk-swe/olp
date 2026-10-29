@@ -47,6 +47,16 @@ func Keyless(origin string) bool {
 	return origin == OriginShadow || origin == OriginProbe || origin == OriginPlayground
 }
 
+func validateDelegation(event *Event) error {
+	if event.AgentPrincipalID == "" && event.DelegationPairDigest == "" {
+		return nil
+	}
+	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !endUserDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
+		return errors.New("request metadata delegation attribution is invalid")
+	}
+	return nil
+}
+
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
@@ -65,8 +75,10 @@ type Event struct {
 	// EndUserDigest contains a project-scoped digest, never a caller identifier.
 	EndUserDigest string `json:"end_user_digest,omitempty"`
 	// APIKeyID is empty exactly when the origin is keyless.
-	APIKeyID    string            `json:"api_key_id"`
-	Attribution map[string]string `json:"attribution,omitempty"`
+	APIKeyID             string            `json:"api_key_id"`
+	AgentPrincipalID     string            `json:"agent_principal_id,omitempty"`
+	DelegationPairDigest string            `json:"delegation_pair_digest,omitempty"`
+	Attribution          map[string]string `json:"attribution,omitempty"`
 	// Origin is empty for a caller request. ParentRequestID names the caller
 	// request a shadow, classifier, cache embedding or batch settlement derives from.
 	Origin          string  `json:"origin,omitempty"`
@@ -375,6 +387,8 @@ type wireEvent struct {
 	RuntimeGenerationID     *string               `json:"runtime_generation_id"`
 	EndUserDigest           *string               `json:"end_user_digest"`
 	APIKeyID                *string               `json:"api_key_id"`
+	AgentPrincipalID        *string               `json:"agent_principal_id"`
+	DelegationPairDigest    *string               `json:"delegation_pair_digest"`
 	Attribution             *map[string]string    `json:"attribution"`
 	Origin                  *string               `json:"origin"`
 	ParentRequestID         *string               `json:"parent_request_id"`
@@ -540,6 +554,15 @@ func (w wireEvent) decode() (*Event, error) {
 			return nil, fmt.Errorf("request metadata field api_key_id must be empty for %s requests", event.Origin)
 		}
 	} else if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
+		return nil, err
+	}
+	if w.AgentPrincipalID != nil {
+		event.AgentPrincipalID = *w.AgentPrincipalID
+	}
+	if w.DelegationPairDigest != nil {
+		event.DelegationPairDigest = *w.DelegationPairDigest
+	}
+	if err := validateDelegation(event); err != nil {
 		return nil, err
 	}
 	if event.ParentRequestID, err = optionalUUID("parent_request_id", w.ParentRequestID); err != nil {
@@ -1064,6 +1087,9 @@ func Validate(e *Event) (*Validated, error) {
 	}
 	if e.EndUserDigest != "" && (!endUserDigestPattern.MatchString(e.EndUserDigest) || Keyless(e.Origin)) {
 		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
+	}
+	if err := validateDelegation(e); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 	if err := ValidateAttribution(e.Attribution); err != nil {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)

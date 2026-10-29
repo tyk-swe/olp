@@ -219,6 +219,33 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	if authority.DelegationAgentLimits == nil {
+		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
+	}
+	agent := authority.DelegationAgentLimits
+	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, Policy: access.KeyPolicy{
+		RequestsPerMinute: agent.Limits.RequestsPerMinute,
+		TokensPerMinute:   agent.Limits.TokensPerMinute,
+		MaxConcurrency:    agent.Limits.MaxConcurrency,
+	}}
+	checked := false
+	agentLease, failure := a.reserveKeyAndGroup(ctx, &principal, "", estimate, ttl, costReservation{}, &checked)
+	if failure != nil {
+		return nil, failure
+	}
+	lease, failure := a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
+	if failure != nil {
+		settleKey(ctx, agentLease, false, nil, a.logger())
+		return nil, failure
+	}
+	if lease == nil {
+		return agentLease, nil
+	}
+	lease.Attach(agentLease)
+	return lease, nil
+}
+
+func (a *Admission) reserveCallerLimits(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
 	// Every cost boundary checks shared accounting evidence just before it
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false

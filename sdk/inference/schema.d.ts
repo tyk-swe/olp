@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/delegations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delegate a key to an authenticated workload agent
+         * @description Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+         */
+        post: operations["createDelegation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -154,6 +174,30 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        DelegationRequest: {
+            scopes: "inference"[];
+            allowed_routes: string[];
+            /**
+             * Format: int64
+             * @description Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime.
+             * @default 300
+             */
+            ttl_seconds: number;
+        };
+        DelegationGrant: {
+            /** @description One-use OLP delegation bearer token. */
+            token: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        InferenceError: {
+            error: {
+                message: string;
+                type: string;
+                param: string | null;
+                code: string;
+            };
+        };
     };
     responses: never;
     parameters: never;
@@ -166,7 +210,10 @@ export interface operations {
     createChatCompletionWithPrompt: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The current workload assertion is required when Authorization contains a one-use delegation token. */
+                "X-OLP-Agent-Identity"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -188,12 +235,59 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description The prompt reference or variables are invalid */
+            /** @description The request or prompt reference is invalid */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The caller is not permitted to use the requested resource */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The caller or agent has reached an admission limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The gateway or authority service is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
             };
         };
     };
@@ -293,6 +387,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    createDelegation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The API key that owns the delegated inference and has the delegate scope. */
+                "X-OLP-Delegating-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DelegationRequest"];
+            };
+        };
+        responses: {
+            /** @description A short-lived, one-use delegation token */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelegationGrant"];
+                };
+            };
+            /** @description The scope, route, or lifetime bounds are invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The workload assertion or delegating key is invalid, expired, or revoked */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The principal, project, delegate scope, or requested route is not authorized */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The gateway or authority service is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
             };
         };
     };

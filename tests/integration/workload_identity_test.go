@@ -19,7 +19,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 
+	"github.com/coder/websocket"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/tyk-swe/olp/internal/gateway"
 )
@@ -313,5 +315,335 @@ func TestWorkloadSubscriptionRebindsCurrentPolicyAndRetainsDigest(t *testing.T) 
 	request("disabled", 403)
 	if calls.Load() != 2 {
 		t.Fatal("disabled workload dispatched")
+	}
+}
+
+func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
+	h := newAccessHarness(t)
+	client, _, limiter := limSetup(t, "agent-delegation")
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
+	persisted := make(chan error, 2)
+	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		persisted <- err
+		return err
+	}}
+	owner := h.owner()
+	project := createProject(h, owner, "Agent delegation")
+	workloadProject(t, h, owner, project, map[string]any{"generation": []string{"delegated-chat"}})
+	templatesPath := "/api/v1/projects/" + project + "/limit-templates"
+	templates := h.want(owner, "GET", templatesPath, nil, nil, 200)
+	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 2}}}, etagHeader(templates), 200)
+	vendor := newOpenAIFixture(t, "")
+	provider := activeAzureProviderInProject(t, h, owner, "Delegated provider", vendor.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "delegated-chat", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("delegated-route"), 201)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
+	validated := h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
+	h.want(owner, "POST", path+"/activate", nil, withMatch(validated, idem("activate-delegated-route")), 200)
+	issuer := newWorkloadFixture(t, h, owner, project, []string{"generation"})
+	issuerInput := func(match map[string]string) map[string]any {
+		return map[string]any{
+			"name": "Portable CI", "issuer": issuer.endpoint.URL, "jwks_url": issuer.endpoint.URL,
+			"enabled": true, "audiences": []string{"olp"}, "algorithms": []string{"EdDSA"},
+			"max_lifetime_seconds": 1200, "disabled_key_ids": []string{},
+			"mappings": []any{map[string]any{"name": "agent", "match": match, "project_id": project, "limit_template": "worker", "route_groups": []string{"generation"}, "scopes": []string{"inference"}, "agent_principal": true}},
+		}
+	}
+	issuerPath := "/api/v1/workload-issuers/" + issuer.issuer["id"].(string)
+	current := h.want(owner, "GET", issuerPath, nil, nil, 200)
+	h.want(owner, "PUT", issuerPath, issuerInput(map[string]string{"/sub": "approved-agent"}), etagHeader(current), 422)
+	h.want(owner, "PUT", issuerPath, issuerInput(map[string]string{"/client_id": "approved-client"}), etagHeader(current), 422)
+	h.want(owner, "PUT", issuerPath, issuerInput(map[string]string{"/sub": "approved-agent", "/client_id": "approved-client"}), etagHeader(current), 200)
+	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	document := exported["document"].(map[string]any)
+	exportedIssuer := document["workload_issuers"].([]any)[0].(map[string]any)
+	exportedMapping := exportedIssuer["mappings"].([]any)[0].(map[string]any)
+	if exportedMapping["agent_principal"] != true {
+		t.Fatal("configuration export lost the agent principal setting")
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("apply-agent-issuer"), 200)
+	delegating := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "delegating", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"delegated-chat"}}, idem("delegating-key"), 201)
+	limitedKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "limited-agent-key", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"delegated-chat"}}, idem("limited-agent-key"), 201)
+	ordinary := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "ordinary", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{"delegated-chat"}}, idem("ordinary-key"), 201)
+	otherProject := createProject(h, owner, "Other delegation project")
+	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other-project", "project_id": otherProject, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{}}, idem("other-project-key"), 201)
+	prompt := h.want(owner, "POST", "/api/v1/prompts", map[string]any{"project_id": project, "name": "delegated prompt", "prompt": map[string]any{"template": "Hello {{name}}", "variables": []string{"name"}}}, idem("delegated-prompt"), 201)
+	promptPath := "/api/v1/prompts/" + prompt["id"].(string)
+	published := h.want(owner, "POST", promptPath+"/publish", nil, withMatch(prompt, idem("publish-delegated-prompt")), 200)
+	h.want(owner, "PUT", promptPath+"/labels/production", map[string]any{"revision_id": published["revision_id"]}, withMatch(published, idem("label-delegated-prompt")), 200)
+	h.refresh()
+	sign := func(subject, client, audience string) string {
+		t.Helper()
+		signer, signerErr := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: issuer.private}, (&jose.SignerOptions{}).WithHeader("kid", issuer.kid))
+		if signerErr != nil {
+			t.Fatal(signerErr)
+		}
+		now := time.Now()
+		body, marshalErr := json.Marshal(map[string]any{"iss": issuer.endpoint.URL, "aud": audience, "sub": subject, "client_id": client, "iat": now.Unix(), "exp": now.Add(19 * time.Minute).Unix()})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		signed, signErr := signer.Sign(body)
+		if signErr != nil {
+			t.Fatal(signErr)
+		}
+		raw, serializeErr := signed.CompactSerialize()
+		if serializeErr != nil {
+			t.Fatal(serializeErr)
+		}
+		return raw
+	}
+	agent := sign("approved-agent", "approved-client", "olp")
+	bounds := runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"delegated-chat"}}
+	exchangeBounds := func(assertion, key string, body runtime.DelegationBounds, want int) string {
+		t.Helper()
+		started := time.Now()
+		response, raw := h.do(nil, "POST", "/v1/delegations", body, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": key})
+		if response.StatusCode != want {
+			t.Fatalf("delegation exchange: %d %s", response.StatusCode, raw)
+		}
+		if want != http.StatusCreated {
+			return ""
+		}
+		var grant struct {
+			Token     string    `json:"token"`
+			ExpiresAt time.Time `json:"expires_at"`
+		}
+		if err := json.Unmarshal(raw, &grant); err != nil || grant.Token == "" {
+			t.Fatalf("delegation token: %s %v", raw, err)
+		}
+		ttl := func() int64 {
+			if body.TTLSeconds > 0 {
+				return body.TTLSeconds
+			}
+			return 300
+		}()
+		if grant.ExpiresAt.Before(started.Add(time.Duration(ttl)*time.Second-time.Second)) || grant.ExpiresAt.After(time.Now().Add(time.Duration(ttl)*time.Second+time.Second)) {
+			t.Fatalf("delegation expiry outside requested bounds: %v", grant.ExpiresAt)
+		}
+		return grant.Token
+	}
+	exchange := func(assertion, key string, want int) string {
+		t.Helper()
+		return exchangeBounds(assertion, key, bounds, want)
+	}
+	exchange(agent, ordinary["secret"].(string), http.StatusForbidden)
+	exchange(agent, otherKey["secret"].(string), http.StatusForbidden)
+	exchange(sign("other-agent", "approved-client", "olp"), delegating["secret"].(string), http.StatusUnauthorized)
+	exchange(sign("approved-agent", "other-client", "olp"), delegating["secret"].(string), http.StatusUnauthorized)
+	exchange(sign("approved-agent", "approved-client", "foreign"), delegating["secret"].(string), http.StatusUnauthorized)
+	exchangeBounds(agent, delegating["secret"].(string), runtime.DelegationBounds{Scopes: []string{"delegate"}, AllowedRoutes: []string{"delegated-chat"}}, http.StatusBadRequest)
+	exchangeBounds(agent, delegating["secret"].(string), runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"delegated-chat", "other-route"}}, http.StatusForbidden)
+	exchangeBounds(agent, delegating["secret"].(string), runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"delegated-chat"}, TTLSeconds: 901}, http.StatusBadRequest)
+	grant := exchange(agent, delegating["secret"].(string), http.StatusCreated)
+	exchange(agent, grant, http.StatusUnauthorized)
+	var leaked bool
+	err := h.Pool.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM olp.agent_delegations d WHERE position($1 in to_jsonb(d)::text)>0 OR position($2 in to_jsonb(d)::text)>0 OR position($3 in to_jsonb(d)::text)>0 OR position($4 in to_jsonb(d)::text)>0)`, grant, agent, "approved-agent", "approved-client").Scan(&leaked)
+	if err != nil || leaked {
+		t.Fatalf("grant retained raw credentials or claims: %v", err)
+	}
+	infer := func(token, assertion string, want int) {
+		t.Helper()
+		response, raw := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + token, "X-OLP-Agent-Identity": assertion})
+		if response.StatusCode != want {
+			t.Fatalf("delegated inference: %d %s", response.StatusCode, raw)
+		}
+	}
+	limSettleInMinute(t, client, 5*time.Second)
+	infer(grant, sign("other-agent", "approved-client", "olp"), http.StatusUnauthorized)
+	infer(grant, agent, http.StatusOK)
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	infer(grant, agent, http.StatusUnauthorized)
+	renewed := exchangeBounds(agent, delegating["secret"].(string), runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"delegated-chat"}, TTLSeconds: 900}, http.StatusCreated)
+	promptResponse, promptBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "olp_prompt": map[string]any{"id": prompt["id"], "label": "production", "variables": map[string]string{"name": "agent"}}}, map[string]string{"Authorization": "Bearer " + renewed, "X-OLP-Agent-Identity": agent})
+	if promptResponse.StatusCode != http.StatusOK {
+		t.Fatalf("delegated prompt inference: %d %s", promptResponse.StatusCode, promptBody)
+	}
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	var agentID, ownerID string
+	var attempts, pairCount int
+	accountingErr := h.Pool.QueryRow(context.Background(), `SELECT min(agent_principal_id::text),min(api_key_id::text),count(*),count(DISTINCT delegation_pair_digest) FROM olp.attempt_usage_facts WHERE api_key_id=$1`, delegating["id"]).Scan(&agentID, &ownerID, &attempts, &pairCount)
+	if accountingErr != nil || agentID == "" || ownerID != delegating["id"] || attempts != 2 || pairCount != 1 {
+		t.Fatalf("delegated accounting owners and stable pair: %s %s %d %d %v", agentID, ownerID, attempts, pairCount, accountingErr)
+	}
+	var promptAttempts int
+	promptErr := h.Pool.QueryRow(context.Background(), `SELECT count(*) FROM olp.attempts a JOIN olp.attempt_usage_facts f ON f.attempt_id=a.id WHERE f.agent_principal_id=$1 AND f.api_key_id=$2 AND a.routing->'prompt'->>'id'=$3 AND a.routing->'prompt'->>'revision_id'=$4`, agentID, ownerID, prompt["id"], published["revision_id"]).Scan(&promptAttempts)
+	if promptErr != nil || promptAttempts != 1 {
+		t.Fatalf("delegated prompt attempt attribution: %d %v", promptAttempts, promptErr)
+	}
+	limitedGrant := exchange(agent, limitedKey["secret"].(string), http.StatusCreated)
+	infer(limitedGrant, agent, http.StatusTooManyRequests)
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	keyPath := "/api/v1/api-keys/" + delegating["id"].(string)
+	key := h.want(owner, "GET", keyPath, nil, nil, 200)
+	restricted := exchange(agent, delegating["secret"].(string), http.StatusCreated)
+	limited := h.want(owner, "PATCH", keyPath, map[string]any{"scopes": []string{"delegate"}}, etagHeader(key), 200)
+	h.refresh()
+	infer(restricted, agent, http.StatusUnauthorized)
+	restored := h.want(owner, "PATCH", keyPath, map[string]any{"scopes": []string{"inference", "delegate"}}, etagHeader(limited), 200)
+	h.refresh()
+	groupRestricted := exchange(agent, delegating["secret"].(string), http.StatusCreated)
+	groupsPath := "/api/v1/projects/" + project + "/route-groups"
+	groups := h.want(owner, "GET", groupsPath, nil, nil, 200)
+	emptyGroups := h.want(owner, "PUT", groupsPath, map[string]any{"groups": map[string]any{"generation": []string{}}}, etagHeader(groups), 200)
+	h.refresh()
+	infer(groupRestricted, agent, http.StatusUnauthorized)
+	h.want(owner, "PUT", groupsPath, map[string]any{"groups": map[string]any{"generation": []string{"delegated-chat"}}}, etagHeader(emptyGroups), 200)
+	h.refresh()
+	revokedKeyGrant := exchange(agent, delegating["secret"].(string), http.StatusCreated)
+	h.want(owner, "POST", keyPath+"/revoke", nil, withMatch(restored, idem("revoke-delegating")), 200)
+	h.refresh()
+	infer(revokedKeyGrant, agent, http.StatusUnauthorized)
+	secondKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "second-delegating", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"delegated-chat"}}, idem("second-delegating"), 201)
+	h.refresh()
+	revokedAgentGrant := exchange(agent, secondKey["secret"].(string), http.StatusCreated)
+	agentPath := "/api/v1/api-keys/" + agentID
+	agentKey := h.want(owner, "GET", agentPath, nil, nil, 200)
+	h.want(owner, "POST", agentPath+"/revoke", nil, withMatch(agentKey, idem("revoke-agent")), 200)
+	h.refresh()
+	infer(revokedAgentGrant, agent, http.StatusUnauthorized)
+	currentIssuer := h.want(owner, "GET", issuerPath, nil, nil, 200)
+	h.want(owner, "PUT", issuerPath, issuerInput(map[string]string{"/sub": "approved-agent", "/client_id": "replacement-client"}), etagHeader(currentIssuer), 200)
+	h.refresh()
+	replacement := sign("approved-agent", "replacement-client", "olp")
+	replacementGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	infer(replacementGrant, replacement, http.StatusOK)
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	var replacementID string
+	replacementErr := h.Pool.QueryRow(context.Background(), `SELECT agent_principal_id::text FROM olp.attempt_usage_facts WHERE api_key_id=$1`, secondKey["id"]).Scan(&replacementID)
+	if replacementErr != nil || replacementID == agentID {
+		t.Fatalf("distinct clients must have distinct agent principals: %s %v", replacementID, replacementErr)
+	}
+	currentTemplates := h.want(owner, "GET", templatesPath, nil, nil, 200)
+	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"tokens_per_minute": 1}}}, etagHeader(currentTemplates), 200)
+	h.refresh()
+	tokenLimitedGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	tokenResponse, tokenBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + tokenLimitedGrant, "X-OLP-Agent-Identity": replacement})
+	if tokenResponse.StatusCode != http.StatusBadRequest || !strings.Contains(string(tokenBody), "request_exceeds_token_limit") {
+		t.Fatalf("agent token limit: %d %s", tokenResponse.StatusCode, tokenBody)
+	}
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkloadDelegationRealtimeRevalidatesAndRevokes(t *testing.T) {
+	h := newAccessHarness(t)
+	_, _, limiter := limSetup(t, "agent-delegation-realtime")
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
+	owner := h.owner()
+	project := createProject(h, owner, "Delegated realtime")
+	upstream := newStrictRealtimeFixture(t, "openai")
+	slug, _ := provisionStrictRealtimeInProject(t, h, owner, "openai", upstream.URL+"/v1", nil, &project)
+	workloadProject(t, h, owner, project, map[string]any{"realtime": []string{slug}})
+	templatesPath := "/api/v1/projects/" + project + "/limit-templates"
+	templates := h.want(owner, "GET", templatesPath, nil, nil, 200)
+	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 100, "max_concurrency": 1}}}, etagHeader(templates), 200)
+	issuer := newWorkloadFixture(t, h, owner, project, []string{"realtime"})
+	config := map[string]any{
+		"name": "Portable CI", "issuer": issuer.endpoint.URL, "jwks_url": issuer.endpoint.URL,
+		"enabled": true, "audiences": []string{"olp"}, "algorithms": []string{"EdDSA"},
+		"max_lifetime_seconds": 600, "disabled_key_ids": []string{},
+		"mappings": []any{map[string]any{"name": "agent", "match": map[string]string{"/sub": "realtime-agent", "/client_id": "realtime-client"}, "project_id": project, "limit_template": "worker", "route_groups": []string{"realtime"}, "scopes": []string{"inference"}, "agent_principal": true}},
+	}
+	issuerPath := "/api/v1/workload-issuers/" + issuer.issuer["id"].(string)
+	h.want(owner, "PUT", issuerPath, config, etagHeader(issuer.issuer), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "realtime delegate", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{slug}}, idem("realtime-delegate"), 201)
+	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other realtime delegate", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{slug}}, idem("other-realtime-delegate"), 201)
+	h.refresh()
+	signer, signerErr := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: issuer.private}, (&jose.SignerOptions{}).WithHeader("kid", issuer.kid))
+	if signerErr != nil {
+		t.Fatal(signerErr)
+	}
+	now := time.Now()
+	body, marshalErr := json.Marshal(map[string]any{"iss": issuer.endpoint.URL, "aud": "olp", "sub": "realtime-agent", "client_id": "realtime-client", "iat": now.Unix(), "exp": now.Add(9 * time.Minute).Unix()})
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	signed, signErr := signer.Sign(body)
+	if signErr != nil {
+		t.Fatal(signErr)
+	}
+	assertion, serializeErr := signed.CompactSerialize()
+	if serializeErr != nil {
+		t.Fatal(serializeErr)
+	}
+	response, raw := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{slug}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": key["secret"].(string)})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("delegation exchange: %d %s", response.StatusCode, raw)
+	}
+	var grant runtime.DelegationGrant
+	if err := json.Unmarshal(raw, &grant); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	url := strings.Replace(h.HTTP.URL, "http://", "ws://", 1) + "/v1/realtime?model=" + slug
+	headers := http.Header{"Authorization": {"Bearer " + grant.Token}, "X-OLP-Agent-Identity": {assertion}}
+	conn, handshake, dialErr := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: headers})
+	if dialErr != nil {
+		if handshake != nil {
+			detail, _ := io.ReadAll(handshake.Body)
+			handshake.Body.Close()
+			t.Fatalf("delegated realtime dial: %s %v", detail, dialErr)
+		}
+		t.Fatalf("delegated realtime dial: %v", dialErr)
+	}
+	defer conn.CloseNow()
+	otherResponse, otherRaw := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{slug}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": otherKey["secret"].(string)})
+	if otherResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("second realtime delegation exchange: %d %s", otherResponse.StatusCode, otherRaw)
+	}
+	var otherGrant runtime.DelegationGrant
+	if err := json.Unmarshal(otherRaw, &otherGrant); err != nil {
+		t.Fatal(err)
+	}
+	otherConn, otherHandshake, otherErr := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + otherGrant.Token}, "X-OLP-Agent-Identity": {assertion}}})
+	if otherConn != nil {
+		otherConn.CloseNow()
+	}
+	if otherErr == nil || otherHandshake == nil || otherHandshake.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("agent concurrency limit: %v %v", otherHandshake, otherErr)
+	}
+	for i, frame := range strictRealtimeClientFrames {
+		if i > 0 {
+			time.Sleep(1600 * time.Millisecond)
+		}
+		if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+			t.Fatalf("delegated realtime frame %d: %v", i, err)
+		}
+		_, received, err := conn.Read(ctx)
+		if err != nil || string(received) != string(strictRealtimeProviderFrames[i]) {
+			t.Fatalf("delegated realtime response %d: %q %v", i, received, err)
+		}
+		if i == 1 {
+			_, received, err := conn.Read(ctx)
+			if err != nil || string(received) != string(strictRealtimeToolCall) {
+				t.Fatalf("delegated realtime tool event: %q %v", received, err)
+			}
+		}
+	}
+	replayed, replayResponse, replayErr := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: headers})
+	if replayed != nil {
+		replayed.CloseNow()
+	}
+	if replayErr == nil || replayResponse == nil || replayResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("delegation replay was accepted: %v %v", replayResponse, replayErr)
+	}
+	keyPath := "/api/v1/api-keys/" + key["id"].(string)
+	current := h.want(owner, "GET", keyPath, nil, nil, 200)
+	h.want(owner, "POST", keyPath+"/revoke", nil, withMatch(current, idem("revoke-realtime-delegate")), 200)
+	h.refresh()
+	_, _, closeErr := conn.Read(ctx)
+	if websocket.CloseStatus(closeErr) != websocket.StatusPolicyViolation {
+		t.Fatalf("revoked realtime session remained open: %v", closeErr)
 	}
 }

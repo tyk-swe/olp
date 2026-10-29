@@ -139,6 +139,8 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 		RequestID:            e.AccountingID,
 		RuntimeGenerationID:  e.RuntimeGenerationID,
 		APIKeyID:             e.KeyID,
+		AgentPrincipalID:     e.AgentPrincipalID,
+		DelegationPairDigest: e.DelegationPairDigest,
 		Origin:               e.Origin,
 		ParentRequestID:      optionalText(e.ParentRequestID),
 		Attribution:          e.Attribution,
