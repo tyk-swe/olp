@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -333,22 +334,28 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 	} {
 		upstream.frames <- []byte(frame)
 	}
-	close(upstream.frames)
 	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
 		return upstream, nil
 	}
 	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`)); err != nil {
-		t.Fatal(err)
-	}
 	for _, frame := range []string{
+		`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`,
 		`{"event":{"promptEnd":{"promptName":"p1"}}}`,
 		`{"event":{"sessionEnd":{}}}`,
 	} {
 		if err := conn.Write(ctx, websocket.MessageText, []byte(frame)); err != nil {
 			t.Fatal(err)
 		}
+		select {
+		case forwarded := <-upstream.writes:
+			if string(forwarded) != frame {
+				t.Fatalf("forwarded frame = %s, want %s", forwarded, frame)
+			}
+		case <-ctx.Done():
+			t.Fatalf("session frame did not reach the provider: %v", ctx.Err())
+		}
 	}
+	close(upstream.frames)
 	for {
 		if _, _, err := conn.Read(ctx); err != nil {
 			break
@@ -359,8 +366,209 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 		t.Fatalf("attempts = %d", len(env.Attempts))
 	}
 	fact := env.Attempts[0]
+	if env.Outcome != "success" || env.ErrorClass != "" || !env.Committed || fact.Class != classSuccess || fact.Status != http.StatusOK {
+		t.Fatalf("completed Bedrock response = %+v", env)
+	}
 	if !fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.InputTokens != 12 || fact.Usage.OutputTokens != 5 {
 		t.Fatalf("clean Bedrock stream end did not settle observed usage: %+v", fact)
+	}
+}
+
+func TestNativeDuplexBedrockPendingResponseCallerClose(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		frames   []string
+		observed bool
+	}{
+		{"unmetered", []string{
+			`{"event":{"completionStart":{"completionId":"c1"}}}`,
+			`{"event":{"textOutput":{"content":"unfinished"}}}`,
+		}, false},
+		{"metered", []string{
+			`{"event":{"completionStart":{"completionId":"c1"}}}`,
+			`{"event":{"usageEvent":{"totalInputTokens":12,"totalOutputTokens":5,"totalTokens":17}}}`,
+		}, true},
+		{"earlier_complete", []string{
+			`{"event":{"completionStart":{"completionId":"c1"}}}`,
+			`{"event":{"usageEvent":{"totalInputTokens":12,"totalOutputTokens":5,"totalTokens":17}}}`,
+			`{"event":{"completionEnd":{"completionId":"c1"}}}`,
+			`{"event":{"completionStart":{"completionId":"c2"}}}`,
+			`{"event":{"textOutput":{"content":"unfinished"}}}`,
+		}, true},
+	} {
+		for _, code := range []websocket.StatusCode{websocket.StatusNormalClosure, websocket.StatusGoingAway} {
+			t.Run(tc.name+"/"+code.String(), func(t *testing.T) {
+				h := bedrockDuplexHarness(t)
+				ledger := &fakeSessionDebits{}
+				h.gateway.Debits = ledger
+				upstream := &recordingPeer{frames: make(chan []byte, len(tc.frames)), writes: make(chan []byte, 1)}
+				for _, frame := range tc.frames {
+					upstream.frames <- []byte(frame)
+				}
+				h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
+					return upstream, nil
+				}
+				conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
+				if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{}}}`)); err != nil {
+					t.Fatal(err)
+				}
+				for range tc.frames {
+					if _, _, err := conn.Read(ctx); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := conn.Close(code, ""); err != nil {
+					t.Fatal(err)
+				}
+				env := h.sink.last(t)
+				if env.Outcome != "cancelled" || env.ErrorClass != "client_cancelled" || !env.Committed || env.Status != 0 {
+					t.Fatalf("pending response close = outcome %q, error %q, committed %v, status %d", env.Outcome, env.ErrorClass, env.Committed, env.Status)
+				}
+				if len(env.Attempts) != 1 {
+					t.Fatalf("attempts = %+v", env.Attempts)
+				}
+				fact := env.Attempts[0]
+				if fact.Class != classCancelled || fact.Status != http.StatusOK {
+					t.Fatalf("pending response attempt = %+v", fact)
+				}
+				if fact.UsageObserved != tc.observed || fact.UsageComplete || !fact.BillingUncertain {
+					t.Fatalf("pending response usage = %+v", fact)
+				}
+				if tc.observed && (fact.Usage == nil || fact.Usage.InputTokens != 12 || fact.Usage.OutputTokens != 5) {
+					t.Fatalf("observed usage lost on cancellation: %+v", fact.Usage)
+				}
+				if fact.Execution == nil || fact.Execution.DispatchID != ledger.prepareID || ledger.prepareID == "" {
+					t.Fatalf("cancelled work lost its durable debit: %+v", fact.Execution)
+				}
+				if events := ledger.order(); !slices.Contains(events, "unknown") || slices.Contains(events, "released") {
+					t.Fatalf("cancelled dispatched work must retain uncertain exposure: %v", events)
+				}
+			})
+		}
+	}
+}
+
+func TestNativeDuplexBedrockPendingResponseProviderClose(t *testing.T) {
+	h := bedrockDuplexHarness(t)
+	upstream := &recordingPeer{frames: make(chan []byte, 2), writes: make(chan []byte, 1)}
+	upstream.frames <- []byte(`{"event":{"completionStart":{"completionId":"c1"}}}`)
+	upstream.frames <- []byte(`{"event":{"textOutput":{"content":"unfinished"}}}`)
+	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
+		return upstream, nil
+	}
+	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(upstream.frames)
+	if _, _, err := conn.Read(ctx); err == nil || websocket.CloseStatus(err) == websocket.StatusNormalClosure || websocket.CloseStatus(err) == websocket.StatusGoingAway {
+		t.Fatalf("provider ended a pending response with successful client closure: %v", err)
+	}
+	env := h.sink.last(t)
+	if env.Outcome != "failure" || env.ErrorClass != "duplex_incomplete" || !env.Committed || env.Status != http.StatusSwitchingProtocols {
+		t.Fatalf("pending provider close = outcome %q, error %q, committed %v, status %d", env.Outcome, env.ErrorClass, env.Committed, env.Status)
+	}
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != classAmbiguous || !env.Attempts[0].BillingUncertain || env.Attempts[0].UsageComplete || env.Attempts[0].UsageObserved {
+		t.Fatalf("pending provider evidence = %+v", env.Attempts)
+	}
+}
+
+func TestNativeDuplexBedrockCleanCallerCloseWithoutUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		frames []string
+	}{
+		{"idle", nil},
+		{"completed", []string{
+			`{"event":{"completionStart":{"completionId":"c1"}}}`,
+			`{"event":{"completionEnd":{"completionId":"c1"}}}`,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := bedrockDuplexHarness(t)
+			upstream := &recordingPeer{frames: make(chan []byte, len(tc.frames)), writes: make(chan []byte, 1)}
+			for _, frame := range tc.frames {
+				upstream.frames <- []byte(frame)
+			}
+			h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) { return upstream, nil }
+			conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
+			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{}}}`)); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-upstream.writes:
+			case <-ctx.Done():
+				t.Fatal("setup did not reach the provider")
+			}
+			for range tc.frames {
+				if _, _, err := conn.Read(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+				t.Fatal(err)
+			}
+			env := h.sink.last(t)
+			if env.Outcome != "success" || env.ErrorClass != "" || env.Status != http.StatusSwitchingProtocols || !env.Committed {
+				t.Fatalf("clean unmetered session = %+v", env)
+			}
+			if len(env.Attempts) != 1 || env.Attempts[0].Class != classSuccess || env.Attempts[0].UsageObserved || env.Attempts[0].UsageComplete || !env.Attempts[0].BillingUncertain {
+				t.Fatalf("clean unmetered billing = %+v", env.Attempts)
+			}
+		})
+	}
+}
+
+func TestNativeDuplexBedrockWriteCloseOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		client   bool
+		terminal bool
+		want     error
+	}{
+		{"client_pending", true, false, errDuplexClientClosed},
+		{"client_terminal_delivery", true, true, errDuplexClientClosed},
+		{"provider_pending", false, false, errDuplexIncomplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := bedrockDuplexHarness(t)
+			route := h.rt.release.Snapshot.Routes[routeSlug]
+			template, _ := h.rt.release.Snapshot.DuplexTemplate(routeSlug, route.Targets[0].ID)
+			observer := template.Observer(1024)
+			for _, frame := range []string{
+				`{"event":{"completionStart":{"completionId":"c1"}}}`,
+				`{"event":{"usageEvent":{"totalInputTokens":12,"totalOutputTokens":5,"totalTokens":17}}}`,
+			} {
+				if _, err := observer.ServerFrame([]byte(frame)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			client := &closingRelayPeer{frames: make(chan []byte, 1)}
+			provider := &closingRelayPeer{frames: make(chan []byte, 1)}
+			closed := func(context.Context) error { return websocket.CloseError{Code: websocket.StatusGoingAway} }
+			if tc.client {
+				client.write = closed
+				frame := `{"event":{"textOutput":{"content":"unfinished"}}}`
+				if tc.terminal {
+					frame = `{"event":{"completionEnd":{"completionId":"c1"}}}`
+				}
+				provider.frames <- []byte(frame)
+			} else {
+				provider.write = closed
+				client.frames <- []byte(`{"event":{"audioInput":{"content":"AA=="}}}`)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			u, complete, err := h.gateway.relayNativeDuplex(ctx, &call{}, &pin{}, client, provider, "", observer, template.Transport(), 1024)
+			if !errors.Is(err, tc.want) || complete || u == nil || u.InputTokens != 12 || u.OutputTokens != 5 {
+				t.Fatalf("write close = usage %+v, complete %v, error %v", u, complete, err)
+			}
+		})
 	}
 }
 
@@ -464,7 +672,7 @@ func TestNativeDuplexRevocationStopsProviderBeforeCallerHandshake(t *testing.T) 
 	upstream := &observedNativeClosePeer{closingRelayPeer: &closingRelayPeer{frames: make(chan []byte)}, closed: make(chan struct{})}
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := h.gateway.relayNativeDuplex(t.Context(), &call{request: request{release: h.rt.release}, routeLeg: routeLeg{route: &route}, keyID: h.keyID}, &pin{provider: provider, slot: provider.Slots[0]}, client, upstream, fullKey, template.Observer(1024), 1024)
+		_, _, err := h.gateway.relayNativeDuplex(t.Context(), &call{request: request{release: h.rt.release}, routeLeg: routeLeg{route: &route}, keyID: h.keyID}, &pin{provider: provider, slot: provider.Slots[0]}, client, upstream, fullKey, template.Observer(1024), template.Transport(), 1024)
 		done <- err
 	}()
 	select {

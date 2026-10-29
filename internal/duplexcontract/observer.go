@@ -16,6 +16,7 @@ type frameObserver interface {
 	clientFrame(frame []byte) error
 	usageValue() *wire.Usage
 	complete() bool
+	pendingResponse() bool
 }
 
 type Observer struct {
@@ -62,4 +63,10 @@ func (o *Observer) Complete() bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.inner.complete()
+}
+
+func (o *Observer) PendingResponse() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.inner.pendingResponse()
 }

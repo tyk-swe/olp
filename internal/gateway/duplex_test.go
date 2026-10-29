@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/coder/websocket"
@@ -39,7 +40,7 @@ func (*closingRelayPeer) Close(websocket.StatusCode, string) error { return nil 
 func (*closingRelayPeer) CloseNow() error                          { return nil }
 
 func TestDuplexCancellationJoinsProviderObservationBeforeReturning(t *testing.T) {
-	for _, protocol := range []string{"realtime", "gemini_live"} {
+	for _, protocol := range []string{"realtime", "gemini_live", "native_bedrock"} {
 		t.Run(protocol, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -55,6 +56,13 @@ func TestDuplexCancellationJoinsProviderObservationBeforeReturning(t *testing.T)
 			if protocol == "gemini_live" {
 				frame = `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":9,"responseTokenCount":5}}`
 			}
+			var native *duplexcontract.Template
+			if protocol == "native_bedrock" {
+				h := bedrockDuplexHarness(t)
+				route := h.rt.release.Snapshot.Routes[routeSlug]
+				native, _ = h.rt.release.Snapshot.DuplexTemplate(routeSlug, route.Targets[0].ID)
+				frame = `{"event":{"usageEvent":{"totalInputTokens":9,"totalOutputTokens":5,"totalTokens":14}}}`
+			}
 			provider.frames <- []byte(frame)
 			x := &call{}
 			s := &Server{}
@@ -68,8 +76,10 @@ func TestDuplexCancellationJoinsProviderObservationBeforeReturning(t *testing.T)
 				var err error
 				if protocol == "realtime" {
 					u, _, err = s.relayRealtime(ctx, x, &pin{}, client, provider, "", "")
-				} else {
+				} else if protocol == "gemini_live" {
 					u, _, err = s.relayGeminiLive(ctx, x, &pin{}, client, provider, "", 1024)
+				} else {
+					u, _, err = s.relayNativeDuplex(ctx, x, &pin{}, client, provider, "", native.Observer(1024), native.Transport(), 1024)
 				}
 				returned <- result{u, err}
 			}()

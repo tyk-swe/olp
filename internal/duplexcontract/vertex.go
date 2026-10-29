@@ -285,6 +285,7 @@ func (o *vertexObserver) clientFrame(frame []byte) error {
 }
 
 func (o *vertexObserver) usageValue() *wire.Usage { return o.usage }
+func (o *vertexObserver) pendingResponse() bool   { return o.pending }
 func (o *vertexObserver) complete() bool {
 	return o.usage != nil && o.turn == nil && !o.pending && !o.awaiting && o.submitted == 0 && o.inputSeq == o.coveredSeq && !o.incomplete
 }
