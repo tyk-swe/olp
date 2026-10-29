@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -24,7 +25,7 @@ import (
 
 const nativeToolResult = "private-tool-result"
 
-func nativeWorkflowHarness(t *testing.T, projectID, surface, profile, mode, fidelity string, toolsets []string, certified bool, fixture *workflowFixture) *harness {
+func nativeWorkflowHarness(t *testing.T, projectID, surface, profile, mode, fidelity string, toolsets []string, certified bool, fixture *workflowFixture, responsesMCP ...bool) *harness {
 	t.Helper()
 	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		route := snapshot.Routes[routeSlug]
@@ -35,7 +36,7 @@ func nativeWorkflowHarness(t *testing.T, projectID, surface, profile, mode, fide
 			RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: route.PublishedAt,
 			Policy: route.Policy, ProjectID: &projectID, ContentPolicy: route.ContentPolicy,
 			Fidelity: routing.RouteFidelity{Mode: fidelity},
-			Behavior: routing.Behavior{ToolExecution: "gateway", Toolsets: toolsets},
+			Behavior: routing.Behavior{ToolExecution: "gateway", Toolsets: toolsets, ResponsesMCPItems: len(responsesMCP) > 0 && responsesMCP[0]},
 		}}
 		snapshot.Providers = maps.Collect(func(yield func(string, routing.Provider) bool) {
 			for id, provider := range snapshot.Providers {
@@ -1148,5 +1149,201 @@ func TestGatewayToolExecutionCancelsLongCallsAfterRevocation(t *testing.T) {
 				t.Fatalf("revoked long call continued: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
+	}
+}
+
+func TestGatewayToolExecutionResponsesCompletesWithFinalOutput(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-responses", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"id":"first","object":"response","status":"completed","model":"model-a","output":[{"type":"function_call","id":"fc-1","call_id":"call-1","name":%q,"arguments":"{}","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`, alias)
+			return
+		}
+		io.WriteString(w, `{"id":"last","object":"response","status":"completed","model":"model-a","output":[{"type":"message","id":"msg-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hello"}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("Responses workflow failed: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+	var result struct {
+		Output []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || len(result.Output) != 1 || result.Output[0].Type != "message" || len(result.Output[0].Content) != 1 || result.Output[0].Content[0].Text != "final answer" {
+		t.Fatalf("Responses workflow did not return only its final answer: %s", body)
+	}
+	first, second := <-upstream, <-upstream
+	var initial, continued struct {
+		Tools []struct{ Type, Name string } `json:"tools"`
+		Input []struct {
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+			Output string `json:"output"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(first, &initial); err != nil || len(initial.Tools) != 1 || initial.Tools[0].Type != "function" || initial.Tools[0].Name != alias {
+		t.Fatalf("provider did not receive Responses function definitions: %s", first)
+	}
+	if err := json.Unmarshal(second, &continued); err != nil || len(continued.Input) < 3 || continued.Input[len(continued.Input)-1].Type != "function_call_output" || continued.Input[len(continued.Input)-1].CallID != "call-1" {
+		t.Fatalf("provider did not receive the paired tool output: %s", second)
+	}
+	assertNativeToolOutput(t, continued.Input[len(continued.Input)-1].Output)
+}
+
+func TestGatewayToolExecutionResponsesProjectsMCPItems(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-responses", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture, true)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"id":"first","object":"response","status":"completed","model":"model-a","output":[{"type":"function_call","id":"fc-1","call_id":"call-1","name":%q,"arguments":"{}","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`, alias)
+			return
+		}
+		io.WriteString(w, `{"id":"last","object":"response","status":"completed","model":"model-a","output":[{"type":"message","id":"msg-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hello"}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("Responses workflow failed: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+	var result struct {
+		Output []struct {
+			Type        string `json:"type"`
+			ID          string `json:"id"`
+			ServerLabel string `json:"server_label"`
+			Name        string `json:"name"`
+			Arguments   string `json:"arguments"`
+			Output      string `json:"output"`
+			Tools       []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || len(result.Output) != 3 {
+		t.Fatalf("Responses workflow did not project MCP items: %s", body)
+	}
+	listed, called, final := result.Output[0], result.Output[1], result.Output[2]
+	if listed.Type != "mcp_list_tools" || listed.ID == "" || listed.ServerLabel != toolsetID || len(listed.Tools) != 1 || listed.Tools[0].Name != alias {
+		t.Fatalf("wrong authorized tool listing: %s", body)
+	}
+	if called.Type != "mcp_call" || called.ID == "" || called.ServerLabel != toolsetID || called.Name != alias || called.Arguments != "{}" {
+		t.Fatalf("wrong authorized tool call: %s", body)
+	}
+	assertNativeToolOutput(t, called.Output)
+	if final.Type != "message" || len(final.Content) != 1 || final.Content[0].Text != "final answer" {
+		t.Fatalf("final answer is missing: %s", body)
+	}
+}
+
+func TestGatewayToolExecutionResponsesStreamReturnsFinalAnswer(t *testing.T) {
+	testResponsesWorkflowStream(t, false)
+}
+
+func TestGatewayToolExecutionResponsesStreamProjectsMCPItems(t *testing.T) {
+	testResponsesWorkflowStream(t, true)
+}
+
+func testResponsesWorkflowStream(t *testing.T, includeItems bool) {
+	t.Helper()
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-responses", "streaming", routing.FidelityTransformed, []string{toolsetID}, true, fixture, includeItems)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if h.mock.count("a") == 1 {
+			item := fmt.Sprintf(`{"type":"function_call","id":"fc-1","call_id":"call-1","name":%q,"arguments":"{}","status":"completed"}`, alias)
+			fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"sequence_number\":0,\"output_index\":0,\"item\":%s}\n\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"first\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"model-a\",\"output\":[%s],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n", item, item)
+			return
+		}
+		for _, event := range streamedEvents("final answer") {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hello","stream":true}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "function_call") {
+		t.Fatalf("Responses stream leaked intermediate output or lost final answer: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+	if !includeItems {
+		if strings.Contains(string(body), "private-tool-result") || strings.Contains(string(body), "mcp_call") {
+			t.Fatalf("undeclared Responses stream exposed MCP items: %s", body)
+		}
+		return
+	}
+	var events []struct {
+		Type        string `json:"type"`
+		Sequence    int    `json:"sequence_number"`
+		OutputIndex *int   `json:"output_index"`
+		Item        struct {
+			Type   string `json:"type"`
+			Output string `json:"output"`
+		} `json:"item"`
+		Response struct {
+			Output []struct {
+				Type string `json:"type"`
+			} `json:"output"`
+		} `json:"response"`
+	}
+	if err := sse.Decode(strings.NewReader(string(body)), 1<<20, func(frame sse.Frame) error {
+		if frame.Control {
+			return nil
+		}
+		var event struct {
+			Type        string `json:"type"`
+			Sequence    int    `json:"sequence_number"`
+			OutputIndex *int   `json:"output_index"`
+			Item        struct {
+				Type   string `json:"type"`
+				Output string `json:"output"`
+			} `json:"item"`
+			Response struct {
+				Output []struct {
+					Type string `json:"type"`
+				} `json:"output"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(frame.Data), &event); err != nil {
+			return err
+		}
+		events = append(events, event)
+		return nil
+	}); err != nil {
+		t.Fatalf("invalid Responses stream: %v", err)
+	}
+	if len(events) < 6 {
+		t.Fatalf("missing Responses MCP events: %s", body)
+	}
+	for index, event := range events {
+		if event.Sequence != index {
+			t.Fatalf("noncontiguous event sequence: %s", body)
+		}
+	}
+	if events[1].Item.Type != "mcp_list_tools" || *events[1].OutputIndex != 0 || events[3].Item.Type != "mcp_call" || *events[3].OutputIndex != 1 || !strings.Contains(events[4].Item.Output, "private-tool-result") {
+		t.Fatalf("MCP items not ordered before final output: %s", body)
+	}
+	final := events[len(events)-1]
+	if final.Type != "response.completed" || len(final.Response.Output) != 3 || final.Response.Output[0].Type != "mcp_list_tools" || final.Response.Output[1].Type != "mcp_call" || final.Response.Output[2].Type != "message" {
+		t.Fatalf("terminal response omitted ordered MCP items: %s", body)
 	}
 }

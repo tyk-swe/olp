@@ -390,6 +390,37 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        ResponsesMCPTool: {
+            name: string;
+            description?: string;
+            input_schema: {
+                [key: string]: unknown;
+            };
+        };
+        ResponsesMCPListTools: {
+            /** @enum {string} */
+            type: "mcp_list_tools";
+            id: string;
+            server_label: string;
+            tools: components["schemas"]["ResponsesMCPTool"][];
+        };
+        ResponsesMCPCall: {
+            /** @enum {string} */
+            type: "mcp_call";
+            id: string;
+            server_label: string;
+            name: string;
+            arguments: string;
+            output?: string;
+            status?: string;
+        };
+        ResponsesWorkflowResponse: {
+            output?: (components["schemas"]["ResponsesMCPListTools"] | components["schemas"]["ResponsesMCPCall"] | {
+                [key: string]: unknown;
+            })[];
+        } & {
+            [key: string]: unknown;
+        };
     };
     responses: never;
     parameters: never;
@@ -674,15 +705,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion response or stream */
+            /** @description Provider completion response or stream, including gateway MCP items when enabled by route policy */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ResponsesWorkflowResponse"];
                     "text/event-stream": string;
                 };
             };

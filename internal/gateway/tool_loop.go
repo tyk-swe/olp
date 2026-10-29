@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -34,27 +35,17 @@ type WorkflowToolRunner interface {
 }
 
 type workflowCall struct {
-	runID       string
-	token       string
-	tools       []WorkflowTool
-	ordinal     int
-	calls       int
-	finalFrames []byte
-}
-
-type advertisedTool struct {
-	Type     string             `json:"type"`
-	Function advertisedFunction `json:"function"`
-}
-
-type advertisedFunction struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters"`
+	runID         string
+	token         string
+	tools         []WorkflowTool
+	ordinal       int
+	calls         int
+	finalFrames   []byte
+	responseItems []responseMCPItem
 }
 
 func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
-	if x.family != wire.Chat && x.family != wire.Anthropic && x.family.Surface() != "gemini" {
+	if x.family != wire.Chat && x.family != wire.Responses && x.family != wire.Anthropic && x.family.Surface() != "gemini" {
 		return invalidRequest("tool_execution_unsupported", "Gateway tool execution is unavailable on this surface.", nil)
 	}
 	if raw := x.generation.parsed.Field("n"); x.family == wire.Chat && len(raw) != 0 {
@@ -106,10 +97,22 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	}
 	x.generation.parsed = parsed
 	x.workflow = &workflowCall{token: token, tools: tools}
+	if x.family == wire.Responses && x.route.ResponsesMCPItems {
+		x.workflow.responseItems = responseMCPListings(x.generation.toolsets, tools)
+	}
 	return nil
 }
 
 func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMessage, error) {
+	if family == wire.Responses {
+		return json.Marshal(slices.Collect(func(yield func(responseAdvertisedTool) bool) {
+			for _, tool := range tools {
+				if !yield(responseAdvertisedTool{Type: "function", Name: tool.Definition.Alias, Description: tool.Definition.Description, Parameters: tool.Definition.InputSchema}) {
+					return
+				}
+			}
+		}))
+	}
 	if family == wire.Chat {
 		advertised := make([]advertisedTool, len(tools))
 		for i, tool := range tools {
@@ -236,12 +239,14 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		}
 		out := s.executeModelStep(ctx, x, x.generation.parsed)
 		if out.err == nil && out.completion != nil && x.generation.parsed.Stream {
-			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), x.named().Slug)
+			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes), x.named().Slug)
 			if err != nil {
 				return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
 			}
 			out.completion.ToolCalls, out.completion.OutputText, out.completion.Refusal = completion.ToolCalls, completion.OutputText, completion.Refusal
-			if len(completion.ToolCalls) != 0 && x.family != wire.Chat {
+			if len(completion.ToolCalls) != 0 && x.family == wire.Responses {
+				out.completion.Body = completion.Body
+			} else if len(completion.ToolCalls) != 0 && x.family != wire.Chat {
 				body, err := protocols.WorkflowStreamBody(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes))
 				if err != nil {
 					return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
@@ -253,8 +258,23 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned multiple candidates.")}
 		}
 		if out.err != nil || out.completion == nil || len(out.completion.ToolCalls) == 0 {
+			if out.err == nil && out.completion != nil && !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
+				body, err := projectResponseMCPItems(out.completion.Body, x.workflow.responseItems, s.cfg.MaxResponseBytes)
+				if err != nil {
+					return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
+				}
+				out.completion.Body = body
+			}
 			if out.err == nil && x.generation.parsed.Stream {
-				x.workflow.finalFrames = slices.Clone(frames.Bytes())
+				if len(x.workflow.responseItems) > 0 {
+					projected, err := projectResponseMCPFrames(frames.Bytes(), x.workflow.responseItems, int(s.cfg.MaxEventBytes), s.cfg.MaxResponseBytes)
+					if err != nil {
+						return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
+					}
+					x.workflow.finalFrames = projected
+				} else {
+					x.workflow.finalFrames = slices.Clone(frames.Bytes())
+				}
 			}
 			return out
 		}
@@ -273,7 +293,14 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 	return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 }
 
-func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent int, route string) (*wire.Completion, error) {
+func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent, maxResponse int, route string) (*wire.Completion, error) {
+	if family == wire.Responses {
+		completion, err := openai.Aggregate(family, frames, maxEvent, maxResponse)
+		if err != nil {
+			return nil, err
+		}
+		return openai.DecodeResponse(completion.Body, route)
+	}
 	if family == wire.Chat {
 		return openai.Stream(wire.Chat, frames, maxEvent, route, true, func([]byte) error { return nil })
 	}
@@ -317,8 +344,20 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 	field := "messages"
 	if x.family.Surface() == "gemini" {
 		field = "contents"
+	} else if x.family == wire.Responses {
+		field = "input"
 	}
-	if err := json.Unmarshal(x.generation.parsed.Field(field), &messages); err != nil {
+	input := x.generation.parsed.Field(field)
+	if x.family == wire.Responses && len(input) > 0 && input[0] == '"' {
+		message, err := json.Marshal(struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}{Role: "user", Content: input})
+		if err != nil {
+			return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
+		}
+		messages = []json.RawMessage{message}
+	} else if err := json.Unmarshal(input, &messages); err != nil {
 		return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
 	}
 	if x.family == wire.Chat {
@@ -343,6 +382,9 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		}
 		if err != nil {
 			return nil, workflowError(err)
+		}
+		if x.family == wire.Responses && x.route.ResponsesMCPItems {
+			x.workflow.responseItems = append(x.workflow.responseItems, responseMCPItem{Type: "mcp_call", ID: "mcp_" + uuid.NewString(), ServerLabel: x.workflow.tools[index].ToolsetID, Name: call.Name, Arguments: call.Arguments, Output: string(result), Status: "completed"})
 		}
 		if x.family != wire.Chat {
 			results = append(results, protocols.WorkflowResult{CallID: call.ID, Content: string(result)})

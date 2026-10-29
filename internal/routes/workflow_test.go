@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -30,9 +31,14 @@ func TestValidateWorkflowDraftPreservesToolsetPolicy(t *testing.T) {
 		name      string
 		execution string
 		toolsets  []string
+		fidelity  json.RawMessage
+		mcpItems  bool
 		valid     bool
 	}{
 		{name: "gateway workflow", execution: "gateway", toolsets: []string{toolsetID}, valid: true},
+		{name: "Responses MCP output", execution: "gateway", toolsets: []string{toolsetID}, fidelity: json.RawMessage(`{"mode":"transformed"}`), mcpItems: true, valid: true},
+		{name: "Responses MCP output on strict route", execution: "gateway", toolsets: []string{toolsetID}, mcpItems: true},
+		{name: "Responses MCP output without gateway execution", fidelity: json.RawMessage(`{"mode":"transformed"}`), mcpItems: true},
 		{name: "duplicate toolset", execution: "gateway", toolsets: []string{toolsetID, toolsetID}},
 		{name: "unknown toolset", execution: "gateway", toolsets: []string{"not-a-uuid"}},
 		{name: "toolset without gateway execution", toolsets: []string{toolsetID}},
@@ -40,7 +46,7 @@ func TestValidateWorkflowDraftPreservesToolsetPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			input := DraftInput{
 				Slug: "workflow", Operations: []string{"generation"}, OverallTimeoutMS: 1000, MaxAttempts: 1,
-				ToolExecution: tc.execution, Toolsets: tc.toolsets,
+				ToolExecution: tc.execution, Toolsets: tc.toolsets, Fidelity: tc.fidelity, ResponsesMCPItems: tc.mcpItems,
 				Targets: []TargetInput{{ProviderModelID: &modelID, Weight: 1, TimeoutMS: 1000}},
 			}
 			_, err := ValidateDraftInput(t.Context(), query, &input, nil, nil)
@@ -54,7 +60,7 @@ func TestValidateWorkflowDraftPreservesToolsetPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			stored, decodeErr := routing.DecodeBehavior(input.Behavior)
-			if decodeErr != nil || stored.ToolExecution != tc.execution || len(stored.Toolsets) != 1 || stored.Toolsets[0] != toolsetID {
+			if decodeErr != nil || stored.ToolExecution != tc.execution || stored.ResponsesMCPItems != tc.mcpItems || len(stored.Toolsets) != 1 || stored.Toolsets[0] != toolsetID {
 				t.Fatalf("workflow policy did not survive validation: %+v, %v", stored, decodeErr)
 			}
 		})

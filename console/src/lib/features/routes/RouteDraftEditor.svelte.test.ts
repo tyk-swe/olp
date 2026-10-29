@@ -148,6 +148,15 @@ it('preserves workflow settings when editing an existing route', async () => {
   expect(search?.checked).toBe(false);
   expect(host.textContent).not.toContain('Other project');
   search!.click();
+  const mcpItems = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+  ].find((item) =>
+    item.parentElement?.textContent?.includes(
+      'Responses clients support MCP output items'
+    )
+  );
+  expect(mcpItems?.checked).toBe(false);
+  mcpItems!.click();
   flushSync();
   host
     .querySelector('form')!
@@ -155,6 +164,7 @@ it('preserves workflow settings when editing an existing route', async () => {
   await vi.waitFor(() => expect(routes.replaceRouteDraft).toHaveBeenCalled());
   expect(vi.mocked(routes.replaceRouteDraft).mock.calls[0][2]).toMatchObject({
     tool_execution: 'gateway',
+    responses_mcp_items: true,
     toolsets: [selected, added]
   });
 });

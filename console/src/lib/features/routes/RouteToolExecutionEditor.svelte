@@ -24,7 +24,9 @@
     editor.behavior = {
       ...editor.behavior,
       tool_execution: value === 'gateway' ? 'gateway' : '',
-      toolsets: value === 'gateway' ? selected : []
+      toolsets: value === 'gateway' ? selected : [],
+      responses_mcp_items:
+        value === 'gateway' && editor.behavior.responses_mcp_items
     };
     editor.touch();
   }
@@ -55,11 +57,26 @@
       <option value="gateway">Gateway</option>
     </select>
     <small>
-      Gateway execution uses published read-only tools on transformed Chat
-      Completions routes. Callers can choose a subset of the allowed toolsets.
+      Gateway execution uses published read-only tools on transformed inference
+      routes. Callers can choose a subset of the allowed toolsets.
     </small>
   </div>
   {#if editor.behavior.tool_execution === 'gateway'}
+    <label>
+      <input
+        type="checkbox"
+        checked={editor.behavior.responses_mcp_items ?? false}
+        onchange={(event) => {
+          editor.behavior = {
+            ...editor.behavior,
+            responses_mcp_items: event.currentTarget.checked
+          };
+          editor.touch();
+        }}
+        disabled={!editor.canManage || Boolean(editor.busy)}
+      />
+      Responses clients support MCP output items
+    </label>
     {#if editor.fidelity.mode !== 'transformed'}
       <p class="inline-problem" role="alert">
         Choose transformed fidelity for gateway tool execution.
