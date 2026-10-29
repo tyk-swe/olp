@@ -65,7 +65,7 @@
         },
         "responses": {
           "200": {
-            "description": "Provider completion response or stream",
+            "description": "Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval",
             "content": {
               "application/json": {
                 "schema": {
@@ -425,7 +425,7 @@
         },
         "responses": {
           "200": {
-            "description": "Provider completion response or stream, including gateway MCP items when enabled by route policy",
+            "description": "Provider completion, stream, or WorkflowApprovalPause. Certified Responses contracts can include MCP approval-request items.",
             "content": {
               "application/json": {
                 "schema": {
@@ -548,7 +548,7 @@
         },
         "responses": {
           "200": {
-            "description": "Provider completion response or stream",
+            "description": "Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval",
             "content": {
               "application/json": {
                 "schema": {
@@ -672,7 +672,7 @@
         },
         "responses": {
           "200": {
-            "description": "Provider completion response or stream",
+            "description": "Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval",
             "content": {
               "application/json": {
                 "schema": {
@@ -805,7 +805,7 @@
         },
         "responses": {
           "200": {
-            "description": "Provider completion response or stream",
+            "description": "Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval",
             "content": {
               "application/json": {
                 "schema": {
@@ -938,7 +938,8 @@
           },
           "olp_toolsets": {
             "$ref": "#/components/schemas/ChatToolsetSelection"
-          }
+          },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": {
@@ -956,10 +957,43 @@
             "type": "array",
             "items": { "type": "object", "additionalProperties": true }
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": { "required": ["olp_prompt"] }
+      },
+      "WorkflowApprovalSubmission": {
+        "type": "object",
+        "required": ["continuation_token", "approved", "arguments"],
+        "description": "After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.",
+        "properties": {
+          "continuation_token": { "type": "string", "pattern": "^olpa_" },
+          "approved": { "type": "boolean", "description": "The client must explicitly set this to true after obtaining human approval." },
+          "arguments": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": true }, "description": "The original JSON arguments indexed by the paused call ID." }
+        },
+        "additionalProperties": false
+      },
+      "WorkflowApprovalCall": {
+        "type": "object",
+        "required": ["id", "name", "arguments"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "server_label": { "type": "string" },
+          "arguments": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "WorkflowApprovalPause": {
+        "type": "object",
+        "required": ["type", "continuation_token", "calls"],
+        "description": "The workflow paused before an approval-required tool. The client obtains human approval and resubmits the original transcript and arguments.",
+        "properties": {
+          "type": { "type": "string", "enum": ["tool_approval_required"] },
+          "continuation_token": { "type": "string", "pattern": "^olpa_" },
+          "calls": { "type": "array", "items": { "$ref": "#/components/schemas/WorkflowApprovalCall" } }
+        },
+        "additionalProperties": true
       },
       "ChatToolsetSelection": {
         "type": "array",
@@ -1447,7 +1481,8 @@
           },
           "olp_toolsets": {
             "$ref": "#/components/schemas/ChatToolsetSelection"
-          }
+          },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": {
@@ -1476,7 +1511,8 @@
           },
           "olp_toolsets": {
             "$ref": "#/components/schemas/ChatToolsetSelection"
-          }
+          },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": {
@@ -1509,7 +1545,8 @@
             "type": "array",
             "items": { "type": "object", "additionalProperties": true }
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": { "required": ["olp_prompt"] }
@@ -1522,7 +1559,8 @@
             "type": "array",
             "items": { "type": "object", "additionalProperties": true }
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": { "required": ["olp_prompt"] }
@@ -1702,7 +1740,8 @@
               { "type": "array", "items": { "type": "object", "additionalProperties": true } }
             ]
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
+          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
         },
         "additionalProperties": true,
         "not": { "required": ["prompt"] }
@@ -1753,6 +1792,17 @@
               "$ref": "#/components/schemas/ResponsesMCPTool"
             }
           }
+        }
+      },
+      "ResponsesMCPApprovalRequest": {
+        "type": "object",
+        "required": ["type", "id", "server_label", "name", "arguments"],
+        "properties": {
+          "type": { "type": "string", "enum": ["mcp_approval_request"] },
+          "id": { "type": "string" },
+          "server_label": { "type": "string" },
+          "name": { "type": "string" },
+          "arguments": { "type": "string" }
         }
       },
       "ResponsesMCPCall": {
@@ -1811,6 +1861,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ResponsesMCPCall"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponsesMCPApprovalRequest"
                 },
                 {
                   "type": "object",

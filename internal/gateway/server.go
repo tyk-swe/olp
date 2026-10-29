@@ -814,6 +814,21 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		if out.approval != nil {
+			if parsed.Stream && len(out.approval.Output) > 0 {
+				frames, err := workflowApprovalFrames(out.approval, int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes))
+				if err != nil {
+					out.err = serverError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
+					status = out.err.Status
+					writeError(w, out.err)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				status = http.StatusOK
+				if _, err := w.Write(frames); err != nil {
+					out.cancelled = true
+				}
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			status = http.StatusOK
 			if err := json.NewEncoder(w).Encode(out.approval); err != nil {

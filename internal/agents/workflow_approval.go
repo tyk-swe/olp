@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type WorkflowApprovalCall struct {
 type WorkflowApprovalRequest struct {
 	RunID           string                 `json:"run_id"`
 	RouteRevisionID string                 `json:"route_revision_id"`
+	StartOrdinal    int                    `json:"start_ordinal"`
 	Transcript      json.RawMessage        `json:"transcript"`
 	State           json.RawMessage        `json:"state"`
 	Calls           []WorkflowApprovalCall `json:"calls"`
@@ -42,20 +44,31 @@ type WorkflowApproval struct {
 type WorkflowContinuation struct {
 	RunID           string             `json:"run_id"`
 	RouteRevisionID string             `json:"route_revision_id"`
+	StartOrdinal    int                `json:"start_ordinal"`
+	NextOrdinal     int                `json:"-"`
 	State           json.RawMessage    `json:"state"`
 	Approvals       []WorkflowApproval `json:"approvals"`
 	ExpiresAt       time.Time          `json:"expires_at"`
 }
 
 func (s *WorkflowStore) Pause(ctx context.Context, authority access.Authority, request WorkflowApprovalRequest, maxBytes int) (string, error) {
-	if s == nil || s.Pool == nil || s.Auth == nil || s.Keys == nil || authority.ProjectID == nil || len(request.Calls) == 0 || len(request.Calls) > 32 || !json.Valid(request.Transcript) || !json.Valid(request.State) {
+	if s == nil || s.Pool == nil || s.Auth == nil || s.Keys == nil || authority.ProjectID == nil || request.StartOrdinal < 0 || len(request.Calls) == 0 || len(request.Calls) > 32 || !json.Valid(request.Transcript) || !json.Valid(request.State) {
 		return "", ErrApproval
 	}
-	expires := request.ExpiresAt
-	if latest := time.Now().Add(5 * time.Minute); expires.IsZero() || expires.After(latest) {
-		expires = latest
+	for i, call := range request.Calls {
+		if call.CallID == "" || !json.Valid(call.Arguments) || slices.ContainsFunc(request.Calls[:i], func(previous WorkflowApprovalCall) bool { return previous.CallID == call.CallID }) {
+			return "", ErrApproval
+		}
 	}
-	if !expires.After(time.Now()) {
+	now := time.Now()
+	expires := func() time.Time {
+		latest := now.Add(5 * time.Minute)
+		if request.ExpiresAt.IsZero() || request.ExpiresAt.After(latest) {
+			return latest
+		}
+		return request.ExpiresAt
+	}()
+	if !expires.After(now) {
 		return "", ErrApproval
 	}
 	tx, err := s.Pool.Begin(ctx)
@@ -69,19 +82,32 @@ func (s *WorkflowStore) Pause(ctx context.Context, authority access.Authority, r
 	}
 	principal := hex.EncodeToString(PrincipalDigest(s.Auth, authority))
 	transcript := hex.EncodeToString(s.Auth.Digest(secrets.ApprovalDigest, "workflow-transcript:"+string(request.Transcript)))
-	approvals := make([]WorkflowApproval, len(request.Calls))
-	for i, call := range request.Calls {
-		if call.CallID == "" || !json.Valid(call.Arguments) {
-			return "", ErrApproval
-		}
-		binding := ApprovalBinding{RunID: request.RunID, ToolsetID: call.ToolsetID, ToolsetRevisionID: call.ToolsetRevisionID, RouteRevisionID: request.RouteRevisionID, ToolAlias: call.ToolAlias, PrincipalDigest: principal, ArgumentDigest: hex.EncodeToString(s.Auth.Digest(secrets.ToolInputDigest, string(call.Arguments))), TranscriptDigest: transcript, Currency: currency, MaxCost: call.MaxCost}
-		id, err := CreateApprovalTx(ctx, tx, s.Auth, authority, binding, expires)
-		if err != nil {
-			return "", err
-		}
-		approvals[i] = WorkflowApproval{CallID: call.CallID, ID: id, Binding: binding}
+	type approvalResult struct {
+		approval WorkflowApproval
+		err      error
 	}
-	continuation := WorkflowContinuation{RunID: request.RunID, RouteRevisionID: request.RouteRevisionID, State: request.State, Approvals: approvals, ExpiresAt: expires}
+	results := slices.Collect(func(yield func(approvalResult) bool) {
+		for _, call := range request.Calls {
+			binding := ApprovalBinding{RunID: request.RunID, ToolsetID: call.ToolsetID, ToolsetRevisionID: call.ToolsetRevisionID, RouteRevisionID: request.RouteRevisionID, ToolAlias: call.ToolAlias, PrincipalDigest: principal, ArgumentDigest: hex.EncodeToString(s.Auth.Digest(secrets.ToolInputDigest, string(call.Arguments))), TranscriptDigest: transcript, Currency: currency, MaxCost: call.MaxCost}
+			id, err := CreateApprovalTx(ctx, tx, s.Auth, authority, binding, expires)
+			if !yield(approvalResult{approval: WorkflowApproval{CallID: call.CallID, ID: id, Binding: binding}, err: err}) || err != nil {
+				return
+			}
+		}
+	})
+	for _, result := range results {
+		if result.err != nil {
+			return "", result.err
+		}
+	}
+	approvals := slices.Collect(func(yield func(WorkflowApproval) bool) {
+		for _, result := range results {
+			if !yield(result.approval) {
+				return
+			}
+		}
+	})
+	continuation := WorkflowContinuation{RunID: request.RunID, RouteRevisionID: request.RouteRevisionID, StartOrdinal: request.StartOrdinal, State: request.State, Approvals: approvals, ExpiresAt: expires}
 	payload, err := json.Marshal(continuation)
 	if err != nil {
 		return "", err
@@ -144,5 +170,10 @@ func (s *WorkflowStore) Continue(ctx context.Context, authority access.Authority
 			return WorkflowContinuation{}, ErrApproval
 		}
 	}
-	return continuation, nil
+	var next int
+	var dispatched bool
+	if err := s.Pool.QueryRow(ctx, `SELECT GREATEST(COALESCE(max(step.ordinal)+1,0),$2),COALESCE(bool_or(debit.state NOT IN ('released','not_accepted')),false) FROM olp.agent_steps step JOIN olp.execution_debits debit ON debit.id=step.dispatch_id WHERE step.run_id=$1 AND step.ordinal>=$2`, continuation.RunID, continuation.StartOrdinal).Scan(&next, &dispatched); err != nil || dispatched {
+		return WorkflowContinuation{}, ErrApproval
+	}
+	return WorkflowContinuation{RunID: continuation.RunID, RouteRevisionID: continuation.RouteRevisionID, StartOrdinal: continuation.StartOrdinal, NextOrdinal: next, State: continuation.State, Approvals: continuation.Approvals, ExpiresAt: continuation.ExpiresAt}, nil
 }

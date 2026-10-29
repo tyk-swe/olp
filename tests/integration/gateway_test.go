@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -759,6 +760,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		var request struct {
 			ID     any    `json:"id"`
 			Method string `json:"method"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
 		}
 		if json.NewDecoder(r.Body).Decode(&request) != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -771,10 +775,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			return
 		case "initialize":
 			w.Header().Set("Mcp-Session-Id", "workflow-session")
-			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+			result = map[string]any{"protocolVersion": request.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "tools/list":
 			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
-			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}, map[string]any{"name": "change", "inputSchema": schema}}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}, map[string]any{"name": "change", "inputSchema": schema, "annotations": map[string]any{"readOnlyHint": true}}}}
 		case "tools/call":
 			if blockTool.Load() {
 				close(toolStarted)
@@ -808,6 +812,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var modelCalls atomic.Int64
 	var noUsage atomic.Bool
 	var blockModel atomic.Bool
+	var iterationScenario atomic.Bool
+	var iterationSteps atomic.Int64
 	modelStarted := make(chan struct{})
 	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
@@ -851,7 +857,14 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			name = "olp_certification_probe"
 		} else if len(input["tools"]) > 0 {
 			modelCalls.Add(1)
-			if !strings.Contains(string(input["messages"]), `"role":"tool"`) {
+			if iterationScenario.Load() {
+				switch step := iterationSteps.Add(1); {
+				case step <= 6:
+					name = tool.Alias
+				case step == 7:
+					name = approvalTool.Alias
+				}
+			} else if !strings.Contains(string(input["messages"]), `"role":"tool"`) {
 				name = tool.Alias
 				if strings.Contains(string(input["messages"]), "workflow-approval-test") {
 					name = approvalTool.Alias
@@ -866,8 +879,14 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		message := map[string]any{"role": "assistant", "content": "done"}
 		finish := "stop"
 		if name != "" {
+			callID := func() string {
+				if iterationScenario.Load() && name == tool.Alias {
+					return fmt.Sprintf("iteration-call-%d", iterationSteps.Load())
+				}
+				return "call-one"
+			}()
 			finish = "tool_calls"
-			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "call-one", "type": "function", "function": map[string]any{"name": name, "arguments": `{"query":"` + argument + `"}`}}}}
+			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": callID, "type": "function", "function": map[string]any{"name": name, "arguments": `{"query":"` + argument + `"}`}}}}
 		}
 		body := map[string]any{"id": "chatcmpl-workflow", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}}
 		if !noUsage.Load() || len(input["tools"]) == 0 || len(input["tool_choice"]) > 0 {
@@ -881,7 +900,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
 		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}})
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "max_concurrency": 1}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
 	valkey, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
@@ -893,7 +912,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	h.Gateway.Debits = gateway.DurableSessionDebits(store)
 	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Keys: h.Server.Keys, Installation: h.Server.Installation, Debits: store}
-	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: store, Auth: h.AuthKey}}
+	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: store, Auth: h.AuthKey}, Guardrails: func(ctx context.Context, evaluation mcp.GuardrailEvaluation) (guardrails.Result, error) {
+		return h.Gateway.EvaluateToolGuardrails(ctx, evaluation.Authority, evaluation.Release, evaluation.Engine, evaluation.RequestID, evaluation.Phase, evaluation.Segments, evaluation.Masks)
+	}}
 	emitter := usage.NewEmitter(8)
 	h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter}
 	h.refresh()
@@ -1020,6 +1041,16 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if transcriptStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
 		t.Fatalf("changed transcript was not refused before dispatch: status=%d model_calls=%d tool_calls=%d", transcriptStatus, modelCalls.Load(), toolCalls.Load())
 	}
+	tampered := map[string]any{
+		"model":        slug,
+		"messages":     []any{map[string]any{"role": "user", "content": "workflow-approval-test"}},
+		"max_tokens":   100,
+		"olp_approval": map[string]any{"continuation_token": continuation + "A", "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}},
+	}
+	tamperedStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, tampered)
+	if tamperedStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("tampered continuation was not refused before dispatch: status=%d model_calls=%d tool_calls=%d", tamperedStatus, modelCalls.Load(), toolCalls.Load())
+	}
 	resume := map[string]any{
 		"model":        slug,
 		"messages":     []any{map[string]any{"role": "user", "content": "workflow-approval-test"}},
@@ -1042,17 +1073,92 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if otherStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
 		t.Fatalf("approval from another caller was not refused: status=%d model_calls=%d tool_calls=%d", otherStatus, modelCalls.Load(), toolCalls.Load())
 	}
+	guardrail := h.want(owner, http.MethodPost, "/api/v1/guardrails", map[string]any{
+		"name": "Approved tool argument refusal", "project_id": project, "type": "builtin.keywords",
+		"configuration": map[string]any{"words": []string{argument}, "substrings": true}, "timeout_ms": 1000, "on_error": "fail_closed",
+	}, idem("workflow-approval-guardrail"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/guardrails/"+guardrail["id"].(string)+"/activate", map[string]any{"revision_id": guardrail["revision_id"]}, withMatch(guardrail, idem("workflow-approval-guardrail-activate")), http.StatusNoContent)
+	policy := h.want(owner, http.MethodPost, "/api/v1/guardrail-policies", map[string]any{
+		"name": "Approved tool refusal", "project_id": project, "entries": []any{map[string]any{"guardrail_id": guardrail["id"], "revision_id": guardrail["revision_id"], "phase": "input", "action": "block"}},
+	}, idem("workflow-approval-policy"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/guardrail-policies/"+policy["id"].(string)+"/activate", map[string]any{"revision_id": policy["revision_id"]}, withMatch(policy, idem("workflow-approval-policy-activate")), http.StatusNoContent)
+	attachment := h.want(owner, http.MethodPost, "/api/v1/guardrail-attachments", map[string]any{"scope": "toolset", "scope_id": toolsetID, "policy_revision_id": policy["revision_id"], "order": 0}, idem("workflow-approval-attachment"), http.StatusCreated)
+	h.refresh()
+	blockedStatus, blockedBody, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, resume)
+	if blockedStatus != http.StatusBadRequest || h.gatewayCode(blockedStatus, blockedBody) != "guardrail_blocked" || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("approved guardrail denial reached upstream: status=%d code=%s model_calls=%d tool_calls=%d", blockedStatus, h.gatewayCode(blockedStatus, blockedBody), modelCalls.Load(), toolCalls.Load())
+	}
+	attachments := h.want(owner, http.MethodGet, "/api/v1/guardrail-attachments", nil, nil, http.StatusOK)
+	attachmentState := mcpExecItem(t, mcpExecItems(t, attachments, "items"), 0, attachments)
+	if attachmentState["id"] != attachment["id"] {
+		t.Fatal("approved tool guardrail attachment was not listed")
+	}
+	h.want(owner, http.MethodDelete, "/api/v1/guardrail-attachments/"+attachment["id"].(string), nil, withMatch(attachmentState, idem("workflow-approval-detach")), http.StatusNoContent)
+	h.refresh()
 	resumeStatus, resumeResponse, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
 	if resumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(resumeResponse), "done") || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
-		t.Fatalf("approved workflow did not resume: status=%d model_calls=%d tool_calls=%d", resumeStatus, modelCalls.Load(), toolCalls.Load())
+		t.Fatalf("approved workflow did not resume: status=%d code=%s model_calls=%d tool_calls=%d", resumeStatus, h.gatewayCode(resumeStatus, resumeResponse), modelCalls.Load(), toolCalls.Load())
 	}
 	replayStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
 	if replayStatus != http.StatusForbidden || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
 		t.Fatalf("approval replay was not refused: status=%d model_calls=%d tool_calls=%d", replayStatus, modelCalls.Load(), toolCalls.Load())
 	}
+	iterationScenario.Store(true)
+	beforeIterationModels, beforeIterationTools := modelCalls.Load(), toolCalls.Load()
+	iterationMessages := []any{map[string]any{"role": "user", "content": "approve near the iteration limit"}}
+	iterationStatus, iterationBody, _ := h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": iterationMessages, "max_tokens": 100})
+	iterationToken, iterationTokenPresent := iterationBody["continuation_token"].(string)
+	if iterationStatus != http.StatusOK || !iterationTokenPresent || iterationToken == "" || modelCalls.Load() != beforeIterationModels+7 || toolCalls.Load() != beforeIterationTools+6 {
+		t.Fatalf("workflow did not pause at the seventh iteration: status=%d token_present=%t model_calls=%d tool_calls=%d", iterationStatus, iterationTokenPresent && iterationToken != "", modelCalls.Load()-beforeIterationModels, toolCalls.Load()-beforeIterationTools)
+	}
+	iterationResume := map[string]any{"model": slug, "messages": iterationMessages, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": iterationToken, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+	iterationResumeStatus, iterationResumeBody, _ := h.gateway("POST", "/v1/chat/completions", secret, iterationResume)
+	if iterationResumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(iterationResumeBody), "done") || modelCalls.Load() != beforeIterationModels+8 || toolCalls.Load() != beforeIterationTools+7 {
+		t.Fatalf("approval used an extra iteration: status=%d model_calls=%d tool_calls=%d", iterationResumeStatus, modelCalls.Load()-beforeIterationModels, toolCalls.Load()-beforeIterationTools)
+	}
+	iterationScenario.Store(false)
+	otherSecret := mcpExecString(t, otherKey, "secret")
+	otherPauseStatus, otherPauseBody, _ := h.gateway("POST", "/v1/chat/completions", otherSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100})
+	otherContinuation, otherTokenPresent := otherPauseBody["continuation_token"].(string)
+	if otherPauseStatus != http.StatusOK || !otherTokenPresent || otherContinuation == "" {
+		t.Fatalf("other caller did not pause: status=%d token_present=%t", otherPauseStatus, otherTokenPresent && otherContinuation != "")
+	}
+	currentOtherKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+otherKey["id"].(string), nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+otherKey["id"].(string)+"/revoke", nil, withMatch(currentOtherKey, idem("workflow-approval-revoke")), http.StatusOK)
+	h.refresh()
+	beforeRevokedModelCalls, beforeRevokedToolCalls := modelCalls.Load(), toolCalls.Load()
+	revokedResume := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": otherContinuation, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+	revokedStatus, _, _ := h.gateway("POST", "/v1/chat/completions", otherSecret, revokedResume)
+	if revokedStatus != http.StatusUnauthorized || modelCalls.Load() != beforeRevokedModelCalls || toolCalls.Load() != beforeRevokedToolCalls {
+		t.Fatalf("revoked caller resumed approval: status=%d model_calls=%d tool_calls=%d", revokedStatus, modelCalls.Load(), toolCalls.Load())
+	}
 
 	unavailable := httptest.NewServer(vendor.Config.Handler)
 	unavailableProvider := activeAzureProviderInProject(t, h, owner, "Unavailable workflow provider", unavailable.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	expirySlug := "workflow-approval-expiry"
+	expiryDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": expirySlug, "operations": []string{"generation"}, "overall_timeout_ms": 1000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{toolsetID},
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 500}},
+	}, idem("workflow-expiry-draft"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+expiryDraft["id"].(string)+"/activate", nil, withMatch(expiryDraft, idem("workflow-expiry-activate")), http.StatusOK)
+	expiryKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow expiry", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{expirySlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-expiry-key"), http.StatusCreated)
+	h.refresh()
+	expiryMessages := []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}
+	expirySecret := mcpExecString(t, expiryKey, "secret")
+	expiryStatus, expiryBody, _ := h.gateway(http.MethodPost, "/v1/chat/completions", expirySecret, map[string]any{"model": expirySlug, "messages": expiryMessages, "max_tokens": 100})
+	expiryToken, ok := expiryBody["continuation_token"].(string)
+	if expiryStatus != http.StatusOK || !ok || expiryToken == "" {
+		t.Fatalf("expiry workflow did not pause: status=%d token_present=%t", expiryStatus, ok && expiryToken != "")
+	}
+	expiryModelCalls, expiryToolCalls := modelCalls.Load(), toolCalls.Load()
+	time.Sleep(1100 * time.Millisecond)
+	expiryResume := map[string]any{"model": expirySlug, "messages": expiryMessages, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": expiryToken, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+	expiredStatus, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", expirySecret, expiryResume)
+	if expiredStatus != http.StatusForbidden || modelCalls.Load() != expiryModelCalls || toolCalls.Load() != expiryToolCalls {
+		t.Fatalf("expired approval was not refused before dispatch: status=%d model_calls=%d tool_calls=%d", expiredStatus, modelCalls.Load(), toolCalls.Load())
+	}
+
 	const fallbackSlug = "workflow-fallback"
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"project_id": project, "slug": fallbackSlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 2,
@@ -1163,7 +1269,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	h.want(owner, http.MethodPatch, "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(h.want(owner, http.MethodGet, "/api/v1/observability/capture", nil, nil, http.StatusOK)), http.StatusOK)
 	receiver, exportServer := newExportReceiver(t, "", http.StatusNoContent)
 	captureSink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "workflow-capture", "type": "https", "destination": exportServer.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
-	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug} {
+	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug, slug} {
 		h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": captureRoute, "sink": captureSink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output", "tool_calls"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
 	}
 	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -1177,7 +1283,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	go func() { manager.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 	deadline := time.Now().Add(3 * time.Second)
-	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug} {
+	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug, slug} {
 		for {
 			collector := manager.Resolve(project, captureRoute, "", "", uuid.NewString())
 			if collector != nil {
@@ -1224,9 +1330,34 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if finalOnlyCaptured {
 		t.Fatal("final-only Responses workflow unexpectedly captured")
 	}
+	approvalPrompt := "workflow-approval-test private approval transcript"
+	beforeTool := toolCalls.Load()
+	approvalStatus, approvalBody, approvalHeaders := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": approvalPrompt}}, "max_tokens": 100})
+	approvalToken, ok := approvalBody["continuation_token"].(string)
+	if approvalStatus != http.StatusOK || !ok || approvalToken == "" || toolCalls.Load() != beforeTool {
+		t.Fatalf("captured approval pause: status=%d token_present=%t tool_calls=%d", approvalStatus, ok && approvalToken != "", toolCalls.Load())
+	}
+	approvalResume := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": approvalPrompt}}, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": approvalToken, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+	approvalResumeStatus, _, approvalResumeHeaders := h.gateway(http.MethodPost, "/v1/chat/completions", secret, approvalResume)
+	if approvalResumeStatus != http.StatusOK || toolCalls.Load() != beforeTool+1 {
+		t.Fatalf("captured approval resume: status=%d tool_calls=%d", approvalResumeStatus, toolCalls.Load())
+	}
+	for _, requestID := range []string{approvalHeaders.Get("X-Request-Id"), approvalResumeHeaders.Get("X-Request-Id")} {
+		var captured bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, requestID).Scan(&captured); err != nil || captured {
+			t.Fatalf("approval request unexpectedly captured: captured=%t error=%v", captured, err)
+		}
+	}
+	for _, table := range []string{"agent_approvals", "agent_runs", "agent_steps", "execution_debits", "mcp_tool_calls", "attempt_usage_facts", "requests", "attempts", "export_records"} {
+		var leaks int
+		query := "SELECT count(*) FROM olp." + table + " AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%' OR row_to_json(row)::text LIKE '%' || $2 || '%'"
+		if err := h.Pool.QueryRow(t.Context(), query, approvalPrompt, approvalToken).Scan(&leaks); err != nil || leaks != 0 {
+			t.Fatalf("approval content reached %s: count=%d error=%v", table, leaks, err)
+		}
+	}
 	for _, envelope := range receiver.received() {
 		data, err := json.Marshal(envelope["data"])
-		if err != nil || strings.Contains(string(data), prompt) || strings.Contains(string(data), argument) || strings.Contains(string(data), answer) {
+		if err != nil || strings.Contains(string(data), approvalPrompt) || strings.Contains(string(data), approvalToken) || strings.Contains(string(data), prompt) || strings.Contains(string(data), argument) || strings.Contains(string(data), answer) {
 			t.Fatalf("Responses workflow content reached capture export: %s %v", data, err)
 		}
 	}
