@@ -604,7 +604,7 @@ func TestStructuredPromptPublicationValidatesAndExports(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := h.want(owner, http.MethodPost, "/api/v1/projects", map[string]any{"name": "Structured prompts"}, idem("structured-project"), http.StatusCreated)["id"].(string)
-	definition := json.RawMessage(`{"template":"","variables":[],"messages":[{"role":"system","content":"Help {{name}}"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"max_output_tokens":32}}`)
+	definition := json.RawMessage(`{"messages":[{"role":"system","content":"Help {{name}}"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"max_output_tokens":32}}`)
 	created := h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{"project_id": project, "name": "structured", "prompt": definition}, idem("structured-create"), http.StatusCreated)
 	path := "/api/v1/prompts/" + created["id"].(string)
 	published := h.want(owner, http.MethodPost, path+"/publish", nil, withMatch(created, idem("structured-publish")), http.StatusOK)

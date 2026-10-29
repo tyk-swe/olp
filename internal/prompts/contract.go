@@ -3,6 +3,7 @@ package prompts
 import (
 	"encoding/json"
 	"errors"
+	"iter"
 	"maps"
 	"math"
 	"regexp"
@@ -15,6 +16,7 @@ const MaxTemplateBytes = 64 << 10
 
 var namePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 var ErrTemplate = errors.New("invalid prompt template or variables")
+var ErrRenderTooLarge = errors.New("rendered prompt exceeds input limit")
 
 type Message struct {
 	Role    string `json:"role"`
@@ -135,7 +137,14 @@ func validMessages(messages []Message, names []string, remaining int, first bool
 
 func (d Definition) Validate() error {
 	names, err := d.variableNames()
-	if err != nil || len(names) > 256 || !validParameters(d.DefaultParameters) {
+	if err != nil {
+		return ErrTemplate
+	}
+	return d.validate(names)
+}
+
+func (d Definition) validate(names []string) error {
+	if len(names) > 256 || !validParameters(d.DefaultParameters) {
 		return ErrTemplate
 	}
 	for i, name := range names {
@@ -158,14 +167,17 @@ func (d Definition) Validate() error {
 	return nil
 }
 
-func render(template string, vars map[string]string) (string, error) {
+func render(template string, vars map[string]string, limit int64) (string, error) {
 	var out strings.Builder
 	parts := strings.Split(template, "{{")
+	if int64(len(parts[0])) > limit {
+		return "", ErrRenderTooLarge
+	}
 	out.WriteString(parts[0])
 	for _, part := range parts[1:] {
 		name, rest, _ := strings.Cut(part, "}}")
-		if out.Len()+len(vars[name])+len(rest) > MaxTemplateBytes {
-			return "", ErrTemplate
+		if int64(out.Len())+int64(len(vars[name]))+int64(len(rest)) > limit {
+			return "", ErrRenderTooLarge
 		}
 		out.WriteString(vars[name])
 		out.WriteString(rest)
@@ -173,40 +185,64 @@ func render(template string, vars map[string]string) (string, error) {
 	return out.String(), nil
 }
 
-func renderMessages(messages []Message, vars map[string]string, remaining int) ([]Message, error) {
-	if len(messages) == 0 {
-		return []Message{}, nil
-	}
-	message := messages[0]
-	content, err := render(message.Content, vars)
-	if err != nil || len(content) > remaining {
-		return nil, ErrTemplate
-	}
-	rest, err := renderMessages(messages[1:], vars, remaining-len(content))
-	if err != nil {
-		return nil, err
-	}
-	return slices.Concat([]Message{{Role: message.Role, Content: content}}, rest), nil
+type renderedMessage struct {
+	message Message
+	err     error
 }
 
-func (d Definition) RenderMessages(vars map[string]string) ([]Message, error) {
-	if err := d.Validate(); err != nil {
-		return nil, err
+func renderMessages(messages []Message, vars map[string]string, remaining int64) iter.Seq[renderedMessage] {
+	return func(yield func(renderedMessage) bool) {
+		if len(messages) == 0 {
+			return
+		}
+		content, err := render(messages[0].Content, vars, remaining)
+		if !yield(renderedMessage{message: Message{Role: messages[0].Role, Content: content}, err: err}) || err != nil {
+			return
+		}
+		renderMessages(messages[1:], vars, remaining-int64(len(content)))(yield)
 	}
+}
+
+func (d Definition) RenderMessages(vars map[string]string, limit int64) ([]Message, error) {
 	names, err := d.variableNames()
-	if err != nil || len(vars) != len(names) {
+	if err != nil || d.validate(names) != nil || len(vars) != len(names) {
 		return nil, ErrTemplate
 	}
 	for name, value := range vars {
-		if !slices.Contains(names, name) || !utf8.ValidString(value) || len(value) > MaxTemplateBytes {
+		if !slices.Contains(names, name) || !utf8.ValidString(value) || len(d.Messages) == 0 && len(value) > MaxTemplateBytes {
 			return nil, ErrTemplate
 		}
 	}
-	return renderMessages(d.promptMessages(), vars, MaxTemplateBytes)
+	if len(d.Messages) == 0 {
+		return d.renderLegacyMessages(vars, limit)
+	}
+	return collectMessages(d.promptMessages(), vars, limit)
+}
+
+func collectMessages(messages []Message, vars map[string]string, limit int64) ([]Message, error) {
+	results := slices.Collect(renderMessages(messages, vars, limit))
+	if len(results) > 0 && results[len(results)-1].err != nil {
+		return nil, results[len(results)-1].err
+	}
+	return slices.Collect(func(yield func(Message) bool) {
+		for _, result := range results {
+			if !yield(result.message) {
+				return
+			}
+		}
+	}), nil
+}
+
+func (d Definition) renderLegacyMessages(vars map[string]string, limit int64) ([]Message, error) {
+	messages, err := collectMessages(d.promptMessages(), vars, min(limit, MaxTemplateBytes))
+	if err != nil && limit >= MaxTemplateBytes {
+		return nil, ErrTemplate
+	}
+	return messages, err
 }
 
 func (d Definition) Render(vars map[string]string) (string, error) {
-	messages, err := d.RenderMessages(vars)
+	messages, err := d.RenderMessages(vars, MaxTemplateBytes)
 	if err != nil || len(messages) != 1 {
 		return "", ErrTemplate
 	}

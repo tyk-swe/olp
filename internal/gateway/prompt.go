@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -158,12 +159,102 @@ func promptDefaults(family wire.Format, parameters *prompts.Parameters) []prompt
 }
 
 func applyPromptDefaults(doc oif.Document, family wire.Format, parameters *prompts.Parameters) (oif.Document, error) {
+	if geminiPromptFamily(family) {
+		normalized, err := normalizeGeminiPromptConfig(doc)
+		if err != nil {
+			return oif.Document{}, err
+		}
+		return applyGeminiPromptDefaults(normalized, family, parameters)
+	}
 	defaults := promptDefaults(family, parameters)
 	if len(defaults) == 0 {
 		return doc, nil
 	}
-	if !geminiPromptFamily(family) {
-		return applyPromptDefaultFields(doc, doc.Root(), "", family, defaults)
+	return applyPromptDefaultFields(doc, doc.Root(), "", family, defaults)
+}
+
+func normalizeGeminiPromptConfig(doc oif.Document) (oif.Document, error) {
+	normalized, err := normalizeGeminiPromptFields(doc)
+	if err != nil {
+		return oif.Document{}, err
+	}
+	return mergeGeminiPromptConfig(normalized)
+}
+
+func mergeGeminiPromptConfig(doc oif.Document) (oif.Document, error) {
+	config, hasSnake := doc.Root().Lookup("generation_config")
+	camel, hasCamel := doc.Root().Lookup("generationConfig")
+	if hasSnake && !hasCamel {
+		normalized, err := oif.Apply(doc, []oif.Change{
+			{Pointer: "/generation_config", Remove: true, Origin: oif.ResourceBinding, Reason: "prompt parameter normalization"},
+			{Pointer: "/generationConfig", Value: config.Raw(), Origin: oif.ResourceBinding, Reason: "prompt parameter normalization"},
+		})
+		if err != nil {
+			return oif.Document{}, err
+		}
+		return normalizeGeminiPromptFields(normalized)
+	}
+	if !hasSnake || config.Kind() != oif.Object || camel.Kind() != oif.Object {
+		return doc, nil
+	}
+	changes := slices.Collect(func(yield func(oif.Change) bool) {
+		if !yield(oif.Change{Pointer: "/generation_config", Remove: true, Origin: oif.ResourceBinding, Reason: "prompt parameter normalization"}) {
+			return
+		}
+		for _, member := range config.Members() {
+			name := geminiPromptParameterName(member.Name)
+			if _, exists := camel.Lookup(name); exists {
+				continue
+			}
+			if name != member.Name {
+				if _, exists := config.Lookup(name); exists {
+					continue
+				}
+			}
+			if !yield(oif.Change{Pointer: oif.Pointer("/generationConfig", name), Value: member.Value.Raw(), Origin: oif.ResourceBinding, Reason: "prompt parameter normalization"}) {
+				return
+			}
+		}
+	})
+	return oif.Apply(doc, changes)
+}
+
+func geminiPromptParameterName(name string) string {
+	switch name {
+	case "top_p":
+		return "topP"
+	case "max_output_tokens":
+		return "maxOutputTokens"
+	default:
+		return name
+	}
+}
+
+func normalizeGeminiPromptFields(doc oif.Document) (oif.Document, error) {
+	config, exists := doc.Root().Lookup("generationConfig")
+	if !exists || config.Kind() != oif.Object {
+		return doc, nil
+	}
+	changes := slices.Collect(func(yield func(oif.Change) bool) {
+		for _, field := range [][2]string{{"top_p", "topP"}, {"max_output_tokens", "maxOutputTokens"}} {
+			value, hasSnake := config.Lookup(field[0])
+			_, hasCamel := config.Lookup(field[1])
+			if !hasSnake || hasCamel {
+				continue
+			}
+			if !yield(oif.Change{Pointer: "/generationConfig/" + field[0], Remove: true, Origin: oif.ResourceBinding, Reason: "prompt parameter normalization"}) ||
+				!yield(oif.Change{Pointer: "/generationConfig/" + field[1], Value: value.Raw(), Origin: oif.ResourceBinding, Reason: "prompt parameter normalization"}) {
+				return
+			}
+		}
+	})
+	return oif.Apply(doc, changes)
+}
+
+func applyGeminiPromptDefaults(doc oif.Document, family wire.Format, parameters *prompts.Parameters) (oif.Document, error) {
+	defaults := promptDefaults(family, parameters)
+	if len(defaults) == 0 {
+		return doc, nil
 	}
 	config, exists := doc.Root().Lookup("generationConfig")
 	if !exists {
@@ -213,6 +304,13 @@ func promptSystemMessage(family wire.Format, messages []prompts.Message) ([]prom
 		return messages[1:], []oif.Change{{Pointer: "/systemInstruction", Value: `{"parts":[{"text":` + string(value) + `}]}`, Origin: oif.ResourceBinding, Reason: "published prompt rendered"}}, nil
 	}
 	return messages[1:], []oif.Change{{Pointer: "/system", Value: string(value), Origin: oif.ResourceBinding, Reason: "published prompt rendered"}}, nil
+}
+
+func promptInputLimit(routeLimit *int64, installationLimit int64) int64 {
+	if routeLimit == nil {
+		return installationLimit
+	}
+	return min(*routeLimit, installationLimit)
 }
 
 func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pathModel string) (oif.Document, *usage.PromptReference, *Error) {
@@ -268,7 +366,10 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		if selection.RevisionID != "" && revision.ID != selection.RevisionID || selection.Label != "" && !slices.Contains(revision.Labels, selection.Label) {
 			continue
 		}
-		rendered, err := revision.Definition.Prompt.RenderMessages(selection.Variables)
+		rendered, err := revision.Definition.Prompt.RenderMessages(selection.Variables, promptInputLimit(route.MaxBodyBytes, s.cfg.MaxBodyBytes))
+		if errors.Is(err, prompts.ErrRenderTooLarge) {
+			return oif.Document{}, nil, bodyTooLarge()
+		}
 		if err != nil {
 			return oif.Document{}, nil, invalidRequest("invalid_prompt", "Prompt variables do not match the published definition.", &param)
 		}

@@ -23,25 +23,127 @@ import (
 )
 
 func publishedPromptHarness(t *testing.T) (*harness, string, string) {
+	return publishedPromptHarnessWith(t, Config{}, prompts.Definition{Template: "Hello {{name}}", Variables: []string{"name"}})
+}
+
+func publishedPromptHarnessWith(t *testing.T, cfg Config, prompt prompts.Definition) (*harness, string, string) {
+	return publishedPromptHarnessFor(t, cfg, prompt, nil)
+}
+
+func publishedPromptHarnessFor(t *testing.T, cfg Config, prompt prompts.Definition, routeLimit *int64) (*harness, string, string) {
 	t.Helper()
-	h := newHarness(t, Config{})
+	h := newHarness(t, cfg)
 	projectID := uuid.NewString()
 	publicationID := uuid.NewString()
 	revisionID := uuid.NewString()
 	route := h.rt.release.Snapshot.Routes[routeSlug]
 	route.ProjectID = &projectID
+	route.Behavior.MaxBodyBytes = routeLimit
 	h.rt.release.Snapshot.Routes[routeSlug] = route
 	key := h.rt.keys[fullKey]
 	key.ProjectID = &projectID
 	h.rt.keys[fullKey] = key
-	draft := agentcontract.Draft{ProjectID: projectID, Name: "test", Prompt: &prompts.Definition{
-		Template: "Hello {{name}}", Variables: []string{"name"},
-	}}
+	draft := agentcontract.Draft{ProjectID: projectID, Name: "test", Prompt: &prompt}
 	h.rt.release.Snapshot.AgentPublications = []agentcontract.Revision{{
 		ID: revisionID, PublicationID: publicationID, ProjectID: projectID, Kind: "prompt",
 		Labels: []string{"production"}, Definition: draft, Digest: agentcontract.DraftDigest(draft),
 	}}
 	return h, publicationID, revisionID
+}
+
+func TestStructuredPromptUsesRouteInputLimit(t *testing.T) {
+	prompt := prompts.Definition{Messages: []prompts.Message{{Role: "user", Content: "{{name}}{{name}}"}}, VariableSchema: &prompts.VariableSchema{Type: "object", Properties: map[string]prompts.VariableProperty{"name": {Type: "string"}}, Required: []string{"name"}}}
+	routeLimit := int64(96 << 10)
+	h, publicationID, _ := publishedPromptHarnessFor(t, Config{MaxBodyBytes: 128 << 10}, prompt, &routeLimit)
+	upstream := make(chan []byte, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		completion(modelA, answerText)(w, r)
+	})
+	value := strings.Repeat("hello ", 7000)
+	request, err := json.Marshal(map[string]any{"model": routeSlug, "olp_prompt": map[string]any{"id": publicationID, "label": "production", "variables": map[string]string{"name": value}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, request, nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("within-limit render: status %d, body %s", response.StatusCode, body)
+	}
+	var sent struct {
+		Messages []prompts.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(<-upstream, &sent); err != nil || len(sent.Messages) != 1 || sent.Messages[0].Content != value+value {
+		t.Fatalf("rendered message did not reach upstream: %v", err)
+	}
+	tooLarge, err := json.Marshal(map[string]any{"model": routeSlug, "olp_prompt": map[string]any{"id": publicationID, "label": "production", "variables": map[string]string{"name": strings.Repeat("hello ", 12000)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, tooLarge, nil)
+	defer rejected.Body.Close()
+	if rejected.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(rejected.Body)
+		t.Fatalf("over-limit render: status %d, body %s", rejected.StatusCode, body)
+	}
+	select {
+	case <-upstream:
+		t.Fatal("over-limit render reached the upstream")
+	default:
+	}
+	legacy, legacyID, _ := publishedPromptHarnessWith(t, Config{MaxBodyBytes: 128 << 10}, prompts.Definition{Template: "{{name}}{{name}}", Variables: []string{"name"}})
+	legacyRequest, err := json.Marshal(map[string]any{"model": routeSlug, "olp_prompt": map[string]any{"id": legacyID, "label": "production", "variables": map[string]string{"name": value}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyResponse := legacy.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, legacyRequest, nil)
+	defer legacyResponse.Body.Close()
+	if legacyResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("legacy render beyond its existing limit: status %d", legacyResponse.StatusCode)
+	}
+}
+
+func TestStructuredPromptGeminiExplicitAliasesOverrideDefaults(t *testing.T) {
+	for _, tc := range []struct{ name, config string }{
+		{"camel", `"generationConfig":{"temperature":0.7,"topP":0.8,"maxOutputTokens":8}`},
+		{"snake fields", `"generationConfig":{"temperature":0.7,"top_p":0.8,"max_output_tokens":8}`},
+		{"snake container", `"generation_config":{"temperature":0.7,"topP":0.8,"maxOutputTokens":8}`},
+		{"all snake", `"generation_config":{"temperature":0.7,"top_p":0.8,"max_output_tokens":8}`},
+		{"mixed containers", `"generationConfig":{"temperature":0.7},"generation_config":{"top_p":0.8,"max_output_tokens":8}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			temperature, topP, maxTokens := 0.25, 0.3, int64(32)
+			prompt := prompts.Definition{Messages: []prompts.Message{{Role: "user", Content: "Hello"}}, VariableSchema: &prompts.VariableSchema{Type: "object", Properties: map[string]prompts.VariableProperty{}, Required: []string{}}, DefaultParameters: &prompts.Parameters{Temperature: &temperature, TopP: &topP, MaxOutputTokens: &maxTokens}}
+			h, publicationID, _ := publishedPromptHarnessWith(t, Config{}, prompt)
+			h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, "gemini", "gemini-generation", connectors.ProfileRevision)
+			upstream := make(chan []byte, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				upstream <- body
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`)
+			})
+			request := fmt.Sprintf(`{"olp_prompt":{"id":%q,"label":"production","variables":{}},%s}`, publicationID, tc.config)
+			response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":generateContent", fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(response.Body)
+				t.Fatalf("status %d, body %s", response.StatusCode, body)
+			}
+			var sent struct {
+				GenerationConfig struct {
+					Temperature     float64 `json:"temperature"`
+					TopP            float64 `json:"topP"`
+					MaxOutputTokens int     `json:"maxOutputTokens"`
+				} `json:"generationConfig"`
+			}
+			if err := json.Unmarshal(<-upstream, &sent); err != nil || sent.GenerationConfig.Temperature != 0.7 || sent.GenerationConfig.TopP != 0.8 || sent.GenerationConfig.MaxOutputTokens != 8 {
+				t.Fatalf("explicit values were lost: %#v, %v", sent, err)
+			}
+		})
+	}
 }
 
 func promptTestProviders(providers map[string]routing.Provider, kind, profileID, profileRevision string) map[string]routing.Provider {
@@ -172,7 +274,7 @@ func TestChatPublishedPromptRendersBeforeDispatch(t *testing.T) {
 
 func TestPublishedPromptRendersStructuredMessagesAndDefaults(t *testing.T) {
 	h, publicationID, _ := publishedPromptHarness(t)
-	definition := []byte(`{"messages":[{"role":"system","content":"You help {{name}}"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"max_output_tokens":32}}`)
+	definition := []byte(`{"messages":[{"role":"system","content":"You help {{name}}"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"top_p":0.5,"max_output_tokens":32}}`)
 	var prompt prompts.Definition
 	if err := json.Unmarshal(definition, &prompt); err != nil {
 		t.Fatal(err)
@@ -199,15 +301,16 @@ func TestPublishedPromptRendersStructuredMessagesAndDefaults(t *testing.T) {
 			Content string `json:"content"`
 		} `json:"messages"`
 		Temperature float64 `json:"temperature"`
+		TopP        float64 `json:"top_p"`
 		MaxTokens   int     `json:"max_tokens"`
 	}
 	if err := json.Unmarshal(<-upstream, &sent); err != nil {
 		t.Fatal(err)
 	}
-	if len(sent.Messages) != 2 || sent.Messages[0].Role != "system" || sent.Messages[0].Content != "You help Ada" || sent.Messages[1].Role != "user" || sent.Messages[1].Content != "Hello Ada" || sent.Temperature != 0.25 || sent.MaxTokens != 32 {
+	if len(sent.Messages) != 2 || sent.Messages[0].Role != "system" || sent.Messages[0].Content != "You help Ada" || sent.Messages[1].Role != "user" || sent.Messages[1].Content != "Hello Ada" || sent.Temperature != 0.25 || sent.TopP != 0.5 || sent.MaxTokens != 32 {
 		t.Fatalf("upstream request = %#v", sent)
 	}
-	override := fmt.Sprintf(`{"model":%q,"temperature":0.75,"max_completion_tokens":7,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+	override := fmt.Sprintf(`{"model":%q,"temperature":0.75,"top_p":0.7,"max_completion_tokens":7,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
 	overrideResponse := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(override), nil)
 	defer overrideResponse.Body.Close()
 	if overrideResponse.StatusCode != http.StatusOK {
@@ -216,13 +319,14 @@ func TestPublishedPromptRendersStructuredMessagesAndDefaults(t *testing.T) {
 	}
 	var overridden struct {
 		Temperature         float64 `json:"temperature"`
+		TopP                float64 `json:"top_p"`
 		MaxCompletionTokens int     `json:"max_completion_tokens"`
 		MaxTokens           *int    `json:"max_tokens"`
 	}
 	if err := json.Unmarshal(<-upstream, &overridden); err != nil {
 		t.Fatal(err)
 	}
-	if overridden.Temperature != 0.75 || overridden.MaxCompletionTokens != 7 || overridden.MaxTokens != nil {
+	if overridden.Temperature != 0.75 || overridden.TopP != 0.7 || overridden.MaxCompletionTokens != 7 || overridden.MaxTokens != nil {
 		t.Fatalf("request parameters were replaced by defaults: %#v", overridden)
 	}
 }
@@ -1025,17 +1129,14 @@ func TestStructuredPromptGuardrailsInspectEveryMessage(t *testing.T) {
 	} {
 		for _, role := range []string{"system", "user", "assistant"} {
 			t.Run(surface.name+"/"+role, func(t *testing.T) {
-				h, publicationID, _ := publishedPromptHarness(t)
+				definition := prompts.Definition{Messages: promptGuardrailMessages(role), VariableSchema: &prompts.VariableSchema{Type: "object", Properties: map[string]prompts.VariableProperty{"name": {Type: "string"}}, Required: []string{"name"}}}
+				h, publicationID, _ := publishedPromptHarnessWith(t, Config{}, definition)
 				upstream, dispatched := promptRefusalObserver()
 				h.mock.set("a", upstream)
 				h.mock.set("b", upstream)
 				snapshot := h.rt.release.Snapshot
 				route := snapshot.Routes[routeSlug]
 				projectID := *route.ProjectID
-				definition := prompts.Definition{Messages: []prompts.Message{{Role: role, Content: "{{name}}"}, {Role: "user", Content: "hello"}}, VariableSchema: &prompts.VariableSchema{Type: "object", Properties: map[string]prompts.VariableProperty{"name": {Type: "string"}}, Required: []string{"name"}}}
-				publication := snapshot.AgentPublications[0]
-				draft := agentcontract.Draft{ProjectID: publication.ProjectID, Name: publication.Definition.Name, Prompt: &definition}
-				snapshot.AgentPublications = []agentcontract.Revision{{ID: publication.ID, PublicationID: publication.PublicationID, ProjectID: publication.ProjectID, Kind: publication.Kind, Labels: publication.Labels, Definition: draft, Digest: agentcontract.DraftDigest(draft)}}
 				snapshot.Guardrails = &guardrails.Registry{
 					Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["forbidden"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
 					Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}},
@@ -1055,4 +1156,11 @@ func TestStructuredPromptGuardrailsInspectEveryMessage(t *testing.T) {
 			})
 		}
 	}
+}
+
+func promptGuardrailMessages(role string) []prompts.Message {
+	if role == "system" {
+		return []prompts.Message{{Role: "system", Content: "{{name}}"}, {Role: "user", Content: "hello"}}
+	}
+	return []prompts.Message{{Role: "system", Content: "safe"}, {Role: role, Content: "{{name}}"}, {Role: "user", Content: "hello"}}
 }

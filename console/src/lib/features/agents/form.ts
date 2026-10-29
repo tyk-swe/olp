@@ -181,8 +181,6 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
     d.prompt =
       form.promptMode === 'messages'
         ? {
-            template: '',
-            variables: [],
             messages: form.messages.map((message) => ({ ...message })),
             variable_schema: {
               type: 'object',

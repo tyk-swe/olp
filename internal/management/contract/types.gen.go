@@ -6539,8 +6539,10 @@ type AgentPublicationDraft struct {
 
 	// ProjectId Required owning UUID in management writes. Configuration promotion rebinds this field from its explicit project name.
 	ProjectId openapi_types.UUID `json:"project_id"`
-	Prompt    *PromptDefinition  `json:"prompt,omitempty"`
-	Toolset   *ToolsetDefinition `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // AgentPublicationList defines model for AgentPublicationList.
@@ -6589,8 +6591,10 @@ type AgentPublicationWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 	Name       string                    `json:"name"`
 	ProjectId  openapi_types.UUID        `json:"project_id"`
-	Prompt     *PromptDefinition         `json:"prompt,omitempty"`
-	Toolset    *ToolsetDefinition        `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // AgentToolPin defines model for AgentToolPin.
@@ -7890,8 +7894,10 @@ type ConfigurationAgentDraft struct {
 
 	// ProjectId Optional source identity; promotion resolves the owning project by name.
 	ProjectId *openapi_types.UUID `json:"project_id,omitempty"`
-	Prompt    *PromptDefinition   `json:"prompt,omitempty"`
-	Toolset   *ToolsetDefinition  `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // ConfigurationAgentPublication defines model for ConfigurationAgentPublication.
@@ -11743,13 +11749,13 @@ type PromptDefaultParameters struct {
 	TopP            *float32 `json:"top_p,omitempty"`
 }
 
-// PromptDefinition defines model for PromptDefinition.
+// PromptDefinition Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
 type PromptDefinition struct {
-	DefaultParameters *PromptDefaultParameters `json:"default_parameters,omitempty"`
-	Messages          *[]PromptMessage         `json:"messages,omitempty"`
-	Template          string                   `json:"template"`
-	VariableSchema    *PromptVariableSchema    `json:"variable_schema,omitempty"`
-	Variables         []string                 `json:"variables"`
+	DefaultParameters *PromptDefaultParameters    `json:"default_parameters,omitempty"`
+	Messages          *[]PromptMessage            `json:"messages,omitempty"`
+	Template          *string                     `json:"template,omitempty"`
+	VariableSchema    *PromptVariableSchema       `json:"variable_schema,omitempty"`
+	Variables         nullable.Nullable[[]string] `json:"variables,omitempty"`
 }
 
 // PromptLabelWrite defines model for PromptLabelWrite.

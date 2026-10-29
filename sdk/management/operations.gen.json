@@ -4546,6 +4546,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -4553,7 +4554,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -4573,11 +4577,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -5287,6 +5287,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -5294,7 +5295,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -5314,11 +5318,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -8885,6 +8885,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -8892,7 +8893,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -8912,11 +8916,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -13113,6 +13113,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -13120,7 +13121,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -13140,11 +13144,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -27711,6 +27711,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -27718,7 +27719,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -27738,11 +27742,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -38857,6 +38857,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -38864,7 +38865,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -38884,11 +38888,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -41265,6 +41265,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -41272,7 +41273,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -41292,11 +41296,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",
@@ -43741,6 +43741,7 @@
         },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -43748,7 +43749,10 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
@@ -43768,11 +43772,7 @@
             "default_parameters": {
               "$ref": "#/$defs/PromptDefaultParameters"
             }
-          },
-          "required": [
-            "template",
-            "variables"
-          ]
+          }
         },
         "PromptMessage": {
           "type": "object",

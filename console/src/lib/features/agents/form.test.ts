@@ -58,8 +58,6 @@ describe('publication configuration', () => {
       maxOutputTokens: '128'
     });
     expect(input.prompt).toEqual({
-      template: '',
-      variables: [],
       messages: [
         { role: 'system', content: 'Help {{name}}' },
         { role: 'user', content: 'Hello {{name}}' }
