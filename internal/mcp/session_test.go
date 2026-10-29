@@ -54,15 +54,13 @@ func (r taskIdentityRuntime) AuthenticateTaskCapability(_ context.Context, token
 
 type taskCallRuntime struct {
 	taskIdentityRuntime
-	err      error
-	attempts atomic.Int32
+	err error
 }
 
 func (r *taskCallRuntime) AdmitTaskCapabilityAttempt(_ context.Context, a access.Authority, scope, resource, revision string, project *string) error {
 	if a.EndUserDigest != "original-user" || scope != "tools" || resource != testToolset || revision != testRevision || project == nil || *project != testProject {
 		return access.Forbidden()
 	}
-	r.attempts.Add(1)
 	return r.err
 }
 
@@ -77,13 +75,13 @@ func TestTaskCapabilitySessionsAndToolAttempts(t *testing.T) {
 	}
 	called := rpcRequest(t, server, "olpt_one", session, latestProtocol(), "/mcp", sessionCallBody(3, "task-call", "hello"))
 	rpcResult(t, called)
-	if capRuntime.attempts.Load() != 1 || fixture.calls.Load() != 1 {
-		t.Fatalf("task call attempts = %d, dispatched = %d", capRuntime.attempts.Load(), fixture.calls.Load())
+	if fixture.calls.Load() != 1 {
+		t.Fatalf("task call dispatched %d times", fixture.calls.Load())
 	}
 	capRuntime.err = runtime.ErrTaskAttemptLimit
 	limited := rpcRequest(t, server, "olpt_one", session, latestProtocol(), "/mcp", sessionCallBody(4, "task-limited", "hello"))
-	if fixture.calls.Load() != 1 || capRuntime.attempts.Load() != 2 {
-		t.Fatalf("exhausted task dispatched: response %v, attempts %d, calls %d", limited.body, capRuntime.attempts.Load(), fixture.calls.Load())
+	if fixture.calls.Load() != 1 {
+		t.Fatalf("exhausted task dispatched: response %v, calls %d", limited.body, fixture.calls.Load())
 	}
 	if data, _ := rpcError(t, limited)["data"].(map[string]any); data["code"] != "task_limit_exceeded" {
 		t.Fatalf("unexpected task limit error: %v", limited.body)

@@ -51,30 +51,33 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 		return nil, err
 	}
 	m.mu.RLock()
-	principal, ok := m.authority.taskPrincipal(keyID)
-	if ok && principal.WorkloadIssuerID != nil {
-		principal, ok = m.authority.taskWorkloadPrincipal(principal, workloadRevision, callerExpires)
-	}
+	policy, principal, snapshot, principalExpires, ok := m.authority.taskCapabilityPrincipal(keyID, workloadRevision, callerExpires)
 	m.mu.RUnlock()
 	if !ok {
 		return nil, ErrInvalidKey
 	}
-	expires = boundDelegationExpiry(expires, principal.ExpiresAt)
-	principal.ExpiresAt = &expires
-	if endUser == "" && (principal.Policy.EndUserSource != nil || principal.Policy.EndUserPolicy != nil || principal.ProjectEndUserPolicy != nil) {
+	if endUser == "" && (policy.Policy.EndUserSource != nil || policy.Policy.EndUserPolicy != nil || policy.ProjectEndUserPolicy != nil) {
 		return nil, ErrInvalidKey
 	}
-	principal.EndUserDigest = endUser
-	if !principal.AllowsEndUser(endUser) {
+	if !policy.AllowsEndUser(endUser) {
 		return nil, ErrInvalidKey
 	}
-	principal.TaskCapability = &access.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: definition.Agent.RouteRevisions, ToolsetRevisions: definition.Agent.ToolsetRevisions}
-	return &principal, nil
+	boundedExpiry := boundDelegationExpiry(expires, principalExpires)
+	capability := &access.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(definition.Agent.ToolsetRevisions)}
+	callback := policy.TaskAuthority(principal, snapshot, workloadRevision, &boundedExpiry, endUser, capability)
+	return &callback, nil
 }
 
-func (state authorityState) taskWorkloadPrincipal(principal access.Authority, revision string, expiry *time.Time) (access.Authority, bool) {
-	if principal.WorkloadIssuerID == nil || expiry == nil {
-		return access.Authority{}, false
+func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (access.Authority, access.Authority, string, *time.Time, bool) {
+	principal, ok := state.taskPrincipal(keyID)
+	if !ok {
+		return access.Authority{}, access.Authority{}, "", nil, false
+	}
+	if principal.WorkloadIssuerID == nil {
+		return principal, principal, principal.SnapshotID, principal.ExpiresAt, true
+	}
+	if expiry == nil {
+		return access.Authority{}, access.Authority{}, "", nil, false
 	}
 	for _, issuer := range state.workloadIssuers {
 		if issuer.ID != *principal.WorkloadIssuerID || !issuer.Config.Enabled || issuer.Revision != revision {
@@ -82,21 +85,11 @@ func (state authorityState) taskWorkloadPrincipal(principal access.Authority, re
 		}
 		base, ok := issuer.bindings[principal.WorkloadMapping]
 		if !ok {
-			return access.Authority{}, false
+			return access.Authority{}, access.Authority{}, "", nil, false
 		}
-		base.ID = principal.ID
-		base.LookupID = principal.LookupID
-		base.LimitLookupID = principal.LimitLookupID
-		base.RevokedAt = principal.RevokedAt
-		base.WorkloadIssuerID = principal.WorkloadIssuerID
-		base.WorkloadDigest = principal.WorkloadDigest
-		base.WorkloadMapping = principal.WorkloadMapping
-		base.WorkloadRevision = revision
-		base.SnapshotID = state.id
-		base.ExpiresAt = expiry
-		return base, true
+		return base, principal, state.id, expiry, true
 	}
-	return access.Authority{}, false
+	return access.Authority{}, access.Authority{}, "", nil, false
 }
 
 func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority access.Authority, scope, resource, revision string, project *string) error {

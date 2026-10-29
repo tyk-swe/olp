@@ -9,6 +9,32 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
+func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
+	project, issuer := "project", "issuer"
+	daily := "7"
+	expires := time.Now().Add(time.Hour)
+	policy := Authority{
+		Issuer: "binding", ProjectID: &project,
+		Policy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"allowed"}, DailyCostLimit: &daily},
+	}
+	owner := Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
+	capability := &TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
+	callback := policy.TaskAuthority(owner, "snapshot", "workload-revision", &expires, "end-user", capability)
+	if !callback.Allows("inference", "allowed", &project, time.Now()) || callback.Allows("inference", "other", &project, time.Now()) {
+		t.Fatal("task authority did not retain the binding's route policy")
+	}
+	debit := callback.KeyDebitRequest(time.Minute)
+	if debit.CostOwnerID != owner.ID || debit.LookupID != owner.LimitLookupID || debit.DailyCostLimit == nil || *debit.DailyCostLimit != daily {
+		t.Fatalf("task debit did not retain owner and budget boundaries: %+v", debit)
+	}
+	if callback.SnapshotID != "snapshot" || callback.WorkloadIssuerID == nil || *callback.WorkloadIssuerID != issuer || callback.WorkloadRevision != "workload-revision" || callback.WorkloadDigest != owner.WorkloadDigest || callback.WorkloadMapping != owner.WorkloadMapping || callback.EndUserDigest != "end-user" || callback.TaskCapability != capability || callback.ExpiresAt == nil || !callback.ExpiresAt.Equal(expires) {
+		t.Fatalf("task identity or lifetime was not retained: %+v", callback)
+	}
+	if policy.TaskCapability != nil || policy.EndUserDigest != "" || policy.ID != "" {
+		t.Fatal("constructing a task authority changed the source binding")
+	}
+}
+
 func TestKeyDebitRequestCarriesKeyBudgetsAndStableLookup(t *testing.T) {
 	daily, weekly, monthly := "1", "2", "3"
 	authority := Authority{

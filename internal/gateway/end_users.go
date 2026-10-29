@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -33,10 +34,15 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 	identifier := ""
 	switch *authority.Policy.EndUserSource {
 	case "header":
-		values := r.Header.Values(endUserHeader)
-		if len(values) == 1 {
-			identifier = values[0]
+		digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+		if failure != nil {
+			if failure.Status == http.StatusBadRequest {
+				return access.Authority{}, invalidRequest(failure.Code, failure.Message, nil)
+			}
+			return access.Authority{}, serverError(failure.Status, failure.Code, failure.Message)
 		}
+		authority.EndUserDigest = digest
+		return authority, nil
 	case "native":
 		project := ""
 		if authority.ProjectID != nil {

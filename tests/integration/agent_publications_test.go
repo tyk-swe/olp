@@ -46,6 +46,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -663,7 +664,12 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	owner := h.owner()
 	project := createProject(h, owner, "A2A callbacks")
 	provider := newOpenAIFixture(t, "")
-	model := activeAzureProviderInProject(t, h, owner, "Callback provider", provider.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	model := activeAzureProviderInProject(t, h, owner, "Callback provider", provider.URL, &project, []any{
+		map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"},
+		map[string]any{"operation": "generation", "surface": "anthropic", "mode": "unary"},
+		map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
+		map[string]any{"operation": "generation", "surface": "gemini", "mode": "streaming"},
+	})
 	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "callback-chat", "overall_timeout_ms": 10000, "max_attempts": 2, "retry": map[string]any{"upstream_server": map[string]any{"max_retries": 1, "base_backoff_ms": 1, "max_backoff_ms": 1}}, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("callback-route"), http.StatusCreated)
 	path := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, http.MethodPost, path+"/validate", nil, etagHeader(draft), http.StatusOK)
@@ -676,7 +682,18 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 		Query string `json:"query"`
 	}
 	var toolCalls atomic.Int64
-	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "callback-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25"}})
+	sdkProtocols := mcpsdk.SupportedProtocolVersions()
+	protocols := slices.Collect(func(yield func(string) bool) {
+		for _, version := range mcpservers.SupportedProtocols() {
+			if slices.Contains(sdkProtocols, version) && !yield(version) {
+				return
+			}
+		}
+	})
+	if len(protocols) == 0 {
+		t.Fatal("MCP fixture and gateway have no common protocol version")
+	}
+	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "callback-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: protocols})
 	mcpsdk.AddTool(reference, &mcpsdk.Tool{Name: "echo", Description: "Return the supplied text"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input toolArguments) (*mcpsdk.CallToolResult, any, error) {
 		toolCalls.Add(1)
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: input.Query}}}, nil, nil
@@ -748,7 +765,7 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	pricing := acctID(t)
 	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
 	digest := sha256.Sum256(cardFor(upstream.URL + "/rpc"))
-	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{"project_id": project, "name": "callback agent", "agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{toolsetRevision}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "max_task_continuations": 5}}, idem("callback-agent"), http.StatusCreated)
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{"project_id": project, "name": "callback agent", "agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{toolsetRevision}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "max_task_continuations": 8}}, idem("callback-agent"), http.StatusCreated)
 	agent := created["id"].(string)
 	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("callback-publish")), http.StatusOK)
 	keyRecord := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "callback owner", "project_id": project, "scopes": []string{"agents", "inference", "tools"}, "allowed_agents": []string{agent}, "allowed_routes": []string{"callback-chat", "callback-unpinned"}, "allowed_toolsets": []string{toolsetID, foreignToolsetID}, "requests_per_minute": 10, "end_user_source": "header", "end_user_policy": map[string]any{"defaults": map[string]any{"requests_per_minute": 10}}}, idem("callback-owner"), http.StatusCreated)
@@ -888,6 +905,36 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if err != nil || response.StatusCode != http.StatusOK {
 		t.Fatalf("Responses callback returned %d: %s (%v)", response.StatusCode, responseBytes, err)
 	}
+	nativeCalls := []struct{ path, body string }{
+		{"/anthropic/v1/messages", `{"model":"callback-chat","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`},
+		{"/gemini/v1beta/models/callback-chat:generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`},
+		{"/gemini/v1beta/models/callback-chat:streamGenerateContent?alt=sse", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`},
+	}
+	nativeCallback := func(path, body string) (int, []byte) {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+capability)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		responseBody, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return response.StatusCode, responseBody
+	}
+	for _, native := range nativeCalls {
+		if status, body := nativeCallback(native.path, native.body); status != http.StatusOK {
+			t.Fatalf("%s callback returned %d: %s", native.path, status, body)
+		}
+	}
 	provider.failNextChat.Store(true)
 	if status := callback(capability, "callback-chat"); status != http.StatusOK {
 		t.Fatalf("active task callback returned %d", status)
@@ -898,13 +945,20 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if status := callTool(capability, toolsetID, "over-limit"); status != http.StatusTooManyRequests {
 		t.Fatalf("tool callback beyond task limit returned %d", status)
 	}
+	for _, native := range nativeCalls {
+		status, body := nativeCallback(native.path, native.body)
+		if status != http.StatusTooManyRequests || !bytes.Contains(body, []byte("task_limit_exceeded")) {
+			t.Fatalf("%s callback beyond task limit returned %d: %s", native.path, status, body)
+		}
+	}
 	if got := toolCalls.Load(); got != 1 {
 		t.Fatalf("tool received %d callbacks, want 1", got)
 	}
-	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 4 {
-		t.Fatalf("provider received %d attempts, want 4", got)
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 7 {
+		t.Fatalf("provider received %d attempts, want 7", got)
 	}
 	var successful, attempts int
+	surfaces := make(map[string]int)
 	for _, event := range sink.all() {
 		if event.Status == http.StatusOK && event.Route == "callback-chat" {
 			if event.KeyID != keyRecord["id"] || event.EndUserDigest != h.Runtime.EndUserDigest(&project, "original-user") || event.Usage == nil {
@@ -912,10 +966,14 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 			}
 			successful++
 			attempts += len(event.Attempts)
+			surfaces[event.Surface]++
 		}
 	}
-	if successful != 3 || attempts != 4 {
-		t.Fatalf("got %d successful callback records with %d attempts, want 3 and 4", successful, attempts)
+	if successful != 6 || attempts != 7 {
+		t.Fatalf("got %d successful callback records with %d attempts, want 6 and 7", successful, attempts)
+	}
+	if surfaces["anthropic"] != 1 || surfaces["gemini"] != 2 {
+		t.Fatalf("native callback accounting records = %v", surfaces)
 	}
 	var settled, results int
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits d ON d.id=r.dispatch_id WHERE d.kind='agent') FROM olp.execution_debits WHERE kind='agent' AND state='settled' AND api_key_id=$1`, keyRecord["id"]).Scan(&settled, &results); err != nil || settled != 1 || results != 1 {
@@ -942,7 +1000,7 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized && status != http.StatusForbidden {
 		t.Fatalf("revoked owner callback returned %d", status)
 	}
-	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 4 {
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 7 {
 		t.Fatalf("refused callbacks reached provider, total %d", got)
 	}
 }

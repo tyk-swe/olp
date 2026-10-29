@@ -720,6 +720,52 @@ type TaskCapability struct {
 	ToolsetRevisions []string
 }
 
+func (a Authority) TaskAuthority(identity Authority, snapshot, workloadRevision string, expiry *time.Time, endUser string, capability *TaskCapability) Authority {
+	return Authority{
+		TaskCapability:              capability,
+		DelegationAgentLimits:       a.DelegationAgentLimits,
+		SnapshotID:                  snapshot,
+		AgentPrincipal:              a.AgentPrincipal,
+		DelegationAgentID:           a.DelegationAgentID,
+		DelegationMemberID:          a.DelegationMemberID,
+		DelegationPairDigest:        a.DelegationPairDigest,
+		DelegationTokenDigest:       a.DelegationTokenDigest,
+		WorkloadIssuerID:            identity.WorkloadIssuerID,
+		WorkloadDigest:              identity.WorkloadDigest,
+		WorkloadRevision:            workloadRevision,
+		WorkloadMapping:             identity.WorkloadMapping,
+		BudgetIncreases:             a.BudgetIncreases,
+		OrganizationID:              a.OrganizationID,
+		OrganizationBudget:          a.OrganizationBudget,
+		InstallationID:              a.InstallationID,
+		InstallationBudget:          a.InstallationBudget,
+		ProjectBudget:               a.ProjectBudget,
+		ProjectAttributionBudgets:   a.ProjectAttributionBudgets,
+		Attribution:                 a.Attribution,
+		allowedGroupRoutes:          a.allowedGroupRoutes,
+		ProjectAttributionPolicy:    a.ProjectAttributionPolicy,
+		EndUserDigest:               endUser,
+		ProjectEndUserPolicy:        a.ProjectEndUserPolicy,
+		ID:                          identity.ID,
+		Issuer:                      a.Issuer,
+		LookupID:                    identity.LookupID,
+		LimitLookupID:               identity.LimitLookupID,
+		ProjectID:                   a.ProjectID,
+		BudgetGroupTemplate:         a.BudgetGroupTemplate,
+		BudgetGroupRPM:              a.BudgetGroupRPM,
+		BudgetGroupTPM:              a.BudgetGroupTPM,
+		BudgetGroupConcurrency:      a.BudgetGroupConcurrency,
+		BudgetGroupID:               a.BudgetGroupID,
+		BudgetGroupCostBasis:        a.BudgetGroupCostBasis,
+		BudgetGroupDailyCostLimit:   a.BudgetGroupDailyCostLimit,
+		BudgetGroupMonthlyCostLimit: a.BudgetGroupMonthlyCostLimit,
+		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
+		Policy:                      a.Policy,
+		ExpiresAt:                   expiry,
+		RevokedAt:                   identity.RevokedAt,
+	}
+}
+
 func (a Authority) BudgetAttribution() map[string]string {
 	if a.DelegationPairDigest == "" {
 		return a.Attribution

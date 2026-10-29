@@ -28,6 +28,40 @@ type taskAuthenticator struct {
 	err       error
 }
 
+type endUserDigester struct{}
+
+func (endUserDigester) EndUserDigest(project *string, identifier string) string {
+	return *project + ":" + identifier
+}
+
+func TestHeaderEndUserDigestBindsProjectAndRejectsInvalidIdentity(t *testing.T) {
+	project, source, native := "project", "header", "native"
+	authority := access.Authority{ProjectID: &project, Policy: access.KeyPolicy{EndUserSource: &source}}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Header.Set("X-OLP-End-User", "caller")
+	if digest, failure := HeaderEndUserDigest(endUserDigester{}, request, authority); failure != nil || digest != "project:caller" {
+		t.Fatalf("valid end-user identity not bound to project: %q, %v", digest, failure)
+	}
+	if _, failure := HeaderEndUserDigest(struct{}{}, request, authority); failure == nil || failure.Status != http.StatusServiceUnavailable {
+		t.Fatalf("missing identity digester was accepted: %v", failure)
+	}
+	for _, values := range [][]string{nil, {"bad identity!"}, {"first", "second"}} {
+		invalid := httptest.NewRequest(http.MethodPost, "/", nil)
+		for _, value := range values {
+			invalid.Header.Add("X-OLP-End-User", value)
+		}
+		if _, failure := HeaderEndUserDigest(endUserDigester{}, invalid, authority); failure == nil || failure.Status != http.StatusBadRequest || failure.Code != "invalid_end_user" {
+			t.Fatalf("invalid identity %v was accepted: %v", values, failure)
+		}
+	}
+	for _, endUserSource := range []*string{nil, &native} {
+		unsupported := access.Authority{ProjectID: &project, Policy: access.KeyPolicy{EndUserSource: endUserSource}}
+		if _, failure := HeaderEndUserDigest(endUserDigester{}, request, unsupported); failure == nil || failure.Status != http.StatusBadRequest {
+			t.Fatalf("unsupported end-user source accepted a header: %v", failure)
+		}
+	}
+}
+
 func (a taskAuthenticator) Authenticate(string) (*access.Authority, error) {
 	return nil, runtime.ErrInvalidKey
 }

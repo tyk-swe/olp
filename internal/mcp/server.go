@@ -415,20 +415,14 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 		}
 		return authority, nil
 	}
-	identifier := ""
-	if *authority.Policy.EndUserSource == "header" {
-		if values := r.Header.Values("X-OLP-End-User"); len(values) == 1 {
-			identifier = values[0]
+	digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+	if failure != nil {
+		if failure.Status == http.StatusBadRequest {
+			return access.Authority{}, fail(failure.Status, failure.Code, "invalid_request_error", failure.Message)
 		}
+		return access.Authority{}, fail(failure.Status, failure.Code, "api_error", failure.Message)
 	}
-	if !access.ValidEndUserIdentifier(identifier) {
-		return access.Authority{}, fail(http.StatusBadRequest, "invalid_end_user", "invalid_request_error", "Provide an end-user machine token of 1-128 characters in the key's configured source.")
-	}
-	digester, ok := s.Runtime.(interface{ EndUserDigest(*string, string) string })
-	if !ok {
-		return access.Authority{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "End-user identity is unavailable.")
-	}
-	authority.EndUserDigest = digester.EndUserDigest(authority.ProjectID, identifier)
+	authority.EndUserDigest = digest
 	return authority, nil
 }
 

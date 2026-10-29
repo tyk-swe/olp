@@ -114,20 +114,11 @@ func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revis
 				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusBadRequest
 			}
 		} else {
-			identifier := ""
-			if *authority.Policy.EndUserSource == "header" {
-				if values := r.Header.Values("X-OLP-End-User"); len(values) == 1 {
-					identifier = values[0]
-				}
+			digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+			if failure != nil {
+				return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
 			}
-			if !access.ValidEndUserIdentifier(identifier) {
-				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusBadRequest
-			}
-			digester, ok := s.Runtime.(interface{ EndUserDigest(*string, string) string })
-			if !ok {
-				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
-			}
-			authority.EndUserDigest = digester.EndUserDigest(authority.ProjectID, identifier)
+			authority.EndUserDigest = digest
 		}
 	}
 	if !authority.AllowsEndUser(authority.EndUserDigest) {
