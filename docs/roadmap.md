@@ -22,7 +22,7 @@ are stable identifiers; independent work can proceed in parallel.
 | Retained APIs and retrieval | Implemented RM5; service and live qualification tracked separately | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | Implemented RM7; live provider and tenant qualification tracked separately | Implemented RM4 accounting and agent contracts, plus existing tool governance |
-| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | Implemented RM7.1 direct execution for tool loops, and implemented prompt publications for prompt rendering |
+| Agent workflows | RM8.1 tool loops | Implemented RM7.1 direct execution and RM8.2 prompt rendering |
 | Cloud invoice imports | RM9.1 import contracts, then each cloud adapter | Existing importer and reconciliation machinery |
 
 The [architecture map](develop/architecture.md#contracts-and-feature-ownership)
@@ -245,10 +245,11 @@ also use their selected RM5 backend.
   durable handling of cancellation, restart and unknown effects. Include
   `typesafe` ordered tool-exchange pruning and compression recovery/tool
   reinjection from the guardrail inventory.
-- [ ] **RM8.2 — Prompt publication and rendering:** implement immutable
-  revisions, labels and bounded string substitution across API, playground
-  and import, with fixed in-flight revisions, variable handling, input guards
-  and content-free persistence.
+- [x] **RM8.2 — Prompt publication and rendering:** immutable revisions, labels
+  and bounded string substitution share a rendering path across inference,
+  playground and imported configuration. Local fixtures cover fixed revisions,
+  variable refusals, input guards and content-free persistence. A packaged
+  console journey covers publishing, label movement and accessibility.
 - [x] **RM8.3 — Delegated identities:** workload agents use consent and scoped,
   single-use credentials with intersected inference and tool rights, budgets,
   renewal and either-principal revocation. Signed tool calls and accounting are

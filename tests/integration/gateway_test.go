@@ -2677,3 +2677,282 @@ func TestNativeStreamingToolCallsCertification(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaygroundRendersPublishedPromptLikeInference(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := h.want(owner, http.MethodPost, "/api/v1/projects", map[string]any{"name": "Prompt rendering"}, idem("prompt-playground-project"), http.StatusCreated)["id"].(string)
+	upstream := newOpenAIFixture(t, "")
+	_, _, route, secret := provisionOpenAIInProject(t, h, owner, &project, upstream.URL,
+		[]any{
+			map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"},
+			map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"},
+			map[string]any{"operation": "generation", "surface": "anthropic", "mode": "unary"},
+			map[string]any{"operation": "generation", "surface": "anthropic", "mode": "streaming"},
+			map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
+			map[string]any{"operation": "generation", "surface": "gemini", "mode": "streaming"},
+		},
+		[]string{"generation"}, map[string]any{"max_body_bytes": 1024})
+	publication := h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{
+		"project_id": project, "name": "greeting",
+		"prompt": map[string]any{"template": "Hello {{name}}", "variables": []any{"name"}},
+	}, idem("prompt-playground-create"), http.StatusCreated)
+	promptPath := "/api/v1/prompts/" + publication["id"].(string)
+	published := h.want(owner, http.MethodPost, promptPath+"/publish", nil,
+		withMatch(publication, idem("prompt-playground-publish")), http.StatusOK)
+	h.want(owner, http.MethodPut, promptPath+"/labels/production", map[string]any{"revision_id": published["revision_id"]},
+		withMatch(published, idem("prompt-playground-label")), http.StatusOK)
+	h.refresh()
+	prompt := map[string]any{"id": publication["id"], "label": "production", "variables": map[string]string{"name": "world"}}
+	for _, tc := range []struct {
+		name, path, fields, padding string
+		status                      int
+	}{
+		{"duplicate chat selector", "/v1/chat/completions", fmt.Sprintf(`"olp_prompt":{"id":%q,"label":"production","variables":{"name":"world"}},"olp\u005fprompt":{"id":%q,"label":"production","variables":{"name":"world"}}`, publication["id"], publication["id"]), "", http.StatusBadRequest},
+		{"duplicate responses selector", "/v1/responses", fmt.Sprintf(`"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"world"}},"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"world"}}`, publication["id"], publication["id"]), "", http.StatusBadRequest},
+		{"oversized chat request", "/v1/chat/completions", fmt.Sprintf(`"olp_prompt":{"id":%q,"label":"production","variables":{"name":"world"}}`, publication["id"]), strings.Repeat(" ", 2048), http.StatusRequestEntityTooLarge},
+		{"oversized responses request", "/v1/responses", fmt.Sprintf(`"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"world"}}`, publication["id"]), strings.Repeat(" ", 2048), http.StatusRequestEntityTooLarge},
+	} {
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/streaming=%t", tc.name, streaming), func(t *testing.T) {
+				raw := fmt.Sprintf(`{"model":%q,"stream":%t,%s%s}`, route, streaming, tc.fields, tc.padding)
+				before := upstream.chatCalls.Load() + upstream.responseCalls.Load()
+				status, body, _ := h.gatewayRaw(http.MethodPost, tc.path, secret, strings.NewReader(raw), map[string]string{"Content-Type": "application/json"})
+				if status != tc.status {
+					t.Fatalf("inference status %d, want %d: %s", status, tc.status, body)
+				}
+				path := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+				request := fmt.Sprintf(`{"model":%q,"stream":%t,"request":%s}`, route, streaming, raw)
+				response, body := h.do(owner, http.MethodPost, path, []byte(request), nil)
+				if response.StatusCode != tc.status || upstream.chatCalls.Load()+upstream.responseCalls.Load() != before {
+					t.Fatalf("playground status %d, want %d without dispatch: %s", response.StatusCode, tc.status, body)
+				}
+			})
+		}
+	}
+	status, body, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "olp_prompt": prompt})
+	if status != http.StatusOK {
+		t.Fatalf("inference status %d: %v", status, body)
+	}
+	inference := upstream.lastReq.Load().(map[string]any)["messages"]
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": prompt}}, nil, http.StatusOK)
+	playground := upstream.lastReq.Load().(map[string]any)["messages"]
+	if !reflect.DeepEqual(playground, inference) {
+		t.Fatalf("playground messages %v differ from inference %v", playground, inference)
+	}
+	responsesPrompt := map[string]any{"id": "olpp_" + publication["id"].(string), "label": "production", "variables": map[string]string{"name": "world"}}
+	for _, tc := range []struct {
+		name, surface, path, streamPath, field string
+		request                                map[string]any
+		inferenceRequest                       func(bool) map[string]any
+	}{
+		{"chat", "openai", "/v1/chat/completions", "/v1/chat/completions", "messages", map[string]any{"olp_prompt": prompt}, func(stream bool) map[string]any {
+			return map[string]any{"model": route, "stream": stream, "olp_prompt": prompt}
+		}},
+		{"responses", "openai", "/v1/responses", "/v1/responses", "input", map[string]any{"prompt": responsesPrompt}, func(stream bool) map[string]any {
+			return map[string]any{"model": route, "stream": stream, "prompt": responsesPrompt}
+		}},
+		{"anthropic", "anthropic", "/anthropic/v1/messages", "/anthropic/v1/messages", "messages", map[string]any{"olp_prompt": prompt, "max_tokens": 20}, func(stream bool) map[string]any {
+			return map[string]any{"model": route, "stream": stream, "olp_prompt": prompt, "max_tokens": 20}
+		}},
+		{"gemini", "gemini", "/gemini/v1beta/models/" + route + ":generateContent", "/gemini/v1beta/models/" + route + ":streamGenerateContent?alt=sse", "messages", map[string]any{"olp_prompt": prompt}, func(bool) map[string]any {
+			return map[string]any{"olp_prompt": prompt}
+		}},
+	} {
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/streaming=%t", tc.name, streaming), func(t *testing.T) {
+				data, err := json.Marshal(tc.inferenceRequest(streaming))
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := map[bool]string{false: tc.path, true: tc.streamPath}[streaming]
+				playgroundPath := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+				status, body, _ := h.gatewayRaw(http.MethodPost, path, secret, strings.NewReader(string(data)), map[string]string{"Content-Type": "application/json"})
+				if status != http.StatusOK || streaming && !strings.Contains(string(body), "OK") {
+					t.Fatalf("inference status %d: %s", status, body)
+				}
+				inference := upstream.lastReq.Load().(map[string]any)[tc.field]
+				if !strings.Contains(fmt.Sprint(inference), "Hello world") {
+					t.Fatalf("inference did not render the prompt: %v", inference)
+				}
+				beforePlayground := upstream.chatCalls.Load() + upstream.responseCalls.Load()
+				response, body := h.do(owner, http.MethodPost, playgroundPath, map[string]any{"model": route, "surface": tc.surface, "stream": streaming, "request": tc.request}, nil)
+				if response.StatusCode != http.StatusOK || streaming && (!strings.Contains(string(body), "event: frame") || !strings.Contains(string(body), "event: done")) {
+					t.Fatalf("playground status %d: %s", response.StatusCode, body)
+				}
+				if upstream.chatCalls.Load()+upstream.responseCalls.Load() != beforePlayground+1 {
+					t.Fatal("playground did not dispatch the request")
+				}
+				if got := upstream.lastReq.Load().(map[string]any)[tc.field]; !reflect.DeepEqual(got, inference) {
+					t.Fatalf("playground input %v differs from inference %v", got, inference)
+				}
+			})
+		}
+	}
+	developer := h.invite(owner, "prompt-developer@example.com", "developer")
+	profile := h.want(developer, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK)
+	developerID := profile["id"].(string)
+	record := h.want(owner, http.MethodGet, "/api/v1/users/"+developerID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, "/api/v1/users/"+developerID, map[string]any{"access_scope": "assigned"}, etagHeader(record), http.StatusOK)
+	assignedDeveloper := login(h, "prompt-developer@example.com")
+	assertProjectAccess := func(allowed bool) {
+		t.Helper()
+		for _, streaming := range []bool{false, true} {
+			path := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+			request := map[string]any{"model": route, "stream": streaming, "request": map[string]any{"olp_prompt": prompt}}
+			before := upstream.chatCalls.Load()
+			if allowed {
+				response, body := h.do(assignedDeveloper, http.MethodPost, path, request, nil)
+				if response.StatusCode != http.StatusOK || streaming && !strings.Contains(string(body), "event: done") || upstream.chatCalls.Load() != before+1 {
+					t.Fatalf("assigned developer could not render: %d %s", response.StatusCode, body)
+				}
+				continue
+			}
+			denied := h.want(assignedDeveloper, http.MethodPost, path, request, nil, http.StatusNotFound)
+			if problemCode(t, denied) != "route_not_found" || upstream.chatCalls.Load() != before {
+				t.Fatalf("unassigned developer reached a project route: %v", denied)
+			}
+		}
+	}
+	assertProjectAccess(false)
+	addMember(h, owner, project, developerID, "viewer")
+	assertProjectAccess(true)
+	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+developerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	assertProjectAccess(false)
+	exported := h.want(owner, http.MethodGet, "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/configuration/apply", map[string]any{"document": exported["document"]}, idem("prompt-playground-import"), http.StatusOK)
+	h.refresh()
+	statusAfterImport, bodyAfterImport, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "olp_prompt": prompt})
+	if statusAfterImport != http.StatusOK {
+		t.Fatalf("inference after import status %d: %v", statusAfterImport, bodyAfterImport)
+	}
+	imported := upstream.lastReq.Load().(map[string]any)["messages"]
+	if !reflect.DeepEqual(imported, inference) {
+		t.Fatalf("imported messages %v differ from inference %v", imported, inference)
+	}
+	beforeImportedPlayground := upstream.chatCalls.Load()
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": prompt}}, nil, http.StatusOK)
+	if got := upstream.lastReq.Load().(map[string]any)["messages"]; upstream.chatCalls.Load() != beforeImportedPlayground+1 || !reflect.DeepEqual(got, imported) {
+		t.Fatalf("playground messages %v differ after import %v", got, imported)
+	}
+	current := h.want(owner, http.MethodGet, promptPath, nil, nil, http.StatusOK)
+	updated := h.want(owner, http.MethodPut, promptPath, map[string]any{"project_id": project, "name": "greeting", "prompt": map[string]any{"template": "Welcome {{name}}", "variables": []any{"name"}}}, withMatch(current, idem("prompt-playground-update")), http.StatusOK)
+	newRevision := h.want(owner, http.MethodPost, promptPath+"/publish", nil, withMatch(updated, idem("prompt-playground-republish")), http.StatusOK)
+	h.want(owner, http.MethodPut, promptPath+"/labels/production", map[string]any{"revision_id": newRevision["revision_id"]}, withMatch(newRevision, idem("prompt-playground-relabel")), http.StatusOK)
+	h.refresh()
+	statusAfterMove, bodyAfterMove, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "olp_prompt": prompt})
+	if statusAfterMove != http.StatusOK {
+		t.Fatalf("inference after label move status %d: %v", statusAfterMove, bodyAfterMove)
+	}
+	moved := upstream.lastReq.Load().(map[string]any)["messages"]
+	if !strings.Contains(fmt.Sprint(moved), "Welcome world") {
+		t.Fatalf("moving the prompt label rendered %v", moved)
+	}
+	beforeMovedPlayground := upstream.chatCalls.Load()
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": prompt}}, nil, http.StatusOK)
+	if got := upstream.lastReq.Load().(map[string]any)["messages"]; upstream.chatCalls.Load() != beforeMovedPlayground+1 || !reflect.DeepEqual(got, moved) {
+		t.Fatalf("playground messages %v differ after label move %v", got, moved)
+	}
+	beforeInvalid := upstream.chatCalls.Load()
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": map[string]any{"id": publication["id"], "label": "production", "variables": map[string]string{"extra": "value"}}}}, nil, http.StatusBadRequest)
+	if upstream.chatCalls.Load() != beforeInvalid {
+		t.Fatal("invalid prompt variables reached the provider")
+	}
+	t.Run("capture and durable privacy", func(t *testing.T) {
+		h.want(owner, http.MethodPatch, "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(h.want(owner, http.MethodGet, "/api/v1/observability/capture", nil, nil, http.StatusOK)), http.StatusOK)
+		receiver, exportServer := newExportReceiver(t, "", http.StatusNoContent)
+		sink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "prompt-privacy", "type": "https", "destination": exportServer.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
+		h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": route, "sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
+		manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		h.Gateway.Capture = manager
+		var receipts sync.Map
+		h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+			_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+			receipts.Store(event.RequestID, recordedWorkflowReceipt{event: event, payload: payload, err: err})
+			return err
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { manager.Run(ctx); close(done) }()
+		t.Cleanup(func() { cancel(); <-done })
+		eventually(t, "prompt route capture policy", 3*time.Second, func() bool {
+			collector := manager.Resolve(project, route, "", "", uuid.NewString())
+			if collector == nil {
+				return false
+			}
+			collector.Close()
+			return true
+		})
+		h.refresh()
+		controlStatus, controlBody, controlHeaders := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "messages": []any{map[string]any{"role": "user", "content": "prompt capture control"}}})
+		if controlStatus != http.StatusOK {
+			t.Fatalf("capture control status %d: %v", controlStatus, controlBody)
+		}
+		control := awaitEnvelope(t, receiver, 1)
+		controlData, _ := json.Marshal(control[0]["data"])
+		if !strings.Contains(string(controlData), "prompt capture control") {
+			t.Fatalf("capture control not exported: %s", controlData)
+		}
+		var controlCaptured bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, controlHeaders.Get("X-Request-Id")).Scan(&controlCaptured); err != nil || !controlCaptured {
+			t.Fatalf("capture control not recorded: captured=%t error=%v", controlCaptured, err)
+		}
+		const privateValue = "playground-private-variable-459"
+		for _, streaming := range []bool{false, true} {
+			path := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+			privatePrompt := map[string]any{"id": publication["id"], "label": "production", "variables": map[string]string{"name": privateValue}}
+			before := upstream.chatCalls.Load()
+			response, body := h.do(owner, http.MethodPost, path, map[string]any{"model": route, "stream": streaming, "request": map[string]any{"olp_prompt": privatePrompt}}, nil)
+			if response.StatusCode != http.StatusOK || streaming && !strings.Contains(string(body), "event: done") || upstream.chatCalls.Load() != before+1 || !strings.Contains(fmt.Sprint(upstream.lastReq.Load()), "Welcome "+privateValue) {
+				t.Fatalf("private playground render failed: status=%d body=%s", response.StatusCode, body)
+			}
+		}
+		cancel()
+		<-done
+		privateIDs := []string{}
+		receipts.Range(func(key, value any) bool {
+			receipt := value.(recordedWorkflowReceipt)
+			if receipt.event.Origin != usage.OriginPlayground {
+				return true
+			}
+			if receipt.err != nil || receipt.event.PayloadCaptured || len(receipt.event.Attempts) != 1 || receipt.event.Attempts[0].Routing == nil || receipt.event.Attempts[0].Routing.Prompt == nil || receipt.event.Attempts[0].Routing.Prompt.ID != publication["id"] || receipt.event.Attempts[0].Routing.Prompt.RevisionID != newRevision["revision_id"] || strings.Contains(string(receipt.payload), privateValue) {
+				t.Fatalf("private playground receipt was not content-free: %+v error=%v", receipt.event, receipt.err)
+			}
+			privateIDs = append(privateIDs, key.(string))
+			return true
+		})
+		if len(privateIDs) != 2 {
+			t.Fatalf("expected unary and streaming playground receipts, got %d", len(privateIDs))
+		}
+		for _, id := range privateIDs {
+			var captured bool
+			var record string
+			if err := h.Pool.QueryRow(t.Context(), `SELECT r.payload_captured, e.payload::text FROM olp.requests r JOIN olp.export_records e ON e.source_id=r.id AND e.stream='requests' WHERE r.id=$1`, id).Scan(&captured, &record); err != nil || captured || strings.Contains(record, privateValue) {
+				t.Fatalf("playground request or export record was not content-free: captured=%t error=%v", captured, err)
+			}
+		}
+		for _, table := range []string{"requests", "attempts", "attempt_usage_facts", "request_metadata_event_receipts", "export_records"} {
+			var leaks int
+			query := "SELECT count(*) FROM olp." + table + " AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%'"
+			if err := h.Pool.QueryRow(t.Context(), query, privateValue).Scan(&leaks); err != nil || leaks != 0 {
+				t.Fatalf("private prompt content reached %s: count=%d error=%v", table, leaks, err)
+			}
+		}
+		worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		if err := worker.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		envelopes := awaitEnvelope(t, receiver, 4)
+		for _, envelope := range envelopes {
+			data, err := json.Marshal(envelope)
+			if err != nil || strings.Contains(string(data), privateValue) {
+				t.Fatalf("private prompt content reached export: %s %v", data, err)
+			}
+		}
+		for _, id := range privateIDs {
+			if !strings.Contains(fmt.Sprint(envelopes), id) {
+				t.Fatalf("playground request %s was not exported", id)
+			}
+		}
+	})
+}

@@ -16,6 +16,35 @@ The [gateway](../develop/architecture.md) applies shared admission and response 
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../../tests/README.md).
 
+## Published prompt compatibility
+
+Prompts have project-scoped drafts, immutable published revisions and
+`production` and `staging` labels. A request selects one label or exact
+revision for a prompt in the route's project. The gateway resolves the label
+once, substitutes declared string variables in `{{name}}` placeholders and
+applies the route's input limit and input guardrails to the rendered messages.
+Unknown or missing required variables are refused before dispatch. Strict routes
+do not support registry prompt rendering.
+
+Chat Completions, Anthropic Messages and Gemini generation accept an
+`olp_prompt` object in place of explicit messages:
+
+```json
+{"olp_prompt":{"id":"PROMPT_ID","label":"production","variables":{"name":"Ada"}}}
+```
+
+Responses uses the same selection inside `prompt`, with `id` prefixed by
+`olpp_`. Other Responses prompt IDs retain their provider behavior. An exact
+`revision_id` can be used instead of `label` on either form. The console
+playground and inference render on the server using the same published
+revision, including after configuration export and import. Variable values and
+rendered messages are transient rather than configuration data.
+
+Local gateway fixtures cover all four request formats in unary and streaming
+mode, and the packaged-console journey covers publication, label movement and
+accessible playground rendering. This fixture evidence does not qualify a live
+provider deployment.
+
 ## Consumer MCP qualification
 
 Published tools support the JSON call endpoint and Streamable HTTP at MCP
