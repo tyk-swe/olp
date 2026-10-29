@@ -64,11 +64,15 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		}
 	}
 	if x.family.Surface() == "gemini" {
-		var config struct {
-			CandidateCount      *int `json:"candidateCount"`
-			CandidateCountSnake *int `json:"candidate_count"`
-		}
-		if raw := x.generation.parsed.Field("generationConfig"); len(raw) != 0 {
+		for _, field := range []string{"generationConfig", "generation_config"} {
+			raw := x.generation.parsed.Field(field)
+			if len(raw) == 0 {
+				continue
+			}
+			var config struct {
+				CandidateCount      *int `json:"candidateCount"`
+				CandidateCountSnake *int `json:"candidate_count"`
+			}
 			if json.Unmarshal(raw, &config) != nil || config.CandidateCount != nil && *config.CandidateCount != 1 || config.CandidateCountSnake != nil && *config.CandidateCountSnake != 1 {
 				return invalidRequest("tool_execution_choices_unsupported", "Gateway tool execution requires a single choice.", nil)
 			}

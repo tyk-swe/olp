@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -30,6 +31,7 @@ func WorkflowStreamBody(family wire.Format, frames io.Reader, maxEvent int) (jso
 	}
 }
 
+// SSE callbacks accumulate bounded deltas without repeatedly copying earlier events.
 func workflowGeminiStreamBody(frames io.Reader, maxEvent int) (json.RawMessage, error) {
 	parts := []json.RawMessage{}
 	err := sse.Decode(frames, maxEvent, func(frame sse.Frame) error {
@@ -70,6 +72,7 @@ type workflowAnthropicBlock struct {
 	citations []json.RawMessage
 }
 
+// Anthropic sends indexed block deltas, which must be accumulated to preserve signed content.
 func workflowAnthropicStreamBody(frames io.Reader, maxEvent int) (json.RawMessage, error) {
 	blocks := []*workflowAnthropicBlock{}
 	err := sse.Decode(frames, maxEvent, func(frame sse.Frame) error {
@@ -153,19 +156,26 @@ func WorkflowDefinitions(family wire.Format, tools []Tool) (json.RawMessage, err
 }
 
 func WorkflowTurns(family wire.Format, completion *wire.Completion, results []WorkflowResult) ([]json.RawMessage, error) {
-	messages := make([]Message, 1, len(results)+1)
-	messages[0] = Message{Role: "assistant", Parts: []Part{{Text: completion.OutputText}}, Calls: completion.ToolCalls}
-	for _, result := range results {
-		messages = append(messages, Message{Role: "tool", ToolID: result.CallID, Parts: []Part{{Text: result.Content}}})
-	}
+	messages := slices.Collect(func(yield func(Message) bool) {
+		if !yield(Message{Role: "assistant", Parts: []Part{{Text: completion.OutputText}}, Calls: completion.ToolCalls}) {
+			return
+		}
+		for _, result := range results {
+			if !yield(Message{Role: "tool", ToolID: result.CallID, Parts: []Part{{Text: result.Content}}}) {
+				return
+			}
+		}
+	})
 	fields, err := workflowEncoding(family, &Generation{Messages: messages, Parameters: Object{}})
 	if err != nil {
 		return nil, err
 	}
-	field := "messages"
-	if family.Surface() == "gemini" {
-		field = "contents"
-	}
+	field := func() string {
+		if family.Surface() == "gemini" {
+			return "contents"
+		}
+		return "messages"
+	}()
 	var turns []json.RawMessage
 	if err := json.Unmarshal(fields[field], &turns); err != nil || len(turns) == 0 {
 		return nil, unsupported("workflow turns")
@@ -177,7 +187,7 @@ func WorkflowTurns(family wire.Format, completion *wire.Completion, results []Wo
 	if err != nil {
 		return nil, err
 	}
-	return append([]json.RawMessage{assistant}, turns[1:]...), nil
+	return slices.Concat([]json.RawMessage{assistant}, turns[1:]), nil
 }
 
 func workflowEncoding(family wire.Format, generation *Generation) (Object, error) {

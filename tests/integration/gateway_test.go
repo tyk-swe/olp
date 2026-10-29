@@ -1060,8 +1060,11 @@ func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
 			return
 		}
 		var request struct {
-			ID     any    `json:"id"`
-			Method string `json:"method"`
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
 		}
 		if json.NewDecoder(r.Body).Decode(&request) != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -1074,8 +1077,11 @@ func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
 		result := func() any {
 			switch request.Method {
 			case "initialize":
+				if request.Params.ProtocolVersion == "" {
+					return nil
+				}
 				w.Header().Set("Mcp-Session-Id", "pinned-gemini-session")
-				return map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+				return map[string]any{"protocolVersion": request.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}}
 			case "tools/list":
 				return map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}}}}
 			case "tools/call":
@@ -1100,6 +1106,8 @@ func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
 	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("pinned-publish")), http.StatusOK)
 
 	var calls atomic.Int64
+	var refuseTools atomic.Bool
+	var uncertifiedDispatches atomic.Int64
 	providerRequests := make(chan map[string]json.RawMessage, 2)
 	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1112,8 +1120,14 @@ func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if refuseTools.Load() && !strings.Contains(string(request["tools"]), "olp_certification_probe") {
+			uncertifiedDispatches.Add(1)
+		}
 		name := func() string {
 			if strings.Contains(string(request["tools"]), "olp_certification_probe") {
+				if refuseTools.Load() {
+					return ""
+				}
 				return "olp_certification_probe"
 			}
 			if len(request["cachedContent"]) == 0 {
@@ -1224,6 +1238,25 @@ func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
 	if models != 2 || tools != 1 || runs != 1 {
 		t.Fatalf("pinned workflow did not settle all steps: models=%d tools=%d runs=%d", models, tools, runs)
 	}
+	refuseTools.Store(true)
+	currentProvider := h.want(owner, "GET", providerPath, nil, nil, http.StatusOK)
+	uncertified := h.want(owner, "POST", providerPath+"/models/"+modelID+"/certify", nil, etagHeader(currentProvider), http.StatusOK)
+	uncertifiedResults, hasResults := uncertified["results"].([]any)
+	if !hasResults || len(uncertifiedResults) != 1 {
+		t.Fatalf("unexpected recertification result: %v", uncertified)
+	}
+	uncertifiedResult, validResult := uncertifiedResults[0].(map[string]any)
+	if !validResult || uncertifiedResult["succeeded"] != true || uncertifiedResult["tool_calls"] != false {
+		t.Fatalf("provider without tool calls was incorrectly certified: %v", uncertified)
+	}
+	recertifiedProvider := h.want(owner, "GET", providerPath, nil, nil, http.StatusOK)
+	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(recertifiedProvider, idem("pinned-uncertified-activate")), http.StatusOK)
+	uncertifiedDispatches.Store(0)
+	h.refresh()
+	refusal, refusalBody := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/models/"+slug+":generateContent", secret, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+	if refusal.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(refusalBody), "upstream_unavailable") || uncertifiedDispatches.Load() != 0 {
+		t.Fatalf("uncertified provider was not refused before dispatch: status=%d body=%s calls=%d", refusal.StatusCode, refusalBody, uncertifiedDispatches.Load())
+	}
 }
 
 func TestAnthropicToolCallsCertification(t *testing.T) {
@@ -1272,5 +1305,78 @@ func TestAnthropicToolCallsCertification(t *testing.T) {
 	result, isResult := results[0].(map[string]any)
 	if !isResult || result["tool_calls"] != true {
 		t.Fatalf("provider tool-call certification failed: %v", certification)
+	}
+}
+
+func TestNativeStreamingToolCallsCertification(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Native streaming tool certification")
+	for _, tc := range []struct {
+		surface, profile, basePath string
+		supportsTools              bool
+	}{
+		{"anthropic", "anthropic-messages", "/v1", true},
+		{"anthropic", "anthropic-messages", "/v1", false},
+		{"gemini", "gemini-generation", "/v1beta", true},
+		{"gemini", "gemini-generation", "/v1beta", false},
+	} {
+		t.Run(fmt.Sprintf("%s/tools=%t", tc.surface, tc.supportsTools), func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					if tc.surface == "gemini" {
+						_ = json.NewEncoder(w).Encode(map[string]any{"models": []any{map[string]string{"name": "models/" + vendorModel}}})
+					} else {
+						_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"id": vendorModel}}})
+					}
+					return
+				}
+				var request struct {
+					Tools  []json.RawMessage `json:"tools"`
+					Stream bool              `json:"stream"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				stream := request.Stream || strings.HasSuffix(r.URL.Path, ":streamGenerateContent")
+				if len(request.Tools) == 0 || !tc.supportsTools {
+					kindGeneration(w, tc.surface, stream)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tc.surface == "gemini" {
+					fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"olp_certification_probe\",\"args\":{}}}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":2,\"totalTokenCount\":5}}\n\n")
+					return
+				}
+				fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"certification\",\"type\":\"message\",\"role\":\"assistant\",\"model\":%q,\"usage\":{\"input_tokens\":3}}}\n\n", vendorModel)
+				fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"probe-call\",\"name\":\"olp_certification_probe\",\"input\":{}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":2}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+			}))
+			defer upstream.Close()
+			name := fmt.Sprintf("%s streaming tools %t", tc.surface, tc.supportsTools)
+			configuration := map[string]any{"kind": tc.surface, "profile_id": tc.profile, "profile_revision": "1", "endpoint": upstream.URL + tc.basePath, "auth_mode": "api_key"}
+			provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": name, "project_id": project, "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, idem("streaming-provider-"+name), http.StatusCreated)
+			path := "/api/v1/providers/" + mcpExecString(t, provider, "id")
+			models := h.want(owner, "GET", path+"/models", nil, nil, http.StatusOK)
+			items, itemsOK := models["items"].([]any)
+			if !itemsOK || len(items) != 1 {
+				t.Fatalf("unexpected provider models: %v", models)
+			}
+			model, modelOK := items[0].(map[string]any)
+			if !modelOK {
+				t.Fatalf("unexpected provider model: %v", items[0])
+			}
+			modelPath := path + "/models/" + mcpExecString(t, model, "id")
+			declared := h.want(owner, "PATCH", modelPath, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "generation", "surface": tc.surface, "mode": "streaming"}}}, etagHeader(provider), http.StatusOK)
+			certification := h.want(owner, "POST", modelPath+"/certify", nil, etagHeader(declared), http.StatusOK)
+			results, resultsOK := certification["results"].([]any)
+			if !resultsOK || len(results) != 1 {
+				t.Fatalf("unexpected certification results: %v", certification)
+			}
+			result, resultOK := results[0].(map[string]any)
+			if !resultOK || result["succeeded"] != true || result["tool_calls"] != tc.supportsTools {
+				t.Fatalf("streaming tool capability was not certified correctly: %v", certification)
+			}
+		})
 	}
 }
