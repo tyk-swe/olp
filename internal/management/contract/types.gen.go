@@ -6521,16 +6521,20 @@ type AdmissionPriority string
 
 // AgentDefinition defines model for AgentDefinition.
 type AgentDefinition struct {
+	// CardDigest SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant.
 	CardDigest   string              `json:"card_digest"`
 	CredentialId *openapi_types.UUID `json:"credential_id,omitempty"`
 	Endpoint     string              `json:"endpoint"`
 	MaxCost      string              `json:"max_cost"`
 
 	// MaxTaskContinuations Maximum observed continuations per task. Defaults to 32.
-	MaxTaskContinuations *int                    `json:"max_task_continuations,omitempty"`
-	MessagePrice         *string                 `json:"message_price,omitempty"`
-	PricingRevisionId    openapi_types.UUID      `json:"pricing_revision_id"`
-	Protocol             AgentDefinitionProtocol `json:"protocol"`
+	MaxTaskContinuations *int    `json:"max_task_continuations,omitempty"`
+	MessagePrice         *string `json:"message_price,omitempty"`
+
+	// Oauth OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret.
+	Oauth             nullable.Nullable[AgentOAuthConfiguration] `json:"oauth,omitempty"`
+	PricingRevisionId openapi_types.UUID                         `json:"pricing_revision_id"`
+	Protocol          AgentDefinitionProtocol                    `json:"protocol"`
 
 	// RemoteWorkBoundSeconds The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent.
 	RemoteWorkBoundSeconds *int                 `json:"remote_work_bound_seconds,omitempty"`
@@ -6543,6 +6547,19 @@ type AgentDefinition struct {
 
 // AgentDefinitionProtocol defines model for AgentDefinition.Protocol.
 type AgentDefinitionProtocol string
+
+// AgentOAuthConfiguration OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret.
+type AgentOAuthConfiguration struct {
+	Audience string `json:"audience"`
+
+	// AuthorizationEndpoint Required for browser and device OAuth.
+	AuthorizationEndpoint       *string      `json:"authorization_endpoint,omitempty"`
+	ClientId                    string       `json:"client_id"`
+	DeviceAuthorizationEndpoint *string      `json:"device_authorization_endpoint,omitempty"`
+	EntraObo                    *MCPEntraOBO `json:"entra_obo,omitempty"`
+	Scopes                      []string     `json:"scopes"`
+	TokenEndpoint               string       `json:"token_endpoint"`
+}
 
 // AgentPublication defines model for AgentPublication.
 type AgentPublication struct {
@@ -6616,8 +6633,11 @@ type AgentPublicationWrite struct {
 
 	// Credential Bearer credential; absent preserves, null removes. Never returned.
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Name       string                    `json:"name"`
-	ProjectId  openapi_types.UUID        `json:"project_id"`
+
+	// EntraClientSecret Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned.
+	EntraClientSecret *string            `json:"entra_client_secret,omitempty"`
+	Name              string             `json:"name"`
+	ProjectId         openapi_types.UUID `json:"project_id"`
 
 	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
 	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
@@ -10010,13 +10030,17 @@ type MCPGrantAuthorizationRequestFlow string
 
 // MCPGrantBinding defines model for MCPGrantBinding.
 type MCPGrantBinding struct {
-	Endpoint string           `json:"endpoint"`
-	Identity MCPGrantIdentity `json:"identity"`
+	AgentId  *openapi_types.UUID `json:"agent_id,omitempty"`
+	Endpoint string              `json:"endpoint"`
+
+	// EntraCredentialId Non-secret identifier for the agent's bound Entra client credential.
+	EntraCredentialId *openapi_types.UUID `json:"entra_credential_id,omitempty"`
+	Identity          MCPGrantIdentity    `json:"identity"`
 
 	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
 	Oauth     nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
 	ProjectId openapi_types.UUID                       `json:"project_id"`
-	ServerId  openapi_types.UUID                       `json:"server_id"`
+	ServerId  *openapi_types.UUID                      `json:"server_id,omitempty"`
 }
 
 // MCPGrantClaimResponse defines model for MCPGrantClaimResponse.
@@ -17370,6 +17394,9 @@ type ProviderGrantLapsedWebhookParams struct {
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody = AgentPublicationWrite
+
+// StartAgentGrantEnrollmentJSONRequestBody defines body for StartAgentGrantEnrollment for application/json ContentType.
+type StartAgentGrantEnrollmentJSONRequestBody = StartMCPGrantEnrollmentRequest
 
 // UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
 type UpdateAgentJSONRequestBody = AgentPublicationWrite

@@ -13,8 +13,149 @@ vi.mock('./api', async (original) => ({
   savePublication: vi.fn()
 }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
-  useRole: () => ({ allows: () => true, user: null, globalScope: false })
+  useRole: () => ({
+    allows: () => true,
+    user: { operations: ['access'] },
+    globalScope: true
+  })
 }));
+
+it('configures and removes agent OAuth without retaining a bearer credential', async () => {
+  const publication: api.Publication = {
+    id: 'agent',
+    project_id: 'project',
+    kind: 'agent',
+    name: 'Agent',
+    etag: 'etag',
+    revision_id: 'revision',
+    retired: false,
+    draft: {
+      project_id: 'project',
+      name: 'Agent',
+      agent: {
+        protocol: 'a2a-1.0.0',
+        endpoint: 'https://agent.example/rpc',
+        card_digest: 'digest',
+        pricing_revision_id: 'pricing',
+        max_cost: '5',
+        toolset_revisions: [],
+        route_revisions: []
+      }
+    }
+  };
+  vi.mocked(api.listPublications).mockImplementation(async (kind) =>
+    kind === 'agents' ? [publication] : []
+  );
+  vi.mocked(api.listProjects).mockResolvedValue([]);
+  vi.mocked(api.listServers).mockResolvedValue([]);
+  vi.mocked(api.getPublication).mockResolvedValue(publication);
+  vi.mocked(api.savePublication).mockClear();
+  vi.mocked(api.savePublication).mockImplementation(
+    async (_kind, current, input) => {
+      if (
+        (input.agent?.oauth && input.credential !== null) ||
+        (input.agent?.oauth?.entra_obo &&
+          input.entra_client_secret !== 'new-client-secret')
+      ) {
+        throw new Error('The agent credential configuration is invalid');
+      }
+      return {
+        ...current!,
+        draft: { ...input, entra_client_secret: undefined }
+      };
+    }
+  );
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(PublicationsProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  [...host.querySelectorAll<HTMLButtonElement>('nav button')]
+    .find((item) => item.textContent?.trim() === 'agents')!
+    .click();
+  await vi.waitFor(() =>
+    expect(
+      [...host.querySelectorAll('button')].some(
+        (item) => item.textContent?.trim() === 'Open'
+      )
+    ).toBe(true)
+  );
+  [...host.querySelectorAll('button')]
+    .find((item) => item.textContent?.trim() === 'Open')!
+    .click();
+  await vi.waitFor(() =>
+    expect(host.textContent?.replace(/\s+/g, ' ')).toContain('Use OAuth grants')
+  );
+  const input = (label: string) =>
+    [...host.querySelectorAll('label')]
+      .find((item) => item.textContent?.replace(/\s+/g, ' ').trim() === label)!
+      .querySelector('input')!;
+  input('Use OAuth grants').click();
+  flushSync();
+  for (const [label, value] of [
+    ['Client ID', 'client'],
+    ['Audience', 'audience'],
+    ['Scopes', 'send'],
+    ['Authorization endpoint', 'https://auth.example/authorize'],
+    ['Token endpoint', 'https://auth.example/token']
+  ]) {
+    input(label).value = value;
+    input(label).dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  flushSync();
+  const form = host.querySelector<HTMLFormElement>(
+    'section[aria-label="Publication editor"] form'
+  )!;
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain(
+      'Draft saved. Publication is a separate action.'
+    )
+  );
+  expect(input('Use OAuth grants').checked).toBe(true);
+  expect(input('Client ID').value).toBe('client');
+  expect(input('Audience').value).toBe('audience');
+  expect(input('Scopes').value).toBe('send');
+  input('Use Entra on-behalf-of').click();
+  flushSync();
+  for (const [label, value] of [
+    ['Workload issuer', 'https://identity.example/tenant'],
+    ['Replacement Entra client secret', 'new-client-secret'],
+    ['Audience', 'api://downstream'],
+    ['Scopes', 'api://downstream/send']
+  ]) {
+    input(label).value = value;
+    input(label).dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  flushSync();
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(input('Replacement Entra client secret').value).toBe('')
+  );
+  expect(input('Use Entra on-behalf-of').checked).toBe(true);
+  expect(input('Workload issuer').value).toBe(
+    'https://identity.example/tenant'
+  );
+  input('Use OAuth grants').click();
+  flushSync();
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain(
+      'Draft saved. Publication is a separate action.'
+    )
+  );
+  expect(input('Use OAuth grants').checked).toBe(false);
+});
 
 it("saves and reloads a tool's execution classification", async () => {
   const tool = {

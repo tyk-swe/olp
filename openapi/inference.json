@@ -261,6 +261,47 @@
         ]
       }
     },
+    "/a2a/{agent}/grant-enrollments": {
+      "post": {
+        "operationId": "startA2AAgentGrantEnrollment",
+        "summary": "Start a personal OAuth grant for an A2A agent",
+        "description": "Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Published agent identifier"
+          }
+        ],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "201": {
+            "description": "One-use enrollment handoff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["enrollment_id", "enrollment_url", "expires_at"],
+                  "properties": {
+                    "enrollment_id": { "type": "string", "format": "uuid" },
+                    "enrollment_url": { "type": "string" },
+                    "expires_at": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "The agent has no OAuth configuration" },
+          "401": { "description": "The bearer credential is invalid" },
+          "403": { "description": "A verified end user is required" },
+          "404": { "description": "The agent is unavailable to this principal" },
+          "409": { "description": "The agent binding changed" },
+          "503": { "description": "The authority or grant store is unavailable" }
+        }
+      }
+    },
     "/a2a/{agent}/.well-known/agent-card.json": {
       "get": {
         "operationId": "getA2AAgentCard",
@@ -310,7 +351,7 @@
       "post": {
         "operationId": "callA2AAgent",
         "summary": "Send a message to or read, cancel, and subscribe to a task from a published A2A agent",
-        "description": "Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.",
+        "description": "Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.",
         "parameters": [
           {
             "name": "agent",

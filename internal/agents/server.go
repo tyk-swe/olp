@@ -96,7 +96,8 @@ func (s *Server) revision(r *http.Request, p access.Principal, kind string) (acc
 func (s *Server) write(r *http.Request, kind, action string) (access.Reply, error) {
 	var request struct {
 		Draft
-		Credential json.RawMessage `json:"credential,omitempty"`
+		Credential        json.RawMessage `json:"credential,omitempty"`
+		EntraClientSecret *string         `json:"entra_client_secret,omitempty"`
 	}
 	var draft Draft
 	var label struct {
@@ -162,13 +163,15 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 	next := current
 	switch action {
 	case "create", "update":
-		if err = s.credential(r.Context(), tx, current, &draft, request.Credential); err != nil {
+		credentialID, credentialErr := s.credential(r.Context(), tx, current, draft, request.Credential, request.EntraClientSecret)
+		if credentialErr != nil {
+			return access.Reply{}, credentialErr
+		}
+		credentialDraft := draftWithCredential(draft, credentialID)
+		if err = AuthorizeTrustChange(p, current, credentialDraft); err != nil {
 			return access.Reply{}, err
 		}
-		if err = AuthorizeTrustChange(p, current, draft); err != nil {
-			return access.Reply{}, err
-		}
-		next = &Publication{Kind: kind, Draft: draft}
+		next = &Publication{Kind: kind, Draft: credentialDraft}
 		err = SaveDraft(r.Context(), tx, p.UserID(), current, next, s.Egress)
 	case "publish":
 		err = Publish(r.Context(), tx, p.UserID(), current)

@@ -124,6 +124,15 @@ export type PublicationForm = {
   protocol: 'a2a-0.3.0' | 'a2a-1.0.0';
   endpoint: string;
   cardDigest: string;
+  oauthEnabled: boolean;
+  oauthEntra: boolean;
+  oauthEntraIssuer: string;
+  oauthClientID: string;
+  oauthAudience: string;
+  oauthScopes: string;
+  oauthAuthorizationEndpoint: string;
+  oauthTokenEndpoint: string;
+  oauthDeviceEndpoint: string;
   pricingRevision: string;
   maxCost: string;
   messagePrice: string;
@@ -159,6 +168,15 @@ export function publicationForm(
     protocol: d?.agent?.protocol ?? 'a2a-1.0.0',
     endpoint: d?.agent?.endpoint ?? '',
     cardDigest: d?.agent?.card_digest ?? '',
+    oauthEnabled: !!d?.agent?.oauth,
+    oauthEntra: !!d?.agent?.oauth?.entra_obo,
+    oauthEntraIssuer: d?.agent?.oauth?.entra_obo?.issuer ?? '',
+    oauthClientID: d?.agent?.oauth?.client_id ?? '',
+    oauthAudience: d?.agent?.oauth?.audience ?? '',
+    oauthScopes: d?.agent?.oauth?.scopes.join(' ') ?? '',
+    oauthAuthorizationEndpoint: d?.agent?.oauth?.authorization_endpoint ?? '',
+    oauthTokenEndpoint: d?.agent?.oauth?.token_endpoint ?? '',
+    oauthDeviceEndpoint: d?.agent?.oauth?.device_authorization_endpoint ?? '',
     pricingRevision: d?.agent?.pricing_revision_id ?? '',
     maxCost: d?.agent?.max_cost ?? '',
     messagePrice: d?.agent?.message_price ?? '',
@@ -222,6 +240,28 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
       protocol: form.protocol,
       endpoint: form.endpoint.trim(),
       card_digest: form.cardDigest.trim(),
+      ...(form.oauthEnabled
+        ? {
+            oauth: {
+              client_id: form.oauthClientID.trim(),
+              audience: form.oauthAudience.trim(),
+              scopes: resourceIDs(form.oauthScopes),
+              ...(form.oauthEntra
+                ? { entra_obo: { issuer: form.oauthEntraIssuer.trim() } }
+                : {
+                    authorization_endpoint:
+                      form.oauthAuthorizationEndpoint.trim()
+                  }),
+              token_endpoint: form.oauthTokenEndpoint.trim(),
+              ...(!form.oauthEntra && form.oauthDeviceEndpoint.trim()
+                ? {
+                    device_authorization_endpoint:
+                      form.oauthDeviceEndpoint.trim()
+                  }
+                : {})
+            }
+          }
+        : {}),
       pricing_revision_id: form.pricingRevision.trim(),
       max_cost: form.maxCost.trim(),
       ...(form.messagePrice.trim() !== ''
