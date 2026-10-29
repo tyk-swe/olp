@@ -6,13 +6,16 @@ import (
 	filter "github.com/scim2/filter-parser/v2"
 )
 
-func SortPath(raw string) ([]string, error) {
+func SortPath(raw, schema string) ([]string, error) {
 	if !boundedExpression(raw) {
 		return nil, Fail(400, "invalidPath", "Invalid attribute path.")
 	}
 	p, e := filter.ParsePath([]byte(raw))
 	if e != nil || p.ValueExpression != nil || p.SubAttribute != nil {
 		return nil, Fail(400, "invalidPath", "Use an attribute or subattribute path.")
+	}
+	if schema != "" && !matchesCoreSchema(p.AttributePath, schema) {
+		return nil, Fail(400, "invalidPath", "The attribute belongs to a different resource schema.")
 	}
 	return pathParts(p.AttributePath), nil
 }
@@ -22,15 +25,20 @@ type selection struct {
 	children map[string]*selection
 }
 
-func Project(d Document, attributes, excluded string) (Document, error) {
+type Projection struct {
+	tree    *selection
+	include bool
+}
+
+func ParseProjection(attributes, excluded, schema string) (Projection, error) {
 	if attributes != "" && excluded != "" {
-		return nil, Invalid("Use attributes or excludedAttributes, not both.")
+		return Projection{}, Invalid("Use attributes or excludedAttributes, not both.")
 	}
 	if attributes == "" && excluded == "" {
-		return d, nil
+		return Projection{}, nil
 	}
 	if len(attributes)+len(excluded) > 4096 {
-		return nil, Invalid("Too many selected attributes.")
+		return Projection{}, Invalid("Too many selected attributes.")
 	}
 	raw := excluded
 	if attributes != "" {
@@ -38,9 +46,9 @@ func Project(d Document, attributes, excluded string) (Document, error) {
 	}
 	tree := &selection{}
 	for _, text := range strings.Split(raw, ",") {
-		parts, err := SortPath(strings.TrimSpace(text))
+		parts, err := SortPath(strings.TrimSpace(text), schema)
 		if err != nil {
-			return nil, err
+			return Projection{}, err
 		}
 		node := tree
 		for _, p := range parts {
@@ -54,13 +62,20 @@ func Project(d Document, attributes, excluded string) (Document, error) {
 		}
 		node.whole = true
 	}
-	out := projectValue(map[string]any(d), tree, attributes != "").(map[string]any)
+	return Projection{tree: tree, include: attributes != ""}, nil
+}
+
+func (p Projection) Apply(d Document) Document {
+	if p.tree == nil {
+		return d
+	}
+	out := projectValue(map[string]any(d), p.tree, p.include).(map[string]any)
 	for _, key := range []string{"id", "schemas", "meta"} {
 		if value, ok := d[key]; ok {
 			out[key] = value
 		}
 	}
-	return Document(out), nil
+	return Document(out)
 }
 
 func projectValue(value any, tree *selection, include bool) any {

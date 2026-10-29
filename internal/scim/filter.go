@@ -132,7 +132,7 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 		a, err := s.expression(x.Expression, base, depth+1, scope)
 		return "(NOT (" + a + "))", err
 	case *filter.ValuePath:
-		if s.Schema != "" && !s.matchesCoreSchema(x.AttributePath) {
+		if s.Schema != "" && !matchesCoreSchema(x.AttributePath, s.Schema) {
 			return "", Fail(400, "invalidFilter", "The value path belongs to a different resource schema.")
 		}
 		s.sequence++
@@ -144,6 +144,9 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 		nullComparison := s.Schema != "" && x.CompareValue == nil && (x.Operator == filter.EQ || x.Operator == filter.NE)
 		if nullComparison && !s.definedAttribute(x.AttributePath, scope) {
 			return "FALSE", nil
+		}
+		if s.Schema != "" && !matchesCoreSchema(x.AttributePath, s.Schema) {
+			return "", Fail(400, "invalidFilter", "The attribute belongs to a different resource schema.")
 		}
 		s.sequence++
 		alias := fmt.Sprintf("scim_value_%d", s.sequence)
@@ -165,14 +168,14 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 	return "", Fail(400, "invalidFilter", "Unsupported filter expression.")
 }
 
-func (s *SQLFilter) matchesCoreSchema(path filter.AttributePath) bool {
+func matchesCoreSchema(path filter.AttributePath, schema string) bool {
 	return path.URIPrefix == nil ||
 		(!strings.EqualFold(*path.URIPrefix, UserSchema) && !strings.EqualFold(*path.URIPrefix, GroupSchema)) ||
-		strings.EqualFold(*path.URIPrefix, s.Schema)
+		strings.EqualFold(*path.URIPrefix, schema)
 }
 
 func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) bool {
-	if !s.matchesCoreSchema(path) {
+	if !matchesCoreSchema(path, s.Schema) {
 		return false
 	}
 	parts := slices.Concat(scope, pathParts(path))
@@ -268,7 +271,7 @@ func (s *SQLFilter) compare(e *filter.AttributeExpression, v string) (string, er
 // Sort honors primary values for multi-valued complex attributes, then uses the
 // first value. The caller adds the resource ID as a stable pagination tie-break.
 func (s *SQLFilter) Sort(raw, base string) (string, error) {
-	parts, err := SortPath(raw)
+	parts, err := SortPath(raw, s.Schema)
 	if err != nil {
 		return "", err
 	}

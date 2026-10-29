@@ -24,6 +24,12 @@ func Patch(current, body Document, group bool, selectValues Select) (Document, e
 	if !ok || len(operations) == 0 || len(operations) > 32 {
 		return nil, Invalid("Provide between one and 32 PATCH operations.")
 	}
+	schema := func() string {
+		if group {
+			return GroupSchema
+		}
+		return UserSchema
+	}()
 	result := Clone(current)
 	for _, raw := range operations {
 		op, ok := raw.(map[string]any)
@@ -63,6 +69,12 @@ func Patch(current, body Document, group bool, selectValues Select) (Document, e
 		p, err := filter.ParsePathNumber([]byte(path))
 		if err != nil {
 			return nil, Fail(400, "invalidPath", "The PATCH path is invalid.")
+		}
+		if !matchesCoreSchema(p.AttributePath, schema) {
+			return nil, Fail(400, "invalidPath", "The PATCH path belongs to a different resource schema.")
+		}
+		if p.ValueExpression != nil && !matchesValueFilterSchema(p.ValueExpression, schema) {
+			return nil, Fail(400, "invalidFilter", "The PATCH filter belongs to a different resource schema.")
 		}
 		parts := pathParts(p.AttributePath)
 		if err = mutable(parts, group); err != nil {
@@ -137,6 +149,18 @@ func Patch(current, body Document, group bool, selectValues Select) (Document, e
 		return nil, Fail(413, "tooLarge", "The resulting resource exceeds its size limit.")
 	}
 	return result, nil
+}
+
+func matchesValueFilterSchema(e filter.Expression, schema string) bool {
+	switch x := e.(type) {
+	case *filter.AttributeExpression:
+		return matchesCoreSchema(x.AttributePath, schema)
+	case *filter.LogicalExpression:
+		return matchesValueFilterSchema(x.Left, schema) && matchesValueFilterSchema(x.Right, schema)
+	case *filter.NotExpression:
+		return matchesValueFilterSchema(x.Expression, schema)
+	}
+	return false
 }
 
 func mutable(parts []string, group bool) error {
